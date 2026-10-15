@@ -100,3 +100,20 @@ export const Queued: Story = {
 		},
 	},
 };
+
+/**
+ * One unbroken word, a hundred characters long: a pasted token, a hash, a data URL. Prose wraps
+ * anywhere (`wrap-anywhere`), and the transcript clips its own width, so a long word cannot drag
+ * the whole console sideways — before this, a pasted PAT scrolled the app.
+ */
+export const LongToken: Story = {
+	args: {
+		entry: {
+			kind: "user",
+			id: "long-token",
+			text: "github_pat_NOT-A-CREDENTIAL-this-is-a-layout-fixture-0000000000000000000000000000",
+			at,
+		},
+	},
+	globals: { viewport: { value: "phone" } },
+};
