@@ -96,6 +96,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/update/rollback", s.updateRollback)
 	mux.HandleFunc("POST /api/update/settings", s.updateSettings)
 
+	// Tool secrets: install-wide entries at /api/secrets, a workspace's own under the
+	// workspace. Values go in and never come back out.
+	mux.HandleFunc("GET /api/secrets", s.secretListGlobal)
+	mux.HandleFunc("POST /api/secrets", s.secretPutGlobal)
+	mux.HandleFunc("POST /api/secrets/{name}/rotate", s.secretRotateGlobal)
+	mux.HandleFunc("DELETE /api/secrets/{name}", s.secretDeleteGlobal)
+	mux.HandleFunc("GET /api/workspaces/{ws}/secrets", s.secretListWorkspace)
+	mux.HandleFunc("POST /api/workspaces/{ws}/secrets", s.secretPutWorkspace)
+	mux.HandleFunc("POST /api/workspaces/{ws}/secrets/{name}/rotate", s.secretRotateWorkspace)
+	mux.HandleFunc("DELETE /api/workspaces/{ws}/secrets/{name}", s.secretDeleteWorkspace)
+
 	mux.HandleFunc("GET /api/workspaces", s.workspaceList)
 	mux.HandleFunc("POST /api/workspaces", s.workspaceCreate)
 	mux.HandleFunc("POST /api/workspaces/{ws}/update", s.workspaceUpdate)

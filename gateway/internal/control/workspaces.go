@@ -9,6 +9,7 @@ package control
 
 import (
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+	"github.com/acornfall/acornfall/gateway/internal/vault"
 
 	"context"
 	"encoding/json"
@@ -133,6 +134,9 @@ type WorkspacesOptions struct {
 	Model string
 	// Sandbox is the machine's sandbox tier, shared by every workspace.
 	Sandbox *sandbox.Manager
+	// Vault is the install-wide tool-secret store. Nil means this install has none, which
+	// is a state the interface reports rather than a reason not to open a workspace.
+	Vault *vault.Store
 	// DisableVMNesting is the install default from --disable-vm-nesting: a workspace's
 	// sandbox nests when the engine and the machine can, unless a workspace refuses it.
 	DisableVMNesting bool
@@ -174,6 +178,9 @@ func NewWorkspaces(opts WorkspacesOptions) *Workspaces {
 		starting: map[string]*sync.Mutex{},
 	}
 }
+
+// Vault is the install-wide secret store, or nil when the gateway was built without one.
+func (w *Workspaces) Vault() *vault.Store { return w.opts.Vault }
 
 // Dir is the folder workspaces are created in.
 func (w *Workspaces) Dir() string {
@@ -415,6 +422,7 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 		SettingsPath:     filepath.Join(w.opts.Home, "state", name, "settings.json"),
 		DraftsPath:       filepath.Join(w.opts.Home, "state", name, "drafts.json"),
 		Sandbox:          w.opts.Sandbox,
+		Vault:            w.opts.Vault,
 		WorkerCommand:    w.opts.WorkerCommand,
 		WorkerDir:        w.opts.WorkerDir,
 		Update:           w.opts.Update,

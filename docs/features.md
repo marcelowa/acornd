@@ -156,6 +156,8 @@ The chain is **conversation → its definition → this workspace → the instal
 | P3 | The gateway listens on every interface and needs no token by default; a token given by flag or environment guards every request. | `httpapi.TestResolveToken` |
 | P4 | The token is accepted as a bearer header or as a cookie set by a `?token=` link, and refused otherwise. | `httpapi.TestRequireToken` |
 | P5 | Credential reads hand back copies, `modify` returning nothing changes nothing, and `delete` is what removes. | `worker/test/skills.test.ts` |
+| P6 | Tool secrets live in `<home>/secrets.json` (0600), global or per workspace; a workspace name wins, and every API response is metadata only. | `vault.TestStoreUpsertListAndPermissions`, `TestSecretsAreStoredAndListedWithoutValues` |
+| P7 | The CLI adds, lists, rotates, and removes a secret with the value on stdin, never argv. | `TestSecretCLIWritesTheVault` |
 
 ## The worker protocol
 

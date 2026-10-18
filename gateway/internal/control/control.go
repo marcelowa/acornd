@@ -21,6 +21,7 @@ import (
 
 	"github.com/acornfall/acornfall/gateway/internal/protocol"
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+	"github.com/acornfall/acornfall/gateway/internal/vault"
 	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 )
 
@@ -69,6 +70,9 @@ type Options struct {
 	// workspace's own setting wins over it, and the engine and the machine have the last
 	// word: see docs/adr/0018-disable-vm-nesting.md.
 	DisableVMNesting bool
+	// Vault is the install-wide tool-secret store. Nil means this workspace has no vault,
+	// and its sandbox receives no secret rather than failing to open.
+	Vault *vault.Store
 }
 
 // UpdateSummary is the self-update state as the stream carries it: enough
