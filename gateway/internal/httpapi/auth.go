@@ -1,13 +1,8 @@
 package httpapi
 
 import (
-	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
-	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -16,54 +11,14 @@ const (
 	tokenHeader = "Authorization"
 )
 
-// IsLoopback reports whether an address only accepts local connections.
-func IsLoopback(addr string) bool {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		host = addr
-	}
-	switch host {
-	case "", "0.0.0.0", "::", "[::]":
-		return false
-	case "localhost":
-		return true
-	}
-	ip := net.ParseIP(strings.Trim(host, "[]"))
-	return ip != nil && ip.IsLoopback()
-}
-
-// ResolveToken returns the shared secret guarding this listener, or "" when the
-// listener is loopback-only or auth is disabled. A reachable listener without an
-// explicit token gets a generated one persisted beside the other state, so the
-// URL stays stable.
-func ResolveToken(explicit, env, dataDir, addr string, disabled bool) (string, error) {
-	if disabled {
-		return "", nil
-	}
+// ResolveToken returns the shared secret guarding this listener, or "" when none was
+// given. The console listens on every interface and needs no token by default; a token
+// passed as a flag or an environment variable is what turns the guard on.
+func ResolveToken(explicit, env string) string {
 	if explicit != "" {
-		return explicit, nil
+		return explicit
 	}
-	if env != "" {
-		return env, nil
-	}
-	if IsLoopback(addr) {
-		return "", nil
-	}
-	path := filepath.Join(dataDir, "token")
-	if payload, err := os.ReadFile(path); err == nil {
-		if token := strings.TrimSpace(string(payload)); token != "" {
-			return token, nil
-		}
-	}
-	buffer := make([]byte, 24)
-	if _, err := rand.Read(buffer); err != nil {
-		return "", err
-	}
-	token := hex.EncodeToString(buffer)
-	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
-		return "", err
-	}
-	return token, nil
+	return env
 }
 
 // RequireToken guards a handler. A token may arrive as a bearer header, a

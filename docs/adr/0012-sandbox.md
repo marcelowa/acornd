@@ -115,8 +115,8 @@ state path, and the reason it cannot work if it cannot.
   it can already read", but it is a real exposure and the narrowing is an egress allowlist.
 - **With egress on, the gateway's own API is reachable from inside.** The guest sits on
   `172.16.0.10/30` with the host at `172.16.0.9`, so it can reach whatever the host can reach —
-  the LAN, the tailnet, and, with `--insecure`, an unauthenticated API to every other workspace.
-  Take this up later; it is the strongest argument for the allowlist.
+  the LAN, the tailnet, and the gateway's own API, which listens on every interface and needs
+  no token by default. Take this up later; it is the strongest argument for the allowlist.
 - **macOS gives a Linux/arm64 guest.** Mach-O binaries cannot run inside it, so no Xcode, no
   Swift or Objective-C builds, no Homebrew tools, no iOS simulators — those stay on the host or
   do not happen. Node, Python, Go, Rust, Ruby work normally, installing their own Linux

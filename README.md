@@ -53,7 +53,7 @@ make deps                      # bun install in worker/
 make build                     # go build -> ./bin/acornfall
 
 ./bin/acornfall provider add opencode-go "$OPENCODE_API_KEY"
-./bin/acornfall                 # http://127.0.0.1:7777 in a workspace directory
+./bin/acornfall                 # http://<host>:7777 in a workspace directory
 ```
 
 ### Install from a release (one binary, no toolchain)
@@ -105,8 +105,9 @@ the host. After that it self-updates from Settings > Updates: one
 click, it restarts itself.
 
 Useful flags: `--workspace <dir>`, `--data-dir <dir>` (default `~/.acornfall`),
-`--model <provider>/<modelId>` (the last resort's first choice), `--addr <host:port>`,
-`--token <secret>`, `--worker-dir <dir>` (development: system bun over these
+`--model <provider>/<modelId>` (the last resort's first choice), `--addr <host:port>`
+(default `0.0.0.0:7777`), `--token <secret>` (default: none), `--worker-dir <dir>`
+(development: system bun over these
 sources, no ensure), `--worker-bin <path>` (single compiled worker binary,
 explicit opt-in),
 `--migrate-dir <dir>` (default: scripts baked into the binary), `--workspaces-dir <dir>` (default
@@ -118,33 +119,32 @@ refused — see [ADR 0018](docs/adr/0018-disable-vm-nesting.md)).
 
 Each of those has an environment variable, for a service manager or a container that should
 not carry flags: `ACORNFALL_HOME` or `ACORNFALL_DATA` for the install folder,
-`ACORNFALL_TOKEN` for the token, and `ACORNFALL_WORKER` for the worker's directory. A flag
-wins over the variable.
+`ACORNFALL_TOKEN` for an optional token, and `ACORNFALL_WORKER` for the worker's directory. A
+flag wins over the variable.
 
 ### Reaching it from another machine
 
-```bash
-make dev                        # binds the tailnet address, no token
-```
-
-A non-loopback bind requires a token. When none is given with `--token` or
-`ACORNFALL_TOKEN`, one is generated into `<data-dir>/token` (0600) and the startup line
-prints the URL to open once:
-
-```
-guard: token required; open http://desktop:7777/?token=e62b…
-```
-
-That query parameter sets an HttpOnly cookie and redirects to `/`, so it does not linger
-in the address bar. `Authorization: Bearer <token>` also works. EventSource cannot set
-headers, which is why the cookie exists.
-
-The more secure alternative when you already have SSH access — and the one to prefer if
-the machine is on a network you do not control:
+The gateway listens on every interface and needs no token by default:
 
 ```bash
+./bin/acornfall                 # binds 0.0.0.0:7777
+```
+
+Open `http://<machine>:7777` from another device. Anyone who can reach port 7777 gets the
+console, its workspaces, and the provider key it spends, so keep that port on a network you
+trust. See [ADR 0020](docs/adr/0020-open-by-default.md).
+
+A token is opt-in. `--token <secret>` or `ACORNFALL_TOKEN` guards every request. A client
+sends `Authorization: Bearer <secret>`, or opens `?token=<secret>` once, which sets an
+HttpOnly cookie and redirects to `/` so the secret does not stay in the address bar.
+EventSource cannot set headers, which is why the cookie exists.
+
+To keep it off the network, bind loopback and use an SSH tunnel:
+
+```bash
+./bin/acornfall --addr 127.0.0.1:7777
 ssh -L 7777:127.0.0.1:7777 desktop
-# then browse http://localhost:7777, no token, nothing exposed
+# then browse http://localhost:7777
 ```
 
 ### Without an API key

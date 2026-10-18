@@ -1,16 +1,10 @@
 BIN := bin/acornfall
 DATA ?= $(HOME)/.acornfall
 
-# Bind to the tailnet address when there is one, so the listener is reachable
-# from your devices and nothing else. Override with ADDR=... for another address.
-TAILNET := $(shell ip -4 -brief addr show tailscale0 2>/dev/null | awk '{print $$3}' | cut -d/ -f1)
-ADDR ?= $(if $(TAILNET),$(TAILNET):7777,127.0.0.1:7777)
-URL ?= http://$(ADDR)
-
-# On a tailnet the WireGuard keys and ACLs are the authentication boundary, so a
-# token would be a second lock on a door that is already yours. INSECURE=0 for one.
-INSECURE ?= 1
-OPTS = $(if $(filter 1,$(INSECURE)),--insecure,)
+# Listen on every interface so another device can open the console; override
+# ADDR=127.0.0.1:7777 for a loopback-only run.
+ADDR ?= 0.0.0.0:7777
+URL ?= http://127.0.0.1:7777
 
 .PHONY: help deps build typecheck lint modernize tools commits check test test-sandbox sandbox-preflight ui ui-build run dev fmt clean release
 
@@ -133,10 +127,10 @@ sandbox-preflight: ## fail, not skip, when there is no hypervisor for the microV
 	fi
 
 run: build ## run against the current directory
-	./$(BIN) --addr $(ADDR) $(OPTS) --workspace $(CURDIR)
+	./$(BIN) --addr $(ADDR) --workspace $(CURDIR)
 
 dev: build ## run with the scripted dev provider (no api key needed)
-	cd worker && ACORNFALL_DEV_PROVIDER=1 ../$(BIN) --addr $(ADDR) $(OPTS) --workspace $(CURDIR) --data-dir $(DATA) --model faux/faux-1 --worker-dir $(CURDIR)/worker
+	cd worker && ACORNFALL_DEV_PROVIDER=1 ../$(BIN) --addr $(ADDR) --workspace $(CURDIR) --data-dir $(DATA) --model faux/faux-1 --worker-dir $(CURDIR)/worker
 
 ui: ## check the interface in a real browser (needs a running gateway)
 	cd tools && bun run check-ui.mjs $(URL)

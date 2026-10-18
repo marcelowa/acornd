@@ -51,9 +51,8 @@ func main() {
 
 func serve(argv []string) error {
 	flags := flag.NewFlagSet("acornfall", flag.ContinueOnError)
-	addr := flags.String("addr", "127.0.0.1:7777", "listen address; a non-loopback address requires a token")
-	token := flags.String("token", "", "shared secret; generated and stored when a non-loopback address has none")
-	insecure := flags.Bool("insecure", false, "listen without a token (trusted network or tunnel only)")
+	addr := flags.String("addr", "0.0.0.0:7777", "listen address (default: every interface)")
+	token := flags.String("token", "", "shared secret guarding every request (default: none)")
 	workspace := flags.String("workspace", "", "the general workspace's folder (default: the folder acornfall is started in)")
 	home := flags.String("home", "", "the acornfall folder: config, credentials, state, workspaces (default: ~/.acornfall)")
 	dataDir := flags.String("data-dir", "", "alias for --home")
@@ -126,10 +125,7 @@ func serve(argv []string) error {
 			log.Printf("worker: %v", err)
 		}
 	}
-	guard, err := httpapi.ResolveToken(*token, os.Getenv("ACORNFALL_TOKEN"), dir, *addr, *insecure)
-	if err != nil {
-		return err
-	}
+	guard := httpapi.ResolveToken(*token, os.Getenv("ACORNFALL_TOKEN"))
 
 	// The sandbox tier. One engine per install, and the worker is told which one, because it
 	// attaches with that engine's client and the two must agree. Nothing here chooses for a
@@ -233,10 +229,10 @@ func serve(argv []string) error {
 	}
 	bound := listener.Addr().String()
 	log.Printf("acornfall listening on http://%s  home=%s", displayAddr(bound), dir)
-	if guard != "" && !httpapi.IsLoopback(bound) {
+	if guard != "" {
 		log.Printf("auth: token required; open http://%s/?token=%s", prettyAddr(bound), guard)
-	} else if guard == "" && !httpapi.IsLoopback(bound) {
-		log.Printf("auth: off (--insecure)")
+	} else {
+		log.Printf("auth: off (no token)")
 	}
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 		return err
