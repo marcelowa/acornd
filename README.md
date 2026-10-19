@@ -163,8 +163,10 @@ A secret added while a conversation runs is stored first. The tool tells the age
 when the turn settles, the gateway restarts the sandbox and starts the next turn itself, so
 the agent continues without you resending anything. The restart waits until no run is using
 the workspace. Rotating an existing name is live, and adding a host or a name is what a
-substitute engine cannot do without that brief restart. The default image
-has no `curl`; install one inside the sandbox or use the project's own HTTPS client:
+substitute engine cannot do without that brief restart. The value field hides by default and has an eye to reveal what you pasted. Its
+password-manager opt-outs keep the browser from offering to save the value as a login; it is
+never inside a submitting form. The default image has no `curl`; install one inside the
+sandbox or use the project's own HTTPS client:
 
 ```bash
 # inside the sandbox

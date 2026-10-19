@@ -1533,6 +1533,95 @@ try {
 	});
 	check("nothing in the composer runs past the phone's edge", controlOverflow === 0, `${controlOverflow} elements`);
 
+	// The secret field: hidden by default, an eye that reveals without changing the value,
+	// the caret kept across the type switch, and the password-manager opt-outs present.
+	await page.setViewport({ width: 1400, height: 900 });
+	await page.goto(`${url}/settings/secrets?workspace=general`, { waitUntil: "networkidle2" });
+	await page.waitForSelector("[data-slot=secrets-section]", { timeout: 15000 });
+	await inPage(page, () => {
+		const button = [...document.querySelectorAll("[data-slot=secrets-section] button")].find(
+			(candidate) => candidate.textContent?.trim() === "Add global secret",
+		);
+		button?.click();
+	});
+	await page.waitForSelector("[role=dialog]", { timeout: 5000 });
+	const secretField = await inPage(page, () => {
+		const input = document.querySelector("[data-slot=secret-input] input");
+		const name = document.querySelector("input[aria-label='Secret name']");
+		if (!(input instanceof HTMLInputElement)) return null;
+		return {
+			type: input.type,
+			autocomplete: input.getAttribute("autocomplete"),
+			onePassword: input.getAttribute("data-1p-ignore"),
+			bitwarden: input.getAttribute("data-bwignore"),
+			lastPass: input.getAttribute("data-lpignore"),
+			inForm: input.closest("form") !== null,
+			nameOptOut: name?.getAttribute("data-1p-ignore"),
+		};
+	});
+	check(
+		"the secret manager opt-outs are on the value and the name",
+		secretField !== null &&
+			secretField.type === "password" &&
+			secretField.autocomplete === "new-password" &&
+			secretField.onePassword === "true" &&
+			secretField.bitwarden === "true" &&
+			secretField.lastPass === "true" &&
+			secretField.nameOptOut === "true" &&
+			!secretField.inForm,
+		JSON.stringify(secretField),
+	);
+	await page.type("[data-slot=secret-input] input", "ui-check-secret");
+	await page.evaluate(() => {
+		const input = document.querySelector("[data-slot=secret-input] input");
+		if (input instanceof HTMLInputElement) {
+			input.focus();
+			input.setSelectionRange(2, 4);
+		}
+	});
+	await press(page, "[data-slot=secret-input] button[aria-label='Show secret']");
+	const revealed = await inPage(page, () => {
+		const input = document.querySelector("[data-slot=secret-input] input");
+		const button = document.querySelector("[data-slot=secret-input] button");
+		if (!(input instanceof HTMLInputElement) || !(button instanceof HTMLButtonElement)) return null;
+		return {
+			type: input.type,
+			value: input.value,
+			pressed: button.getAttribute("aria-pressed"),
+			label: button.getAttribute("aria-label"),
+			start: input.selectionStart,
+			end: input.selectionEnd,
+		};
+	});
+	check(
+		"the eye reveals the value and keeps the selection",
+		revealed !== null &&
+			revealed.type === "text" &&
+			revealed.value === "ui-check-secret" &&
+			revealed.pressed === "true" &&
+			revealed.label === "Hide secret" &&
+			revealed.start === 2 &&
+			revealed.end === 4,
+		JSON.stringify(revealed),
+	);
+	await press(page, "[data-slot=secret-input] button[aria-label='Hide secret']");
+	const hiddenAgain = await inPage(page, () => {
+		const input = document.querySelector("[data-slot=secret-input] input");
+		const button = document.querySelector("[data-slot=secret-input] button");
+		return input instanceof HTMLInputElement && button instanceof HTMLButtonElement
+			? { type: input.type, value: input.value, pressed: button.getAttribute("aria-pressed") }
+			: null;
+	});
+	check(
+		"the eye hides it again without touching the value",
+		hiddenAgain !== null &&
+			hiddenAgain.type === "password" &&
+			hiddenAgain.value === "ui-check-secret" &&
+			hiddenAgain.pressed === "false",
+		JSON.stringify(hiddenAgain),
+	);
+	await page.keyboard.press("Escape");
+
 	check("no JavaScript errors", problems.length === 0, problems.join("; "));
 } finally {
 	await browser.close();

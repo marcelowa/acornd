@@ -13,6 +13,7 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/ui/secret-input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 export interface SecretRequestDialogProps {
@@ -129,6 +130,13 @@ function SecretRequestCard({
 							inputSize="sm"
 							value={description}
 							placeholder="A read-only token for the release script"
+							autoComplete="off"
+							autoCapitalize="off"
+							autoCorrect="off"
+							data-1p-ignore="true"
+							data-bwignore="true"
+							data-lpignore="true"
+							data-form-type="other"
 							aria-label="Secret description"
 							onChange={(event) => setDescription(event.target.value)}
 						/>
@@ -137,13 +145,10 @@ function SecretRequestCard({
 						<Text size="2xs" tone="muted">
 							value
 						</Text>
-						<Input
+						<SecretInput
 							inputSize="sm"
-							type="password"
 							value={value}
 							placeholder="the value is never shown again"
-							autoComplete="new-password"
-							spellCheck={false}
 							aria-label="Secret value"
 							onChange={(event) => setValue(event.target.value)}
 						/>
@@ -157,7 +162,13 @@ function SecretRequestCard({
 							value={hosts}
 							placeholder="api.github.com, *.example.org"
 							autoComplete="off"
+							autoCapitalize="off"
+							autoCorrect="off"
 							spellCheck={false}
+							data-1p-ignore="true"
+							data-bwignore="true"
+							data-lpignore="true"
+							data-form-type="other"
 							aria-label="Allowed hosts"
 							onChange={(event) => setHosts(event.target.value)}
 						/>

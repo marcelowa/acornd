@@ -19,6 +19,7 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/ui/secret-input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { SettingsField, SettingsGroup } from "./settings-group";
 
@@ -425,7 +426,13 @@ function SecretDialog({ editor, workspace, engine, onClose, onDone }: SecretDial
 								disabled={editor.kind === "override"}
 								placeholder="GITHUB_TOKEN"
 								autoComplete="off"
+								autoCapitalize="off"
+								autoCorrect="off"
 								spellCheck={false}
+								data-1p-ignore="true"
+								data-bwignore="true"
+								data-lpignore="true"
+								data-form-type="other"
 								aria-label="Secret name"
 								onChange={(event) =>
 									setName(
@@ -448,19 +455,23 @@ function SecretDialog({ editor, workspace, engine, onClose, onDone }: SecretDial
 								inputSize="sm"
 								value={description}
 								placeholder="What is it for?"
+								autoComplete="off"
+								autoCapitalize="off"
+								autoCorrect="off"
+								data-1p-ignore="true"
+								data-bwignore="true"
+								data-lpignore="true"
+								data-form-type="other"
 								aria-label="Secret description"
 								onChange={(event) => setDescription(event.target.value)}
 							/>
 						</SettingsField>
 					)}
 					<SettingsField label={rotating ? "new value" : "value"}>
-						<Input
+						<SecretInput
 							inputSize="sm"
-							type="password"
 							value={value}
 							placeholder="the value is never shown again"
-							autoComplete="new-password"
-							spellCheck={false}
 							aria-label="Secret value"
 							onChange={(event) => setValue(event.target.value)}
 						/>
@@ -479,7 +490,13 @@ function SecretDialog({ editor, workspace, engine, onClose, onDone }: SecretDial
 									value={hosts}
 									placeholder="api.github.com, *.example.org"
 									autoComplete="off"
+									autoCapitalize="off"
+									autoCorrect="off"
 									spellCheck={false}
+									data-1p-ignore="true"
+									data-bwignore="true"
+									data-lpignore="true"
+									data-form-type="other"
 									aria-label="Allowed hosts"
 									onChange={(event) => setHosts(event.target.value)}
 								/>
