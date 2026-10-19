@@ -60,6 +60,10 @@ func TestSecretsReachTheSandboxWithoutTheirValues(t *testing.T) {
 				Reply: "the token went out",
 			},
 			scriptRule{
+				Match: "Automatic continuation",
+				Reply: "continued after the secret",
+			},
+			scriptRule{
 				Match: "show both tokens",
 				Tools: []scriptTool{{Name: "bash", Args: map[string]any{
 					"command": `printf 'one=[%s] two=[%s]' "$SPIKE_TOKEN" "$SECOND_TOKEN"`,
@@ -139,11 +143,12 @@ func TestSecretsReachTheSandboxWithoutTheirValues(t *testing.T) {
 		t.Fatalf("answer the second card: %d %s", status, body)
 	}
 	cardView := c.waitForText("general", root, "the second card finished")
-	if !strings.Contains(cardView.all(), "pick it up when this turn ends") {
-		t.Errorf("the tool should say the sandbox will have it after the turn:\n%s", cardView.all())
+	if !strings.Contains(cardView.all(), "will continue automatically") {
+		t.Errorf("the tool should say the control will continue:\n%s", cardView.all())
 	}
 
-	// The run has settled; wait for the control to apply the pending restart.
+	// The run has settled; the control applies the pending restart and starts the next turn
+	// itself. The new turn's script rule is the automatic continuation.
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		added := c.state("general")
@@ -155,6 +160,8 @@ func TestSecretsReachTheSandboxWithoutTheirValues(t *testing.T) {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
+	c.waitForText("general", root, "continued after the secret")
+	c.waitIdle("general", root, 60*time.Second)
 
 	// The engine substitutes the placeholder for an allowed host: httpbin echoes the header
 	// back, so the real value is proof the network layer used it. This is the value leaving

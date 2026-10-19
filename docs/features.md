@@ -161,7 +161,7 @@ The chain is **conversation → its definition → this workspace → the instal
 | P8 | A microsandbox workspace receives each secret as the literal `$MSB_<NAME>`; the value stays host-side and is substituted only for the allowed hosts over HTTPS. A card refuses a substitute secret with no allowed host. | `TestPolicyRenderKeepsSecretValuesOut`, `TestSecretsReachTheSandboxWithoutTheirValues`, `TestACardRefusesASecretWithoutHosts` |
 | P9 | An environment engine puts the value in the sandbox; `allowEnv: false` withholds it and the state says why. | `TestHostEngineDeliversSecretsIntoTheWorkerEnvironment` |
 | P10 | The agent can list secrets and ask for a value through a card; the value goes to the gateway, never the transcript or the model. | `TestTheConversationAsksForASecretWithoutShowingItsValue`, `TestTheConversationListsSecretsWithoutValues` |
-| P11 | Rotating an existing name is live where the engine can; adding or removing one is stored, applied after the active run settles, and the tool says so. | `TestSecretsChangedRotatesLive`, `TestSecretsReachTheSandboxWithoutTheirValues`, `TestHostEngineDeliversSecretsIntoTheWorkerEnvironment` |
+| P11 | Rotating an existing name is live where the engine can; adding or removing one is stored, applied after the active run settles, and the control starts the continuation itself. | `TestSecretsChangedRotatesLive`, `TestSecretsReachTheSandboxWithoutTheirValues`, `TestHostEngineDeliversSecretsIntoTheWorkerEnvironment` |
 
 ## The worker protocol
 

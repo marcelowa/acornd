@@ -159,9 +159,11 @@ real value only for the allowed hosts, and only over HTTPS; plain HTTP is not in
 the real value in the sandbox, and `allowEnv: false` keeps it out. See
 [ADR 0021](docs/adr/0021-a-vault-for-tool-secrets.md).
 
-A secret added while a conversation runs is stored first; the sandbox picks it up when that
-turn ends, and the agent is told so. Rotating an existing name is live, and adding a host or
-a name is what a substitute engine cannot do without that brief restart. The default image
+A secret added while a conversation runs is stored first. The tool tells the agent to stop;
+when the turn settles, the gateway restarts the sandbox and starts the next turn itself, so
+the agent continues without you resending anything. The restart waits until no run is using
+the workspace. Rotating an existing name is live, and adding a host or a name is what a
+substitute engine cannot do without that brief restart. The default image
 has no `curl`; install one inside the sandbox or use the project's own HTTPS client:
 
 ```bash

@@ -112,7 +112,7 @@ function answerText(answer: SecretAnswer): string {
 	}
 	const where = answer.scope === "global" ? "globally" : "to this workspace";
 	const restart = answer.restartRequired
-		? " The sandbox will pick it up when this turn ends."
+		? " Stop here; the sandbox will restart and I will continue automatically."
 		: " The running sandbox has it.";
 	return `Saved ${where}.${restart}`;
 }

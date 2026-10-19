@@ -71,6 +71,10 @@ func TestHostEngineDeliversSecretsIntoTheWorkerEnvironment(t *testing.T) {
 				}}},
 				Reply: "the host card is readable",
 			},
+			scriptRule{
+				Match: "Automatic continuation",
+				Reply: "continued after the host secret",
+			},
 		),
 	)
 	c := s.client()
@@ -135,8 +139,8 @@ func TestHostEngineDeliversSecretsIntoTheWorkerEnvironment(t *testing.T) {
 	if strings.Contains(finished.all(), "host-card-value") {
 		t.Fatalf("the host card value reached the transcript:\n%s", finished.all())
 	}
-	if !strings.Contains(finished.all(), "pick it up when this turn ends") {
-		t.Errorf("the tool should say the worker restart waits for the turn:\n%s", finished.all())
+	if !strings.Contains(finished.all(), "will continue automatically") {
+		t.Errorf("the tool should say the control will continue:\n%s", finished.all())
 	}
 
 	// The run settled; the deferred worker restart should have put the value in the new
@@ -152,6 +156,8 @@ func TestHostEngineDeliversSecretsIntoTheWorkerEnvironment(t *testing.T) {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
+	c.waitForText("general", root, "continued after the host secret")
+	c.waitIdle("general", root, 60*time.Second)
 	c.prompt("general", root, "read the host card token")
 	read := c.waitForText("general", root, "the host card is readable")
 	if !strings.Contains(read.all(), "card=[host-card-value]") {

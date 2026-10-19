@@ -334,6 +334,14 @@ type Control struct {
 	// stays in place until then so a concurrent call gets "not running" instead of a nil
 	// dereference, and its exit notification is not mistaken for a crash to supervise.
 	restarting bool
+	// lifecycle serializes a prompt's admission with a pending secret restart. A restart
+	// only starts when no run is active; a prompt accepted during one waits, and a restart
+	// waits for an admitted prompt's run. It is not the worker's lifetime lock.
+	lifecycle sync.Mutex
+	// continuations are conversations waiting for a deferred secret before the automatic
+	// continuation prompt. Kept until the sandbox restart succeeds.
+	continuationMu sync.Mutex
+	continuations  map[string][]string
 }
 
 // cachedView is the last full view per conversation, so switching back is instant
@@ -382,6 +390,7 @@ func New(opts Options) *Control {
 		actionAt:               map[string]int64{},
 		drafts:                 map[string]Draft{},
 		secretRequests:         map[string]*pendingSecret{},
+		continuations:          map[string][]string{},
 	}
 }
 
@@ -1088,7 +1097,7 @@ func (c *Control) ApplySecrets(ctx context.Context, deferRestart bool) error {
 		// A value set from a card must not kill the turn that asked for it. If the caller
 		// says to defer, or a run is in flight, the worker keeps its old environment, the
 		// state says a restart is needed, and the restart happens when the run settles.
-		if !deferRestart && !c.Busy() {
+		if !deferRestart && !c.AnyRunning() {
 			return c.RestartWorker(ctx)
 		}
 		c.mu.Lock()
@@ -1109,7 +1118,7 @@ func (c *Control) ApplySecrets(ctx context.Context, deferRestart bool) error {
 	c.sandbox.SecretsRestart = change.RestartRequired
 	c.mu.Unlock()
 	c.publish(protocol.Frame{Type: "state"})
-	if change.RestartRequired && !deferRestart && !c.Busy() {
+	if change.RestartRequired && !deferRestart && !c.AnyRunning() {
 		// Nobody is running: apply it now instead of waiting for a submission that may be
 		// hours away. A run in flight, or a card answered during one, waits for that run.
 		c.applyPendingSecretRestart(ctx)
@@ -1122,46 +1131,105 @@ func (c *Control) ApplySecrets(ctx context.Context, deferRestart bool) error {
 // started so it reads the next-start config (the worker's next tool call wakes it); an
 // environment engine gets a fresh worker, whose environment is the delivery.
 func (c *Control) applyPendingSecretRestart(ctx context.Context) {
+	c.lifecycle.Lock()
 	c.mu.RLock()
 	restart := c.sandbox.SecretsRestart
 	c.mu.RUnlock()
-	if !restart || c.Busy() {
+	if !restart || c.AnyRunning() {
+		c.lifecycle.Unlock()
 		return
 	}
 	manager := c.opts.Sandbox
 	if manager == nil {
+		c.lifecycle.Unlock()
 		return
 	}
+	applied := false
 	delivery := manager.SecretDelivery()
 	if delivery == sandbox.DeliverySubstitute {
 		policy := c.opts.Workspace.SandboxPolicy(c.opts.Home, c.opts.UserHome, c.opts.DisableVMNesting)
 		policy.Secrets = c.resolveSecrets(delivery).delivered
 		if err := manager.Stop(ctx, c.opts.Workspace.Path); err != nil {
 			workerpool.Log("restart sandbox for secrets: %v", err)
-			return
-		}
-		if _, err := manager.Produce(ctx, policy, filepath.Dir(c.opts.StoragePath)); err != nil {
+		} else if _, err := manager.Produce(ctx, policy, filepath.Dir(c.opts.StoragePath)); err != nil {
 			workerpool.Log("restart sandbox for secrets: %v", err)
-			return
+		} else {
+			applied = true
+			c.mu.Lock()
+			c.sandbox.SecretsRestart = false
+			if status, err := manager.Status(ctx, c.opts.Workspace.Path); err == nil {
+				c.sandbox.Status = status
+			}
+			c.mu.Unlock()
 		}
 	} else if manager.SecretEnvInWorker() {
 		if err := c.RestartWorker(ctx); err != nil {
 			workerpool.Log("restart worker for secrets: %v", err)
+		} else {
+			applied = true
 		}
-		return
 	} else {
 		resolved := c.resolveSecrets(delivery)
 		if _, err := manager.SecretsChanged(ctx, c.opts.Workspace.Path, resolved.delivered); err != nil {
 			workerpool.Log("apply secrets for %s: %v", c.opts.Workspace.Name, err)
+		} else {
+			applied = true
+			c.mu.Lock()
+			c.sandbox.SecretsRestart = false
+			c.mu.Unlock()
+		}
+	}
+	c.lifecycle.Unlock()
+	if applied {
+		c.resumeAfterSecrets(ctx)
+	}
+}
+
+// QueueSecretContinuation remembers that a conversation's turn ended because a secret
+// needs a sandbox restart. Once the restart lands, the control starts the next turn itself;
+// the user does not have to.
+func (c *Control) QueueSecretContinuation(conversationID, name string) {
+	if conversationID == "" || name == "" {
+		return
+	}
+	c.continuationMu.Lock()
+	defer c.continuationMu.Unlock()
+	for _, existing := range c.continuations[conversationID] {
+		if existing == name {
 			return
 		}
 	}
-	c.mu.Lock()
-	c.sandbox.SecretsRestart = false
-	if status, err := manager.Status(ctx, c.opts.Workspace.Path); err == nil {
-		c.sandbox.Status = status
+	c.continuations[conversationID] = append(c.continuations[conversationID], name)
+}
+
+// resumeAfterSecrets starts the turn the deferred restart interrupted. It is called only
+// after no run is active and the sandbox/worker has the new set.
+func (c *Control) resumeAfterSecrets(ctx context.Context) {
+	c.continuationMu.Lock()
+	pending := c.continuations
+	c.continuations = map[string][]string{}
+	c.continuationMu.Unlock()
+	for conversationID, names := range pending {
+		info, found := c.conversationInfo(conversationID)
+		if !found || info.Hidden {
+			continue
+		}
+		text := "Automatic continuation: the secret"
+		if len(names) == 1 {
+			text += " " + names[0] + " is"
+		} else {
+			text += "s " + strings.Join(names, ", ") + " are"
+		}
+		text += " now available to commands in the sandbox. Continue the task you were doing before you requested it. Use the environment variable"
+		if len(names) == 1 {
+			text += " " + names[0] + "."
+		} else {
+			text += "s " + strings.Join(names, ", ") + "."
+		}
+		if err := c.Prompt(ctx, conversationID, text, protocol.WhenBusyFollowUp, nil); err != nil {
+			workerpool.Log("automatic continuation for %s: %v", conversationID, err)
+		}
 	}
-	c.mu.Unlock()
 }
 
 // RestartWorker replaces the harness with one that reads the current environment. The old
@@ -2342,6 +2410,10 @@ func (c *Control) CancelAuth(ctx context.Context, authID string) error {
 }
 
 func (c *Control) Prompt(ctx context.Context, conversationID, text string, when protocol.WhenBusy, attachments []string) error {
+	// A prompt admitted while a secret restart runs must not start a tool call against the
+	// sandbox being replaced. The restart holds this lock across Stop/Produce.
+	c.lifecycle.Lock()
+	defer c.lifecycle.Unlock()
 	// Files may ride alone: a screenshot with no words is still a message.
 	if strings.TrimSpace(text) == "" && len(attachments) == 0 {
 		return errors.New("empty message")

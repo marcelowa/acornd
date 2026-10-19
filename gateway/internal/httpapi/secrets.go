@@ -275,6 +275,11 @@ func (s *Server) secretRequestAnswer(w http.ResponseWriter, r *http.Request) {
 	// run settles, or the sandbox would restart under the agent.
 	s.applySecrets(r, scope, workspace, true)
 	restart := ctl.SecretsRestart()
+	if restart {
+		// The turn will end because the sandbox has to restart. The control starts the
+		// continuation itself once that restart lands; the user does not resume.
+		ctl.QueueSecretContinuation(prompt.ConversationID, prompt.Name)
+	}
 	ctl.ResolveSecret(requestID, false, string(scope), restart, "")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"secret":          meta,

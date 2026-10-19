@@ -122,11 +122,21 @@ microsandbox `msb modify --secret NAME@HOST` (or `--secret-rm`) with the value i
 modify process environment; containers recreate the sandbox, which the interface states.
 A rotated value never touches a sandbox's files or its transcript.
 
-**A change that needs a start is applied after the run, not under it.** Adding a name or
-changing a host stores the next-start config; the card tool says so, and when the run that
-asked settles the control restarts the sandbox (substitute) or the worker (environment). The
-next turn uses the value. This is the missing trigger the first beta exposed: "next start"
-with no way to ask for one left the secret stored but never delivered.
+**A change that needs a start is applied after the run, and the control starts the next
+turn itself.** Adding a name or changing a host stores the next-start config; the card tool
+tells the agent to stop, and when the run that asked settles the control restarts the sandbox
+(substitute) or the worker (environment). Once no run is active, it starts a new turn with an
+automatic continuation message naming the secret. The user does not resume. This is the
+missing trigger the first beta exposed: "next start" with no way to ask for one left the
+secret stored but never delivered.
+
+The restart waits for every conversation in the workspace to be idle, and a prompt admitted
+while it runs waits on the same lifecycle lock. The pinned engine has no atomic quiesce, so a
+run started by a delegated agent inside the check window is a small residual race; the
+workspace's own turns and tools are not interrupted. Background processes the agent left
+running in the sandbox end at the restart; the files and installed packages persist. A
+container driver has the same trade-off, which is why this is the default rather than a
+mid-turn VM restart.
 
 Per-use audit is not in v1. The vault records when a value was rotated, and the sandbox
 state lists the names it holds. Which secret a request used is only visible where the
@@ -208,10 +218,11 @@ after the answer.
   and every SSE frame contain no value; a workspace override is the delivered value.
 - End to end: `bash` prints `$NAME` and the transcript holds `$MSB_NAME`, not the value;
   the API's secrets response has no value; the system prompt lists the name and placeholder.
-- The card path: a request answered during a run stores the value, the tool says it will be
-  picked up after the turn, and the next turn's command sees the placeholder. An HTTPS
-  request to an allowed host carries the real value; plain HTTP does not substitute. A
-  substitute secret with no allowed host is refused at the card.
+- The card path: a request answered during a run stores the value, the tool tells the agent
+  to stop, the control restarts the sandbox after the turn settles, starts the continuation
+  itself, and the next command sees the placeholder. An HTTPS request to an allowed host
+  carries the real value; plain HTTP does not substitute. A substitute secret with no
+  allowed host is refused at the card.
 - Live sandbox tier: a request with the placeholder in an allowed host's header reaches
   the host with the real value; the same placeholder to a disallowed host is blocked.
 - Rotation: a live microsandbox sees the new value without a recreate; a stopped one gets
