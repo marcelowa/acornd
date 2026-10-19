@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	abortConversation,
 	answerAuthPrompt,
+	answerSecretRequest,
+	cancelSecretRequest,
 	applyUpdate,
 	cancelAuthFlow,
 	checkUpdate,
@@ -36,6 +38,7 @@ import {
 	type CompactPreview,
 	type DefaultScope,
 	type ProviderAuthType,
+	type SecretAnswerInput,
 	type UpdatePrefs,
 	type UpdateStatus,
 } from "./client";
@@ -83,6 +86,7 @@ import type {
 	WireDraft,
 	WireDraftAttachment,
 	WireResolvedAgent,
+	WireSecretEvent,
 	WireSender,
 	WireState,
 	WireUsage,
@@ -118,9 +122,9 @@ export type Screen = "conversation" | "settings" | "update";
  * page: what runs and how it keeps itself current, the defaults a new conversation starts from,
  * and the theme. The old `defaults`, `updates` and `install` pages kept no redirect — the
  * release page has its own address now, and an unknown page lands on general. */
-export type SettingsTab = "general" | "providers";
+export type SettingsTab = "general" | "providers" | "secrets";
 
-const SETTINGS_TABS: SettingsTab[] = ["general", "providers"];
+const SETTINGS_TABS: SettingsTab[] = ["general", "providers", "secrets"];
 
 function settingsTabFrom(segment: string | undefined): SettingsTab {
 	return SETTINGS_TABS.includes(segment as SettingsTab) ? (segment as SettingsTab) : "general";
@@ -298,6 +302,12 @@ export interface Platform {
 	logoutProvider: (id: string) => void;
 	/** Re-read the catalog, for a key added outside the app. */
 	refreshProviders: () => void;
+	/** A tool's open secret request, shown as a card in the conversation. */
+	secretRequest?: WireSecretEvent | undefined;
+	/** Send the card's value to the gateway; the tool waiting on it gets only the outcome. */
+	answerSecret: (requestId: string, input: SecretAnswerInput) => Promise<void>;
+	/** Close the card without setting anything. */
+	cancelSecret: (requestId: string) => Promise<void>;
 	/** The self-update state, if the gateway answered yet. One dot, not a list. */
 	update?: UpdateStatus | undefined;
 	/** Ask the gateway for the update state again; a success clears the last refusal. */
@@ -377,6 +387,7 @@ export interface Platform {
 export function usePlatform(): Platform {
 	const [route, setRoute] = useState<Route>(fromUrl);
 	const [state, setState] = useState<WireState | undefined>(undefined);
+	const [secretRequest, setSecretRequest] = useState<WireSecretEvent | undefined>(undefined);
 	const [view, setView] = useState<WireView | undefined>(undefined);
 	const [senders, setSenders] = useState<Record<string, WireSender>>({});
 	/**
@@ -591,6 +602,16 @@ export function usePlatform(): Platform {
 					return;
 				}
 				setState(next);
+			},
+			onSecret: (event) => {
+				if (cancelled) return;
+				if (event.kind === "request") {
+					setSecretRequest(event);
+					return;
+				}
+				setSecretRequest((current) =>
+					current?.requestId === event.requestId ? undefined : current,
+				);
 			},
 			onView: (nextView, nextSenders) => {
 				if (cancelled) return;
@@ -1176,6 +1197,26 @@ export function usePlatform(): Platform {
 		act(refreshProviders(workspace), () => void reload());
 	}, [act, workspace, reload]);
 
+	const answerSecret = useCallback(
+		async (requestId: string, input: SecretAnswerInput): Promise<void> => {
+			const conversation = secretRequest?.conversationId ?? route.conversation;
+			if (conversation === "") throw new Error("no conversation is open");
+			await answerSecretRequest(workspace, conversation, requestId, input);
+			setSecretRequest((current) => (current?.requestId === requestId ? undefined : current));
+		},
+		[workspace, route.conversation, secretRequest],
+	);
+
+	const cancelSecret = useCallback(
+		async (requestId: string): Promise<void> => {
+			const conversation = secretRequest?.conversationId ?? route.conversation;
+			if (conversation === "") throw new Error("no conversation is open");
+			await cancelSecretRequest(workspace, conversation, requestId);
+			setSecretRequest((current) => (current?.requestId === requestId ? undefined : current));
+		},
+		[workspace, route.conversation, secretRequest],
+	);
+
 	// The self-update state: the stream carries the summary (dot data) on
 	// every state event; a fetch fills the details (notes, prefs, sizes)
 	// once at load and every 15 minutes. A failed poll falls back to the
@@ -1418,6 +1459,9 @@ export function usePlatform(): Platform {
 		closeLogin,
 		logoutProvider: logoutProviderById,
 		refreshProviders: refreshProvidersNow,
+		secretRequest,
+		answerSecret,
+		cancelSecret,
 		update,
 		refreshUpdate,
 		applyingUpdate,

@@ -218,6 +218,8 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 			status: "Running",
 			tools: true,
 			isolated: true,
+			secrets: [],
+			secretsRestart: false,
 		},
 		resolved: {
 			name: "scout",
@@ -277,6 +279,8 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		closeLogin: noop,
 		logoutProvider: noop,
 		refreshProviders: noop,
+		answerSecret: async () => undefined,
+		cancelSecret: async () => undefined,
 		update: undefined,
 		restartUpdateNow: noop,
 		refreshUpdate: noop,

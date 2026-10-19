@@ -1,6 +1,6 @@
 # ADR 0021 — A vault for tool secrets, global and per workspace
 
-Status: accepted, not built — the conversation surface and the container driver are the open build work
+Status: accepted, built — microsandbox substitution, host environment delivery, and the conversation card; the real container driver is its own ticket
 Date: 2026-10-25
 
 ## Context
@@ -45,6 +45,9 @@ on 2026-10-25:
   hosts. The value is nowhere in the engine's store on disk.
 - `msb modify --secret NAME@HOST` rotates live (the plan says `live`), with the value in
   the modify process's environment.
+- Built and measured end to end: a live workspace sends the placeholder in an
+  `Authorization` header to `httpbin.org` and receives the real value; the guest never held
+  it. The test is `TestSecretsReachTheSandboxWithoutTheirValues`.
 
 The limit is as important as the capability: this engine only substitutes into HTTP(S)
 requests. The guest never holds the raw value, so a client the proxy cannot see — `psql`,
@@ -217,4 +220,6 @@ file and a 0600 default let a key source wrap the values later without a schema 
 - Encryption at rest: choose the key source (OS keyring, passphrase, or a file the owner
   supplies) and wrap the `value` fields. The API and interface do not change.
 - The real container driver: its own ticket. This ADR fixes only its delivery contract
-  (`environment`, `allowEnv` default true) and the fake that pins it.
+  (`environment`, `allowEnv` default true); the host engine already exercises that contract
+  in `TestHostEngineDeliversSecretsIntoTheWorkerEnvironment`, including the
+  card-without-a-restart path.

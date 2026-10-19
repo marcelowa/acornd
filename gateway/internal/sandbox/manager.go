@@ -73,6 +73,16 @@ type Driver interface {
 	Stop(ctx context.Context, name string) error
 	// Remove deletes a sandbox and everything in it.
 	Remove(ctx context.Context, name string) error
+	// SecretDelivery is what this engine can do with a secret's value: substitute it
+	// host-side, or put it in the sandbox environment.
+	SecretDelivery() Delivery
+	// SecretEnvInWorker reports whether an environment-delivered secret belongs in the
+	// worker's own process (the host engine) rather than in a guest (a container engine).
+	SecretEnvInWorker() bool
+	// SecretsChanged applies a complete desired set to a sandbox: add, rotate, remove. A
+	// stopped or absent sandbox is not an error; RestartRequired says the change is waiting
+	// for the next start.
+	SecretsChanged(ctx context.Context, name string, secrets []Secret) (SecretChange, error)
 }
 
 // Instance is one sandbox as an engine reports it.
@@ -275,6 +285,30 @@ func (m *Manager) Produce(ctx context.Context, policy Policy, dir string) (strin
 		return "", err
 	}
 	return name, nil
+}
+
+// SecretDelivery is the engine's way of delivering a tool secret. It is a capability, not a
+// policy: the control filters the vault against it before building a policy.
+func (m *Manager) SecretDelivery() Delivery {
+	if m.driver == nil {
+		return DeliverySubstitute
+	}
+	return m.driver.SecretDelivery()
+}
+
+// SecretEnvInWorker says whether an environment-delivered secret belongs in the worker's
+// own process. The host engine is the one that does; a guest engine keeps its own.
+func (m *Manager) SecretEnvInWorker() bool {
+	return m.driver != nil && m.driver.SecretEnvInWorker()
+}
+
+// SecretsChanged applies a workspace's complete desired set to its sandbox. A stopped or
+// absent sandbox is not an error; RestartRequired says the change waits for a start.
+func (m *Manager) SecretsChanged(ctx context.Context, workspace string, secrets []Secret) (SecretChange, error) {
+	if problem := m.Problem(); problem != nil {
+		return SecretChange{}, problem
+	}
+	return m.driver.SecretsChanged(ctx, Name(workspace), secrets)
 }
 
 // Stop shuts a workspace's sandbox down, keeping everything it accumulated. The engine also

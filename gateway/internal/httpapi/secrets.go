@@ -1,8 +1,11 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/control"
 	"github.com/acornfall/acornfall/gateway/internal/vault"
@@ -155,6 +158,7 @@ func (s *Server) secretPut(w http.ResponseWriter, r *http.Request, store *vault.
 		secretFailure(w, err)
 		return
 	}
+	s.applySecrets(r, scope, workspace, true)
 	writeJSON(w, http.StatusOK, map[string]any{"secret": meta})
 }
 
@@ -170,6 +174,7 @@ func (s *Server) secretRotate(w http.ResponseWriter, r *http.Request, store *vau
 		secretFailure(w, err)
 		return
 	}
+	s.applySecrets(r, scope, workspace, true)
 	writeJSON(w, http.StatusOK, map[string]any{"secret": meta})
 }
 
@@ -179,7 +184,104 @@ func (s *Server) secretDelete(w http.ResponseWriter, r *http.Request, store *vau
 		secretFailure(w, err)
 		return
 	}
+	s.applySecrets(r, scope, workspace, true)
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": name, "scope": scope})
+}
+
+// secretRequestAnswer is the card's endpoint: the value comes from the interface, goes
+// straight into the vault, and never through the worker. The tool waiting on the other side
+// learns only that it was set (and whether a restart is needed) or that it was cancelled.
+func (s *Server) secretRequestAnswer(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.secretStore(w)
+	if !ok {
+		return
+	}
+	ctl, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	requestID := r.PathValue("request")
+	prompt, ok := ctl.SecretPrompt(requestID)
+	if !ok {
+		http.Error(w, "no secret request is waiting", http.StatusNotFound)
+		return
+	}
+	if prompt.ConversationID != r.PathValue("id") {
+		http.Error(w, "no secret request is waiting for this conversation", http.StatusNotFound)
+		return
+	}
+	var body struct {
+		Value       string    `json:"value"`
+		Description *string   `json:"description"`
+		Hosts       *[]string `json:"hosts"`
+		Scope       string    `json:"scope"`
+		Cancelled   bool      `json:"cancelled"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.Cancelled {
+		if !ctl.ResolveSecret(requestID, true, "", false, "the user cancelled") {
+			http.Error(w, "no secret request is waiting", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"cancelled": true})
+		return
+	}
+	if body.Value == "" {
+		http.Error(w, "a secret needs a value", http.StatusBadRequest)
+		return
+	}
+	scope := vault.Workspace
+	switch body.Scope {
+	case "", "workspace":
+	case "global":
+		scope = vault.Global
+	default:
+		http.Error(w, `scope is "workspace" or "global"`, http.StatusBadRequest)
+		return
+	}
+	description := prompt.Description
+	if body.Description != nil {
+		description = strings.TrimSpace(*body.Description)
+	}
+	hosts := prompt.Hosts
+	if body.Hosts != nil {
+		hosts = *body.Hosts
+	}
+	workspace := ""
+	if scope == vault.Workspace {
+		workspace = ctl.WorkspacePath()
+	}
+	meta, err := store.Upsert(vault.Upsert{
+		Name:        prompt.Name,
+		Description: description,
+		Scope:       scope,
+		Workspace:   workspace,
+		Value:       body.Value,
+		Hosts:       &hosts,
+	})
+	if err != nil {
+		secretFailure(w, err)
+		return
+	}
+	s.applySecrets(r, scope, workspace, false)
+	restart := ctl.SecretsRestart()
+	ctl.ResolveSecret(requestID, false, string(scope), restart, "")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"secret":          meta,
+		"restartRequired": restart,
+	})
+}
+
+// applySecrets asks the running workspaces a change affects to pick it up. The store already
+// holds the value, so a sandbox that cannot take it now reports that in its state rather than
+// making the save look failed. The work is bounded: an engine call per affected workspace.
+func (s *Server) applySecrets(r *http.Request, scope vault.Scope, workspace string, restart bool) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
+	defer cancel()
+	s.workspaces.ApplySecrets(ctx, scope, workspace, restart)
 }
 
 // secretFailure maps the vault's two caller mistakes to their status. Anything else is the

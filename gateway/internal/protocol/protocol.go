@@ -49,6 +49,14 @@ type Command struct {
 	Action     string `json:"action,omitempty"`
 	// Stored attachment ids riding with a prompt.
 	Attachments []string `json:"attachments,omitempty"`
+	// SecretRequestID answers a tool's secret request; Scope and RestartRequired tell the
+	// tool where the value went and whether the sandbox took it. Secrets is the answer to a
+	// list request.
+	SecretRequestID string       `json:"secretRequestId,omitempty"`
+	Secrets         []SecretInfo `json:"secrets"`
+	SecretScope     string       `json:"secretScope,omitempty"`
+	RestartRequired bool         `json:"restartRequired,omitempty"`
+	Reason          string       `json:"reason,omitempty"`
 	// Host file an upload staged; the worker only reads it. Tag names match
 	// the worker protocol, which says name, mime, and size.
 	TempPath string `json:"tempPath,omitempty"`
@@ -91,6 +99,31 @@ type AuthLink struct {
 	Label string `json:"label,omitempty"`
 }
 
+// SecretInfo is one secret as the agent may know it: name, description, and how it reaches
+// the sandbox. The value is never in this struct.
+type SecretInfo struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Scope       string   `json:"scope,omitempty"`
+	Hosts       []string `json:"hosts,omitempty"`
+	Delivery    string   `json:"delivery,omitempty"`
+	Status      string   `json:"status,omitempty"`
+}
+
+// SecretEvent is a secret request or its outcome on the stream. It is shown to the user as a
+// card; the value travels from the card to the gateway, never through this struct.
+type SecretEvent struct {
+	Kind            string   `json:"kind"`
+	RequestID       string   `json:"requestId"`
+	ConversationID  string   `json:"conversationId,omitempty"`
+	Name            string   `json:"name,omitempty"`
+	Description     string   `json:"description,omitempty"`
+	Hosts           []string `json:"hosts,omitempty"`
+	Scope           string   `json:"scope,omitempty"`
+	RestartRequired bool     `json:"restartRequired,omitempty"`
+	Reason          string   `json:"reason,omitempty"`
+}
+
 // Frame is an unprompted message from the worker to control.
 type Frame struct {
 	Type           string          `json:"type"`
@@ -108,6 +141,12 @@ type Frame struct {
 	Acornfall json.RawMessage `json:"acornfall,omitempty"`
 	AuthID    string          `json:"authId,omitempty"`
 	Event     *AuthEvent      `json:"event,omitempty"`
+	// A tool's secret request: the worker asks; the gateway answers with a command.
+	Name        string   `json:"name,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Hosts       []string `json:"hosts,omitempty"`
+	// Secret carries a tool's secret request or its outcome to the interface.
+	Secret *SecretEvent `json:"secret,omitempty"`
 }
 
 // LayerTrace records which layer contributed what, so a resolved agent can be

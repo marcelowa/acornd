@@ -333,6 +333,23 @@ describe("the wire mapping", () => {
 		expect(toScopeDefaults(undefined)).toEqual({ model: "", thinking: "", agent: "" });
 	});
 
+	test("a sandbox carries delivered secrets, and no values", () => {
+		const sandbox = toSandbox({
+			engine: "microsandbox",
+			status: "Running",
+			tools: true,
+			isolated: true,
+			secrets: [
+				{ name: "GITHUB_TOKEN", delivery: "substitute", status: "delivered" },
+				{ name: "SECOND_TOKEN", delivery: "substitute", status: "delivered" },
+			],
+			secretsRestart: true,
+		});
+		expect(sandbox.secrets).toHaveLength(2);
+		expect(sandbox.secrets[0]?.delivery).toBe("substitute");
+		expect(sandbox.secretsRestart).toBe(true);
+	});
+
 	test("a sandbox that is not isolated says so", () => {
 		const sandbox = toSandbox({
 			engine: "host",

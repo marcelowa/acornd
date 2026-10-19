@@ -63,6 +63,15 @@ export interface WireUpdateSummary {
 	restartRequired?: boolean | undefined;
 }
 
+export interface WireSandboxSecret {
+	name: string;
+	description?: string | undefined;
+	scope?: string | undefined;
+	hosts?: string[] | undefined;
+	delivery?: string | undefined;
+	status?: string | undefined;
+}
+
 export interface WireSandbox {
 	engine?: string | undefined;
 	version?: string | undefined;
@@ -70,6 +79,10 @@ export interface WireSandbox {
 	tools: boolean;
 	isolated: boolean;
 	problem?: string | undefined;
+	/** The workspace's secrets as the engine delivers them; names and status only. */
+	secrets?: WireSandboxSecret[] | undefined;
+	secretsRestart?: boolean | undefined;
+	secretsProblem?: string | undefined;
 }
 
 export interface WireModel {
@@ -305,6 +318,19 @@ export interface WireSender {
 	conversationId: string;
 }
 
+/** A tool's secret request or its outcome. The value is never in this event. */
+export interface WireSecretEvent {
+	kind: "request" | "resolved" | "cancelled";
+	requestId: string;
+	conversationId?: string | undefined;
+	name?: string | undefined;
+	description?: string | undefined;
+	hosts?: string[] | undefined;
+	scope?: "global" | "workspace" | undefined;
+	restartRequired?: boolean | undefined;
+	reason?: string | undefined;
+}
+
 export interface WireFrame {
 	type: string;
 	conversationId?: string | undefined;
@@ -312,4 +338,5 @@ export interface WireFrame {
 	acornfall?: { senders?: Record<string, WireSender> | undefined } | undefined;
 	authId?: string | undefined;
 	event?: WireAuthEvent | undefined;
+	secret?: WireSecretEvent | undefined;
 }

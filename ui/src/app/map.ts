@@ -181,6 +181,16 @@ export function toSandbox(sandbox: WireSandbox): SandboxSummary {
 		tools: sandbox.tools,
 		isolated: sandbox.isolated,
 		problem: sandbox.problem,
+		secrets: (sandbox.secrets ?? []).map((secret) => ({
+			name: secret.name,
+			description: secret.description,
+			scope: secret.scope,
+			hosts: secret.hosts,
+			delivery: secret.delivery,
+			status: secret.status,
+		})),
+		secretsRestart: sandbox.secretsRestart === true,
+		secretsProblem: sandbox.secretsProblem,
 	};
 }
 

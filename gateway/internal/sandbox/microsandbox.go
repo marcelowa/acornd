@@ -251,6 +251,27 @@ func (p Policy) render(o owner) []byte {
 		// scripts, and editing them from inside would be self-modification.
 		b.WriteString("  - " + yamlString(path+":"+path+":ro") + "\n")
 	}
+	secrets := substitutedSecrets(p.Secrets)
+	if len(secrets) > 0 {
+		b.WriteString("secrets:\n")
+		for index, secret := range secrets {
+			// The value is never here: only the name of a host environment variable the
+			// engine reads at start. A file the agent could read therefore holds no secret.
+			fmt.Fprintf(&b, "  %s:\n", yamlString(secret.Name))
+			fmt.Fprintf(&b, "    value: { $msb_env: %s }\n", secretEnvVar(index))
+			b.WriteString("    allow: [")
+			for i, host := range secret.Hosts {
+				if i > 0 {
+					b.WriteString(", ")
+				}
+				b.WriteString(yamlString(host))
+			}
+			b.WriteString("]\n")
+			fmt.Fprintf(&b, "    substitution: { headers: %t, query: %t, body: %t }\n",
+				secret.Headers, secret.Query, secret.Body)
+			b.WriteString("    require_tls_identity: true\n")
+		}
+	}
 	return []byte(b.String())
 }
 
@@ -371,7 +392,7 @@ func (m *Microsandbox) Create(ctx context.Context, policy Policy, policyDir stri
 			args = append(args, "--nested-virt")
 		}
 	}
-	_, err := m.run(ctx, args...)
+	_, err := m.runEnv(ctx, secretEnvValues(policy.Secrets), args...)
 	return err
 }
 
@@ -414,7 +435,16 @@ func (m *Microsandbox) List(ctx context.Context) ([]Instance, error) {
 // engine's store is inside the installation folder whatever the user's shell says — and so
 // that the worker, which the SDK attaches with, looks in the same place.
 func (m *Microsandbox) run(ctx context.Context, args ...string) (string, error) {
+	return m.runEnv(ctx, nil, args...)
+}
+
+// runEnv is run with extra environment entries, last wins. It is how a secret value reaches
+// the engine without being written to the policy file or passed in argv.
+func (m *Microsandbox) runEnv(ctx context.Context, extra []string, args ...string) (string, error) {
 	if m.runner != nil {
+		if runner, ok := m.runner.(EnvRunner); ok {
+			return runner.RunEnv(ctx, extra, args...)
+		}
 		return m.runner.Run(ctx, args...)
 	}
 	if !m.Installed() {
@@ -424,7 +454,7 @@ func (m *Microsandbox) run(ctx context.Context, args ...string) (string, error) 
 		return "", err
 	}
 	command := exec.CommandContext(ctx, m.binary(), args...)
-	command.Env = append(os.Environ(), m.Env()...)
+	command.Env = mergeEnv(os.Environ(), m.Env(), extra)
 	output, commandErr := command.CombinedOutput()
 	text := strings.TrimSpace(string(output))
 	if commandErr != nil {

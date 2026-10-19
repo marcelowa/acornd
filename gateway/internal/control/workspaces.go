@@ -514,6 +514,22 @@ func (w *Workspaces) changeInstall(ctx context.Context, change func(*Defaults) e
 	return nil
 }
 
+// ApplySecrets reconciles the running workspaces a change affects. A global change reaches
+// every started workspace; a workspace change reaches the one whose folder it names. A
+// stopped workspace needs nothing: its next start reads the vault. Failures are logged and
+// left in the workspace's sandbox state, because the store already has the value and the
+// caller asked to save it, not to prove every sandbox accepted it.
+func (w *Workspaces) ApplySecrets(ctx context.Context, scope vault.Scope, workspacePath string, restart bool) {
+	for _, control := range w.running() {
+		if scope == vault.Workspace && control.opts.Workspace.Path != workspacePath {
+			continue
+		}
+		if err := control.ApplySecrets(ctx, restart); err != nil {
+			workerpool.Log("secrets for %s: %v", control.opts.Workspace.Name, err)
+		}
+	}
+}
+
 // running is a snapshot of the started workspaces, copied out so nothing is called while the
 // registry lock is held.
 func (w *Workspaces) running() []*Control {

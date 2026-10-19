@@ -281,11 +281,12 @@ try {
 		);
 		check("settings shows the defaults", settingsText.includes("Defaults"));
 		// The sandbox fields left this screen: a workspace names itself on the workspaces screen,
-		// and the row menu opens them there. So this screen has three pages, and the theme is a
+		// and the row menu opens them there. So this screen has four pages, and the theme is a
 		// group on the first one rather than a tab of its own.
 		check(
-			"settings has three pages, and no workspace tab",
+			"settings has four pages, and no workspace tab",
 			settingsText.includes("Providers") &&
+				settingsText.includes("Secrets") &&
 				settingsText.includes("Updates") &&
 				!settingsText.includes("Workspace\n"),
 			settingsText.replace(/\s+/g, " ").slice(0, 80),

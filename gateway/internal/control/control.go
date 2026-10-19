@@ -104,6 +104,23 @@ type SandboxState struct {
 	// is visible rather than a surprise. A workspace that disables nesting carries neither.
 	Nested       bool   `json:"nested,omitempty"`
 	NestedReason string `json:"nestedReason,omitempty"`
+	// Secrets is the workspace's effective set as the engine delivers it. Blocked entries
+	// stay in the list with the reason, so the interface never hides a secret someone set.
+	// SecretsRestart is true when the engine could not put the change into the running
+	// sandbox; the next start will. SecretsProblem is why the vault could not be read.
+	Secrets        []SandboxSecret `json:"secrets,omitempty"`
+	SecretsRestart bool            `json:"secretsRestart,omitempty"`
+	SecretsProblem string          `json:"secretsProblem,omitempty"`
+}
+
+// SandboxSecret is one secret's delivery state, without its value.
+type SandboxSecret struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Scope       string   `json:"scope,omitempty"`
+	Hosts       []string `json:"hosts,omitempty"`
+	Delivery    string   `json:"delivery,omitempty"`
+	Status      string   `json:"status,omitempty"`
 }
 
 // WorkspaceState is a workspace as the interface needs it: what it is called, where it
@@ -306,6 +323,14 @@ type Control struct {
 	// drafts holds one unsent message per conversation, keyed by the harness's own id.
 	// Loaded at open, persisted on every save: a draft outlives the process that took it.
 	drafts map[string]Draft
+	// secretRequests are tools waiting for a person to set a secret. The worker asks; the
+	// card answers through the gateway, which owns the vault and the answer.
+	secretMu       sync.Mutex
+	secretRequests map[string]*pendingSecret
+	// restarting says stopWorker is about to be followed by a new worker. The old pointer
+	// stays in place until then so a concurrent call gets "not running" instead of a nil
+	// dereference, and its exit notification is not mistaken for a crash to supervise.
+	restarting bool
 }
 
 // cachedView is the last full view per conversation, so switching back is instant
@@ -316,6 +341,26 @@ type cachedView struct {
 	value      []byte
 	annotation json.RawMessage
 	seq        int64
+}
+
+// pendingSecret is one tool's open request. The worker pointer is the process to answer: a
+// restart or a crash can make it stale, and the answer then goes nowhere.
+type pendingSecret struct {
+	requestID      string
+	conversationID string
+	worker         *workerpool.Worker
+	name           string
+	description    string
+	hosts          []string
+}
+
+// SecretPrompt is a pending request as the HTTP layer needs it. The value is never here.
+type SecretPrompt struct {
+	RequestID      string
+	ConversationID string
+	Name           string
+	Description    string
+	Hosts          []string
 }
 
 func New(opts Options) *Control {
@@ -333,6 +378,7 @@ func New(opts Options) *Control {
 		promptedAt:             map[string]int64{},
 		actionAt:               map[string]int64{},
 		drafts:                 map[string]Draft{},
+		secretRequests:         map[string]*pendingSecret{},
 	}
 }
 
@@ -475,14 +521,42 @@ func (c *Control) startWorker(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	delivery := sandbox.DeliverySubstitute
+	if c.opts.Sandbox != nil {
+		delivery = c.opts.Sandbox.SecretDelivery()
+	}
+	delivered := c.resolveSecrets(delivery).delivered
+	if len(delivered) > 0 {
+		// The prompt carries names and descriptions only; a substitute engine never gives the
+		// worker a value, and an environment engine gives it through the process environment.
+		metadata := make([]map[string]any, 0, len(delivered))
+		for _, secret := range delivered {
+			metadata = append(metadata, map[string]any{
+				"name":        secret.Name,
+				"description": secret.Description,
+				"hosts":       secret.Hosts,
+				"delivery":    delivery.String(),
+			})
+		}
+		if encoded, err := json.Marshal(metadata); err == nil {
+			args = append(args, "--secrets", string(encoded))
+		}
+	}
+	env := sandboxEnv(c.opts.Sandbox)
+	if c.opts.Sandbox != nil && c.opts.Sandbox.SecretEnvInWorker() {
+		for _, secret := range delivered {
+			env = append(env, secret.Name+"="+secret.Value)
+		}
+	}
 	worker := workerpool.New(workerpool.Config{
 		Command: base[0],
 		Args:    args,
 		Dir:     c.opts.WorkerDir,
 		// The worker attaches to the sandbox with the engine's SDK, so it needs the engine's
 		// own environment to find it. One engine per install, so this is the same for every
-		// workspace.
-		Env: sandboxEnv(c.opts.Sandbox),
+		// workspace. A secret an environment engine delivers into the worker's own process is
+		// appended here too, last so it cannot be shadowed by the shell's variable.
+		Env: env,
 	})
 	worker.OnFrame(c.onFrame)
 	if err := worker.Start(ctx); err != nil {
@@ -499,6 +573,7 @@ func (c *Control) startWorker(ctx context.Context) error {
 	c.worker = worker
 	c.workerUp = true
 	c.workerError = ""
+	c.restarting = false
 	c.sandbox = sandboxState
 	c.mu.Unlock()
 	// The identity of the dying worker is part of the notification: a worker that has already
@@ -569,7 +644,7 @@ func (c *Control) workerFailed(worker *workerpool.Worker, err error) {
 	// problem: the process it describes is gone, and the one running now is fine. Acting on it
 	// marked a live workspace down, and the signal woke the supervisor to start a second
 	// harness over the same storage — two writers, from a late message about a dead process.
-	if c.worker != worker {
+	if c.restarting || c.worker != worker {
 		c.mu.Unlock()
 		workerpool.Log("worker died: %v (already replaced)", err)
 		return
@@ -587,6 +662,7 @@ func (c *Control) workerFailed(worker *workerpool.Worker, err error) {
 	c.workerUp = false
 	c.workerError = reason
 	c.mu.Unlock()
+	c.dropSecrets("")
 	workerpool.Log("worker died: %s", reason)
 	c.publish(protocol.Frame{Type: "state"})
 	// The supervisor restarts: work is committed before it is shown, so a fresh process
@@ -700,7 +776,22 @@ func (c *Control) conversationSignature() string {
 // WorkerCall is an escape hatch for small read-only commands, so a diagnostic does
 // not need a method and an endpoint of its own.
 func (c *Control) WorkerCall(ctx context.Context, kind, conversationID string) (json.RawMessage, error) {
-	return c.worker.Call(ctx, protocol.Command{Type: kind, ConversationID: conversationID})
+	worker, err := c.currentWorker()
+	if err != nil {
+		return nil, err
+	}
+	return worker.Call(ctx, protocol.Command{Type: kind, ConversationID: conversationID})
+}
+
+// currentWorker is the live harness, or a refusal. A control that failed to open has none;
+// an endpoint asked anyway should answer that, not dereference nil.
+func (c *Control) currentWorker() (*workerpool.Worker, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.worker == nil {
+		return nil, errors.New("the harness is not running")
+	}
+	return c.worker, nil
 }
 
 func (c *Control) workspaceList() []WorkspaceState {
@@ -715,6 +806,19 @@ func (c *Control) WorkerUp() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.workerUp
+}
+
+// watchingConversation reports whether a client is looking at this conversation. A card in
+// another conversation's tab does not answer the tool that asked here.
+func (c *Control) watchingConversation(conversationID string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, watched := range c.subscriberConversation {
+		if watched == conversationID {
+			return true
+		}
+	}
+	return false
 }
 
 // Watching reports whether a client is attached to any of this workspace's conversations.
@@ -746,13 +850,21 @@ func (c *Control) SetWorkspace(workspace Workspace) {
 
 // Commands lists this workspace's slash commands, global first and workspace shadowing.
 func (c *Control) Commands(ctx context.Context) (json.RawMessage, error) {
-	return c.worker.Call(ctx, protocol.Command{Type: "commands"})
+	worker, err := c.currentWorker()
+	if err != nil {
+		return nil, err
+	}
+	return worker.Call(ctx, protocol.Command{Type: "commands"})
 }
 
 // Policy reports what a conversation may do with other conversations, resolved
 // the same way its agent is.
 func (c *Control) Policy(ctx context.Context, conversationID string) (json.RawMessage, error) {
-	return c.worker.Call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID})
+	worker, err := c.currentWorker()
+	if err != nil {
+		return nil, err
+	}
+	return worker.Call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID})
 }
 
 // stopWorker terminates the worker process and leaves everything else:
@@ -763,10 +875,11 @@ func (c *Control) Policy(ctx context.Context, conversationID string) (json.RawMe
 func (c *Control) stopWorker() {
 	c.mu.Lock()
 	worker := c.worker
-	c.worker = nil
+	c.restarting = true
 	c.workerUp = false
 	c.mu.Unlock()
 	if worker != nil {
+		c.dropSecrets("")
 		worker.Close()
 	}
 }
@@ -817,11 +930,27 @@ func (c *Control) provisionSandbox(ctx context.Context) SandboxState {
 		state.Problem = problem.Error()
 		return state
 	}
+	delivery := manager.SecretDelivery()
+	resolved := c.resolveSecrets(delivery)
 	policy := c.opts.Workspace.SandboxPolicy(c.opts.Home, c.opts.UserHome, c.opts.DisableVMNesting)
+	policy.Secrets = resolved.delivered
 	if _, err := manager.Produce(ctx, policy, filepath.Dir(c.opts.StoragePath)); err != nil {
 		state.Problem = err.Error()
 		workerpool.Log("sandbox for %s: %v", c.opts.Workspace.Name, err)
 		return state
+	}
+	state.Secrets = resolved.state
+	state.SecretsProblem = resolved.problem
+	if delivery == sandbox.DeliverySubstitute && resolved.problem == "" {
+		// A sandbox that was already here may have been created before a secret changed; the
+		// engine is reconciled on the way up, so a stopped workspace does not start with an
+		// old set.
+		change, err := manager.SecretsChanged(ctx, policy.Workspace, resolved.delivered)
+		if err != nil {
+			state.SecretsProblem = err.Error()
+		} else if change.RestartRequired {
+			state.SecretsRestart = true
+		}
 	}
 	// Whether the sandbox that is running nests is what it was created with; this says what
 	// the next one gets, and why it cannot when it cannot. A workspace that disables
@@ -838,6 +967,132 @@ func (c *Control) provisionSandbox(ctx context.Context) SandboxState {
 	}
 	state.Tools = true
 	return state
+}
+
+// sandboxSecrets is the vault filtered for one engine: what to deliver, what the interface
+// should show, and what could not be read.
+type sandboxSecrets struct {
+	delivered []sandbox.Secret
+	state     []SandboxSecret
+	problem   string
+}
+
+// resolveSecrets reads the workspace's effective set and asks what this engine can do with
+// each entry. A substitute engine needs an allowed host; an environment engine needs the
+// owner to have allowed the value inside. A blocked entry stays visible with its reason.
+func (c *Control) resolveSecrets(delivery sandbox.Delivery) sandboxSecrets {
+	resolved := sandboxSecrets{}
+	if c.opts.Vault == nil {
+		return resolved
+	}
+	entries, err := c.opts.Vault.Resolve(c.opts.Workspace.Path)
+	if err != nil {
+		resolved.problem = err.Error()
+		return resolved
+	}
+	for _, entry := range entries {
+		state := SandboxSecret{
+			Name:        entry.Name,
+			Description: entry.Description,
+			Scope:       string(entry.Scope),
+			Hosts:       append([]string(nil), entry.Hosts...),
+			Delivery:    delivery.String(),
+		}
+		switch delivery {
+		case sandbox.DeliverySubstitute:
+			if len(entry.Hosts) == 0 {
+				state.Status = "not delivered: no allowed hosts"
+				resolved.state = append(resolved.state, state)
+				continue
+			}
+		case sandbox.DeliveryEnvironment:
+			if !entry.AllowEnv {
+				state.Status = "not delivered: its value may not enter the sandbox"
+				resolved.state = append(resolved.state, state)
+				continue
+			}
+		}
+		state.Status = "delivered"
+		resolved.state = append(resolved.state, state)
+		resolved.delivered = append(resolved.delivered, sandbox.Secret{
+			Name:        entry.Name,
+			Description: entry.Description,
+			Value:       entry.Value,
+			Hosts:       append([]string(nil), entry.Hosts...),
+			Headers:     entry.Substitution.Headers,
+			Query:       entry.Substitution.Query,
+			Body:        entry.Substitution.Body,
+			AllowEnv:    entry.AllowEnv,
+		})
+	}
+	return resolved
+}
+
+// ApplySecrets reconciles a running workspace with the vault after a change. A substitute
+// engine rotates live where it can and stores the rest for the next start; the host engine
+// cannot change a running process's environment, so its worker is restarted. A stopped
+// workspace has nothing to apply: its next start reads the vault.
+func (c *Control) ApplySecrets(ctx context.Context, restart bool) error {
+	if !c.WorkerUp() {
+		return nil
+	}
+	manager := c.opts.Sandbox
+	if manager == nil {
+		return nil
+	}
+	if problem := manager.Problem(); problem != nil {
+		return problem
+	}
+	delivery := manager.SecretDelivery()
+	resolved := c.resolveSecrets(delivery)
+	if resolved.problem != "" {
+		c.mu.Lock()
+		c.sandbox.Secrets = resolved.state
+		c.sandbox.SecretsProblem = resolved.problem
+		c.mu.Unlock()
+		c.publish(protocol.Frame{Type: "state"})
+		return nil
+	}
+	if delivery == sandbox.DeliveryEnvironment && manager.SecretEnvInWorker() {
+		if restart {
+			return c.RestartWorker(ctx)
+		}
+		// A value set from a card must not kill the turn that asked for it. The worker keeps
+		// its old environment; the state says a restart is needed and the tool says so too.
+		c.mu.Lock()
+		c.sandbox.Secrets = resolved.state
+		c.sandbox.SecretsProblem = ""
+		c.sandbox.SecretsRestart = true
+		c.mu.Unlock()
+		c.publish(protocol.Frame{Type: "state"})
+		return nil
+	}
+	change, err := manager.SecretsChanged(ctx, c.opts.Workspace.Path, resolved.delivered)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.sandbox.Secrets = resolved.state
+	c.sandbox.SecretsProblem = ""
+	c.sandbox.SecretsRestart = change.RestartRequired
+	c.mu.Unlock()
+	c.publish(protocol.Frame{Type: "state"})
+	return nil
+}
+
+// RestartWorker replaces the harness with one that reads the current environment. The old
+// worker is stopped first; its exit notification is ignored because it is no longer the
+// current process, and the new one is recovered the same way a supervised restart is.
+func (c *Control) RestartWorker(ctx context.Context) error {
+	c.stopWorker()
+	if err := c.startWorker(ctx); err != nil {
+		select {
+		case c.workerExited <- struct{}{}:
+		default:
+		}
+		return err
+	}
+	return c.recoverWithWorker(ctx)
 }
 
 // Describe returns the cached worker self-report.
@@ -2082,11 +2337,20 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 }
 
 func (c *Control) Abort(ctx context.Context, conversationID string) error {
-	return c.worker.CallInto(ctx, protocol.Command{Type: "abort", ConversationID: conversationID}, nil)
+	c.cancelSecrets(conversationID)
+	worker, err := c.currentWorker()
+	if err != nil {
+		return err
+	}
+	return worker.CallInto(ctx, protocol.Command{Type: "abort", ConversationID: conversationID}, nil)
 }
 
 func (c *Control) Usage(ctx context.Context) (json.RawMessage, error) {
-	return c.worker.Call(ctx, protocol.Command{Type: "usage"})
+	worker, err := c.currentWorker()
+	if err != nil {
+		return nil, err
+	}
+	return worker.Call(ctx, protocol.Command{Type: "usage"})
 }
 
 // Attachment is one stored file, answered with the id messages carry.
@@ -2205,6 +2469,14 @@ func (c *Control) Unsubscribe(id int) {
 }
 
 func (c *Control) onFrame(frame protocol.Frame) {
+	switch frame.Type {
+	case "secret_request":
+		c.handleSecretRequest(frame)
+		return
+	case "secret_list":
+		go c.answerSecretList(frame)
+		return
+	}
 	c.publish(frame)
 	// Titles are derived from the first user message, so a settled run is the
 	// moment a conversation's name can change. The settlement also clears the prompt
@@ -2224,6 +2496,202 @@ func (c *Control) onFrame(frame protocol.Frame) {
 		}()
 	}
 }
+
+// handleSecretRequest turns a tool's request into a card for the people watching. A turn
+// with nobody attached is answered at once: there is no one to ask, and a tool blocked
+// forever would only burn a run.
+func (c *Control) handleSecretRequest(frame protocol.Frame) {
+	requestID := frame.ID
+	conversationID := frame.ConversationID
+	if requestID == "" || conversationID == "" {
+		return
+	}
+	c.mu.RLock()
+	worker := c.worker
+	c.mu.RUnlock()
+	if worker == nil {
+		return
+	}
+	if !c.watchingConversation(conversationID) {
+		go c.answerSecret(worker, requestID, true, "", false, "no client is watching this conversation")
+		return
+	}
+	c.secretMu.Lock()
+	c.secretRequests[requestID] = &pendingSecret{
+		requestID:      requestID,
+		conversationID: conversationID,
+		worker:         worker,
+		name:           frame.Name,
+		description:    frame.Description,
+		hosts:          frame.Hosts,
+	}
+	c.secretMu.Unlock()
+	c.publish(protocol.Frame{
+		Type:           "secret",
+		ConversationID: conversationID,
+		Secret: &protocol.SecretEvent{
+			Kind:           "request",
+			RequestID:      requestID,
+			ConversationID: conversationID,
+			Name:           frame.Name,
+			Description:    frame.Description,
+			Hosts:          frame.Hosts,
+		},
+	})
+}
+
+// answerSecretList answers a tool that asked what the workspace has. It is a read: no card,
+// no pending state, and no value in the answer.
+func (c *Control) answerSecretList(frame protocol.Frame) {
+	c.mu.RLock()
+	worker := c.worker
+	c.mu.RUnlock()
+	if worker == nil {
+		return
+	}
+	delivery := sandbox.DeliverySubstitute
+	if c.opts.Sandbox != nil {
+		delivery = c.opts.Sandbox.SecretDelivery()
+	}
+	resolved := c.resolveSecrets(delivery)
+	infos := make([]protocol.SecretInfo, 0, len(resolved.state))
+	for _, secret := range resolved.state {
+		infos = append(infos, protocol.SecretInfo{
+			Name:        secret.Name,
+			Description: secret.Description,
+			Scope:       secret.Scope,
+			Hosts:       secret.Hosts,
+			Delivery:    secret.Delivery,
+			Status:      secret.Status,
+		})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = worker.CallInto(ctx, protocol.Command{
+		Type:            "secret_list_answer",
+		SecretRequestID: frame.ID,
+		Secrets:         infos,
+		Reason:          resolved.problem,
+	}, nil)
+}
+
+// SecretPrompt returns an open request by id, for the answer endpoint.
+func (c *Control) SecretPrompt(requestID string) (SecretPrompt, bool) {
+	c.secretMu.Lock()
+	defer c.secretMu.Unlock()
+	pending, ok := c.secretRequests[requestID]
+	if !ok {
+		return SecretPrompt{}, false
+	}
+	return SecretPrompt{
+		RequestID:      pending.requestID,
+		ConversationID: pending.conversationID,
+		Name:           pending.name,
+		Description:    pending.description,
+		Hosts:          append([]string(nil), pending.hosts...),
+	}, true
+}
+
+// ResolveSecret answers the tool and closes the card. The value was already written by the
+// HTTP layer; this side carries only the outcome.
+func (c *Control) ResolveSecret(requestID string, cancelled bool, scope string, restart bool, reason string) bool {
+	c.secretMu.Lock()
+	pending, ok := c.secretRequests[requestID]
+	delete(c.secretRequests, requestID)
+	c.secretMu.Unlock()
+	if !ok {
+		return false
+	}
+	c.answerSecret(pending.worker, requestID, cancelled, scope, restart, reason)
+	kind := "resolved"
+	if cancelled {
+		kind = "cancelled"
+	}
+	c.publish(protocol.Frame{
+		Type:           "secret",
+		ConversationID: pending.conversationID,
+		Secret: &protocol.SecretEvent{
+			Kind:            kind,
+			RequestID:       requestID,
+			ConversationID:  pending.conversationID,
+			Name:            pending.name,
+			Scope:           scope,
+			RestartRequired: restart,
+			Reason:          reason,
+		},
+	})
+	return true
+}
+
+// cancelSecrets closes every open request for a conversation, or for the whole workspace
+// when the conversation is empty. A run that ended, a worker that died, and an update that
+// stopped the process all leave no one to answer.
+func (c *Control) cancelSecrets(conversationID string) {
+	c.secretMu.Lock()
+	ids := []string{}
+	for id, pending := range c.secretRequests {
+		if conversationID == "" || pending.conversationID == conversationID {
+			ids = append(ids, id)
+		}
+	}
+	c.secretMu.Unlock()
+	for _, id := range ids {
+		c.ResolveSecret(id, true, "", false, "the run ended before the secret was set")
+	}
+}
+
+// dropSecrets closes the cards without waiting for a worker that is gone or going. The tool
+// died with the process; there is nobody to answer.
+func (c *Control) dropSecrets(conversationID string) {
+	c.secretMu.Lock()
+	removed := []*pendingSecret{}
+	for id, pending := range c.secretRequests {
+		if conversationID == "" || pending.conversationID == conversationID {
+			removed = append(removed, pending)
+			delete(c.secretRequests, id)
+		}
+	}
+	c.secretMu.Unlock()
+	for _, pending := range removed {
+		c.publish(protocol.Frame{
+			Type:           "secret",
+			ConversationID: pending.conversationID,
+			Secret: &protocol.SecretEvent{
+				Kind:           "cancelled",
+				RequestID:      pending.requestID,
+				ConversationID: pending.conversationID,
+				Name:           pending.name,
+				Reason:         "the harness restarted before the secret was set",
+			},
+		})
+	}
+}
+
+func (c *Control) answerSecret(worker *workerpool.Worker, requestID string, cancelled bool, scope string, restart bool, reason string) {
+	if worker == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = worker.CallInto(ctx, protocol.Command{
+		Type:            "secret_answer",
+		SecretRequestID: requestID,
+		Cancelled:       cancelled,
+		SecretScope:     scope,
+		RestartRequired: restart,
+		Reason:          reason,
+	}, nil)
+}
+
+// SecretsRestart reports whether the last applied change waits for the next sandbox start.
+func (c *Control) SecretsRestart() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.sandbox.SecretsRestart
+}
+
+// WorkspacePath is the folder this control serves, for the answer endpoint's vault entry.
+func (c *Control) WorkspacePath() string { return c.opts.Workspace.Path }
 
 // notifyState wakes every attached client: the state it holds is stale, and the HTTP layer
 // answers each one with a fresh state for its own conversation. A signal already waiting
@@ -2279,7 +2747,7 @@ func (c *Control) publish(frame protocol.Frame) {
 		// conversation must never see it, or switching away mid-run shows the run
 		// writing into the room just opened. Frames with no conversation are for
 		// everyone: a login prompt belongs to no transcript.
-		if (frame.Type == "view" || frame.Type == "submission") && frame.ConversationID != "" {
+		if (frame.Type == "view" || frame.Type == "submission" || frame.Type == "secret") && frame.ConversationID != "" {
 			if c.subscriberConversation[id] != frame.ConversationID {
 				continue
 			}
@@ -2323,10 +2791,14 @@ func (c *Control) RefreshConversations(ctx context.Context) error {
 }
 
 func (c *Control) listConversations(ctx context.Context) ([]protocol.ConversationInfo, error) {
+	worker, err := c.currentWorker()
+	if err != nil {
+		return nil, err
+	}
 	var data struct {
 		Conversations []protocol.ConversationInfo `json:"conversations"`
 	}
-	if err := c.worker.CallInto(ctx, protocol.Command{Type: "conversations"}, &data); err != nil {
+	if err := worker.CallInto(ctx, protocol.Command{Type: "conversations"}, &data); err != nil {
 		return nil, err
 	}
 	c.mu.Lock()
@@ -2340,7 +2812,7 @@ func (c *Control) listConversations(ctx context.Context) ([]protocol.Conversatio
 	// Policy for every conversation a client is watching, so an inspector is correct in
 	// whichever tab it happens to be open.
 	for _, conversationID := range c.watchedConversations() {
-		policy, err := c.worker.Call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID})
+		policy, err := worker.Call(ctx, protocol.Command{Type: "policy", ConversationID: conversationID})
 		if err != nil {
 			continue
 		}

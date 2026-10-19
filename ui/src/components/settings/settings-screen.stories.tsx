@@ -5,6 +5,7 @@ import { Picker } from "@/components/composer/picker";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ProvidersSection } from "./providers-section";
 import { SettingsScreen } from "./settings-screen";
+import { Text } from "@/components/typography/text";
 import { UpdatesSection } from "@/components/release/updates-section";
 
 const meta = {
@@ -136,6 +137,11 @@ export const Default: Story = {
 		onThemeChange: noop,
 		defaults,
 		providers: <ProvidersSection providers={providers} />,
+		secrets: (
+			<Text size="sm" tone="muted">
+				The workspace's secrets and the globals.
+			</Text>
+		),
 		install,
 		version: "v0.9.2",
 		onClose: noop,
@@ -150,6 +156,11 @@ export const Dark: Story = {
 /** Each page has its own URL: the providers page. */
 export const Providers: Story = {
 	args: { ...Default.args, tab: "providers" },
+};
+
+/** The secrets page lists names and descriptions; a value is never shown. */
+export const Secrets: Story = {
+	args: { ...Default.args, tab: "secrets" },
 };
 
 /** A phone: the tab bar, the fields and the controls at 390px. */

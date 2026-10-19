@@ -5,6 +5,7 @@ import type {
 	WireDraft,
 	WireDraftAttachment,
 	WireFrame,
+	WireSecretEvent,
 	WireSender,
 	WireState,
 	WireView,
@@ -31,6 +32,7 @@ export interface StreamHandlers {
 	onState: (state: WireState) => void;
 	onView: (view: WireView, senders: Record<string, WireSender>) => void;
 	onAuth?: ((authId: string, event: WireAuthEvent) => void) | undefined;
+	onSecret?: ((event: WireSecretEvent) => void) | undefined;
 	onReconnecting: () => void;
 }
 
@@ -53,6 +55,10 @@ export function openStream(
 		const frame = JSON.parse((event as MessageEvent<string>).data) as WireFrame;
 		if (frame.type === "auth" && frame.authId !== undefined && frame.event !== undefined) {
 			handlers.onAuth?.(frame.authId, frame.event);
+			return;
+		}
+		if (frame.type === "secret" && frame.secret !== undefined) {
+			handlers.onSecret?.(frame.secret);
 			return;
 		}
 		if (frame.type !== "view" || frame.value === undefined) return;
@@ -455,4 +461,149 @@ export interface UpdatePrefs {
 /** The install-wide settings page: channel and auto-check. There is no pin. */
 export function setUpdatePrefs(prefs: UpdatePrefs): Promise<UpdateStatus> {
 	return postJson<UpdateStatus>("/api/update/settings", prefs);
+}
+
+/* ---------- tool secrets ---------- */
+
+export type SecretScope = "global" | "workspace";
+
+export interface SecretSubstitution {
+	headers: boolean;
+	query: boolean;
+	body: boolean;
+}
+
+/** A secret as the API returns it: everything but the value. */
+export interface SecretMeta {
+	name: string;
+	description: string;
+	scope: SecretScope;
+	workspace?: string | undefined;
+	hosts: string[];
+	substitution: SecretSubstitution;
+	allowEnv: boolean;
+	rotatedAt?: string | undefined;
+	/** Set on a workspace entry whose name also exists globally. */
+	overrides?: boolean | undefined;
+	/** Set on a global entry that a workspace entry replaces. */
+	overridden?: boolean | undefined;
+	/** On an effective entry: which scope won. */
+	source?: SecretScope | undefined;
+}
+
+export interface WorkspaceSecrets {
+	workspace: { name: string; path: string };
+	global: SecretMeta[];
+	own: SecretMeta[];
+	effective: SecretMeta[];
+}
+
+export interface SecretInput {
+	name: string;
+	description: string;
+	value: string;
+	hosts: string[];
+	substitution: SecretSubstitution;
+	allowEnv: boolean;
+}
+
+function secretsPath(scope: SecretScope, workspace: string, tail = ""): string {
+	if (scope === "global") return `/api/secrets${tail}`;
+	return workspacePath(workspace, `/secrets${tail}`);
+}
+
+async function readJSON<T>(path: string, method: string, body?: unknown): Promise<T> {
+	const init: RequestInit = { method };
+	if (body !== undefined) {
+		init.headers = { "content-type": "application/json" };
+		init.body = JSON.stringify(body);
+	}
+	const response = await fetch(path, init);
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	return (await response.json()) as T;
+}
+
+export async function fetchGlobalSecrets(): Promise<SecretMeta[]> {
+	const payload = await readJSON<{ secrets: SecretMeta[] }>("/api/secrets", "GET");
+	return payload.secrets;
+}
+
+export async function fetchWorkspaceSecrets(workspace: string): Promise<WorkspaceSecrets> {
+	return readJSON<WorkspaceSecrets>(secretsPath("workspace", workspace), "GET");
+}
+
+export async function saveSecret(
+	scope: SecretScope,
+	workspace: string,
+	input: SecretInput,
+): Promise<SecretMeta> {
+	const payload = await readJSON<{ secret: SecretMeta }>(
+		secretsPath(scope, workspace),
+		"POST",
+		input,
+	);
+	return payload.secret;
+}
+
+export async function rotateSecret(
+	scope: SecretScope,
+	workspace: string,
+	name: string,
+	value: string,
+): Promise<SecretMeta> {
+	const payload = await readJSON<{ secret: SecretMeta }>(
+		secretsPath(scope, workspace, `/${encodeURIComponent(name)}/rotate`),
+		"POST",
+		{ value },
+	);
+	return payload.secret;
+}
+
+export async function deleteSecret(
+	scope: SecretScope,
+	workspace: string,
+	name: string,
+): Promise<void> {
+	await readJSON<{ deleted: string }>(
+		secretsPath(scope, workspace, `/${encodeURIComponent(name)}`),
+		"DELETE",
+	);
+}
+
+export interface SecretAnswerInput {
+	value: string;
+	description: string;
+	hosts: string[];
+	scope: "workspace" | "global";
+}
+
+export async function answerSecretRequest(
+	workspace: string,
+	conversation: string,
+	requestId: string,
+	input: SecretAnswerInput,
+): Promise<{ restartRequired?: boolean | undefined }> {
+	return readJSON(
+		workspacePath(
+			workspace,
+			`/conversations/${encodeURIComponent(conversation)}/secrets/${encodeURIComponent(requestId)}`,
+		),
+		"POST",
+		input,
+	);
+}
+
+export async function cancelSecretRequest(
+	workspace: string,
+	conversation: string,
+	requestId: string,
+): Promise<void> {
+	await readJSON(
+		workspacePath(
+			workspace,
+			`/conversations/${encodeURIComponent(conversation)}/secrets/${encodeURIComponent(requestId)}`,
+		),
+		"POST",
+		{ cancelled: true },
+	);
 }

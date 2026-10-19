@@ -66,6 +66,12 @@ func (f *fakeDriver) Remove(context.Context, string) error {
 	f.calls = append(f.calls, "rm")
 	return f.err
 }
+func (f *fakeDriver) SecretDelivery() Delivery { return DeliverySubstitute }
+func (f *fakeDriver) SecretEnvInWorker() bool  { return false }
+func (f *fakeDriver) SecretsChanged(context.Context, string, []Secret) (SecretChange, error) {
+	f.calls = append(f.calls, "secrets")
+	return SecretChange{}, f.err
+}
 
 func (f *fakeDriver) ran(call string) bool {
 	return slices.Contains(f.calls, call)

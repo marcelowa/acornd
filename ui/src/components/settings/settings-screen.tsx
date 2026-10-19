@@ -22,6 +22,8 @@ export interface SettingsScreenProps {
 	defaults: ReactNode;
 	/** The providers section: global keys, so it never sits under workspace tabs. */
 	providers: ReactNode;
+	/** The secrets section: the globals, and the workspace in view. Values are never shown. */
+	secrets: ReactNode;
 	/** The updates section: the running build, auto-check, and the door to the releases. */
 	install: ReactNode;
 	/** The running build, when the gateway answered: shown under the title. */
@@ -48,6 +50,7 @@ export function SettingsScreen({
 	onThemeChange,
 	defaults,
 	providers,
+	secrets,
 	install,
 	version,
 	onClose,
@@ -80,12 +83,14 @@ export function SettingsScreen({
 					<Tabs
 						value={tab}
 						onValueChange={(next) => {
-							if (next === "general" || next === "providers") onTabChange(next);
+							if (next === "general" || next === "providers" || next === "secrets")
+								onTabChange(next);
 						}}
 					>
 						<TabsList aria-label="Settings pages">
 							<TabsTrigger value="general">General</TabsTrigger>
 							<TabsTrigger value="providers">Providers</TabsTrigger>
+							<TabsTrigger value="secrets">Secrets</TabsTrigger>
 						</TabsList>
 					</Tabs>
 
@@ -137,6 +142,7 @@ export function SettingsScreen({
 					) : null}
 
 					{tab === "providers" ? providers : null}
+					{tab === "secrets" ? secrets : null}
 				</Stack>
 			</Measure>
 		</div>

@@ -147,6 +147,24 @@ ssh -L 7777:127.0.0.1:7777 desktop
 # then browse http://localhost:7777
 ```
 
+### Secrets
+
+A tool secret is a value a command needs, kept out of the transcript. Global entries are on
+every workspace; a workspace entry with the same name wins. The agent can list names and
+descriptions and ask for one through a card; the value goes to the gateway, never the model.
+On microsandbox the guest sees a placeholder and the value is substituted only for the
+allowed hosts; an environment engine puts the value in the sandbox, and `allowEnv: false`
+keeps it out. See [ADR 0021](docs/adr/0021-a-vault-for-tool-secrets.md).
+
+Settings > Secrets lists them; the conversation menu has the same page, and an agent that
+needs one shows the card. The headless path reads the value from stdin:
+
+```bash
+acornfall secret add --global --description "release token" \
+  --hosts api.github.com,github.com GITHUB_TOKEN < token.txt
+acornfall secret list
+```
+
 ### Without an API key
 
 The dev provider answers every turn with one real `bash` call and a scripted

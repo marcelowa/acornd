@@ -24,6 +24,8 @@ import { UpdatesSection } from "@/components/release/updates-section";
 import { ReleaseMark } from "@/components/release/release-mark";
 import { ReleaseScreen } from "@/components/release/release-screen";
 import { ProvidersSection } from "@/components/settings/providers-section";
+import { SecretsSection } from "@/components/settings/secrets-section";
+import { SecretRequestDialog } from "@/components/secrets/secret-request-dialog";
 import { ProviderLoginDialog } from "@/components/settings/provider-login-dialog";
 import { WorkspacesPanel } from "@/components/workspace/workspaces-panel";
 import { WorkspaceButton } from "@/components/workspace/workspace-button";
@@ -385,6 +387,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					}
 					onHide={(id) => platform.hide(id, true)}
 					onRestore={(id) => platform.hide(id, false)}
+					onSecrets={() => platform.showSettingsTab("secrets")}
 				/>
 			}
 			foot={
@@ -603,6 +606,17 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		}
 		void platform.startLogin(provider, method).catch(() => undefined);
 	};
+	const secrets = (
+		<SecretsSection
+			workspace={
+				activeWorkspace === undefined
+					? undefined
+					: { name: activeWorkspace.name, path: activeWorkspace.path }
+			}
+			engine={platform.sandbox?.engine}
+		/>
+	);
+
 	const providers = (
 		<ProvidersSection
 			providers={platform.providers}
@@ -636,6 +650,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 				onThemeChange={platform.setThemeChoice}
 				defaults={defaults}
 				providers={providers}
+				secrets={secrets}
 				install={install}
 				version={platform.update?.current}
 				onClose={() => platform.showScreen("conversation")}
@@ -802,6 +817,13 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					platform.compact();
 				}}
 				onCancel={platform.closeCompactDialog}
+			/>
+			<SecretRequestDialog
+				key={platform.secretRequest?.requestId ?? "none"}
+				request={platform.secretRequest}
+				engine={platform.sandbox?.engine}
+				onAnswer={platform.answerSecret}
+				onCancel={platform.cancelSecret}
 			/>
 			<ProviderLoginDialog
 				pending={platform.authFlow === undefined ? connecting : undefined}

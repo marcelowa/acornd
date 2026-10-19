@@ -51,6 +51,8 @@ import {
 } from "./attachments.ts";
 import { thinkingLevelFor } from "./thinking.ts";
 import { PREAMBLE } from "./preamble.ts";
+import { parseSecrets, secretSection, type SecretInfo } from "./secrets.ts";
+import { resolveSecretAnswer, resolveSecretList, secretExtension } from "./secret-tool.ts";
 import { totalCost, totalTokens } from "./usage.ts";
 import { cancelAuth, login, resolveAuthAnswer } from "./auth.ts";
 import {
@@ -103,6 +105,8 @@ interface Args {
 	sandbox: string;
 	/** Which engine that sandbox belongs to. The name is control's, and the two must agree. */
 	sandboxEngine: string;
+	/** The workspace's delivered secrets, names and descriptions only. */
+	secrets: SecretInfo[];
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -130,6 +134,7 @@ function parseArgs(argv: readonly string[]): Args {
 		credentials,
 		sandbox: values.get("sandbox") ?? "",
 		sandboxEngine: values.get("sandbox-engine") ?? "microsandbox",
+		secrets: parseSecrets(values.get("secrets")),
 	};
 }
 
@@ -226,6 +231,7 @@ registry.install(
 			section("preamble", () => PREAMBLE, { tag: false }),
 			section("cwd", (input) => input.env?.cwd),
 			section("workspace-rules", () => workspaceRules),
+			section("secrets", () => secretSection(args.secrets)),
 		],
 	}),
 );
@@ -237,6 +243,7 @@ registry.install(
 	),
 );
 registry.install(CodingTools);
+registry.install(secretExtension());
 
 const settings: HarnessSettings = { toolExecution: "parallel" };
 // One environment per tool call, all of them over the same sandbox: the id is the sandbox's,
@@ -796,6 +803,26 @@ async function main(): Promise<void> {
 			emit({ type: "response", id: command.id, ok: true });
 			return;
 		}
+		// The card's answer and a list answer arrive while the tool that asked is blocked,
+		// so they bypass the queue for the same reason a login answer does.
+		if (command.type === "secret_answer") {
+			resolveSecretAnswer(command.secretRequestId, {
+				cancelled: command.cancelled === true,
+				scope: command.secretScope,
+				restartRequired: command.restartRequired === true,
+				reason: command.reason,
+			});
+			emit({ type: "response", id: command.id, ok: true });
+			return;
+		}
+		if (command.type === "secret_list_answer") {
+			resolveSecretList(command.secretRequestId, {
+				secrets: command.secrets ?? [],
+				reason: command.reason,
+			});
+			emit({ type: "response", id: command.id, ok: true });
+			return;
+		}
 		// A login runs beside the queue as well. It is a conversation with the provider that can
 		// wait minutes for a code, and one sign-in nobody answers must not hold up every command
 		// behind it — the state, the conversations, the next message. Its response still comes
@@ -852,7 +879,13 @@ async function main(): Promise<void> {
  * command in the protocol is then either handled here or added to this exclusion, and the
  * compiler asks.
  */
-type HandledCommand = Exclude<Command, { type: "auth_answer" } | { type: "auth_cancel" }>;
+type HandledCommand = Exclude<
+	Command,
+	| { type: "auth_answer" }
+	| { type: "auth_cancel" }
+	| { type: "secret_answer" }
+	| { type: "secret_list_answer" }
+>;
 
 async function handle(command: HandledCommand): Promise<unknown> {
 	switch (command.type) {

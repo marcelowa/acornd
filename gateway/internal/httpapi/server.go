@@ -104,6 +104,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/secrets/{name}", s.secretDeleteGlobal)
 	mux.HandleFunc("GET /api/workspaces/{ws}/secrets", s.secretListWorkspace)
 	mux.HandleFunc("POST /api/workspaces/{ws}/secrets", s.secretPutWorkspace)
+	mux.HandleFunc("POST /api/workspaces/{ws}/conversations/{id}/secrets/{request}", s.secretRequestAnswer)
 	mux.HandleFunc("POST /api/workspaces/{ws}/secrets/{name}/rotate", s.secretRotateWorkspace)
 	mux.HandleFunc("DELETE /api/workspaces/{ws}/secrets/{name}", s.secretDeleteWorkspace)
 

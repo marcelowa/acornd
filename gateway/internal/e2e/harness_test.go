@@ -712,12 +712,20 @@ type state struct {
 	} `json:"skills"`
 	Capabilities map[string]any `json:"capabilities"`
 	Sandbox      struct {
-		Engine   string `json:"engine"`
-		Version  string `json:"version"`
-		Status   string `json:"status"`
-		Tools    bool   `json:"tools"`
-		Isolated bool   `json:"isolated"`
-		Problem  string `json:"problem"`
+		Engine         string `json:"engine"`
+		Version        string `json:"version"`
+		Status         string `json:"status"`
+		Tools          bool   `json:"tools"`
+		Isolated       bool   `json:"isolated"`
+		Problem        string `json:"problem"`
+		SecretsRestart bool   `json:"secretsRestart"`
+		SecretsProblem string `json:"secretsProblem"`
+		Secrets        []struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Delivery    string `json:"delivery"`
+			Status      string `json:"status"`
+		} `json:"secrets"`
 	} `json:"sandbox"`
 	Defaults []layerTrace   `json:"defaults"`
 	Resolved map[string]any `json:"resolved"`

@@ -47,6 +47,10 @@ test("settings keeps its page and the workspace it was about", () => {
 	});
 });
 
+test("the secrets page is its own setting", () => {
+	expect(routeFromUrl("/settings/secrets", "?workspace=spikes").settingsTab).toBe("secrets");
+});
+
 test("an unknown settings page lands on general", () => {
 	expect(routeFromUrl("/settings/nope", "").settingsTab).toBe("general");
 });

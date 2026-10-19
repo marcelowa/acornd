@@ -58,6 +58,20 @@ func (h *Host) List(context.Context) ([]Instance, error) { return nil, nil }
 // folder is the sandbox.
 func (h *Host) Create(context.Context, Policy, string) error { return nil }
 
+// SecretDelivery is the environment: there is no guest to keep a value out of. A value in
+// the worker's own process is what a command on the host sees.
+func (h *Host) SecretDelivery() Delivery { return DeliveryEnvironment }
+
+// SecretEnvInWorker puts the values in the worker's process environment, which is where the
+// host engine's commands read their environment.
+func (h *Host) SecretEnvInWorker() bool { return true }
+
+// SecretsChanged cannot change a running process's environment. The worker is restarted,
+// which reads the new set on the way up.
+func (h *Host) SecretsChanged(context.Context, string, []Secret) (SecretChange, error) {
+	return SecretChange{RestartRequired: true}, nil
+}
+
 func (h *Host) Start(context.Context, string) error  { return nil }
 func (h *Host) Stop(context.Context, string) error   { return nil }
 func (h *Host) Remove(context.Context, string) error { return nil }

@@ -29,6 +29,7 @@ export interface ConversationRowProps {
 	active?: boolean | undefined;
 	onSelect?: ((id: string) => void) | undefined;
 	onRename?: ((id: string) => void) | undefined;
+	onSecrets?: ((id: string) => void) | undefined;
 	onHide?: ((id: string) => void) | undefined;
 	onRestore?: ((id: string) => void) | undefined;
 	className?: string | undefined;
@@ -64,6 +65,7 @@ export function ConversationRow({
 	active = false,
 	onSelect,
 	onRename,
+	onSecrets,
 	onHide,
 	onRestore,
 	className,
@@ -106,6 +108,7 @@ export function ConversationRow({
 		? [{ label: "Restore", destructive: false, run: () => onRestore?.(conversation.id) }]
 		: [
 				{ label: "Rename", destructive: false, run: () => onRename?.(conversation.id) },
+				{ label: "Secrets", destructive: false, run: () => onSecrets?.(conversation.id) },
 				{ label: "Delete", destructive: true, run: () => onHide?.(conversation.id) },
 			];
 
