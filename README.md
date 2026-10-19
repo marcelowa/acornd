@@ -152,9 +152,23 @@ ssh -L 7777:127.0.0.1:7777 desktop
 A tool secret is a value a command needs, kept out of the transcript. Global entries are on
 every workspace; a workspace entry with the same name wins. The agent can list names and
 descriptions and ask for one through a card; the value goes to the gateway, never the model.
-On microsandbox the guest sees a placeholder and the value is substituted only for the
-allowed hosts; an environment engine puts the value in the sandbox, and `allowEnv: false`
-keeps it out. See [ADR 0021](docs/adr/0021-a-vault-for-tool-secrets.md).
+On microsandbox the guest environment holds the literal `$MSB_<NAME>`; a command sends that
+value, for example `-H "Authorization: Bearer $GITHUB_TOKEN"`. The engine substitutes the
+real value only for the allowed hosts, and only over HTTPS; plain HTTP is not intercepted.
+`${NAME}` and `{{NAME}}` are not placeholders and pass through. An environment engine puts
+the real value in the sandbox, and `allowEnv: false` keeps it out. See
+[ADR 0021](docs/adr/0021-a-vault-for-tool-secrets.md).
+
+A secret added while a conversation runs is stored first; the sandbox picks it up when that
+turn ends, and the agent is told so. Rotating an existing name is live, and adding a host or
+a name is what a substitute engine cannot do without that brief restart. The default image
+has no `curl`; install one inside the sandbox or use the project's own HTTPS client:
+
+```bash
+# inside the sandbox
+apt-get update && apt-get install -y curl
+curl -fsS -H "Authorization: Bearer $GITHUB_TOKEN" https://api.github.com/user
+```
 
 Settings > Secrets lists them; the conversation menu has the same page, and an agent that
 needs one shows the card. The headless path reads the value from stdin:

@@ -396,8 +396,10 @@ func (m *Microsandbox) Create(ctx context.Context, policy Policy, policyDir stri
 	return err
 }
 
-func (m *Microsandbox) Start(ctx context.Context, name string) error {
-	_, err := m.run(ctx, "start", name)
+func (m *Microsandbox) Start(ctx context.Context, name string, secrets []Secret) error {
+	// The stored config references a host variable per secret. The engine reads it at start,
+	// so the values ride the start process's environment, never the config.
+	_, err := m.runEnv(ctx, startSecretEnv(secrets), "start", name)
 	return err
 }
 

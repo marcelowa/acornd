@@ -57,7 +57,9 @@ export function SandboxPanel({ sandbox, workspacePath }: SandboxPanelProps) {
 						<Fact
 							key={secret.name}
 							label={secret.name}
-							value={[secret.status, secret.delivery].filter(Boolean).join(" · ")}
+							value={[secret.status, secret.delivery, secret.placeholder]
+								.filter(Boolean)
+								.join(" · ")}
 						/>
 					))}
 				</>

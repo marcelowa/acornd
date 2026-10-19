@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/control"
+	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 	"github.com/acornfall/acornfall/gateway/internal/vault"
 )
 
@@ -158,7 +159,7 @@ func (s *Server) secretPut(w http.ResponseWriter, r *http.Request, store *vault.
 		secretFailure(w, err)
 		return
 	}
-	s.applySecrets(r, scope, workspace, true)
+	s.applySecrets(r, scope, workspace, false)
 	writeJSON(w, http.StatusOK, map[string]any{"secret": meta})
 }
 
@@ -174,7 +175,7 @@ func (s *Server) secretRotate(w http.ResponseWriter, r *http.Request, store *vau
 		secretFailure(w, err)
 		return
 	}
-	s.applySecrets(r, scope, workspace, true)
+	s.applySecrets(r, scope, workspace, false)
 	writeJSON(w, http.StatusOK, map[string]any{"secret": meta})
 }
 
@@ -184,7 +185,7 @@ func (s *Server) secretDelete(w http.ResponseWriter, r *http.Request, store *vau
 		secretFailure(w, err)
 		return
 	}
-	s.applySecrets(r, scope, workspace, true)
+	s.applySecrets(r, scope, workspace, false)
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": name, "scope": scope})
 }
 
@@ -250,6 +251,10 @@ func (s *Server) secretRequestAnswer(w http.ResponseWriter, r *http.Request) {
 	if body.Hosts != nil {
 		hosts = *body.Hosts
 	}
+	if ctl.SecretDelivery() == sandbox.DeliverySubstitute && len(hosts) == 0 {
+		http.Error(w, "this engine needs at least one allowed host for a secret: name the host the value may reach", http.StatusBadRequest)
+		return
+	}
 	workspace := ""
 	if scope == vault.Workspace {
 		workspace = ctl.WorkspacePath()
@@ -266,7 +271,9 @@ func (s *Server) secretRequestAnswer(w http.ResponseWriter, r *http.Request) {
 		secretFailure(w, err)
 		return
 	}
-	s.applySecrets(r, scope, workspace, false)
+	// This answer is always during the turn that asked: defer the engine restart until that
+	// run settles, or the sandbox would restart under the agent.
+	s.applySecrets(r, scope, workspace, true)
 	restart := ctl.SecretsRestart()
 	ctl.ResolveSecret(requestID, false, string(scope), restart, "")
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -278,10 +285,10 @@ func (s *Server) secretRequestAnswer(w http.ResponseWriter, r *http.Request) {
 // applySecrets asks the running workspaces a change affects to pick it up. The store already
 // holds the value, so a sandbox that cannot take it now reports that in its state rather than
 // making the save look failed. The work is bounded: an engine call per affected workspace.
-func (s *Server) applySecrets(r *http.Request, scope vault.Scope, workspace string, restart bool) {
+func (s *Server) applySecrets(r *http.Request, scope vault.Scope, workspace string, deferRestart bool) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 	defer cancel()
-	s.workspaces.ApplySecrets(ctx, scope, workspace, restart)
+	s.workspaces.ApplySecrets(ctx, scope, workspace, deferRestart)
 }
 
 // secretFailure maps the vault's two caller mistakes to their status. Anything else is the

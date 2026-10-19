@@ -51,6 +51,17 @@ func secretEnvValues(secrets []Secret) []string {
 	return values
 }
 
+// startSecretEnv carries both source spellings: a config created from sandbox.yaml uses the
+// ACORNFALL_SECRET_<n> source, while one changed by `msb modify --secret NAME@HOST` stores
+// the guest name as its source. The start process has to satisfy whichever is stored.
+func startSecretEnv(secrets []Secret) []string {
+	values := append([]string(nil), secretEnvValues(secrets)...)
+	for _, secret := range substitutedSecrets(secrets) {
+		values = append(values, secret.Name+"="+secret.Value)
+	}
+	return values
+}
+
 // mergeEnv combines environment groups, last wins. A secret named GITHUB_TOKEN must not be
 // shadowed by the host's own GITHUB_TOKEN, so a duplicate key is replaced rather than passed
 // twice to execve.

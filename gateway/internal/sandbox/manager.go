@@ -67,8 +67,10 @@ type Driver interface {
 	List(ctx context.Context) ([]Instance, error)
 	// Create makes a sandbox from a policy and boots it.
 	Create(ctx context.Context, policy Policy, policyDir string) error
-	// Start boots a sandbox that exists and is stopped.
-	Start(ctx context.Context, name string) error
+	// Start boots a sandbox that exists and is stopped. Secrets carries the desired values
+	// because the engine resolves a stored secret source from its own start environment; a
+	// clone of the process environment is not enough.
+	Start(ctx context.Context, name string, secrets []Secret) error
 	// Stop shuts a sandbox down, keeping everything it accumulated.
 	Stop(ctx context.Context, name string) error
 	// Remove deletes a sandbox and everything in it.
@@ -276,7 +278,7 @@ func (m *Manager) Produce(ctx context.Context, policy Policy, dir string) (strin
 		if instance.Running() {
 			return name, nil
 		}
-		if err := m.driver.Start(ctx, name); err != nil {
+		if err := m.driver.Start(ctx, name, policy.Secrets); err != nil {
 			return "", err
 		}
 		return name, nil

@@ -108,6 +108,9 @@ type SecretInfo struct {
 	Hosts       []string `json:"hosts,omitempty"`
 	Delivery    string   `json:"delivery,omitempty"`
 	Status      string   `json:"status,omitempty"`
+	// Placeholder is the literal the guest environment holds for a substitute engine. The
+	// value is never here. Empty for an environment engine, where the variable is the value.
+	Placeholder string `json:"placeholder,omitempty"`
 }
 
 // SecretEvent is a secret request or its outcome on the stream. It is shown to the user as a

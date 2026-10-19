@@ -64,6 +64,13 @@ func TestHostEngineDeliversSecretsIntoTheWorkerEnvironment(t *testing.T) {
 				}},
 				Reply: "the host card finished",
 			},
+			scriptRule{
+				Match: "read the host card token",
+				Tools: []scriptTool{{Name: "bash", Args: map[string]any{
+					"command": `printf 'card=[%s]' "$HOST_CARD_TOKEN"`,
+				}}},
+				Reply: "the host card is readable",
+			},
 		),
 	)
 	c := s.client()
@@ -128,8 +135,26 @@ func TestHostEngineDeliversSecretsIntoTheWorkerEnvironment(t *testing.T) {
 	if strings.Contains(finished.all(), "host-card-value") {
 		t.Fatalf("the host card value reached the transcript:\n%s", finished.all())
 	}
-	after := c.state("general")
-	if !after.Sandbox.SecretsRestart {
-		t.Error("the host card's value cannot be in the running worker, so a restart should be pending")
+	if !strings.Contains(finished.all(), "pick it up when this turn ends") {
+		t.Errorf("the tool should say the worker restart waits for the turn:\n%s", finished.all())
+	}
+
+	// The run settled; the deferred worker restart should have put the value in the new
+	// process environment. A prompt after it reads the value from the host sandbox.
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		after := c.state("general")
+		if !after.Sandbox.SecretsRestart {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the host card's secret was not applied: %+v", after.Sandbox)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	c.prompt("general", root, "read the host card token")
+	read := c.waitForText("general", root, "the host card is readable")
+	if !strings.Contains(read.all(), "card=[host-card-value]") {
+		t.Errorf("the restarted worker should have the card's value:\n%s", read.all())
 	}
 }

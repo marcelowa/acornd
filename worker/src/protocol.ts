@@ -139,6 +139,8 @@ export interface SecretInfo {
 	hosts?: string[];
 	delivery?: string;
 	status?: string;
+	/** The literal the guest environment holds on a substitute engine; empty for env. */
+	placeholder?: string;
 }
 
 /** One conversation as the UI lists it. The id is the harness's own, stringified. */

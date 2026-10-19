@@ -519,12 +519,12 @@ func (w *Workspaces) changeInstall(ctx context.Context, change func(*Defaults) e
 // stopped workspace needs nothing: its next start reads the vault. Failures are logged and
 // left in the workspace's sandbox state, because the store already has the value and the
 // caller asked to save it, not to prove every sandbox accepted it.
-func (w *Workspaces) ApplySecrets(ctx context.Context, scope vault.Scope, workspacePath string, restart bool) {
+func (w *Workspaces) ApplySecrets(ctx context.Context, scope vault.Scope, workspacePath string, deferRestart bool) {
 	for _, control := range w.running() {
 		if scope == vault.Workspace && control.opts.Workspace.Path != workspacePath {
 			continue
 		}
-		if err := control.ApplySecrets(ctx, restart); err != nil {
+		if err := control.ApplySecrets(ctx, deferRestart); err != nil {
 			workerpool.Log("secrets for %s: %v", control.opts.Workspace.Name, err)
 		}
 	}

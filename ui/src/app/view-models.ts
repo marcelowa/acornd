@@ -28,6 +28,7 @@ export interface SandboxSecretSummary {
 	hosts?: string[] | undefined;
 	delivery?: string | undefined;
 	status?: string | undefined;
+	placeholder?: string | undefined;
 }
 
 /** What the agent's tools can reach, as the interface has to be able to say. */

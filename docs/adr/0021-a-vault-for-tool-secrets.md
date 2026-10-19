@@ -49,10 +49,10 @@ on 2026-10-25:
   `Authorization` header to `httpbin.org` and receives the real value; the guest never held
   it. The test is `TestSecretsReachTheSandboxWithoutTheirValues`.
 
-The limit is as important as the capability: this engine only substitutes into HTTP(S)
-requests. The guest never holds the raw value, so a client the proxy cannot see — `psql`,
-`git` over SSH, a tool that insists on reading a file — cannot use a secret here at all.
-There is no raw-env mode to fall back to.
+The limit is as important as the capability: this engine substitutes only into HTTPS
+requests, because it intercepts TLS on port 443. A plain HTTP request is not seen at all,
+and a client the proxy cannot see — `psql`, `git` over SSH, a tool that insists on reading a
+file — cannot use a secret here. There is no raw-env mode to fall back to.
 
 ## Decision
 
@@ -77,6 +77,19 @@ the interface. Until then, 0600 is the bar credentials already meet.
 **The value is write-only.** No API response, log line, error, state file, or transcript
 contains it. The interface shows the name, description, scope, hosts, substitution,
 `allowEnv`, and when it was rotated. The value is entered once and never returned.
+
+**The guest holds a placeholder, and the prompt says how to send it.** On a substitute engine
+the environment variable is the literal `$MSB_<NAME>`; a command sends that value, for
+example in an `Authorization` header. `${NAME}` and `{{NAME}}` are not placeholders and pass
+through unchanged, and substitution is HTTPS only: the engine intercepts TLS on 443, so a
+plain HTTP request is never substituted. The prompt and the list tool name the placeholder
+and the HTTPS limit, because a success that never reaches a command is the worst failure
+mode this feature has.
+
+**A no-host substitute secret is refused at the card.** On microsandbox a secret with no
+allowed host has nowhere to be substituted, so the card will not store one and the settings
+page marks it required. The store itself stays engine-neutral: an environment engine does not
+need a host, so the vault can still hold an entry for one.
 
 **Delivery is an engine capability, not a vault property.** The driver reports one of:
 
@@ -108,6 +121,12 @@ API, and interface do not change.
 microsandbox `msb modify --secret NAME@HOST` (or `--secret-rm`) with the value in the
 modify process environment; containers recreate the sandbox, which the interface states.
 A rotated value never touches a sandbox's files or its transcript.
+
+**A change that needs a start is applied after the run, not under it.** Adding a name or
+changing a host stores the next-start config; the card tool says so, and when the run that
+asked settles the control restarts the sandbox (substitute) or the worker (environment). The
+next turn uses the value. This is the missing trigger the first beta exposed: "next start"
+with no way to ask for one left the secret stored but never delivered.
 
 Per-use audit is not in v1. The vault records when a value was rotated, and the sandbox
 state lists the names it holds. Which secret a request used is only visible where the
@@ -188,7 +207,11 @@ after the answer.
   chosen scope and resolves with `set`; cancel leaves the vault untouched; the transcript
   and every SSE frame contain no value; a workspace override is the delivered value.
 - End to end: `bash` prints `$NAME` and the transcript holds `$MSB_NAME`, not the value;
-  the API's secrets response has no value; the system prompt lists the name.
+  the API's secrets response has no value; the system prompt lists the name and placeholder.
+- The card path: a request answered during a run stores the value, the tool says it will be
+  picked up after the turn, and the next turn's command sees the placeholder. An HTTPS
+  request to an allowed host carries the real value; plain HTTP does not substitute. A
+  substitute secret with no allowed host is refused at the card.
 - Live sandbox tier: a request with the placeholder in an allowed host's header reaches
   the host with the real value; the same placeholder to a disallowed host is blocked.
 - Rotation: a live microsandbox sees the new value without a recreate; a stopped one gets

@@ -54,7 +54,7 @@ func (f *fakeDriver) Create(_ context.Context, policy Policy, _ string) error {
 	f.policy = policy
 	return f.err
 }
-func (f *fakeDriver) Start(context.Context, string) error {
+func (f *fakeDriver) Start(context.Context, string, []Secret) error {
 	f.calls = append(f.calls, "start")
 	return f.err
 }

@@ -94,8 +94,12 @@ function formatList(answer: SecretListAnswer): string {
 			const description = secret.description ? `: ${secret.description}` : "";
 			const status = secret.status ? ` — ${secret.status}` : "";
 			const delivery = secret.delivery ? ` (${secret.delivery})` : "";
-			const hosts = secret.hosts?.length ? ` for ${secret.hosts.join(", ")}` : "";
-			return `- ${secret.name}${description}${status}${delivery}${hosts}`;
+			const hosts = secret.hosts?.length ? ` for ${secret.hosts.join(", ")} over HTTPS` : "";
+			const placeholder =
+				secret.delivery === "substitute" && secret.placeholder
+					? `; the env holds the literal ${secret.placeholder}`
+					: "";
+			return `- ${secret.name}${description}${status}${delivery}${hosts}${placeholder}`;
 		}),
 	];
 	return lines.join("\n");
@@ -108,7 +112,7 @@ function answerText(answer: SecretAnswer): string {
 	}
 	const where = answer.scope === "global" ? "globally" : "to this workspace";
 	const restart = answer.restartRequired
-		? " The running sandbox will have it at its next start."
+		? " The sandbox will pick it up when this turn ends."
 		: " The running sandbox has it.";
 	return `Saved ${where}.${restart}`;
 }

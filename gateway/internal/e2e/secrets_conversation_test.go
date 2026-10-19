@@ -136,6 +136,62 @@ func TestTheConversationListsSecretsWithoutValues(t *testing.T) {
 	}
 }
 
+// The card refuses a substitute secret with no allowed host: storing it would be a secret
+// that can never be used. The tool stays waiting, and cancelling closes it.
+func TestACardRefusesASecretWithoutHosts(t *testing.T) {
+	t.Parallel()
+	notSandbox(t)
+	s := start(t, withScript(scriptRule{
+		Match: "ask for a hostless token",
+		Tools: []scriptTool{{
+			Name: "secret",
+			Args: map[string]any{
+				"action":      "request",
+				"name":        "NOHOST_TOKEN",
+				"description": "a token with nowhere to go",
+			},
+		}},
+		Reply: "the hostless card finished",
+	}))
+	c := s.client()
+	root := c.waitForConversation("general")
+	requests := make(chan string, 1)
+	go func() { requests <- c.waitForSecretRequest("general", root) }()
+	time.Sleep(200 * time.Millisecond)
+	c.prompt("general", root, "ask for a hostless token")
+	var requestID string
+	select {
+	case requestID = <-requests:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the hostless request never reached the stream")
+	}
+	path := fmt.Sprintf("/api/workspaces/general/conversations/%s/secrets/%s", root, requestID)
+	status, body := c.do(http.MethodPost, path, map[string]any{
+		"value":       "hostless-value",
+		"description": "a token with nowhere to go",
+		"hosts":       []string{},
+		"scope":       "workspace",
+	})
+	if status != http.StatusBadRequest || !strings.Contains(string(body), "allowed host") {
+		t.Fatalf("a substitute secret with no hosts should be refused, got %d %s", status, body)
+	}
+	status, body = c.do(http.MethodPost, path, map[string]any{"cancelled": true})
+	if status != http.StatusOK {
+		t.Fatalf("cancel the hostless card: %d %s", status, body)
+	}
+	view := c.waitForText("general", root, "the hostless card finished")
+	if strings.Contains(view.all(), "hostless-value") {
+		t.Fatalf("the rejected value reached the transcript:\n%s", view.all())
+	}
+	listed := vaultWorkspace{}
+	c.get("/api/workspaces/general/secrets", &listed)
+	for _, secret := range listed.Own {
+		if secret.Name == "NOHOST_TOKEN" {
+			t.Error("a rejected secret must not be stored")
+		}
+	}
+}
+
 // An empty list is still an answer: the tool must not receive undefined and fall over, which
 // is what an omitted empty JSON array would become.
 func TestTheConversationListsNoSecrets(t *testing.T) {

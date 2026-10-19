@@ -188,6 +188,7 @@ export function toSandbox(sandbox: WireSandbox): SandboxSummary {
 			hosts: secret.hosts,
 			delivery: secret.delivery,
 			status: secret.status,
+			placeholder: secret.placeholder,
 		})),
 		secretsRestart: sandbox.secretsRestart === true,
 		secretsProblem: sandbox.secretsProblem,

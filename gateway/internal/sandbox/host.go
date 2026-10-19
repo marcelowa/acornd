@@ -72,9 +72,9 @@ func (h *Host) SecretsChanged(context.Context, string, []Secret) (SecretChange, 
 	return SecretChange{RestartRequired: true}, nil
 }
 
-func (h *Host) Start(context.Context, string) error  { return nil }
-func (h *Host) Stop(context.Context, string) error   { return nil }
-func (h *Host) Remove(context.Context, string) error { return nil }
+func (h *Host) Start(context.Context, string, []Secret) error { return nil }
+func (h *Host) Stop(context.Context, string) error            { return nil }
+func (h *Host) Remove(context.Context, string) error          { return nil }
 
 // Engines are the drivers this build can run, by the name the worker matches with its own
 // client. An unknown name is refused with the list, never silently defaulted: a run that

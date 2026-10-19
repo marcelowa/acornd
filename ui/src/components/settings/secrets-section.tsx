@@ -352,7 +352,11 @@ function SecretDialog({ editor, workspace, engine, onClose, onDone }: SecretDial
 	const validName = rotating || editor.kind === "override" || /^[A-Z][A-Z0-9_]*$/.test(name);
 	const valid =
 		value !== "" &&
-		(rotating || (description.trim() !== "" && validName && locations.length > 0));
+		(rotating ||
+			(description.trim() !== "" &&
+				validName &&
+				locations.length > 0 &&
+				(engine !== "microsandbox" || splitHosts(hosts).length > 0)));
 
 	const submit = async (): Promise<void> => {
 		if (!valid || saving) return;
@@ -463,7 +467,13 @@ function SecretDialog({ editor, workspace, engine, onClose, onDone }: SecretDial
 					</SettingsField>
 					{rotating ? null : (
 						<>
-							<SettingsField label="allowed hosts">
+							<SettingsField
+								label={
+									engine === "microsandbox"
+										? "allowed hosts (required)"
+										: "allowed hosts"
+								}
+							>
 								<Input
 									inputSize="sm"
 									value={hosts}
@@ -475,6 +485,9 @@ function SecretDialog({ editor, workspace, engine, onClose, onDone }: SecretDial
 								/>
 								<Text size="2xs" tone="muted">
 									Comma-separated. No scheme or path; a leading * is a wildcard.
+									{engine === "microsandbox" && splitHosts(hosts).length === 0
+										? " This engine needs at least one host to deliver the value."
+										: ""}
 								</Text>
 							</SettingsField>
 							<SettingsField label="substitute in">

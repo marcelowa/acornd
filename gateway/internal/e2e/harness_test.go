@@ -725,6 +725,7 @@ type state struct {
 			Description string `json:"description"`
 			Delivery    string `json:"delivery"`
 			Status      string `json:"status"`
+			Placeholder string `json:"placeholder"`
 		} `json:"secrets"`
 	} `json:"sandbox"`
 	Defaults []layerTrace   `json:"defaults"`

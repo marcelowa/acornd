@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,11 +40,31 @@ func TestSecretsReachTheSandboxWithoutTheirValues(t *testing.T) {
 				Reply: "the command ran",
 			},
 			scriptRule{
+				Match: "ask for the second token",
+				Tools: []scriptTool{{
+					Name: "secret",
+					Args: map[string]any{
+						"action":      "request",
+						"name":        "SECOND_TOKEN",
+						"description": "another test token",
+						"hosts":       []string{"httpbin.org"},
+					},
+				}},
+				Reply: "the second card finished",
+			},
+			scriptRule{
 				Match: "send the token to httpbin",
 				Tools: []scriptTool{{Name: "bash", Args: map[string]any{
-					"command": `apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq curl >/dev/null 2>&1 && curl -fsS -H "Authorization: Bearer $SPIKE_TOKEN" https://httpbin.org/headers`,
+					"command": `apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq curl >/dev/null 2>&1 && curl -fsS -H "Authorization: Bearer $SECOND_TOKEN" https://httpbin.org/headers`,
 				}}},
 				Reply: "the token went out",
+			},
+			scriptRule{
+				Match: "show both tokens",
+				Tools: []scriptTool{{Name: "bash", Args: map[string]any{
+					"command": `printf 'one=[%s] two=[%s]' "$SPIKE_TOKEN" "$SECOND_TOKEN"`,
+				}}},
+				Reply: "both shown",
 			},
 		),
 	)
@@ -65,6 +86,9 @@ func TestSecretsReachTheSandboxWithoutTheirValues(t *testing.T) {
 	}
 	if state.Sandbox.Secrets[0].Description != "a test token" {
 		t.Errorf("the state should carry the description, got %q", state.Sandbox.Secrets[0].Description)
+	}
+	if state.Sandbox.Secrets[0].Placeholder != "$MSB_SPIKE_TOKEN" {
+		t.Errorf("the state should name the guest placeholder, got %q", state.Sandbox.Secrets[0].Placeholder)
 	}
 	if state.Sandbox.Secrets[0].Delivery != "substitute" || state.Sandbox.Secrets[0].Status != "delivered" {
 		t.Errorf("unexpected delivery state: %+v", state.Sandbox.Secrets[0])
@@ -91,30 +115,64 @@ func TestSecretsReachTheSandboxWithoutTheirValues(t *testing.T) {
 		t.Fatal("the API returned the rotated value")
 	}
 
-	// Adding a name cannot be applied to a running sandbox; it waits for the next start.
-	c.post("/api/secrets", map[string]any{
-		"name":         "SECOND_TOKEN",
-		"description":  "another test token",
-		"value":        "second-value",
-		"hosts":        []string{"api.example.com"},
-		"substitution": map[string]bool{"headers": true},
-		"allowEnv":     true,
-	}, nil)
-	added := c.state("general")
-	if !added.Sandbox.SecretsRestart {
-		t.Error("adding a secret to a running sandbox should say a restart is needed")
+	// A card answer while the turn is active stores the value for the next start. The tool
+	// returns, the run settles, and the control restarts the sandbox then. This is the path
+	// the bug report took: the value has to be usable on the next turn, not never.
+	requests := make(chan string, 1)
+	go func() { requests <- c.waitForSecretRequest("general", root) }()
+	time.Sleep(200 * time.Millisecond)
+	c.prompt("general", root, "ask for the second token")
+	var requestID string
+	select {
+	case requestID = <-requests:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the second secret request never reached the stream")
 	}
-	if len(added.Sandbox.Secrets) != 2 {
-		t.Errorf("the state should list both secrets, got %+v", added.Sandbox.Secrets)
+	path := fmt.Sprintf("/api/workspaces/general/conversations/%s/secrets/%s", root, requestID)
+	status, body := c.do("POST", path, map[string]any{
+		"value":       "second-card-value",
+		"description": "another test token",
+		"hosts":       []string{"httpbin.org"},
+		"scope":       "workspace",
+	})
+	if status != 200 {
+		t.Fatalf("answer the second card: %d %s", status, body)
+	}
+	cardView := c.waitForText("general", root, "the second card finished")
+	if !strings.Contains(cardView.all(), "pick it up when this turn ends") {
+		t.Errorf("the tool should say the sandbox will have it after the turn:\n%s", cardView.all())
+	}
+
+	// The run has settled; wait for the control to apply the pending restart.
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		added := c.state("general")
+		if !added.Sandbox.SecretsRestart && len(added.Sandbox.Secrets) == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the card's secret was not applied after the run: %+v", added.Sandbox)
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
 
 	// The engine substitutes the placeholder for an allowed host: httpbin echoes the header
 	// back, so the real value is proof the network layer used it. This is the value leaving
 	// the sandbox in a request, which is what the secret is for; the guest never held it.
+	// It also proves the card's secret works after the restart.
 	c.prompt("general", root, "send the token to httpbin")
-	substituted := c.waitForText("general", root, rotated)
+	substituted := c.waitForText("general", root, "second-card-value")
 	if !strings.Contains(substituted.all(), "httpbin.org") {
 		t.Errorf("the response should be httpbin's echo:\n%s", substituted.all())
+	}
+
+	c.prompt("general", root, "show both tokens")
+	both := c.waitForText("general", root, "both shown")
+	if !strings.Contains(both.all(), "one=[$MSB_SPIKE_TOKEN] two=[$MSB_SECOND_TOKEN]") {
+		t.Errorf("both placeholders should be in the environment after the restart:\n%s", both.all())
+	}
+	if strings.Contains(both.all(), "two=[second-card-value]") {
+		t.Errorf("the secret value reached the guest environment:\n%s", both.all())
 	}
 }
 

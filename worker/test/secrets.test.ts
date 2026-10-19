@@ -20,8 +20,15 @@ describe("the secrets control sends", () => {
 				description: "read-only token",
 				hosts: ["api.github.com"],
 				delivery: "substitute",
+				placeholder: "$MSB_GITHUB_TOKEN",
 			},
-			{ name: "DB_PASSWORD", description: "", hosts: [], delivery: "environment" },
+			{
+				name: "DB_PASSWORD",
+				description: "",
+				hosts: [],
+				delivery: "environment",
+				placeholder: "",
+			},
 		]);
 	});
 
@@ -43,6 +50,7 @@ describe("the secrets control sends", () => {
 				description: "",
 				hosts: ["api.example.com"],
 				delivery: "substitute",
+				placeholder: "$MSB_TOKEN",
 			},
 		]);
 	});
@@ -60,20 +68,22 @@ describe("the prompt section", () => {
 				description: "read-only token",
 				hosts: ["api.github.com", "github.com"],
 				delivery: "substitute",
+				placeholder: "$MSB_GITHUB_TOKEN",
 			},
 			{
 				name: "DB_PASSWORD",
 				description: "the project database",
 				hosts: [],
 				delivery: "environment",
+				placeholder: "",
 			},
 		]);
 		expect(section).toContain("never print a secret");
 		expect(section).toContain(
-			"GITHUB_TOKEN: read-only token The value is substituted only for api.github.com, github.com.",
+			"GITHUB_TOKEN: read-only token The environment holds the literal $MSB_GITHUB_TOKEN; send that value for api.github.com, github.com over HTTPS.",
 		);
 		expect(section).toContain(
-			"DB_PASSWORD: the project database The sandbox environment holds its value.",
+			"DB_PASSWORD: the project database The sandbox environment holds the real value.",
 		);
 	});
 });

@@ -121,6 +121,9 @@ type SandboxSecret struct {
 	Hosts       []string `json:"hosts,omitempty"`
 	Delivery    string   `json:"delivery,omitempty"`
 	Status      string   `json:"status,omitempty"`
+	// Placeholder is the literal the guest environment holds on a substitute engine, for
+	// the prompt and the list tool. Empty on an environment engine.
+	Placeholder string `json:"placeholder,omitempty"`
 }
 
 // WorkspaceState is a workspace as the interface needs it: what it is called, where it
@@ -536,6 +539,7 @@ func (c *Control) startWorker(ctx context.Context) error {
 				"description": secret.Description,
 				"hosts":       secret.Hosts,
 				"delivery":    delivery.String(),
+				"placeholder": secretPlaceholder(delivery, secret.Name),
 			})
 		}
 		if encoded, err := json.Marshal(metadata); err == nil {
@@ -949,7 +953,16 @@ func (c *Control) provisionSandbox(ctx context.Context) SandboxState {
 		if err != nil {
 			state.SecretsProblem = err.Error()
 		} else if change.RestartRequired {
-			state.SecretsRestart = true
+			// No worker is attached yet, so this is the safe moment to start the sandbox
+			// with the stored set: the first turn should not begin with an old environment.
+			if err := manager.Stop(ctx, policy.Workspace); err != nil {
+				state.SecretsRestart = true
+			} else if _, err := manager.Produce(ctx, policy, filepath.Dir(c.opts.StoragePath)); err != nil {
+				state.SecretsRestart = true
+				workerpool.Log("apply stored secrets to %s: %v", c.opts.Workspace.Name, err)
+			} else if status, err := manager.Status(ctx, policy.Workspace); err == nil {
+				state.Status = status
+			}
 		}
 	}
 	// Whether the sandbox that is running nests is what it was created with; this says what
@@ -977,6 +990,23 @@ type sandboxSecrets struct {
 	problem   string
 }
 
+// secretPlaceholder is the engine's default placeholder for a substitute secret. The
+// engine builds it from the name; an environment engine has the real value instead.
+func secretPlaceholder(delivery sandbox.Delivery, name string) string {
+	if delivery != sandbox.DeliverySubstitute {
+		return ""
+	}
+	return "$MSB_" + name
+}
+
+// SecretDelivery is the engine's way of delivering a secret, for the card's validation.
+func (c *Control) SecretDelivery() sandbox.Delivery {
+	if c.opts.Sandbox == nil {
+		return sandbox.DeliverySubstitute
+	}
+	return c.opts.Sandbox.SecretDelivery()
+}
+
 // resolveSecrets reads the workspace's effective set and asks what this engine can do with
 // each entry. A substitute engine needs an allowed host; an environment engine needs the
 // owner to have allowed the value inside. A blocked entry stays visible with its reason.
@@ -997,6 +1027,7 @@ func (c *Control) resolveSecrets(delivery sandbox.Delivery) sandboxSecrets {
 			Scope:       string(entry.Scope),
 			Hosts:       append([]string(nil), entry.Hosts...),
 			Delivery:    delivery.String(),
+			Placeholder: secretPlaceholder(delivery, entry.Name),
 		}
 		switch delivery {
 		case sandbox.DeliverySubstitute:
@@ -1032,7 +1063,7 @@ func (c *Control) resolveSecrets(delivery sandbox.Delivery) sandboxSecrets {
 // engine rotates live where it can and stores the rest for the next start; the host engine
 // cannot change a running process's environment, so its worker is restarted. A stopped
 // workspace has nothing to apply: its next start reads the vault.
-func (c *Control) ApplySecrets(ctx context.Context, restart bool) error {
+func (c *Control) ApplySecrets(ctx context.Context, deferRestart bool) error {
 	if !c.WorkerUp() {
 		return nil
 	}
@@ -1054,11 +1085,12 @@ func (c *Control) ApplySecrets(ctx context.Context, restart bool) error {
 		return nil
 	}
 	if delivery == sandbox.DeliveryEnvironment && manager.SecretEnvInWorker() {
-		if restart {
+		// A value set from a card must not kill the turn that asked for it. If the caller
+		// says to defer, or a run is in flight, the worker keeps its old environment, the
+		// state says a restart is needed, and the restart happens when the run settles.
+		if !deferRestart && !c.Busy() {
 			return c.RestartWorker(ctx)
 		}
-		// A value set from a card must not kill the turn that asked for it. The worker keeps
-		// its old environment; the state says a restart is needed and the tool says so too.
 		c.mu.Lock()
 		c.sandbox.Secrets = resolved.state
 		c.sandbox.SecretsProblem = ""
@@ -1077,7 +1109,59 @@ func (c *Control) ApplySecrets(ctx context.Context, restart bool) error {
 	c.sandbox.SecretsRestart = change.RestartRequired
 	c.mu.Unlock()
 	c.publish(protocol.Frame{Type: "state"})
+	if change.RestartRequired && !deferRestart && !c.Busy() {
+		// Nobody is running: apply it now instead of waiting for a submission that may be
+		// hours away. A run in flight, or a card answered during one, waits for that run.
+		c.applyPendingSecretRestart(ctx)
+	}
 	return nil
+}
+
+// applyPendingSecretRestart finishes a change the engine deferred while a run was active.
+// It runs after a submission has settled every run. A substitute engine is stopped and
+// started so it reads the next-start config (the worker's next tool call wakes it); an
+// environment engine gets a fresh worker, whose environment is the delivery.
+func (c *Control) applyPendingSecretRestart(ctx context.Context) {
+	c.mu.RLock()
+	restart := c.sandbox.SecretsRestart
+	c.mu.RUnlock()
+	if !restart || c.Busy() {
+		return
+	}
+	manager := c.opts.Sandbox
+	if manager == nil {
+		return
+	}
+	delivery := manager.SecretDelivery()
+	if delivery == sandbox.DeliverySubstitute {
+		policy := c.opts.Workspace.SandboxPolicy(c.opts.Home, c.opts.UserHome, c.opts.DisableVMNesting)
+		policy.Secrets = c.resolveSecrets(delivery).delivered
+		if err := manager.Stop(ctx, c.opts.Workspace.Path); err != nil {
+			workerpool.Log("restart sandbox for secrets: %v", err)
+			return
+		}
+		if _, err := manager.Produce(ctx, policy, filepath.Dir(c.opts.StoragePath)); err != nil {
+			workerpool.Log("restart sandbox for secrets: %v", err)
+			return
+		}
+	} else if manager.SecretEnvInWorker() {
+		if err := c.RestartWorker(ctx); err != nil {
+			workerpool.Log("restart worker for secrets: %v", err)
+		}
+		return
+	} else {
+		resolved := c.resolveSecrets(delivery)
+		if _, err := manager.SecretsChanged(ctx, c.opts.Workspace.Path, resolved.delivered); err != nil {
+			workerpool.Log("apply secrets for %s: %v", c.opts.Workspace.Name, err)
+			return
+		}
+	}
+	c.mu.Lock()
+	c.sandbox.SecretsRestart = false
+	if status, err := manager.Status(ctx, c.opts.Workspace.Path); err == nil {
+		c.sandbox.Status = status
+	}
+	c.mu.Unlock()
 }
 
 // RestartWorker replaces the harness with one that reads the current environment. The old
@@ -2487,11 +2571,13 @@ func (c *Control) onFrame(frame protocol.Frame) {
 		delete(c.promptedAt, frame.ConversationID)
 		c.mu.Unlock()
 		go func() {
-			ctx := context.Background()
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
 			if _, err := c.listConversations(ctx); err != nil {
 				workerpool.Log("refresh conversation list: %v", err)
 				return
 			}
+			c.applyPendingSecretRestart(ctx)
 			c.publish(protocol.Frame{Type: "state"})
 		}()
 	}
@@ -2555,14 +2641,20 @@ func (c *Control) answerSecretList(frame protocol.Frame) {
 	}
 	resolved := c.resolveSecrets(delivery)
 	infos := make([]protocol.SecretInfo, 0, len(resolved.state))
+	restarting := c.SecretsRestart()
 	for _, secret := range resolved.state {
+		status := secret.Status
+		if restarting && status == "delivered" {
+			status = "stored; waiting for the sandbox restart"
+		}
 		infos = append(infos, protocol.SecretInfo{
 			Name:        secret.Name,
 			Description: secret.Description,
 			Scope:       secret.Scope,
 			Hosts:       secret.Hosts,
 			Delivery:    secret.Delivery,
-			Status:      secret.Status,
+			Status:      status,
+			Placeholder: secret.Placeholder,
 		})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

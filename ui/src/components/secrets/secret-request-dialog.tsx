@@ -69,7 +69,10 @@ function SecretRequestCard({
 		.split(",")
 		.map((host) => host.trim().toLowerCase())
 		.filter((host) => host !== "");
-	const valid = value !== "" && description.trim() !== "";
+	const valid =
+		value !== "" &&
+		description.trim() !== "" &&
+		(engine !== "microsandbox" || hostList.length > 0);
 
 	const answer = async (): Promise<void> => {
 		if (!valid || saving) return;
@@ -147,7 +150,7 @@ function SecretRequestCard({
 					</label>
 					<label className="flex flex-col gap-1">
 						<Text size="2xs" tone="muted">
-							allowed hosts
+							allowed hosts{engine === "microsandbox" ? " (required)" : ""}
 						</Text>
 						<Input
 							inputSize="sm"

@@ -70,6 +70,8 @@ export interface WireSandboxSecret {
 	hosts?: string[] | undefined;
 	delivery?: string | undefined;
 	status?: string | undefined;
+	/** The literal the guest holds on a substitute engine; empty for an env engine. */
+	placeholder?: string | undefined;
 }
 
 export interface WireSandbox {
