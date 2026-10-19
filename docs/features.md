@@ -162,7 +162,7 @@ The chain is **conversation → its definition → this workspace → the instal
 | P9 | An environment engine puts the value in the sandbox; `allowEnv: false` withholds it and the state says why. | `TestHostEngineDeliversSecretsIntoTheWorkerEnvironment` |
 | P10 | The agent can list secrets and ask for a value through a card; the value goes to the gateway, never the transcript or the model. | `TestTheConversationAsksForASecretWithoutShowingItsValue`, `TestTheConversationListsSecretsWithoutValues` |
 | P11 | Rotating an existing name is live where the engine can; adding or removing one is stored, applied after the active run settles, and the control starts the continuation itself. | `TestSecretsChangedRotatesLive`, `TestSecretsReachTheSandboxWithoutTheirValues`, `TestHostEngineDeliversSecretsIntoTheWorkerEnvironment` |
-| P12 | The secret value field hides by default, reveals with a keyboard-operable eye without changing the value, keeps the caret, and opts out of password managers; it is never in a form. | `make ui` |
+| P12 | The secret value field hides by default, reveals with a keyboard-operable eye without changing the value, keeps the caret, and carries the common password-manager opt-outs; it is never in a form. Bitwarden on Firefox still prompts (#100). | `make ui` |
 
 ## The worker protocol
 
