@@ -1,6 +1,6 @@
 # ADR 0022 — youki as a sandbox engine
 
-Status: spike done, decision open
+Status: spike done, not built — bwrap shipped first, see [ADR 0023](0023-bwrap-engine.md)
 Date: 2026-10-26
 
 ## Why this exists

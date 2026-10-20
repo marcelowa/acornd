@@ -27,6 +27,8 @@ another worker, not changing the control plane.
 - bun 1.4+
 - make, gcc (builds and the `-race` tests)
 - an API key for a supported provider (or the dev provider below)
+- one sandbox engine: a hypervisor (`/dev/kvm`) for the default microVM engine, or
+  `bwrap` (bubblewrap) for the beta engine — `apt install bubblewrap`
 
 ## Setup
 
@@ -55,6 +57,25 @@ make build                     # go build -> ./bin/acornfall
 ./bin/acornfall provider add opencode-go "$OPENCODE_API_KEY"
 ./bin/acornfall                 # http://<host>:7777 in a workspace directory
 ```
+
+### Sandbox engines
+
+A workspace runs on one engine, chosen when it is created and kept with its record:
+
+| engine | what it is | needs |
+|---|---|---|
+| `microsandbox` | one microVM per workspace (the default, and the strongest boundary) | `/dev/kvm`, and it fetches a 67 MB engine on first use |
+| `bwrap` | a bubblewrap namespace view per command (beta) | a user namespace, `apt install bubblewrap`; no KVM, 78 KB, 6 ms per command |
+| `host` | no sandbox: the tools run on your machine | nothing, and it is not isolated |
+
+```bash
+./bin/acornfall workspace add demo ~/work/demo --sandbox bwrap   # or the engine switch on the create form
+./bin/acornfall workspace list                                    # the engine is a column
+```
+
+What the bwrap engine gives up today, so nobody is surprised: it has no image of its own (the
+host's tools are visible read-only), and it has no sandbox to stop — every command is a
+sandbox. [ADR 0023](docs/adr/0023-bwrap-engine.md) has the measurements and the limits.
 
 ### Install from a release (one binary, no toolchain)
 

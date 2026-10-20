@@ -1,6 +1,6 @@
 # ADR 0023 — bwrap, spiked against the same list
 
-Status: spike done, decision open
+Status: spike done; bwrap is built as a beta engine, youki is not
 Date: 2026-10-26
 
 ## Context
@@ -94,6 +94,43 @@ acornfall can use bwrap again.
 bwrap covers all four requirements and all five extras, with fewer moving parts, and it is the
 only one of the two that nests. youki's advantages are a declarative `config.json` and built-in
 cgroup and exec plumbing — plumbing that did not work rootless in this environment.
+
+## What is built
+
+bwrap is an engine a workspace can choose, by name, at creation: `POST /api/workspaces` with
+`engine`, `acornfall workspace add --sandbox bwrap`, or the engine switch on the create form.
+The choice is stored on the workspace record like its image and its network, and it decides
+what `--sandbox-engine` the worker is started with — so one install can hold a microVM
+workspace and a bwrap one.
+
+The shape is the one this ADR predicted, and it is small:
+
+| | |
+|---|---|
+| `gateway/internal/sandbox/bwrap.go` | the Driver. No install (a distribution package), a real `Usable()` probe of a user namespace, `Create` writing one readable config per workspace, and no sandbox object: `List` is empty, `Start` and `Stop` do nothing, `Remove` deletes the config and the private home. |
+| `gateway/internal/sandbox/tier.go` | one Manager per engine, built on first use, so a workspace's engine is a lookup rather than an install-wide switch. |
+| `worker/src/bwrap.ts` | the client: the config becomes an argv, and the file operations are the host's, unchanged. |
+| `worker/src/workspace-files.ts` | the file operations the host and bwrap engines share, extracted so they cannot drift. |
+
+The config a command runs under, written to `<home>/sandboxes/bwrap/<name>.json`, is:
+
+- the host root **read-only**, `/tmp` a tmpfs, `/dev` and `/proc` fresh;
+- `<home>` — credentials, state, the engine's own store — hidden behind a tmpfs, with the
+  global resource folders bound back **read-only at their own paths**;
+- a **private home** per workspace under the engine's folder, which is where a language
+  toolchain installs and what `Remove` deletes;
+- the workspace bound **read-write at its own path**;
+- `--unshare-all`, with `--share-net` only when the workspace's network is on;
+- `--die-with-parent`, so a kill reaches the command;
+- `--clearenv` and then exactly the environment the worker hands over, which is also how a
+  secret arrives (the environment delivery row).
+
+Two things are deliberately missing, and this is a beta because of them:
+
+- **No image and no rootfs.** Commands run on the host's tools, read-only. `apt` inside a
+  workspace is the next step, and it is the unpack/overlay work neither engine provides.
+- **No persistent sandbox.** Every command is a sandbox, so no daemon outlives it and there is
+  no `exec` into a running one. That is the supervisor this ADR's second half describes.
 
 ## What this does not settle
 
