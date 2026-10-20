@@ -468,10 +468,14 @@ func workspaceCommand(argv []string) {
 	image := flags.String("image", "", "sandbox image for this workspace, e.g. golang:1.24 (default: "+sandbox.DefaultImage+")")
 	network := flags.String("network", "", `sandbox network: "on" (default) or "off"`)
 	engine := flags.String("sandbox", "", "sandbox engine for this workspace: microsandbox, bwrap, or host (default: the install's --sandbox-engine)")
-	if err := flags.Parse(argv); err != nil {
+	// Flags after the name and the folder are documented in the usage below, and the standard
+	// flag package stops at the first positional. Splitting them is what makes
+	// `workspace add demo ~/work/demo --sandbox bwrap` mean what it says.
+	flagArgs, positional := splitFlags(argv, map[string]bool{"data-dir": true, "image": true, "network": true, "sandbox": true})
+	if err := flags.Parse(flagArgs); err != nil {
 		return
 	}
-	args := flags.Args()
+	args := positional
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: acornfall workspace <list|add|remove> [--sandbox ENGINE] [--image IMAGE] [--network on|off]")
 		os.Exit(2)
@@ -571,6 +575,29 @@ func workspaceCommand(argv []string) {
 
 // sandboxLabel is what a workspace's sandbox will be, for the list column: short enough to
 // scan, specific enough to answer "which image is this one running".
+// splitFlags separates an argument list into flags and positionals the way people write
+// them: `add demo /path --sandbox bwrap`, not only `--sandbox bwrap add demo /path`. An
+// unknown flag is left for flag.Parse to refuse, so a typo still says so.
+func splitFlags(argv []string, takesValue map[string]bool) (flags, positional []string) {
+	for i := 0; i < len(argv); i++ {
+		arg := argv[i]
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			positional = append(positional, arg)
+			continue
+		}
+		flags = append(flags, arg)
+		name := strings.TrimLeft(arg, "-")
+		if strings.Contains(name, "=") {
+			continue
+		}
+		if takesValue[name] && i+1 < len(argv) {
+			flags = append(flags, argv[i+1])
+			i++
+		}
+	}
+	return flags, positional
+}
+
 func sandboxLabel(workspace control.Workspace) string {
 	image := workspace.Image
 	if image == "" {
