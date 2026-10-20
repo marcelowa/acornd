@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -83,5 +84,35 @@ func TestAWorkspaceKeepsTheEngineItWasCreatedWith(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("the created workspace is not in the listing")
+	}
+}
+
+// One install, two engines: the general workspace keeps the install's default and a new one
+// runs on bwrap, in the same gateway. This is what the per-workspace field buys, and it is the
+// case that would break if engine selection were still an install-wide switch.
+func TestOneInstallRunsTwoEngines(t *testing.T) {
+	t.Parallel()
+	workspaceResources(t) // the install default is host, so a bwrap workspace is a real choice
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("no bubblewrap on this machine")
+	}
+	s := start(t)
+	c := s.client()
+	c.waitForConversation("general")
+
+	if engine := c.state("general").Sandbox.Engine; engine != "host" {
+		t.Fatalf("the general workspace should follow the install default, got %q", engine)
+	}
+	c.createWorkspaceWith("wrapped", map[string]any{"engine": "bwrap"})
+	wrapped := c.state("wrapped").Sandbox
+	if wrapped.Engine != "bwrap" {
+		t.Fatalf("the wrapped workspace should run on bwrap, got %+v", wrapped)
+	}
+	if !wrapped.Isolated || !wrapped.Tools {
+		t.Fatalf("a bwrap workspace is isolated and its tools run, got %+v", wrapped)
+	}
+	// The default is unchanged by one workspace's choice.
+	if engine := c.state("general").Sandbox.Engine; engine != "host" {
+		t.Fatalf("creating a bwrap workspace changed the general one to %q", engine)
 	}
 }
