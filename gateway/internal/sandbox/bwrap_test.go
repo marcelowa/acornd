@@ -127,8 +127,8 @@ func TestBwrapCreateWritesWhatTheWorkspaceRunsUnder(t *testing.T) {
 	if config.Workspace != workspace || config.Engine != "bwrap" {
 		t.Fatalf("config names %q on engine %q", config.Workspace, config.Engine)
 	}
-	if config.Network != NetworkOffName {
-		t.Fatalf("network: %q, want off", config.Network)
+	if config.Network.Mode != NetworkOffName {
+		t.Fatalf("network: %q, want off", config.Network.Mode)
 	}
 	// Only folders that exist are mounted: a mount that does not resolve would make every
 	// command fail, and a later-created folder is the next command's business.
@@ -150,6 +150,68 @@ func TestBwrapCreateWritesWhatTheWorkspaceRunsUnder(t *testing.T) {
 	info, err := os.Stat(config.Home)
 	if err != nil || !info.IsDir() {
 		t.Fatalf("home was not created: %v", err)
+	}
+}
+
+// Egress is carried by pasta: the sandbox gets an address inside a namespace of its own, and the
+// host's own stack is not what a command is on.
+func TestBwrapCreateCarriesEgressWithPasta(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	driver, _ := testBwrap(t, home)
+	driver = driver.WithLookPath(func(name string) (string, error) {
+		return "/usr/bin/" + name, nil
+	})
+	if err := driver.Create(context.Background(), Policy{Workspace: workspace, Egress: true}, t.TempDir()); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(driver.StateDir(), Name(workspace)+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config bwrapConfig
+	if err := json.Unmarshal(raw, &config); err != nil {
+		t.Fatal(err)
+	}
+	if config.Network.Mode != "pasta" {
+		t.Fatalf("mode: %q, want pasta", config.Network.Mode)
+	}
+	// The tools are resolved now, so a missing one is a sentence at create rather than a mystery
+	// in the middle of a turn.
+	if config.Network.Pasta != "/usr/bin/pasta" || config.Network.IP != "/usr/bin/ip" {
+		t.Fatalf("tool paths: %+v", config.Network)
+	}
+	if config.Network.Address != sandboxAddress || config.Network.Gateway != sandboxGateway {
+		t.Fatalf("address: %+v", config.Network)
+	}
+}
+
+// A machine without the two packages cannot carry egress, and saying which one is missing is the
+// difference between a refusal somebody can act on and one they cannot.
+func TestBwrapCreateNamesWhatEgressNeeds(t *testing.T) {
+	workspace := t.TempDir()
+	withOnly := func(available string) *Bwrap {
+		return NewBwrap(t.TempDir()).
+			WithRunner(&fakeBwrap{version: "bubblewrap 0.11.0"}).
+			WithImageSource(fakeImage).
+			WithLookPath(func(name string) (string, error) {
+				if name == available || name == "bwrap" {
+					return "/usr/bin/" + name, nil
+				}
+				return "", errors.New("not found")
+			})
+	}
+	err := withOnly("bwrap").Create(context.Background(), Policy{Workspace: workspace, Egress: true}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "apt install passt") {
+		t.Fatalf("no pasta: %v, want the package that provides it", err)
+	}
+	err = withOnly("pasta").Create(context.Background(), Policy{Workspace: workspace, Egress: true}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "iproute2") {
+		t.Fatalf("no ip: %v, want the package that provides it", err)
+	}
+	// Without egress neither is needed: a sandbox with no network needs no network tools.
+	if err := withOnly("bwrap").Create(context.Background(), Policy{Workspace: workspace}, t.TempDir()); err != nil {
+		t.Fatalf("network off should not need pasta: %v", err)
 	}
 }
 

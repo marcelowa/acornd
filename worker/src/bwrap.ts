@@ -40,7 +40,8 @@ export interface BwrapConfig {
 	engine: string;
 	workspace: string;
 	image: string;
-	network: string;
+	/** "off" is a namespace with no interfaces; "pasta" forwards through the host. */
+	network: BwrapNetwork;
 	/** The workspace's own unpacked image, bound as `/`. Absent means the host's root. */
 	rootfs?: string;
 	/** The private home language toolchains install into. */
@@ -50,6 +51,31 @@ export interface BwrapConfig {
 	/** Global resource folders, bound back read-only after the tmpfs. */
 	readOnly?: string[];
 }
+
+/** How a command reaches the network, as control resolved it. */
+export interface BwrapNetwork {
+	mode: "off" | "pasta";
+	/** The sandbox's own address inside its namespace, with its prefix: 10.0.2.15/24. */
+	address?: string;
+	/** pasta's address inside that namespace: the sandbox's way out, and nothing on the host. */
+	gateway?: string;
+	pasta?: string;
+	ip?: string;
+}
+
+/**
+ * What runs between pasta and bubblewrap: pasta makes the namespace and the tap but configures
+ * neither, so this does, from inside that namespace as its root, and then becomes the sandbox.
+ * The arguments are positional and the script is a constant, so no value is ever parsed as code.
+ */
+const configureScript = [
+	'IP="$1"; ADDR="$2"; GATEWAY="$3"; shift 3',
+	'"$IP" link set lo up',
+	'"$IP" link set eth0 up',
+	'"$IP" addr add "$ADDR" dev eth0',
+	'"$IP" route add default via "$GATEWAY"',
+	'exec "$@"',
+].join("\n");
 
 const systemPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
@@ -114,8 +140,9 @@ export function bwrapArguments(
 		config.workspace,
 		config.workspace,
 		"--unshare-all",
-		// Egress is the workspace's setting: undoing the netns is how it is granted.
-		...(config.network === "off" ? [] : ["--share-net"]),
+		// A sandbox with egress shares the network namespace of whoever started bubblewrap: pasta,
+		// which is why `--share-net` here means pasta's namespace and not the machine's.
+		...(config.network.mode === "off" ? [] : ["--share-net"]),
 		// A command that outlives the worker is a command nobody can stop; the worker's kill
 		// then reaches bubblewrap and bubblewrap takes its child with it.
 		"--die-with-parent",
@@ -132,6 +159,49 @@ export function bwrapArguments(
  * image, and its real path when the host's root is the root. */
 export function guestHome(config: BwrapConfig): string {
 	return config.rootfs === undefined ? config.home : "/root";
+}
+
+/**
+ * What to run: bubblewrap alone when the sandbox has no network, or pasta in front of it.
+ *
+ * pasta makes a network namespace and a tap, forwards what the sandbox sends through the
+ * host, and runs a command inside that namespace. It configures neither the address nor the
+ * route, so a short script does that first — it runs as root inside pasta's namespace, which
+ * is the only place those are its to set.
+ */
+export function spawnFor(config: BwrapConfig, args: string[]): string[] {
+	const network = config.network;
+	if (network.mode === "off") {
+		// The command's own argv, not the network's: bubblewrap is the program.
+		return ["bwrap", ...args];
+	}
+	if (network.pasta === undefined || network.ip === undefined) {
+		throw new Error(
+			"this workspace has egress but no pasta path in its config: recreate the sandbox (acornfall workspace remove, then open it)",
+		);
+	}
+	const [address, prefix] = (network.address ?? "").split("/");
+	const gateway = network.gateway ?? "";
+	return [
+		network.pasta,
+		"-q",
+		"-a",
+		address ?? "",
+		"-n",
+		prefix ?? "24",
+		"-g",
+		gateway,
+		"--",
+		"/bin/sh",
+		"-c",
+		configureScript,
+		"sh",
+		network.ip,
+		network.address ?? "",
+		gateway,
+		"bwrap",
+		...args,
+	];
 }
 
 class BwrapClient extends WorkspaceFiles implements SandboxClient {
@@ -166,7 +236,7 @@ class BwrapClient extends WorkspaceFiles implements SandboxClient {
 		if (argv.length === 0) throw new Error("empty argv: no program to run");
 		const env = this.environment(options);
 		const args = bwrapArguments(this.config, argv, options.cwd ?? this.config.workspace, env);
-		const proc = Bun.spawn(["bwrap", ...args], {
+		const proc = Bun.spawn(spawnFor(this.config, args), {
 			stdin: "ignore",
 			stdout: "pipe",
 			stderr: "pipe",

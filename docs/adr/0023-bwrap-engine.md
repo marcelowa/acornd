@@ -62,8 +62,40 @@ acornfall can use bwrap again.
 | **budgets** | no cgroups of its own. `systemd-run --user -p MemoryMax=256M -p MemorySwapMax=0 --scope bwrap …` terminates a 400 MB allocation (exit 143) while a 100 MB one completes. Without `MemorySwapMax=0` the limit is silently not hit — swap absorbs it, which cost one wrong conclusion here. |
 | **kill** | `--die-with-parent` cascades: two 300 s sleeps died with the sandbox. Without it they survive the sandbox's death. |
 | **persistence** | no shared namespace between commands. A dev server started by one command answers `HTTP 200` from outside, but a later command cannot signal it — different pid namespace. youki's `exec` joins the running one. |
-| **egress** | `--unshare-net` + `pasta` + `ip`, the same three pieces as youki, with one twist: the sandbox must run `--uid 0` so its user namespace maps `0 → you`. With an identity mapping, a joiner is a plain user inside and `setns(net)` is `EPERM`. That done, pasta attaches (template `eth0`, `192.168.50.251`) and TCP egress works. |
+| **egress** | carried by `pasta`, not by sharing the machine's stack — see below. |
 | **ownership** | writes by the sandbox are the user's own files — the property youki gets from its `0↔1000` mapping. |
+
+## Egress is pasta, and the sandbox has no address on your network
+
+A workspace with its network on is a namespace of its own whose traffic pasta forwards through the
+host. Measured inside a workspace with an image:
+
+```
+interfaces:                    lo eth0          (nothing of the machine's is in there)
+getent hosts debian.org:       resolved
+TCP to 1.1.1.1:53:             connected
+MagicDNS over the tailnet:     100.64.0.15  peer.example.ts.net
+```
+
+Two consequences worth stating:
+
+- **The tailnet comes along for free.** pasta dials from the host side, so the host's routing —
+  `tailscale0`, MagicDNS at `100.100.100.100`, any peer — applies to whatever the sandbox dials.
+  Nothing is configured and no key is involved.
+- **The machine's `127.0.0.1` is not the sandbox's.** A dev server in a workspace binds its own
+  loopback, and the host's loopback answers only at pasta's gateway address.
+
+What it costs: **49 ms** per command instead of 6 (pasta's own setup is the difference), ICMP does
+not work (pasta is a userspace forwarder, so `ping` fails and TCP/UDP do not), and two packages
+have to be installed — `passt` for pasta and `iproute2` for the address step — because `Create`
+refuses a workspace whose egress it cannot carry rather than quietly putting it on the host's
+network.
+
+Running `tailscaled` **inside** a workspace is possible but is a different feature: it needs
+`/dev/net/tun` bound in and `--cap-add CAP_NET_ADMIN`, because **bwrap drops every capability by
+default** — a sandbox is root with no powers (`CapEff: 0`). Measured: the interface comes up. The
+no-privilege alternative is `tailscaled --tun=userspace-networking`, which needs no device and no
+capability because applications reach it through a proxy.
 
 ## What it costs
 

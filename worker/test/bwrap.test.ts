@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bwrapArguments, guestHome, openSandbox } from "../src/bwrap.ts";
+import { bwrapArguments, guestHome, openSandbox, spawnFor } from "../src/bwrap.ts";
 import type { SandboxClient } from "../src/sandbox.ts";
 
 /**
@@ -17,6 +17,12 @@ import type { SandboxClient } from "../src/sandbox.ts";
 const probe = Bun.spawnSync(["bwrap", "--ro-bind", "/", "/", "--unshare-all", "--", "/bin/true"]);
 const usable = probe.exitCode === 0;
 const whenUsable = usable ? test : test.skip;
+// Egress is carried by pasta, and configured with ip: a machine with neither cannot answer the
+// network questions below, so it skips them rather than failing them.
+const pastaPath = Bun.which("pasta") ?? "/usr/bin/pasta";
+const ipPath = Bun.which("ip") ?? "/usr/sbin/ip";
+const whenNetworked =
+	usable && Bun.which("pasta") !== null && Bun.which("ip") !== null ? test : test.skip;
 
 const opened: string[] = [];
 
@@ -34,7 +40,7 @@ interface Opened {
 }
 
 /** A workspace and the config control would have written for it. */
-async function open(network: "on" | "off" = "off"): Promise<Opened> {
+async function open(network: "pasta" | "off" = "off"): Promise<Opened> {
 	const root = await realpath(await mkdtemp(join(tmpdir(), "acornfall-bwrap-")));
 	opened.push(root);
 	const dir = join(root, "work");
@@ -55,7 +61,16 @@ async function open(network: "on" | "off" = "off"): Promise<Opened> {
 			engine: "bwrap",
 			workspace: dir,
 			image: "debian:stable-slim",
-			network,
+			network:
+				network === "pasta"
+					? {
+							mode: "pasta" as const,
+							address: "10.0.2.15/24",
+							gateway: "10.0.2.2",
+							pasta: pastaPath,
+							ip: ipPath,
+						}
+					: { mode: "off" as const },
 			home: join(state, "home"),
 			hidden,
 			readOnly: [global, readOnly],
@@ -119,7 +134,7 @@ whenUsable("the host root is read-only, and the workspace is not", async () => {
 	expect(new TextDecoder().decode(write.stderr)).toContain("Read-only file system");
 });
 
-whenUsable("the network is the workspace's setting", async () => {
+whenNetworked("the network is the workspace's setting", async () => {
 	const off = await open("off");
 	const isolates = await off.client.exec("cat /proc/net/dev", { clearEnv: true });
 	// A netns of its own: loopback is the only interface, so egress is not there to leak.
@@ -130,9 +145,16 @@ whenUsable("the network is the workspace's setting", async () => {
 		.map((line) => line.trim().split(":")[0]);
 	expect(interfaces).toEqual(["lo"]);
 
-	const on = await open("on");
+	// With pasta the sandbox has a tap of its own, and the machine's interfaces are not in it.
+	const on = await open("pasta");
 	const shares = await on.client.exec("cat /proc/net/dev", { clearEnv: true });
-	expect(new TextDecoder().decode(shares.stdout)).toContain("eth");
+	const named = new TextDecoder()
+		.decode(shares.stdout)
+		.split("\n")
+		.filter((line) => line.includes(":"))
+		.map((line) => line.trim().split(":")[0]);
+	expect(named).toContain("eth0");
+	expect(named).not.toContain("tailscale0");
 });
 
 whenUsable("secrets arrive in the environment and nothing else does", async () => {
@@ -190,7 +212,13 @@ test("a workspace with an image runs in that image, as its own root", () => {
 		engine: "bwrap",
 		workspace: "/work/ws",
 		image: "debian:stable-slim",
-		network: "on",
+		network: {
+			mode: "pasta" as const,
+			address: "10.0.2.15/24",
+			gateway: "10.0.2.2",
+			pasta: "/usr/bin/pasta",
+			ip: "/usr/sbin/ip",
+		},
 		rootfs: "/state/acornfall-test/rootfs",
 		home: "/state/acornfall-test/home",
 		hidden: "/home/me/.acornfall",
@@ -216,7 +244,7 @@ test("without an image the host's root is the root, read-only, with the install 
 		engine: "bwrap",
 		workspace: "/work/ws",
 		image: "debian:stable-slim",
-		network: "off",
+		network: { mode: "off" as const },
 		home: "/state/acornfall-test/home",
 		hidden: "/home/me/.acornfall",
 	};
@@ -226,4 +254,50 @@ test("without an image the host's root is the root, read-only, with the install 
 	expect(args).not.toContain("--uid 0");
 	expect(args).not.toContain("--share-net");
 	expect(guestHome(config)).toBe("/state/acornfall-test/home");
+});
+
+// Pasta carries egress: the sandbox is on its own namespace, and what configures that namespace
+// runs between pasta and bubblewrap.
+test("an egress workspace runs through pasta, which configures the namespace first", () => {
+	const config = {
+		engine: "bwrap",
+		workspace: "/work/ws",
+		image: "debian:stable-slim",
+		network: {
+			mode: "pasta" as const,
+			address: "10.0.2.15/24",
+			gateway: "10.0.2.2",
+			pasta: "/usr/bin/pasta",
+			ip: "/usr/sbin/ip",
+		},
+		rootfs: "/state/ws/rootfs",
+		home: "/state/ws/home",
+		hidden: "/home/me/.acornfall",
+	};
+	const args = bwrapArguments(config, ["sh", "-c", "true"], "/work/ws", {}).join(" ");
+	// The sandbox's namespace is pasta's: bubblewrap shares it instead of making one.
+	expect(args).toContain("--share-net");
+
+	const spawn = spawnFor(config, ["sh", "-c", "true"]);
+	expect(spawn[0]).toBe("/usr/bin/pasta");
+	// The address and the route are set from inside that namespace, where they are ours to set.
+	expect(spawn.join(" ")).toContain('addr add "$ADDR" dev eth0');
+	expect(spawn.join(" ")).toContain('route add default via "$GATEWAY"');
+	expect(spawn.slice(0, -1).join(" ")).toContain("-a 10.0.2.15 -n 24 -g 10.0.2.2");
+	// And bubblewrap is what the script becomes, after the arguments that configure the namespace.
+	expect(spawn.indexOf("bwrap")).toBeGreaterThan(spawn.indexOf("/usr/sbin/ip"));
+	expect(spawn.indexOf("bwrap")).toBeGreaterThan(spawn.indexOf("10.0.2.2"));
+});
+
+test("a workspace with no network does not involve pasta at all", () => {
+	const config = {
+		engine: "bwrap",
+		workspace: "/work/ws",
+		image: "debian:stable-slim",
+		network: { mode: "off" as const },
+		home: "/state/ws/home",
+		hidden: "/home/me/.acornfall",
+	};
+	expect(bwrapArguments(config, ["true"], "/work/ws", {}).join(" ")).not.toContain("--share-net");
+	expect(spawnFor(config, ["true"])[0]).toBe("bwrap");
 });

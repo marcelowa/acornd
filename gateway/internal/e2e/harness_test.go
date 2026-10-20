@@ -433,6 +433,13 @@ func bwrapAvailable(t *testing.T) {
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		t.Skip("no bubblewrap on this machine")
 	}
+	// Egress is carried by pasta and configured with ip, and a workspace without one of them
+	// cannot be created at all.
+	for _, tool := range []struct{ name, pkg string }{{"pasta", "passt"}, {"ip", "iproute2"}} {
+		if _, err := exec.LookPath(tool.name); err != nil {
+			t.Skipf("no %s on this machine: a bwrap workspace with egress needs it (apt install %s)", tool.name, tool.pkg)
+		}
+	}
 	if os.Getenv("ACORNFALL_IMAGE_TEST") == "" {
 		t.Skip("a bwrap workspace fetches its image: set ACORNFALL_IMAGE_TEST=1 to run this")
 	}

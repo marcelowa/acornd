@@ -65,7 +65,7 @@ A workspace runs on one engine, chosen when it is created and kept with its reco
 | engine | what it is | needs |
 |---|---|---|
 | `microsandbox` | one microVM per workspace (the default, and the strongest boundary) | `/dev/kvm`, and it fetches a 67 MB engine on first use |
-| `bwrap` | the workspace's own image inside a bubblewrap namespace view, per command (beta) | a user namespace and one image pull: `apt install bubblewrap`; no KVM, 78 KB, 6 ms per command, 82 MB of disk per workspace |
+| `bwrap` | the workspace's own image inside a bubblewrap namespace view, per command (beta) | a user namespace, one image pull, and two network tools for egress: `apt install bubblewrap passt iproute2`; no KVM, 78 KB, 6 ms per command (49 ms with egress), 82 MB of disk per workspace |
 | `host` | no sandbox: the tools run on your machine | nothing, and it is not isolated |
 
 ```bash
@@ -75,7 +75,9 @@ ACORNFALL_IMAGE_TEST=1 make test                                  # the bwrap en
 ```
 
 A bwrap workspace gets its own copy of its image, so `apt install` works inside it and the
-machine's own tools are never touched. What it gives up today: the copy costs its image's size
+machine's own tools are never touched. Its network, when on, is a namespace of its own that
+pasta forwards through the host: the sandbox has no address on your network, and dialing your
+tailnet works because the host does the dialing. What it gives up today: the copy costs its image's size
 on disk, and it has no sandbox to stop — every command is a sandbox, so no daemon or cron
 outlives it. [ADR 0023](docs/adr/0023-bwrap-engine.md) has the measurements and the limits.
 

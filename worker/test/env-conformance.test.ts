@@ -63,7 +63,7 @@ if (bwrapUsable) {
 					engine: "bwrap",
 					workspace,
 					image: "debian:stable-slim",
-					network: "off",
+					network: { mode: "off" },
 					home: join(state, "home"),
 					hidden: join(state, "hidden"),
 				}),

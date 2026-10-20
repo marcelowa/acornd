@@ -175,7 +175,9 @@ type bwrapConfig struct {
 	Engine    string `json:"engine"`
 	Workspace string `json:"workspace"`
 	Image     string `json:"image"`
-	Network   string `json:"network"`
+	// Network is how a command reaches the network: a namespace with no interfaces, or one whose
+	// traffic pasta forwards through the host. See bwrapNetwork.
+	Network bwrapNetwork `json:"network"`
 	// Rootfs is the workspace's own unpacked copy of its image, bound as `/`. It is where an
 	// install inside the sandbox lands and stays: the host never sees it, and removing the
 	// sandbox removes it.
@@ -186,6 +188,26 @@ type bwrapConfig struct {
 	// Beta notes what this shape does not do yet, so the file does not read as a promise.
 	Beta string `json:"beta"`
 }
+
+// bwrapNetwork is the network a command gets. The tool paths are resolved when the workspace is
+// created, so a missing one is a sentence then rather than a mystery in the middle of a turn.
+type bwrapNetwork struct {
+	Mode string `json:"mode"`
+	// Address is the sandbox's own address inside that namespace, and Gateway is pasta's address
+	// there. Both live inside the sandbox: nothing about them appears on the host.
+	Address string `json:"address,omitempty"`
+	Gateway string `json:"gateway,omitempty"`
+	Pasta   string `json:"pasta,omitempty"`
+	IP      string `json:"ip,omitempty"`
+}
+
+// The sandbox's network, when it has one. It is the address space QEMU's user-mode network has
+// used for twenty years, and it is chosen not to collide with the ranges a machine is likely to
+// have.
+const (
+	sandboxAddress = "10.0.2.15/24"
+	sandboxGateway = "10.0.2.2"
+)
 
 // Create resolves the policy into a config and the workspace's private home. It is
 // idempotent: creating twice rewrites the same file, which is what makes a changed policy
@@ -220,9 +242,17 @@ func (b *Bwrap) Create(_ context.Context, policy Policy, dir string) error {
 		}
 	}
 	sort.Strings(readonly)
-	network := NetworkOffName
+	network := bwrapNetwork{Mode: NetworkOffName}
 	if policy.Egress {
-		network = "on"
+		pasta, err := b.look("pasta")
+		if err != nil {
+			return fmt.Errorf("%w: egress in a bwrap workspace is carried by pasta (install it: apt install passt)", ErrUnavailable)
+		}
+		ip, err := b.look("ip")
+		if err != nil {
+			return fmt.Errorf("%w: configuring a bwrap workspace's network needs ip (install it: apt install iproute2)", ErrUnavailable)
+		}
+		network = bwrapNetwork{Mode: "pasta", Address: sandboxAddress, Gateway: sandboxGateway, Pasta: pasta, IP: ip}
 	}
 	config := bwrapConfig{
 		Engine:    b.Name(),

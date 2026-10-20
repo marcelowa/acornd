@@ -112,9 +112,9 @@ test: lint ## the default tier: units and the feature suite, no hypervisor neede
 	cd gateway && ACORNFALL_NO_SANDBOX=1 go test -short -race -count=1 -parallel $(TEST_PARALLEL) ./...
 
 test-bwrap: ## the bubblewrap engine end to end: it fetches an image, so it is not part of `make test`
-	# A bwrap workspace gets its own copy of its image; the pull is why this is its own tier,
-	# the same way the microVM tier needs /dev/kvm. The client tests and the driver tests run in
-	# the fast tier already.
+	# A bwrap workspace gets its own copy of its image and carries egress with pasta; both are
+	# why this is its own tier, the same way the microVM tier needs /dev/kvm. Needs bubblewrap,
+	# passt, and iproute2 installed. The client and driver tests run in the fast tier already.
 	cd worker && env -u ACORNFALL_NO_SANDBOX bun test test/bwrap.test.ts test/env-conformance.test.ts
 	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_IMAGE_TEST=1 go test -count=1 ./internal/e2e/ -run 'Bwrap|TwoEngines|KeepsTheEngine'
 
