@@ -88,15 +88,15 @@ value and send it. Rotation means a restart, which the host engine already repor
 | **youki inside youki** | **refused by the kernel** |
 | microsandbox inside youki | needs a deliberate `/dev/kvm` bind |
 
-The refusal is worth the words, because it is the one thing this engine cannot do: a nested
-user namespace may not mount a fresh procfs — `VFS: Mount too revealing`
-(`mount_too_revealing()` in `fs/namespace.c`). It is not a youki bug: plain
-`unshare -U -r -p -f -m --mount-proc` fails identically, while a new pid namespace **without**
-a new user namespace works. This is the reason sysbox exists, and the reason nested containers
-are normally given a VM.
+The refusal is worth the words, because it is the one thing this engine cannot do: the inner
+container dies mounting `/proc`, `VFS: Mount too revealing`. It is specific to youki as far as
+this spike goes — [ADR 0023](0023-bwrap-engine.md) mounts a fresh procfs and nests a bwrap
+inside a bwrap at the same depth, and `unshare -U -r -p -f -m --mount-proc` does not fail on
+the bare user namespace either. So the kernel rule is about *where* the mount happens, not a
+blanket ban on containers in containers, and youki's ordering is the wrong side of it.
 
-So a youki workspace can run acornfall, and the inner acornfall must pick `host` or `bwrap`
-(with no `--proc`, which would hit the same wall). It cannot run its own youki engine inside.
+So a youki workspace can run acornfall, and the inner acornfall must pick `host` or `bwrap`.
+It cannot run its own youki engine inside.
 
 ## What youki does not do, and the engine would have to
 
@@ -120,6 +120,45 @@ So a youki workspace can run acornfall, and the inner acornfall must pick `host`
 4. **Kill.** Killing the host-side `exec` leaves the child running inside (reparented to the
    container's init) — the same `+1` leftover the microsandbox CLI gave. It needs a process
    group inside the sandbox, or a kill through the joiner.
+
+## The three words that needed explaining
+
+**Rootfs.** It is the file tree a sandbox sees as `/`. microsandbox builds it from the image
+and boots it as a disk. youki does not build anything: `config.json` names a directory and
+that directory becomes `/`. An empty one is a sandbox with no `sh` and no `apt`. In the spike
+the directory was made by hand — download the `debian:stable-slim` layer (29.8 MB), `tar xzf`
+it into `rootfs/` (82 MB), point `root.path` at it. Everything installed afterwards landed in
+*that* directory: `curl` from apt, bun in `rootfs/root/.bun`, acornfall in `rootfs/opt`. The
+host was never touched. What is unbuilt is the bookkeeping around it — one shared base plus a
+private writable layer per workspace, update, prune — which is what podman normally owns.
+
+**Joiner.** A small program that puts a new process into a running sandbox's namespaces: one
+`setns()` per namespace (user, pid, mount, network, ipc, uts). `youki exec` should be it, and
+rootless it is not. Two rules make a hand-written one work, and both are load-bearing:
+
+```python
+fds = {t: open(f"/proc/{pid}/ns/{t}") for t in ["user","pid","mnt","net","ipc","uts"]}
+# open every fd FIRST — after entering the mount namespace, /proc is the sandbox's
+for t in ["user","pid","mnt","net","ipc","uts"]: setns(fds[t])   # user first, else EPERM
+os.execv("/bin/sh", ["sh", "-c", 'exec "$@"', "sh", *cmd])
+```
+
+It cannot be JavaScript: the worker is bun, and bun cannot call `setns`. So it is a binary the
+worker runs, and the acornfall binary is its natural home — `acornfall sandbox-exec --pid N --
+<command>`. It also fixes kill: the joiner is inside the pid namespace and can kill the group.
+
+**Nesting.** Inside an acornfall workspace, a second acornfall starts and wants a sandbox of
+its own: a box in a box. Two questions hide in that, and they have different answers. Does
+acornfall *run* in a youki box — yes, measured: server started, worker ready, `HTTP 200`. Can
+the inner acornfall make a youki box — no. The outer engine decides what the inner one can be:
+
+| outer \\ inner | microsandbox | youki | bwrap | host |
+|---|---|---|---|---|
+| **microsandbox** (a VM) | needs nested KVM | works | works | works |
+| **youki** | needs `/dev/kvm` | **refused** | works | works |
+
+The shape of that table is the finding: the cheap engine can live inside the expensive one,
+not inside itself. A VM has its own kernel, so namespaces start clean inside it.
 
 ## The numbers, together
 
