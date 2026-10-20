@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openSandbox } from "../src/bwrap.ts";
+import { bwrapArguments, guestHome, openSandbox } from "../src/bwrap.ts";
 import type { SandboxClient } from "../src/sandbox.ts";
 
 /**
@@ -181,4 +181,49 @@ test("a config for another workspace is refused", async () => {
 	expect(openSandbox("acornfall-test", "/somewhere/else")).rejects.toThrow(
 		"is not the config for",
 	);
+});
+
+// The argv is where the image shape lives, and it can be checked without a user namespace: a
+// rootfs changes what `/` is, and hiding the install folder then has nothing left to hide.
+test("a workspace with an image runs in that image, as its own root", () => {
+	const config = {
+		engine: "bwrap",
+		workspace: "/work/ws",
+		image: "debian:stable-slim",
+		network: "on",
+		rootfs: "/state/acornfall-test/rootfs",
+		home: "/state/acornfall-test/home",
+		hidden: "/home/me/.acornfall",
+		readOnly: ["/home/me/.agents"],
+	};
+	const args = bwrapArguments(config, ["sh", "-c", "true"], "/work/ws", {}).join(" ");
+	expect(args).toContain("--bind /state/acornfall-test/rootfs / ");
+	expect(args).not.toContain("--ro-bind / /");
+	// Root inside, the user outside: the single mapping is what keeps ownership theirs.
+	expect(args).toContain("--uid 0 --gid 0");
+	// A container root still needs the machine's resolver.
+	expect(args).toContain("--ro-bind /etc/resolv.conf /etc/resolv.conf");
+	expect(args).toContain("--bind /state/acornfall-test/home /root ");
+	// Nothing on the filesystem holds the install folder, so nothing has to be hidden.
+	expect(args).not.toContain("--tmpfs /home/me/.acornfall");
+	expect(guestHome(config)).toBe("/root");
+	// The global resources are still read-only at their own paths.
+	expect(args).toContain("--ro-bind /home/me/.agents /home/me/.agents");
+});
+
+test("without an image the host's root is the root, read-only, with the install folder hidden", () => {
+	const config = {
+		engine: "bwrap",
+		workspace: "/work/ws",
+		image: "debian:stable-slim",
+		network: "off",
+		home: "/state/acornfall-test/home",
+		hidden: "/home/me/.acornfall",
+	};
+	const args = bwrapArguments(config, ["true"], "/work/ws", {}).join(" ");
+	expect(args).toContain("--ro-bind / /");
+	expect(args).toContain("--tmpfs /home/me/.acornfall");
+	expect(args).not.toContain("--uid 0");
+	expect(args).not.toContain("--share-net");
+	expect(guestHome(config)).toBe("/state/acornfall-test/home");
 });

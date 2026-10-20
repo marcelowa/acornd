@@ -35,8 +35,23 @@ func testBwrap(t *testing.T, home string) (*Bwrap, *fakeBwrap) {
 	runner := &fakeBwrap{version: "bubblewrap 0.11.0"}
 	driver := NewBwrap(home).
 		WithRunner(runner).
+		WithImageSource(fakeImage).
 		WithLookPath(func(string) (string, error) { return "/usr/bin/bwrap", nil })
 	return driver, runner
+}
+
+// fakeImage is a registry that answers with a two-file root, so the pull is not this suite's
+// business (image_test.go covers it) and no test needs a network.
+func fakeImage(_ context.Context, reference, dest string, _ func(string, ...any)) error {
+	for _, dir := range []string{filepath.Join(dest, "etc"), filepath.Join(dest, "usr", "bin")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dest, "etc", "os-release"), []byte("ID=test\n"), 0o644); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dest, "usr", "bin", "sh"), []byte("#!/bin/sh\n"), 0o755)
 }
 
 func TestBwrapVersionIsBubblewrapsOwn(t *testing.T) {
@@ -124,6 +139,14 @@ func TestBwrapCreateWritesWhatTheWorkspaceRunsUnder(t *testing.T) {
 	if !strings.HasPrefix(config.Home, driver.StateDir()) {
 		t.Fatalf("home %q is not inside %q", config.Home, driver.StateDir())
 	}
+	// The workspace's own copy of its image, and the apt line that makes a container root
+	// usable under a single-mapping user namespace.
+	if _, err := os.Stat(filepath.Join(config.Rootfs, "etc", "os-release")); err != nil {
+		t.Fatalf("the rootfs was not copied from the image: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(config.Rootfs, "etc", "apt", "apt.conf.d", "99-acornfall")); err != nil {
+		t.Fatalf("the apt sandbox line was not written: %v", err)
+	}
 	info, err := os.Stat(config.Home)
 	if err != nil || !info.IsDir() {
 		t.Fatalf("home was not created: %v", err)
@@ -163,6 +186,9 @@ func TestBwrapRemoveDeletesTheHomeAndNotTheWorkspace(t *testing.T) {
 	}
 	if _, err := os.Stat(workspace); err != nil {
 		t.Fatalf("remove took the workspace with it: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(driver.StateDir(), Name(workspace))); !os.IsNotExist(err) {
+		t.Fatalf("remove left the sandbox's own folder behind: %v", err)
 	}
 	// Removing what is not there is already the wanted state.
 	if err := driver.Remove(context.Background(), "acornfall-absent"); err != nil {

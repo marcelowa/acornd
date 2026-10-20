@@ -114,7 +114,8 @@ The shape is the one this ADR predicted, and it is small:
 
 The config a command runs under, written to `<home>/sandboxes/bwrap/<name>.json`, is:
 
-- the host root **read-only**, `/tmp` a tmpfs, `/dev` and `/proc` fresh;
+- the workspace's own image as `/` — or the host root **read-only** when a workspace has none —
+  with `/tmp` a tmpfs and `/dev` and `/proc` fresh;
 - `<home>` — credentials, state, the engine's own store — hidden behind a tmpfs, with the
   global resource folders bound back **read-only at their own paths**;
 - a **private home** per workspace under the engine's folder, which is where a language
@@ -125,12 +126,34 @@ The config a command runs under, written to `<home>/sandboxes/bwrap/<name>.json`
 - `--clearenv` and then exactly the environment the worker hands over, which is also how a
   secret arrives (the environment delivery row).
 
-Two things are deliberately missing, and this is a beta because of them:
+**The image is the workspace's own disk.** The reference is fetched from the registry once,
+verified layer by layer against the digests the manifest names, and unpacked into
+`<home>/sandboxes/bwrap/images/<key>/base`. A workspace copies that tree into
+`<name>/rootfs` and binds **it** as `/`, as root inside (a single mapping `0 ↔ the user`), with
+the machine's resolver bound read-only. Installations then behave the way people expect:
 
-- **No image and no rootfs.** Commands run on the host's tools, read-only. `apt` inside a
-  workspace is the next step, and it is the unpack/overlay work neither engine provides.
+| | |
+|---|---|
+| a language toolchain in `$HOME` | survives, in the workspace's private home |
+| `apt install` | **works**: it is an ordinary write to the workspace's own root |
+| `/tmp` | gone with the command, as it should be |
+| the machine's files | not in the tree at all; the only root is the workspace's copy |
+
+Measured inside a workspace: `apt-get update` 2 s, `apt-get install -y less` completes, and
+`less` is there for the next command. The host's `/usr` never changes.
+
+Two things are still deliberately missing, and this is a beta because of them:
+
+- **A copy, not an overlay.** Each workspace pays its image's size on disk (82 MB for
+  `debian:stable-slim`) and a copy at creation. An overlay with a shared read-only lower layer
+  is the optimisation, and it needs a mount this engine cannot make for itself.
 - **No persistent sandbox.** Every command is a sandbox, so no daemon outlives it and there is
   no `exec` into a running one. That is the supervisor this ADR's second half describes.
+
+A bwrap workspace therefore needs a registry once, as the microVM engine needs one for its
+first image (ADR 0012). A failed fetch is a refusal — a workspace is created with its image or
+not at all — and the e2e tests that create one run under `ACORNFALL_IMAGE_TEST=1`, because
+`make test` stays offline.
 
 ## What this does not settle
 

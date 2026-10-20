@@ -30,6 +30,9 @@ type Bwrap struct {
 	// the probe can be answered without a user namespace.
 	runner Runner
 	look   func(string) (string, error)
+	// pull fetches an image into a directory. It is a field so a test can answer without a
+	// registry, the same way the runner answers without a binary.
+	pull imageSource
 
 	once    sync.Once
 	version string
@@ -42,7 +45,15 @@ func NewBwrap(home string) *Bwrap {
 		home:  home,
 		state: filepath.Join(home, "sandboxes", "bwrap"),
 		look:  exec.LookPath,
+		pull:  pullImage,
 	}
+}
+
+// WithImageSource replaces the registry with a directory of its own, which is how the pull and
+// the unpack are tested without a network.
+func (b *Bwrap) WithImageSource(pull imageSource) *Bwrap {
+	b.pull = pull
+	return b
 }
 
 // WithRunner replaces the bubblewrap binary, which is how the driver is tested without one.
@@ -161,13 +172,17 @@ func (b *Bwrap) List(context.Context) ([]Instance, error) { return nil, nil }
 // config is what one workspace's commands run under, written for a person to read and for the
 // worker to build an argv from.
 type bwrapConfig struct {
-	Engine    string   `json:"engine"`
-	Workspace string   `json:"workspace"`
-	Image     string   `json:"image"`
-	Network   string   `json:"network"`
-	Home      string   `json:"home"`
-	Hidden    string   `json:"hidden"`
-	ReadOnly  []string `json:"readOnly,omitempty"`
+	Engine    string `json:"engine"`
+	Workspace string `json:"workspace"`
+	Image     string `json:"image"`
+	Network   string `json:"network"`
+	// Rootfs is the workspace's own unpacked copy of its image, bound as `/`. It is where an
+	// install inside the sandbox lands and stays: the host never sees it, and removing the
+	// sandbox removes it.
+	Rootfs   string   `json:"rootfs,omitempty"`
+	Home     string   `json:"home"`
+	Hidden   string   `json:"hidden"`
+	ReadOnly []string `json:"readOnly,omitempty"`
 	// Beta notes what this shape does not do yet, so the file does not read as a promise.
 	Beta string `json:"beta"`
 }
@@ -183,11 +198,19 @@ func (b *Bwrap) Create(_ context.Context, policy Policy, dir string) error {
 	if err != nil || !info.IsDir() {
 		return fmt.Errorf("sandbox: no workspace folder at %s", policy.Workspace)
 	}
+	image := policy.Image
+	if strings.TrimSpace(image) == "" {
+		image = DefaultImage
+	}
 	if err := os.MkdirAll(b.state, 0o700); err != nil {
 		return err
 	}
 	home := b.workspaceHome(Name(policy.Workspace))
 	if err := os.MkdirAll(home, 0o700); err != nil {
+		return err
+	}
+	rootfs, err := b.workspaceRootfs(Name(policy.Workspace), image)
+	if err != nil {
 		return err
 	}
 	var readonly []string
@@ -201,19 +224,16 @@ func (b *Bwrap) Create(_ context.Context, policy Policy, dir string) error {
 	if policy.Egress {
 		network = "on"
 	}
-	image := policy.Image
-	if strings.TrimSpace(image) == "" {
-		image = DefaultImage
-	}
 	config := bwrapConfig{
 		Engine:    b.Name(),
 		Workspace: policy.Workspace,
 		Image:     image,
 		Network:   network,
+		Rootfs:    rootfs,
 		Home:      home,
 		Hidden:    b.home,
 		ReadOnly:  readonly,
-		Beta:      "the host root is visible read-only; there is no image and no sandbox lifecycle",
+		Beta:      "no persistent sandbox: every command is a sandbox, so no daemon outlives one",
 	}
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
@@ -239,10 +259,82 @@ func (b *Bwrap) Remove(_ context.Context, name string) error {
 	if err := os.Remove(b.configPath(name)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if err := os.RemoveAll(b.workspaceHome(name)); err != nil {
-		return err
+	// The whole folder: the root, the private home, and whatever a command left in either.
+	return os.RemoveAll(b.workspaceDir(name))
+}
+
+// workspaceRootfs returns the workspace's own copy of its image, making it on first use. A
+// copy rather than a shared read-only tree with a layer on top: an install inside the sandbox
+// is then an ordinary write to an ordinary directory, which needs no privileged mount, no
+// overlay, and no cleanup beyond removing the folder.
+func (b *Bwrap) workspaceRootfs(name, image string) (string, error) {
+	rootfs := filepath.Join(b.workspaceDir(name), "rootfs")
+	if info, err := os.Stat(filepath.Join(rootfs, ".acornfall-rootfs")); err == nil && !info.IsDir() {
+		return rootfs, nil
 	}
-	return nil
+	base, err := b.imageBase(image)
+	if err != nil {
+		return "", err
+	}
+	// Replaced whole, so a half-copied tree cannot be mistaken for a finished one.
+	_ = os.RemoveAll(rootfs)
+	if err := copyTree(base, rootfs); err != nil {
+		return "", fmt.Errorf("sandbox: copying the image for this workspace: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootfs, ".acornfall-rootfs"), []byte(image+"\n"), 0o644); err != nil {
+		return "", err
+	}
+	// apt's own sandbox drops to _apt with setgroups, which a single-mapping user namespace
+	// denies; as root inside a root that is the workspace's own, dropping is not needed.
+	aptDir := filepath.Join(rootfs, "etc", "apt", "apt.conf.d")
+	if err := os.MkdirAll(aptDir, 0o755); err == nil {
+		_ = os.WriteFile(filepath.Join(aptDir, "99-acornfall"), []byte("APT::Sandbox::User \"root\";\n"), 0o644)
+	}
+	return rootfs, nil
+}
+
+// imageBase is the shared unpacked image, fetched once per digest and reused by every
+// workspace. It is read-only in practice: a workspace copies it before it runs anything.
+func (b *Bwrap) imageBase(image string) (string, error) {
+	if strings.TrimSpace(image) == "" {
+		image = DefaultImage
+	}
+	ref, err := parseImageReference(image)
+	if err != nil {
+		return "", fmt.Errorf("sandbox: %w", err)
+	}
+	key := slugify(ref.host+"-"+ref.repository) + "-" + slugify(ref.tag)
+	dir := filepath.Join(b.StateDir(), "images", key)
+	complete := filepath.Join(dir, "complete")
+	if info, err := os.Stat(complete); err == nil && !info.IsDir() {
+		return filepath.Join(dir, "base"), nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	staging := filepath.Join(dir, "base.partial")
+	_ = os.RemoveAll(staging)
+	if b.pull == nil {
+		return "", errors.New("sandbox: no image source is configured")
+	}
+	if err := b.pull(context.Background(), image, staging, nil); err != nil {
+		_ = os.RemoveAll(staging)
+		return "", fmt.Errorf("sandbox: fetching the image %s: %w", image, err)
+	}
+	base := filepath.Join(dir, "base")
+	_ = os.RemoveAll(base)
+	if err := os.Rename(staging, base); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(complete, []byte(image+"\n"), 0o644); err != nil {
+		return "", err
+	}
+	return base, nil
+}
+
+// workspaceDir is a path inside this workspace's sandbox folder.
+func (b *Bwrap) workspaceDir(name string) string {
+	return filepath.Join(b.StateDir(), name)
 }
 
 // SecretDelivery is the environment: there is no guest to substitute into. A value in the
@@ -268,7 +360,7 @@ func (b *Bwrap) configPath(name string) string {
 // workspaceHome is the private home a sandbox's commands get: language toolchains install
 // there, the host's own home is not written, and removing the sandbox removes it.
 func (b *Bwrap) workspaceHome(name string) string {
-	return filepath.Join(b.state, name, "home")
+	return filepath.Join(b.workspaceDir(name), "home")
 }
 
 // NetworkOffName is how a policy's egress switch is written into the engine's config.

@@ -36,11 +36,13 @@ export async function openSandbox(name: string, workspace: string): Promise<Sand
 }
 
 /** What control resolved for one workspace: paths, network, and the private home. */
-interface BwrapConfig {
+export interface BwrapConfig {
 	engine: string;
 	workspace: string;
 	image: string;
 	network: string;
+	/** The workspace's own unpacked image, bound as `/`. Absent means the host's root. */
+	rootfs?: string;
 	/** The private home language toolchains install into. */
 	home: string;
 	/** The install folder, hidden by a tmpfs: credentials and state live in there. */
@@ -49,7 +51,88 @@ interface BwrapConfig {
 	readOnly?: string[];
 }
 
-const defaultPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+const systemPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+/**
+ * What a command's PATH starts with. Tools a workspace installs itself land in its own home,
+ * so the two folders every unprivileged installer uses come first — otherwise a toolchain that
+ * survived one command would still not be found by the next one.
+ */
+function searchPath(home: string): string {
+	return `${home}/.local/bin:${home}/.cargo/bin:${home}/.bun/bin:${systemPath}`;
+}
+
+/**
+ * The argv that puts one command inside this workspace's sandbox: the mounts, the namespaces,
+ * the environment, and the command. It is a function of the config alone, which is what makes
+ * it testable without a user namespace.
+ */
+export function bwrapArguments(
+	config: BwrapConfig,
+	argv: readonly string[],
+	cwd: string,
+	env: Record<string, string>,
+): string[] {
+	const image = config.rootfs !== undefined;
+	return [
+		// The workspace's own image when it has one: its `/` is then a tree that is disposable
+		// with the workspace, and an install in it outlives the command. Without one the host's
+		// root is the root, read-only, which is the older shape.
+		...(image
+			? [
+					"--bind",
+					config.rootfs as string,
+					"/",
+					// A root of its own: a single mapping makes root inside the user who owns the
+					// sandbox outside, so files still land owned by them.
+					"--uid",
+					"0",
+					"--gid",
+					"0",
+					// The resolver is the one thing a root genuinely needs from its machine.
+					"--ro-bind",
+					"/etc/resolv.conf",
+					"/etc/resolv.conf",
+				]
+			: ["--ro-bind", "/", "/"]),
+		"--dev",
+		"/dev",
+		"--proc",
+		"/proc",
+		"--tmpfs",
+		"/tmp",
+		// The install folder is hidden only when the host's root is the root: credentials and
+		// state live in there, and inside an image they are not on the filesystem at all.
+		...(image ? [] : ["--tmpfs", config.hidden]),
+		// The global resources, read-only at their own paths: a skill's instructions name their
+		// own directory, and a script beside a skill has to be a path that works.
+		...[...(config.readOnly ?? [])].flatMap((path) => ["--ro-bind", path, path]),
+		"--bind",
+		config.home,
+		guestHome(config),
+		"--bind",
+		config.workspace,
+		config.workspace,
+		"--unshare-all",
+		// Egress is the workspace's setting: undoing the netns is how it is granted.
+		...(config.network === "off" ? [] : ["--share-net"]),
+		// A command that outlives the worker is a command nobody can stop; the worker's kill
+		// then reaches bubblewrap and bubblewrap takes its child with it.
+		"--die-with-parent",
+		"--clearenv",
+		...Object.entries(env).flatMap(([key, value]) => ["--setenv", key, value]),
+		"--chdir",
+		cwd,
+		"--",
+		...argv,
+	];
+}
+
+/** Where the private home appears inside the sandbox: the root's own home when there is an
+ * image, and its real path when the host's root is the root. */
+export function guestHome(config: BwrapConfig): string {
+	return config.rootfs === undefined ? config.home : "/root";
+}
 
 class BwrapClient extends WorkspaceFiles implements SandboxClient {
 	readonly name: string;
@@ -73,8 +156,8 @@ class BwrapClient extends WorkspaceFiles implements SandboxClient {
 		for (const [key, value] of Object.entries({ ...inherited, ...options.env })) {
 			if (typeof value === "string") env[key] = value;
 		}
-		env["HOME"] ??= this.config.home;
-		env["PATH"] ??= defaultPath;
+		env["HOME"] ??= guestHome(this.config);
+		env["PATH"] = searchPath(env["HOME"] ?? guestHome(this.config));
 		return env;
 	}
 
@@ -82,40 +165,7 @@ class BwrapClient extends WorkspaceFiles implements SandboxClient {
 		const argv = typeof command === "string" ? ["/bin/sh", "-c", command] : [...command];
 		if (argv.length === 0) throw new Error("empty argv: no program to run");
 		const env = this.environment(options);
-		const args = [
-			// The host's root, read-only: this shape has no image of its own yet, so the tools
-			// are the host's. What must not be readable is a tmpfs first, then bound back.
-			"--ro-bind",
-			"/",
-			"/",
-			"--dev",
-			"/dev",
-			"--proc",
-			"/proc",
-			"--tmpfs",
-			"/tmp",
-			"--tmpfs",
-			this.config.hidden,
-			...this.globalMounts(),
-			"--bind",
-			this.config.home,
-			this.config.home,
-			"--bind",
-			this.config.workspace,
-			this.config.workspace,
-			"--unshare-all",
-			// Egress is the workspace's setting: undoing the netns is how it is granted.
-			...(this.config.network === "off" ? [] : ["--share-net"]),
-			// A command that outlives the worker is a command nobody can stop; the worker's kill
-			// then reaches bubblewrap and bubblewrap takes its child with it.
-			"--die-with-parent",
-			"--clearenv",
-			...Object.entries(env).flatMap(([key, value]) => ["--setenv", key, value]),
-			"--chdir",
-			options.cwd ?? this.config.workspace,
-			"--",
-			...argv,
-		];
+		const args = bwrapArguments(this.config, argv, options.cwd ?? this.config.workspace, env);
 		const proc = Bun.spawn(["bwrap", ...args], {
 			stdin: "ignore",
 			stdout: "pipe",
@@ -180,18 +230,5 @@ class BwrapClient extends WorkspaceFiles implements SandboxClient {
 			stderr: fail,
 			...(stopped === undefined ? {} : { stopped }),
 		};
-	}
-
-	/**
-	 * The global resources, read-only at their own paths. They live inside the hidden install
-	 * folder and out of it, and a skill's instructions name their own directory — so a script
-	 * beside a skill has to be a path that works.
-	 */
-	private globalMounts(): string[] {
-		const mounts: string[] = [];
-		for (const path of this.config.readOnly ?? []) {
-			mounts.push("--ro-bind", path, path);
-		}
-		return mounts;
 	}
 }

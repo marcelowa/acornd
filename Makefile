@@ -6,7 +6,7 @@ DATA ?= $(HOME)/.acornfall
 ADDR ?= 0.0.0.0:7777
 URL ?= http://127.0.0.1:7777
 
-.PHONY: help deps build typecheck lint modernize tools commits check test test-sandbox sandbox-preflight ui ui-build run dev fmt clean release release-branch
+.PHONY: help deps build typecheck lint modernize tools commits check test test-sandbox test-bwrap sandbox-preflight ui ui-build run dev fmt clean release release-branch
 
 # The linters, installed into the Go and bun toolchains rather than vendored. `make lint` runs
 # whichever are present and names the ones that are not, so a missing tool is a message and
@@ -110,6 +110,13 @@ test: lint ## the default tier: units and the feature suite, no hypervisor neede
 	# -count=1 because the suite's inputs include worker/src and the built interface, which
 	# Go's test cache cannot see: a cached pass would be a pass for code that has changed.
 	cd gateway && ACORNFALL_NO_SANDBOX=1 go test -short -race -count=1 -parallel $(TEST_PARALLEL) ./...
+
+test-bwrap: ## the bubblewrap engine end to end: it fetches an image, so it is not part of `make test`
+	# A bwrap workspace gets its own copy of its image; the pull is why this is its own tier,
+	# the same way the microVM tier needs /dev/kvm. The client tests and the driver tests run in
+	# the fast tier already.
+	cd worker && env -u ACORNFALL_NO_SANDBOX bun test test/bwrap.test.ts test/env-conformance.test.ts
+	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_IMAGE_TEST=1 go test -count=1 ./internal/e2e/ -run 'Bwrap|TwoEngines|KeepsTheEngine'
 
 test-sandbox: sandbox-preflight ## the engine boundary: live driver, SDK client, and its e2e tests
 	# env -u so a shell that exported the fast tier's switch cannot silently turn this into a

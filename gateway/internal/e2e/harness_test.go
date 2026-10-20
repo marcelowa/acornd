@@ -416,12 +416,26 @@ var hostEngineTests sync.Map
 var bwrapEngineTests sync.Map
 
 // bwrapEngine marks a test as running on the bubblewrap engine, before start.
+//
+// A bwrap workspace fetches its image from a registry before it can run anything, so this is
+// also where the tier answers: without ACORNFALL_IMAGE_TEST the test skips, which keeps
+// `make test` offline and fast. It is the same trade the microVM tier makes with /dev/kvm.
 func bwrapEngine(t *testing.T) {
+	t.Helper()
+	bwrapAvailable(t)
+	bwrapEngineTests.Store(t.Name(), true)
+}
+
+// bwrapAvailable is the machine half, for a test that chooses the engine itself rather than
+// asking start to choose it.
+func bwrapAvailable(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		t.Skip("no bubblewrap on this machine")
 	}
-	bwrapEngineTests.Store(t.Name(), true)
+	if os.Getenv("ACORNFALL_IMAGE_TEST") == "" {
+		t.Skip("a bwrap workspace fetches its image: set ACORNFALL_IMAGE_TEST=1 to run this")
+	}
 }
 
 // notSandbox marks a test that needs no real workspace. Both sandbox tiers skip it: this one
