@@ -63,7 +63,7 @@ func serve(argv []string) error {
 	dataDir := flags.String("data-dir", "", "alias for --home")
 	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornfall/workspaces)")
 	sandboxState := flags.String("sandbox-state", "", "where sandboxes, images, and snapshots are kept (default: <home>/sandboxes); must be a short path")
-	sandboxEngine := flags.String("sandbox-engine", "", "which engine runs the tools: microsandbox (default; needs a hypervisor) or host (no isolation)")
+	sandboxEngine := flags.String("sandbox-engine", "", "the default engine for workspaces that name none: microsandbox (needs a hypervisor), bwrap (needs user namespaces), or host (no isolation)")
 	migrateDir := flags.String("migrate-dir", "", "release migrate scripts directory (default: the scripts baked into the binary)")
 	disableVMNesting := flags.Bool("disable-vm-nesting", false, "keep a workspace's sandbox from nesting virtual machines; by default a sandbox nests when the engine and the machine can, and a workspace's own setting wins")
 	model := flags.String("model", "", "default model as provider/modelId")
@@ -148,7 +148,7 @@ func serve(argv []string) error {
 	if engineName == "host" && *sandboxState != "" {
 		return errors.New("--sandbox-state belongs to the microsandbox engine; the host engine keeps no state")
 	}
-	engine, err := sandboxTier(ctx, dir, *sandboxState, engineName)
+	engine, tier, err := sandboxTier(ctx, dir, *sandboxState, engineName)
 	if err != nil {
 		return err
 	}
@@ -172,9 +172,10 @@ func serve(argv []string) error {
 				RestartRequired: status.RestartRequired,
 			}
 		},
-		Model:   *model,
-		Sandbox: engine,
-		Vault:   secrets,
+		Model:     *model,
+		Sandbox:   engine,
+		Sandboxes: tier,
+		Vault:     secrets,
 		// Nesting is allowed unless refused: a workspace's sandbox nests when the
 		// engine offers it and the machine can grant it, and boots without it otherwise.
 		DisableVMNesting: *disableVMNesting,
@@ -260,22 +261,18 @@ func serve(argv []string) error {
 // ACORNFALL_NO_SANDBOX is that refusal on purpose, not a fallback: no engine is configured,
 // nothing is installed or booted, and the worker's tools refuse. Tests use it so one command
 // behaves the same on a machine with /dev/kvm and in CI, which auto-detecting did not.
-func sandboxTier(ctx context.Context, home, state, engineName string) (*sandbox.Manager, error) {
+func sandboxTier(ctx context.Context, home, state, engineName string) (*sandbox.Manager, *sandbox.Tier, error) {
 	if os.Getenv("ACORNFALL_NO_SANDBOX") != "" {
 		log.Printf("sandbox: disabled by ACORNFALL_NO_SANDBOX; commands and file tools will refuse")
-		return nil, nil
+		return nil, nil, nil
 	}
-	driver, err := sandbox.Engine(home, state, engineName)
+	_ = ctx
+	// Every engine this build has, one manager each, so a workspace can choose its own. The
+	// default is the one --sandbox-engine names; a workspace that names one wins over it.
+	tier := sandbox.NewTier(home, state, log.Printf)
+	engine, err := tier.For(engineName)
 	if err != nil {
-		return nil, err
-	}
-	engine, err := sandbox.Open(ctx, sandbox.Options{
-		Home:   home,
-		Log:    log.Printf,
-		Driver: driver,
-	})
-	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	report := engine.Report()
 	if problem := engine.Problem(); problem != nil {
@@ -286,7 +283,7 @@ func sandboxTier(ctx context.Context, home, state, engineName string) (*sandbox.
 	if !report.Isolated {
 		log.Printf("sandbox: the host engine is not isolated: commands and file tools run with this user's own reach")
 	}
-	return engine, nil
+	return engine, tier, nil
 }
 
 // versionCommand prints the running tag: the version file, the build
@@ -470,16 +467,21 @@ func workspaceCommand(argv []string) {
 	dataDir := flags.String("data-dir", "", "the acornfall folder")
 	image := flags.String("image", "", "sandbox image for this workspace, e.g. golang:1.24 (default: "+sandbox.DefaultImage+")")
 	network := flags.String("network", "", `sandbox network: "on" (default) or "off"`)
+	engine := flags.String("sandbox", "", "sandbox engine for this workspace: microsandbox, bwrap, or host (default: the install's --sandbox-engine)")
 	if err := flags.Parse(argv); err != nil {
 		return
 	}
 	args := flags.Args()
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: acornfall workspace <list|add|remove> [--image IMAGE] [--network on|off]")
+		fmt.Fprintln(os.Stderr, "usage: acornfall workspace <list|add|remove> [--sandbox ENGINE] [--image IMAGE] [--network on|off]")
 		os.Exit(2)
 	}
 	if *network != "" && !control.ValidNetwork(*network) {
 		fmt.Fprintln(os.Stderr, `acornfall: --network is "on" or "off"`)
+		os.Exit(2)
+	}
+	if !sandbox.ValidEngine(*engine) {
+		fmt.Fprintf(os.Stderr, "acornfall: --sandbox is one of %s\n", strings.Join(sandbox.EngineNames(), ", "))
 		os.Exit(2)
 	}
 	dir, err := resolveDataDir(*dataDir)
@@ -503,12 +505,12 @@ func workspaceCommand(argv []string) {
 			if workspace.General {
 				marker = "*"
 			}
-			fmt.Printf("%s %-16s %-22s %s\n", marker, workspace.Name, sandboxLabel(workspace), workspace.Path)
+			fmt.Printf("%s %-16s %-14s %-22s %s\n", marker, workspace.Name, engineLabel(workspace.Engine), sandboxLabel(workspace), workspace.Path)
 		}
 		fmt.Printf("\nworkspaces folder: %s\n", registry.WorkspacesDir)
 	case "add":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: acornfall workspace add <name> [folder] [--image IMAGE] [--network on|off]")
+			fmt.Fprintln(os.Stderr, "usage: acornfall workspace add <name> [folder] [--sandbox ENGINE] [--image IMAGE] [--network on|off]")
 			os.Exit(2)
 		}
 		name := args[1]
@@ -529,13 +531,13 @@ func workspaceCommand(argv []string) {
 			}
 		}
 		registry.Workspaces = append(registry.Workspaces, control.Workspace{
-			Name: name, Path: absolute, Title: name, Image: *image, Network: *network,
+			Name: name, Path: absolute, Title: name, Image: *image, Network: *network, Engine: *engine,
 		})
 		if err := control.SaveRegistryFile(registry); err != nil {
 			log.Fatalf("acornfall: %v", err)
 		}
 		fmt.Printf("added %s at %s\n", name, absolute)
-		fmt.Printf("sandbox: %s, network %s\n", imageLabel(*image), networkLabel(*network))
+		fmt.Printf("sandbox: %s, network %s, engine %s\n", imageLabel(*image), networkLabel(*network), engineLabel(*engine))
 	case "remove":
 		if len(args) < 2 {
 			fmt.Fprintln(os.Stderr, "usage: acornfall workspace remove <name>")
@@ -579,6 +581,15 @@ func sandboxLabel(workspace control.Workspace) string {
 		network = "net off"
 	}
 	return image + ", " + network
+}
+
+// engineLabel names the engine a workspace runs on, saying so when it follows the install's
+// default rather than a choice of its own.
+func engineLabel(engine string) string {
+	if engine == "" {
+		return sandbox.DefaultEngine + "*"
+	}
+	return engine
 }
 
 func imageLabel(image string) string {

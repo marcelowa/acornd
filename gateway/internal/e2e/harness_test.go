@@ -244,7 +244,8 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	}
 	// The shared engine, linked where a driver looks for it, so the first workspace to start
 	// does not pay for a download per test. A host-engine test never touches this driver.
-	if _, host := hostEngineTests.Load(t.Name()); engineHome != "" && !host {
+	_, bwrapTest := bwrapEngineTests.Load(t.Name())
+	if _, host := hostEngineTests.Load(t.Name()); engineHome != "" && !host && !bwrapTest {
 		if err := os.MkdirAll(filepath.Join(s.Home, "tools"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -274,7 +275,10 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	// and this is the engine that needs no hypervisor and no state directory. Everything else
 	// runs with the sandbox tier forced off, which is a refusal path and not a host fallback.
 	hostEngine := false
-	if value, ok := hostEngineTests.Load(t.Name()); ok && value == true {
+	if value, ok := bwrapEngineTests.Load(t.Name()); ok && value == true {
+		hostEngine = true
+		args = append(args, "--sandbox-engine", "bwrap")
+	} else if value, ok := hostEngineTests.Load(t.Name()); ok && value == true {
 		hostEngine = true
 		args = append(args, "--sandbox-engine", "host")
 	} else {
@@ -405,6 +409,20 @@ func engineBinary(home string) string {
 // reads it and runs their gateway with --sandbox-engine host, which needs no hypervisor and
 // no state directory; a test declares it in workspaceResources, before start.
 var hostEngineTests sync.Map
+
+// bwrapEngineTests records the tests that asked to run on the bubblewrap engine. start reads it
+// and runs their gateway with --sandbox-engine bwrap: user namespaces instead of a hypervisor,
+// so the workspace is isolated for real and still needs no KVM and no engine download.
+var bwrapEngineTests sync.Map
+
+// bwrapEngine marks a test as running on the bubblewrap engine, before start.
+func bwrapEngine(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("no bubblewrap on this machine")
+	}
+	bwrapEngineTests.Store(t.Name(), true)
+}
 
 // notSandbox marks a test that needs no real workspace. Both sandbox tiers skip it: this one
 // already ran in the fast tier, where the tools take the refusal path. Without a marker a
@@ -683,6 +701,9 @@ type workspaceRef struct {
 	Path    string `json:"path"`
 	Title   string `json:"title"`
 	General bool   `json:"general"`
+	// Engine is the sandbox engine the workspace was created with; empty means the install
+	// default.
+	Engine  string `json:"engine"`
 	Running bool   `json:"running"`
 }
 
@@ -896,6 +917,17 @@ func (c *client) fork(workspace, id, at string) conversation {
 func (c *client) createWorkspace(name string) {
 	c.t.Helper()
 	c.post("/api/workspaces", map[string]any{"name": name}, nil)
+}
+
+// createWorkspaceWith posts the create form's own body and returns what the listing says.
+func (c *client) createWorkspaceWith(name string, body map[string]any) state {
+	c.t.Helper()
+	fields := map[string]any{"name": name}
+	for key, value := range body {
+		fields[key] = value
+	}
+	c.post("/api/workspaces", fields, nil)
+	return c.state("general")
 }
 
 func (c *client) waitIdle(workspace, id string, timeout time.Duration) {

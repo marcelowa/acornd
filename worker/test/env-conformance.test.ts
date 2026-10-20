@@ -1,8 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerEnvConformance } from "@earendil-works/pi-durable/testing";
+import { openSandbox as openBwrap } from "../src/bwrap.ts";
 import { openSandbox } from "../src/host.ts";
 import { SandboxExecutionEnv } from "../src/sandbox-env.ts";
 
@@ -29,3 +30,56 @@ registerEnvConformance(
 	},
 	{ shell: ["sh", "-c"] },
 );
+
+/**
+ * The same contract over the bubblewrap engine: the third client, and the one that has to pass
+ * without a hypervisor. A machine that will not make a user namespace skips, because there is
+ * no sandbox to conform to; the driver's refusal is covered in the Go suite.
+ */
+const bwrapProbe = Bun.spawnSync([
+	"bwrap",
+	"--ro-bind",
+	"/",
+	"/",
+	"--unshare-all",
+	"--",
+	"/bin/true",
+]);
+const bwrapUsable = bwrapProbe.exitCode === 0;
+
+if (bwrapUsable) {
+	registerEnvConformance(
+		{ describe, expect, it },
+		"SandboxExecutionEnv (bwrap engine) conformance",
+		async (use) => {
+			const workspace = await realpath(
+				await mkdtemp(join(tmpdir(), "acornfall-envconf-bwrap-")),
+			);
+			const state = await mkdtemp(join(tmpdir(), "acornfall-envconf-state-"));
+			const name = "acornfall-envconf";
+			await writeFile(
+				join(state, `${name}.json`),
+				JSON.stringify({
+					engine: "bwrap",
+					workspace,
+					image: "debian:stable-slim",
+					network: "off",
+					home: join(state, "home"),
+					hidden: join(state, "hidden"),
+				}),
+			);
+			await mkdir(join(state, "home"), { recursive: true });
+			await mkdir(join(state, "hidden"), { recursive: true });
+			process.env.ACORNFALL_BWRAP_STATE = state;
+			const sandbox = await openBwrap(name, workspace);
+			try {
+				await use(new SandboxExecutionEnv(sandbox, workspace));
+			} finally {
+				delete process.env.ACORNFALL_BWRAP_STATE;
+				await rm(workspace, { recursive: true, force: true });
+				await rm(state, { recursive: true, force: true });
+			}
+		},
+		{ shell: ["sh", "-c"] },
+	);
+}

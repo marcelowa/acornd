@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"strings"
 )
 
 // Host is the engine that does not sandbox anything: commands and file operations happen on
@@ -87,9 +88,34 @@ func Engine(home, state, name string) (Driver, error) {
 			driver = driver.WithStateDir(state)
 		}
 		return driver, nil
+	case "bwrap":
+		driver := NewBwrap(home)
+		if state != "" {
+			driver = driver.WithStateDir(state)
+		}
+		return driver, nil
 	case "host":
 		return NewHost(), nil
 	default:
-		return nil, errors.New("sandbox: unknown engine " + name + " (microsandbox, host)")
+		return nil, errors.New("sandbox: unknown engine " + name + " (" + strings.Join(EngineNames(), ", ") + ")")
 	}
+}
+
+// EngineNames are the engines this build runs, strongest first and the unisolated one last,
+// which is the order a chooser should show them in.
+func EngineNames() []string { return []string{"microsandbox", "bwrap", "host"} }
+
+// ValidEngine reports whether a workspace may name an engine. The empty string is valid and
+// means the install's default; anything else has to be one this build implements, because a
+// workspace that named an engine nobody implements would have no sandbox at all.
+func ValidEngine(name string) bool {
+	if name == "" {
+		return true
+	}
+	for _, known := range EngineNames() {
+		if known == name {
+			return true
+		}
+	}
+	return false
 }

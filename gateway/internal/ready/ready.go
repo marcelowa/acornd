@@ -149,7 +149,7 @@ func hypervisor() Requirement {
 		return Requirement{"hypervisor", true, "not applicable on " + runtime.GOOS, ""}
 	}
 	if _, err := os.Stat("/dev/kvm"); err != nil {
-		return Requirement{"hypervisor", false, "no /dev/kvm", "run where KVM exists, or --sandbox-engine host (unconfined)"}
+		return Requirement{"hypervisor", false, "no /dev/kvm", "run where KVM exists, or choose another engine: bwrap (user namespaces) or host (unconfined)"}
 	}
 	return Requirement{"hypervisor", true, "/dev/kvm present", ""}
 }

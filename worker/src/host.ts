@@ -1,13 +1,5 @@
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { hostFiles, type DirEntry } from "./files.ts";
-import {
-	concatChunks,
-	type ExecOptions,
-	type ExecResult,
-	type SandboxClient,
-	type WriteSink,
-} from "./sandbox.ts";
+import { concatChunks, type ExecOptions, type ExecResult, type SandboxClient } from "./sandbox.ts";
+import { WorkspaceFiles } from "./workspace-files.ts";
 
 /**
  * The host engine: no sandbox. Commands run in the workspace with the user's own permissions
@@ -27,12 +19,13 @@ export async function openSandbox(_name: string, workspace: string): Promise<San
 	return new HostClient(workspace);
 }
 
-class HostClient implements SandboxClient {
+class HostClient extends WorkspaceFiles implements SandboxClient {
 	/** The workspace, which is what this engine's "sandbox" is. */
 	readonly name: string;
 	private readonly workspace: string;
 
 	constructor(workspace: string) {
+		super();
 		this.workspace = workspace;
 		this.name = `host:${workspace}`;
 	}
@@ -98,66 +91,5 @@ class HostClient implements SandboxClient {
 			stderr: concatChunks(stderr),
 			...(stopped === undefined ? {} : { stopped }),
 		};
-	}
-
-	// Reads and stats are the host's, exactly as the worker reads its own global resources:
-	// there is no second filesystem to translate. The listing is its own because it carries
-	// real sizes, which `hostFiles` leaves at zero.
-	read(path: string): Promise<string | null> {
-		return hostFiles.read(path);
-	}
-
-	async list(path: string): Promise<DirEntry[]> {
-		const entries = await readdir(path, { withFileTypes: true }).catch(() => []);
-		return await Promise.all(
-			entries.map(async (entry) => {
-				const info = await stat(join(path, entry.name)).catch(() => null);
-				return {
-					name: entry.name,
-					directory: entry.isDirectory(),
-					size: info?.size ?? 0,
-					mtimeMs: info?.mtimeMs ?? 0,
-				};
-			}),
-		);
-	}
-
-	stat(path: string): ReturnType<typeof hostFiles.stat> {
-		return hostFiles.stat(path);
-	}
-
-	async readBytes(path: string): Promise<Uint8Array> {
-		return new Uint8Array(await readFile(path));
-	}
-
-	async write(path: string, content: string | Uint8Array): Promise<void> {
-		await writeFile(path, content);
-	}
-
-	async writeStream(path: string): Promise<WriteSink> {
-		const writer = Bun.file(path).writer();
-		return {
-			write: async (data) => {
-				await writer.write(data);
-			},
-			close: async () => {
-				await writer.end();
-			},
-		};
-	}
-
-	async mkdir(path: string): Promise<void> {
-		await mkdir(path, { recursive: true }).catch(() => {});
-	}
-
-	async remove(path: string, options: { recursive?: boolean; force?: boolean }): Promise<void> {
-		await rm(path, {
-			recursive: options.recursive === true,
-			force: options.force === true,
-		}).catch(() => {});
-	}
-
-	async rename(from: string, to: string): Promise<void> {
-		await rename(from, to);
 	}
 }
