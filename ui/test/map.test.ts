@@ -7,6 +7,7 @@ import {
 	textOf,
 	toAgentGroups,
 	toConversation,
+	toEngines,
 	toModelChoices,
 	toProviders,
 	toSandbox,
@@ -512,5 +513,34 @@ describe("the provider list", () => {
 		expect(rows[0]?.source).toBe("OPENCODE_API_KEY");
 		expect(rows[0]?.authTypes).toEqual(["api_key", "oauth"]);
 		expect(toProviders([provider()])[0]?.authTypes).toEqual([]);
+	});
+});
+
+describe("the engines a workspace can be created on", () => {
+	test("keeps the gateway's order and names the microVM engine for a person", () => {
+		const engines = toEngines([
+			{ name: "microsandbox", default: true, isolated: true, installed: true },
+			{ name: "bwrap", isolated: true, installed: true },
+		]);
+		expect(engines.map((engine) => engine.label)).toEqual(["microVM", "bwrap"]);
+		expect(engines[0]?.isDefault).toBe(true);
+		expect(engines[1]?.isDefault).toBe(false);
+	});
+
+	test("offers an engine this machine cannot run, with the reason", () => {
+		const [host] = toEngines([
+			{
+				name: "host",
+				isolated: false,
+				installed: true,
+				problem: "the host engine is not isolated",
+			},
+		]);
+		expect(host?.usable).toBe(false);
+		expect(host?.problem).toContain("not isolated");
+	});
+
+	test("has nothing to offer when the gateway reported none", () => {
+		expect(toEngines(undefined)).toEqual([]);
 	});
 });

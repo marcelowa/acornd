@@ -220,8 +220,16 @@ export function removeWorkspace(name: string): Promise<void> {
 	return post(`/api/workspaces/${encodeURIComponent(name)}/remove`, {});
 }
 
-export function createWorkspace(name: string): Promise<void> {
-	return post("/api/workspaces", { name });
+/**
+ * A new workspace, with the engine chosen before it exists: the engine decides what a
+ * workspace's sandbox is, and a workspace that wanted a microVM should not have to run once
+ * on another engine to change it.
+ */
+export function createWorkspace(name: string, engine?: string): Promise<void> {
+	return post("/api/workspaces", {
+		name,
+		...(engine === undefined || engine === "" ? {} : { engine }),
+	});
 }
 
 /** A new conversation, created and selected; the answer is the state it is now in. */

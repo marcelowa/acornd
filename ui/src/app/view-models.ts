@@ -18,6 +18,20 @@ export interface WorkspaceSummary {
 	active: boolean;
 	image?: string | undefined;
 	network?: string | undefined;
+	/** The sandbox engine this workspace runs on, as the row says it. */
+	engine?: string | undefined;
+}
+
+/** One sandbox engine the create form offers. */
+export interface EngineSummary {
+	name: string;
+	/** The engine a workspace with no choice of its own gets. */
+	isDefault: boolean;
+	/** False means this machine cannot run it; `problem` says why. */
+	usable: boolean;
+	problem?: string | undefined;
+	/** A short word for a narrow control: the engine's own name, or its family. */
+	label: string;
 }
 
 /** One secret's delivery, never its value. */

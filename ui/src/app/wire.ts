@@ -15,7 +15,21 @@ export interface WireWorkspace {
 	general: boolean;
 	image?: string | undefined;
 	network?: string | undefined;
+	/** Which sandbox engine this workspace runs on; absent means the install default. */
+	engine?: string | undefined;
 	running: boolean;
+}
+
+/** One sandbox engine this install can run, and whether this machine can. */
+export interface WireEngine {
+	name: string;
+	/** True for the engine a workspace with no engine of its own gets. */
+	default?: boolean | undefined;
+	isolated: boolean;
+	installed: boolean;
+	version?: string | undefined;
+	/** Why this machine cannot run it, in a sentence. Present means it cannot. */
+	problem?: string | undefined;
 }
 
 export interface WireConversation {
@@ -198,6 +212,8 @@ export interface WireResolvedAgent {
 export interface WireState {
 	workspace: WireWorkspace;
 	workspaces: WireWorkspace[];
+	/** The engines the chooser offers, with this machine's answer for each. */
+	engines?: WireEngine[] | undefined;
 	conversation?: WireConversation | undefined;
 	conversations: WireConversation[];
 	/** The conversation's unsent message, if it ever had one. It is the workspace's, not the

@@ -1,9 +1,10 @@
 import { useState } from "react";
-import type { WorkspaceSummary } from "@/app/view-models";
+import type { EngineSummary, WorkspaceSummary } from "@/app/view-models";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RenameDialog } from "@/components/ui/rename-dialog";
 import { Text } from "@/components/typography/text";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { SandboxDialog } from "./sandbox-dialog";
 import { WorkspaceRow } from "./workspace-row";
 
@@ -11,7 +12,10 @@ export interface WorkspacesPanelProps {
 	/** Every workspace, with the one in view marked. */
 	workspaces: WorkspaceSummary[];
 	onSelect: (name: string) => void;
-	onCreate: (name: string) => void;
+	/** A new workspace, on the engine chosen for it. */
+	onCreate: (name: string, engine?: string) => void;
+	/** The engines to choose from, strongest first, with this machine's answer for each. */
+	engines: EngineSummary[];
 	onRename: (name: string, title: string) => void;
 	onForget: (name: string) => void;
 	/** A row's sandbox, changed from the row's own menu. */
@@ -36,19 +40,24 @@ export function WorkspacesPanel({
 	workspaces,
 	onSelect,
 	onCreate,
+	engines,
 	onRename,
 	onForget,
 	onUpdateSandbox,
 	failure,
 }: WorkspacesPanelProps) {
 	const [name, setName] = useState("");
+	/** The engine the new workspace will run on; the install's default until changed. */
+	const [engine, setEngine] = useState<string>(
+		engines.find((candidate) => candidate.isDefault)?.name ?? "",
+	);
 	/** The workspace being renamed, if any: the dialog is about one row at a time. */
 	const [renaming, setRenaming] = useState<WorkspaceSummary | undefined>(undefined);
 	/** The workspace whose sandbox is being changed, if any. */
 	const [sandboxFor, setSandboxFor] = useState<WorkspaceSummary | undefined>(undefined);
 	const create = (): void => {
 		if (name.trim() === "") return;
-		onCreate(name.trim());
+		onCreate(name.trim(), engine === "" ? undefined : engine);
 		setName("");
 	};
 
@@ -73,6 +82,35 @@ export function WorkspacesPanel({
 			{/* The rail is narrow and the list scrolls: the form stays at the bottom, in reach
 			 * under a thumb, and it wraps rather than clipping the button off the edge. */}
 			<div data-slot="workspaces-create" className="flex shrink-0 flex-col gap-1">
+				{/* The sandbox is chosen before the workspace exists: it decides what the
+				 * workspace's tools can reach, and changing it later is a different decision
+				 * (the sandbox is rebuilt). An engine this machine cannot run is shown with
+				 * the reason, disabled rather than hidden. */}
+				{engines.length > 0 ? (
+					<ToggleGroup
+						type="single"
+						value={engine}
+						onValueChange={(next) => {
+							if (next !== "") setEngine(next);
+						}}
+						variant="outline"
+						size="sm"
+						spacing={0}
+						className="flex-wrap"
+						aria-label="Sandbox engine for the new workspace"
+					>
+						{engines.map((candidate) => (
+							<ToggleGroupItem
+								key={candidate.name}
+								value={candidate.name}
+								disabled={!candidate.usable}
+								title={candidate.problem}
+							>
+								{candidate.label}
+							</ToggleGroupItem>
+						))}
+					</ToggleGroup>
+				) : null}
 				<div className="flex flex-wrap items-center gap-2">
 					<Input
 						inputSize="sm"
@@ -97,7 +135,8 @@ export function WorkspacesPanel({
 				</div>
 				<Text size="2xs" tone="muted">
 					The folder is created inside the workspaces folder, and the new workspace opens
-					with an empty conversation.
+					with an empty conversation. The sandbox engine is fixed when the workspace is
+					made.
 				</Text>
 			</div>
 

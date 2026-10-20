@@ -50,6 +50,13 @@ export function WorkspaceRow({
 					<Text size="2xs" tone="muted" className="truncate font-mono">
 						{workspace.path}
 					</Text>
+					{/* The engine is which sandbox this workspace runs on; a row that hides it
+					 * would make two workspaces on different engines look the same. */}
+					{workspace.engine !== undefined && workspace.engine !== "" ? (
+						<Badge variant="outline" aria-label={`Sandbox engine ${workspace.engine}`}>
+							{workspace.engine}
+						</Badge>
+					) : null}
 				</div>
 			</div>
 			<div className="flex shrink-0 items-center gap-2">

@@ -357,6 +357,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					workspaces={platform.workspaces}
 					onSelect={platform.selectWorkspace}
 					onCreate={platform.createWorkspace}
+					engines={platform.engines}
 					onRename={platform.renameWorkspace}
 					onForget={platform.removeWorkspace}
 					onUpdateSandbox={platform.setWorkspaceSandbox}

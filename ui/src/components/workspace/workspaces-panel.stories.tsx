@@ -38,6 +38,7 @@ const workspaces: WorkspaceSummary[] = [
 		general: false,
 		running: false,
 		active: false,
+		engine: "bwrap",
 	},
 	{
 		name: "something",
@@ -49,9 +50,23 @@ const workspaces: WorkspaceSummary[] = [
 	},
 ];
 
+/** The engines the create form offers: the default first, and one this machine cannot run. */
+const engines = [
+	{ name: "microsandbox", isDefault: true, usable: true, label: "microVM" },
+	{ name: "bwrap", isDefault: false, usable: true, label: "bwrap" },
+	{
+		name: "host",
+		isDefault: false,
+		usable: false,
+		label: "host",
+		problem: "not isolated: commands run on the machine itself",
+	},
+];
+
 export const Default: Story = {
 	args: {
 		workspaces,
+		engines,
 		onSelect: noop,
 		onCreate: noop,
 		onRename: noop,

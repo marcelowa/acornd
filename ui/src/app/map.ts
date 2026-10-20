@@ -1,6 +1,7 @@
 import type {
 	BusyAction,
 	ConversationSummary,
+	EngineSummary,
 	ModelChoice,
 	PickerGroup,
 	ProviderSummary,
@@ -12,6 +13,7 @@ import type {
 	WireAgentSummary,
 	WireContentBlock,
 	WireConversation,
+	WireEngine,
 	WireEntry,
 	WireMessage,
 	WireProvider,
@@ -170,6 +172,22 @@ export function toWorkspaces(workspaces: WireWorkspace[], activeName: string): W
 		active: workspace.name === activeName,
 		image: workspace.image,
 		network: workspace.network,
+		engine: workspace.engine,
+	}));
+}
+
+/**
+ * The engines the create form offers, in the order the gateway lists them: strongest first.
+ * `label` is the engine's own name, except the engine names the product elsewhere: a
+ * "microsandbox" is a microVM to the person choosing one.
+ */
+export function toEngines(engines: WireEngine[] | undefined): EngineSummary[] {
+	return (engines ?? []).map((engine) => ({
+		name: engine.name,
+		isDefault: engine.default === true,
+		usable: engine.installed && engine.problem === undefined,
+		problem: engine.problem,
+		label: engine.name === "microsandbox" ? "microVM" : engine.name,
 	}));
 }
 
