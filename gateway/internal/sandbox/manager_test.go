@@ -54,7 +54,7 @@ func (f *fakeDriver) Create(_ context.Context, policy Policy, _ string) error {
 	f.policy = policy
 	return f.err
 }
-func (f *fakeDriver) Start(context.Context, string) error {
+func (f *fakeDriver) Start(context.Context, string, []Secret) error {
 	f.calls = append(f.calls, "start")
 	return f.err
 }
@@ -65,6 +65,12 @@ func (f *fakeDriver) Stop(context.Context, string) error {
 func (f *fakeDriver) Remove(context.Context, string) error {
 	f.calls = append(f.calls, "rm")
 	return f.err
+}
+func (f *fakeDriver) SecretDelivery() Delivery { return DeliverySubstitute }
+func (f *fakeDriver) SecretEnvInWorker() bool  { return false }
+func (f *fakeDriver) SecretsChanged(context.Context, string, []Secret) (SecretChange, error) {
+	f.calls = append(f.calls, "secrets")
+	return SecretChange{}, f.err
 }
 
 func (f *fakeDriver) ran(call string) bool {

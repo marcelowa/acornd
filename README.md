@@ -147,6 +147,43 @@ ssh -L 7777:127.0.0.1:7777 desktop
 # then browse http://localhost:7777
 ```
 
+### Secrets
+
+A tool secret is a value a command needs, kept out of the transcript. Global entries are on
+every workspace; a workspace entry with the same name wins. The agent can list names and
+descriptions and ask for one through a card; the value goes to the gateway, never the model.
+On microsandbox the guest environment holds the literal `$MSB_<NAME>`; a command sends that
+value, for example `-H "Authorization: Bearer $GITHUB_TOKEN"`. The engine substitutes the
+real value only for the allowed hosts, and only over HTTPS; plain HTTP is not intercepted.
+`${NAME}` and `{{NAME}}` are not placeholders and pass through. An environment engine puts
+the real value in the sandbox, and `allowEnv: false` keeps it out. See
+[ADR 0021](docs/adr/0021-a-vault-for-tool-secrets.md).
+
+A secret added while a conversation runs is stored first. The tool tells the agent to stop;
+when the turn settles, the gateway restarts the sandbox and starts the next turn itself, so
+the agent continues without you resending anything. The restart waits until no run is using
+the workspace. Rotating an existing name is live, and adding a host or a name is what a
+substitute engine cannot do without that brief restart. The value field hides by default and has an eye to reveal what you pasted. It carries the
+common password-manager opt-outs, though Bitwarden on Firefox still prompts
+([issue #100](https://github.com/marcelowa/acornfall/issues/100)); it is never inside a
+submitting form. The default image has no `curl`; install one inside the sandbox or use the
+project's own HTTPS client:
+
+```bash
+# inside the sandbox
+apt-get update && apt-get install -y curl
+curl -fsS -H "Authorization: Bearer $GITHUB_TOKEN" https://api.github.com/user
+```
+
+Settings > Secrets lists them; the conversation menu has the same page, and an agent that
+needs one shows the card. The headless path reads the value from stdin:
+
+```bash
+acornfall secret add --global --description "release token" \
+  --hosts api.github.com,github.com GITHUB_TOKEN < token.txt
+acornfall secret list
+```
+
 ### Without an API key
 
 The dev provider answers every turn with one real `bash` call and a scripted

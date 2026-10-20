@@ -25,6 +25,19 @@ export const Running: Story = {
 			status: "Running",
 			tools: true,
 			isolated: true,
+			secrets: [
+				{
+					name: "GITHUB_TOKEN",
+					delivery: "substitute",
+					status: "delivered",
+				},
+				{
+					name: "SECOND_TOKEN",
+					delivery: "substitute",
+					status: "delivered",
+				},
+			],
+			secretsRestart: true,
 		},
 		workspacePath: "/home/marcelo/workspace/acornfall",
 	},
@@ -39,6 +52,8 @@ export const OnTheHost: Story = {
 			status: "Running",
 			tools: true,
 			isolated: false,
+			secrets: [],
+			secretsRestart: false,
 		},
 	},
 };
@@ -53,6 +68,8 @@ export const Refused: Story = {
 			tools: false,
 			isolated: true,
 			problem: "no hypervisor: /dev/kvm is not readable",
+			secrets: [],
+			secretsRestart: false,
 		},
 	},
 };

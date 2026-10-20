@@ -20,6 +20,17 @@ export interface WorkspaceSummary {
 	network?: string | undefined;
 }
 
+/** One secret's delivery, never its value. */
+export interface SandboxSecretSummary {
+	name: string;
+	description?: string | undefined;
+	scope?: string | undefined;
+	hosts?: string[] | undefined;
+	delivery?: string | undefined;
+	status?: string | undefined;
+	placeholder?: string | undefined;
+}
+
 /** What the agent's tools can reach, as the interface has to be able to say. */
 export interface SandboxSummary {
 	engine: string;
@@ -30,6 +41,11 @@ export interface SandboxSummary {
 	/** False is the host engine: no isolation, and the interface has to say so. */
 	isolated: boolean;
 	problem?: string | undefined;
+	/** The effective secrets, with blocked entries and their reasons. */
+	secrets: SandboxSecretSummary[];
+	/** True when the engine stored a change for the next start. */
+	secretsRestart: boolean;
+	secretsProblem?: string | undefined;
 }
 
 /** One conversation as the rail needs it. */

@@ -21,6 +21,7 @@ import (
 	"github.com/acornfall/acornfall/gateway/internal/ready"
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 	"github.com/acornfall/acornfall/gateway/internal/update"
+	"github.com/acornfall/acornfall/gateway/internal/vault"
 	"github.com/acornfall/acornfall/gateway/web"
 )
 
@@ -34,6 +35,10 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "workspace" {
 		workspaceCommand(os.Args[2:])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "secret" {
+		secretCommand(os.Args[2:])
 		return
 	}
 	if len(os.Args) > 1 && os.Args[1] == "doctor" {
@@ -79,6 +84,12 @@ func serve(argv []string) error {
 	}
 	dir = resolved
 	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	// The vault is install-wide: one file beside credentials.json, never inside a
+	// workspace and never mounted into a sandbox.
+	secrets, err := vault.Open(filepath.Join(dir, "secrets.json"))
+	if err != nil {
 		return err
 	}
 	// The user's home is resolved here rather than inside control: the sandbox mounts `~/.agents`
@@ -163,6 +174,7 @@ func serve(argv []string) error {
 		},
 		Model:   *model,
 		Sandbox: engine,
+		Vault:   secrets,
 		// Nesting is allowed unless refused: a workspace's sandbox nests when the
 		// engine offers it and the machine can grant it, and boots without it otherwise.
 		DisableVMNesting: *disableVMNesting,

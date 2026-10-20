@@ -14,6 +14,7 @@ export interface ConversationListProps {
 	activeId?: string | undefined;
 	onSelect?: ((id: string) => void) | undefined;
 	onRename?: ((id: string) => void) | undefined;
+	onSecrets?: ((id: string) => void) | undefined;
 	onHide?: ((id: string) => void) | undefined;
 	onRestore?: ((id: string) => void) | undefined;
 	className?: string | undefined;
@@ -87,6 +88,7 @@ export function ConversationList({
 	className,
 	onSelect,
 	onRename,
+	onSecrets,
 	onHide,
 	onRestore,
 }: ConversationListProps) {
@@ -100,6 +102,7 @@ export function ConversationList({
 			active={conversation.id === activeId}
 			onSelect={onSelect}
 			onRename={onRename}
+			onSecrets={onSecrets}
 			onHide={onHide}
 			onRestore={onRestore}
 		/>

@@ -80,6 +80,22 @@ export type Command =
 			cancelled?: boolean;
 	  }
 	| { id: string; type: "auth_cancel"; authId: string }
+	| {
+			id: string;
+			type: "secret_answer";
+			secretRequestId: string;
+			cancelled?: boolean;
+			secretScope?: "global" | "workspace";
+			restartRequired?: boolean;
+			reason?: string;
+	  }
+	| {
+			id: string;
+			type: "secret_list_answer";
+			secretRequestId: string;
+			secrets: SecretInfo[];
+			reason?: string;
+	  }
 	| { id: string; type: "usage" }
 	| { id: string; type: "shutdown" };
 
@@ -113,6 +129,18 @@ export interface DescribeData {
 		subagents: boolean;
 		sandbox: string;
 	};
+}
+
+/** A secret as the agent may know it: name, description, and delivery. Never a value. */
+export interface SecretInfo {
+	name: string;
+	description?: string;
+	scope?: string;
+	hosts?: string[];
+	delivery?: string;
+	status?: string;
+	/** The literal the guest environment holds on a substitute engine; empty for env. */
+	placeholder?: string;
 }
 
 /** One conversation as the UI lists it. The id is the harness's own, stringified. */
@@ -188,7 +216,16 @@ export type Frame =
 			};
 	  }
 	| { type: "submission"; conversationId: string; submissionId: string; status: string }
-	| { type: "auth"; authId: string; event: AuthEvent };
+	| { type: "auth"; authId: string; event: AuthEvent }
+	| {
+			type: "secret_request";
+			id: string;
+			conversationId: string;
+			name: string;
+			description?: string;
+			hosts?: string[];
+	  }
+	| { type: "secret_list"; id: string; conversationId: string };
 
 /** One line of JSON on stdout. A single write keeps frames from interleaving. */
 export function emit(frame: Frame): void {

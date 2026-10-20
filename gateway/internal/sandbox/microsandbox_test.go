@@ -248,7 +248,7 @@ func TestTheLifecycleCallsTheEngineAsDocumented(t *testing.T) {
 	if err := driver.Create(ctx, Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
-	if err := driver.Start(ctx, "ws"); err != nil {
+	if err := driver.Start(ctx, "ws", nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := driver.Stop(ctx, "ws"); err != nil {

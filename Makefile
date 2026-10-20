@@ -6,7 +6,7 @@ DATA ?= $(HOME)/.acornfall
 ADDR ?= 0.0.0.0:7777
 URL ?= http://127.0.0.1:7777
 
-.PHONY: help deps build typecheck lint modernize tools commits check test test-sandbox sandbox-preflight ui ui-build run dev fmt clean release
+.PHONY: help deps build typecheck lint modernize tools commits check test test-sandbox sandbox-preflight ui ui-build run dev fmt clean release release-branch
 
 # The linters, installed into the Go and bun toolchains rather than vendored. `make lint` runs
 # whichever are present and names the ones that are not, so a missing tool is a message and
@@ -146,6 +146,11 @@ fmt: ## format Go sources
 # both came from tagging before fetching. Fails clean rather than tagging
 # the wrong commit, and proves the tag before pushing it. A hyphen suffix
 # marks the GitHub release as a pre-release, so the picker can hide it.
+#
+# A GA tag belongs on main: the update check follows the newest GA, and a
+# branch build marked GA would become every install's default. A branch
+# that is not merged yet uses release-branch below, whose tag must carry a
+# suffix (vX.Y.Z-beta.N); GitHub then marks it a pre-release.
 release: ## tag origin/main as V and push the tag (NOTES=release notes)
 	@test -n "$(V)" || (echo "usage: make release V=vX.Y.Z[-suffix] [NOTES=...]"; exit 2)
 	@echo "$(V)" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$$' || (echo "V is vX.Y.Z or vX.Y.Z-rc.N, got $(V)"; exit 2)
@@ -155,6 +160,22 @@ release: ## tag origin/main as V and push the tag (NOTES=release notes)
 	git fetch origin main
 	git tag -a $(V) origin/main -m "$${NOTES:-Release $(V).}"
 	@test "$$(git rev-parse '$(V)^{commit}')" = "$$(git rev-parse origin/main)" || (echo "tag missed main"; exit 2)
+	git push origin $(V)
+
+# The branch counterpart of release. It refuses a tag without a hyphen
+# suffix, because that is the only thing that keeps a branch build out of
+# the newest-GA marker. BRANCH defaults to the checked-out branch.
+BRANCH ?= $(shell git branch --show-current)
+release-branch: ## tag origin/<BRANCH> as V (V must carry a -suffix; NOTES=release notes)
+	@test -n "$(V)" || (echo "usage: make release-branch V=vX.Y.Z-suffix [BRANCH=name] [NOTES=...]"; exit 2)
+	@echo "$(V)" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.]+$$' || (echo "a branch release needs a hyphen suffix, e.g. v0.11.0-beta.1"; exit 2)
+	@test -n "$(BRANCH)" || (echo "name a branch"; exit 2)
+	@test -z "$$(git status --porcelain)" || (echo "tree not clean"; exit 2)
+	git fetch origin $(BRANCH) 'refs/tags/$(V):refs/tags/$(V)-remote' 2>/dev/null || true
+	@if git rev-parse --verify --quiet 'refs/tags/$(V)-remote' >/dev/null; then echo "$(V) already on origin"; exit 2; fi
+	git fetch origin $(BRANCH)
+	git tag -a $(V) origin/$(BRANCH) -m "$${NOTES:-Release $(V).}"
+	@test "$$(git rev-parse '$(V)^{commit}')" = "$$(git rev-parse origin/$(BRANCH))" || (echo "tag missed origin/$(BRANCH)"; exit 2)
 	git push origin $(V)
 
 clean:

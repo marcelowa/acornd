@@ -93,7 +93,7 @@ func (w *Worker) Start(ctx context.Context) error {
 	cmd := exec.Command(w.config.Command, w.config.Args...)
 	cmd.Dir = w.config.Dir
 	if len(w.config.Env) > 0 {
-		cmd.Env = append(os.Environ(), w.config.Env...)
+		cmd.Env = mergeEnv(os.Environ(), w.config.Env)
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -175,6 +175,31 @@ func (w *Worker) CallInto(ctx context.Context, command protocol.Command, out any
 		return nil
 	}
 	return json.Unmarshal(data, out)
+}
+
+// mergeEnv combines environment groups, last wins. A secret delivered into the worker's own
+// environment must not lose to a variable the shell already exported, which is what
+// appending duplicates would do: getenv reads the first match.
+func mergeEnv(base, extra []string) []string {
+	values := map[string]string{}
+	order := []string{}
+	for _, group := range [][]string{base, extra} {
+		for _, entry := range group {
+			key, value, ok := strings.Cut(entry, "=")
+			if !ok || key == "" {
+				continue
+			}
+			if _, seen := values[key]; !seen {
+				order = append(order, key)
+			}
+			values[key] = value
+		}
+	}
+	out := make([]string, 0, len(order))
+	for _, key := range order {
+		out = append(out, key+"="+values[key])
+	}
+	return out
 }
 
 // Close sends shutdown and waits briefly for the process to end.

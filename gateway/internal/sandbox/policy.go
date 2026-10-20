@@ -53,6 +53,11 @@ type Policy struct {
 	// user's folder, so that build artifacts cannot fight between host and guest. Not used
 	// yet, deliberately: see ADR 0012, "Not doing now, on purpose".
 	Owned []string
+	// Secrets are the values a driver may deliver, already filtered for its capability. A
+	// substitute engine writes source references into the policy file and keeps the values in
+	// the create/modify process environment; an environment engine puts them in the sandbox.
+	// See docs/adr/0021-a-vault-for-tool-secrets.md.
+	Secrets []Secret
 }
 
 // Defaults, chosen to be unremarkable. The image matches this host's libc family so that

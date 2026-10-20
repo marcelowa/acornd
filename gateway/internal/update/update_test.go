@@ -396,22 +396,28 @@ func TestBackupKeepsLastThree(t *testing.T) {
 
 func TestBackupSkipsSecrets(t *testing.T) {
 	manager, home := testManager(t)
-	if err := os.WriteFile(filepath.Join(home, "credentials.json"), []byte("secret"), 0o600); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"credentials.json", "secrets.json"} {
+		if err := os.WriteFile(filepath.Join(home, name), []byte("secret"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	dir, err := manager.Backup()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "credentials.json")); !os.IsNotExist(err) {
-		t.Fatal("backup must not hold credentials.json")
-	}
-	if err := os.WriteFile(filepath.Join(dir, "credentials.json"), []byte("old"), 0o600); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"credentials.json", "secrets.json"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Fatalf("backup must not hold %s", name)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("old"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	manager.scrubSecrets()
-	if _, err := os.Stat(filepath.Join(dir, "credentials.json")); !os.IsNotExist(err) {
-		t.Fatal("scrub must remove old credentials.json copies")
+	for _, name := range []string{"credentials.json", "secrets.json"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Fatalf("scrub must remove old %s copies", name)
+		}
 	}
 }
 

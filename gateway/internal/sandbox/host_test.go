@@ -30,7 +30,7 @@ func TestTheHostEngineNeedsNothing(t *testing.T) {
 	policy := Policy{Workspace: t.TempDir()}
 	for _, call := range []error{
 		host.Create(context.Background(), policy, t.TempDir()),
-		host.Start(context.Background(), "anything"),
+		host.Start(context.Background(), "anything", nil),
 		host.Stop(context.Background(), "anything"),
 		host.Remove(context.Background(), "anything"),
 	} {

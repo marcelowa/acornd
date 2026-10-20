@@ -40,6 +40,30 @@ export function SandboxPanel({ sandbox, workspacePath }: SandboxPanelProps) {
 			{sandbox.problem === undefined ? null : (
 				<Fact label="problem" value={sandbox.problem} tone="danger" />
 			)}
+			{sandbox.secretsProblem === undefined ? null : (
+				<Fact label="secrets" value={sandbox.secretsProblem} tone="danger" />
+			)}
+			{sandbox.secrets.length === 0 ? null : (
+				<>
+					<Fact
+						label="secrets"
+						value={
+							sandbox.secretsRestart
+								? "the next sandbox start applies a change"
+								: `${sandbox.secrets.length}`
+						}
+					/>
+					{sandbox.secrets.map((secret) => (
+						<Fact
+							key={secret.name}
+							label={secret.name}
+							value={[secret.status, secret.delivery, secret.placeholder]
+								.filter(Boolean)
+								.join(" · ")}
+						/>
+					))}
+				</>
+			)}
 			{workspacePath === undefined ? null : <Fact label="workspace" value={workspacePath} />}
 		</div>
 	);
