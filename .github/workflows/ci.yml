@@ -110,9 +110,14 @@ jobs:
   bwrap:
     # The third engine's tier: real bubblewrap, real pasta, a real image pulled from a registry.
     # The fast tier covers the driver and the client against fakes; this is the one job that runs
-    # the thing itself, so it installs what the engine needs and then lets the tier assert it
-    # (ACORNFALL_BWRAP_ONLY makes a missing piece a failure rather than a skip).
-    runs-on: [self-hosted, linux, x64]
+    # the thing itself.
+    #
+    # It runs on a hosted runner because it needs three packages installed, and the self-hosted
+    # runner has neither sudo nor root — the tier would fail on the box that is meant to run it.
+    # Ubuntu 24.04 gates unprivileged user namespaces behind AppArmor, so it gets the profile
+    # Ubuntu documents for bubblewrap; without it the engine is unusable there for a reason that
+    # has nothing to do with this code.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -124,20 +129,16 @@ jobs:
           bun-version: latest
       - name: Install what the engine needs
         # bubblewrap for the sandbox, pasta for its network, and iproute2 for the address step
-        # pasta does not do itself. A runner that cannot install them fails here, loudly.
-        #
-        # `sudo` is not on every runner — a container-based runner is already root, and one
-        # without sudo at all is a runner that cannot run this tier. Both are said plainly.
+        # pasta does not do itself.
         run: |
-          for tool in bwrap pasta ip; do
-            command -v "$tool" >/dev/null || missing=1
-          done
-          if [ -z "${missing:-}" ]; then echo "bubblewrap, pasta, and ip are already here"; exit 0; fi
-          if [ "$(id -u)" -eq 0 ]; then SUDO=""; else
-            command -v sudo >/dev/null || { echo "::error::this runner has no sudo and is not root, so the engine's packages cannot be installed"; exit 1; }
-            SUDO=sudo
-          fi
-          $SUDO apt-get update -qq
-          $SUDO apt-get install -y -qq bubblewrap passt iproute2
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap passt iproute2
+      - name: Let bubblewrap make user namespaces
+        # abi/4.0 profiles are the 24.04 mechanism; `userns,` is what bubblewrap needs and what the
+        # distribution refuses by default.
+        run: |
+          sudo sh -c 'printf "%s\n" "abi <abi/4.0>," "include <tunables/global>" "profile bwrap /usr/bin/bwrap flags=(unconfined) {" "  userns," "}" > /etc/apparmor.d/bwrap'
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap
+          bwrap --ro-bind / / --unshare-all -- /bin/true && echo "bubblewrap can make a user namespace"
       - run: make deps
       - run: make test-bwrap
