@@ -343,7 +343,7 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 		Bwrap:       bwrapPath,
 		Run:         run,
 		GuestRun:    guestRunDir,
-		IdleTimeout: policy.IdleTimeout,
+		IdleTimeout: idleTimeoutOrDefault(policy.IdleTimeout),
 		Beta:        "one sandbox per workspace, held by this binary as its first process",
 	}
 	data, err := json.MarshalIndent(config, "", "  ")
@@ -834,4 +834,15 @@ func hasLoopbackServers(contents string) bool {
 		}
 	}
 	return false
+}
+
+// idleTimeoutOrDefault is the policy's idle timeout, or the default when the policy did not name
+// one. The default normally comes from Policy.withDefaults, which the microVM driver calls while
+// rendering its file; a driver that reads the field directly has to ask, or a sandbox that nobody
+// told about the timer keeps running forever.
+func idleTimeoutOrDefault(value string) string {
+	if trimmed := strings.TrimSpace(value); trimmed != "" {
+		return trimmed
+	}
+	return DefaultIdleTimeout
 }

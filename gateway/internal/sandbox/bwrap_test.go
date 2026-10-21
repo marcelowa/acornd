@@ -182,6 +182,11 @@ func TestBwrapCreateWritesWhatTheWorkspaceRunsUnder(t *testing.T) {
 	if config.Network.Mode != NetworkOffName {
 		t.Fatalf("network: %q, want off", config.Network.Mode)
 	}
+	// A policy that names no idle timeout gets the default one: a sandbox nobody told about the
+	// timer would keep running after a gateway died.
+	if config.IdleTimeout != DefaultIdleTimeout {
+		t.Fatalf("idle timeout: %q, want %q", config.IdleTimeout, DefaultIdleTimeout)
+	}
 	// Only folders that exist are mounted: a mount that does not resolve would make every
 	// command fail, and a later-created folder is the next command's business.
 	if len(config.ReadOnly) != 1 || config.ReadOnly[0] != filepath.Join(home, "skills") {
@@ -593,5 +598,22 @@ func TestBwrapBindsTheMachinesOwnResolverWhenItIsUsable(t *testing.T) {
 	// And the argv falls back to the machine's own file.
 	if resolverOrHost(bwrapConfig{}) != "/etc/resolv.conf" {
 		t.Fatal("the fallback is the machine's own resolver file")
+	}
+}
+
+// A workspace that asked to be kept alive keeps the value that says so: the default is only for a
+// policy that named nothing.
+func TestBwrapKeepsTheIdleTimeoutAPolicyNames(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	workspace := t.TempDir()
+	if _, err := driver.writeConfig(Policy{Workspace: workspace, IdleTimeout: KeptAliveIdleTimeout}, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	config, err := driver.readConfig(Name(workspace))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.IdleTimeout != KeptAliveIdleTimeout {
+		t.Fatalf("idle timeout: %q, want %q", config.IdleTimeout, KeptAliveIdleTimeout)
 	}
 }
