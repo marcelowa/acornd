@@ -552,15 +552,22 @@ func workspaceCommand(argv []string) {
 				log.Fatalf("acornfall: workspace %q already exists", name)
 			}
 		}
+		// A workspace records its engine: left blank it would mean "whatever this machine prefers",
+		// and an unrecorded choice is one that changes if the workspace moves. The question is
+		// asked here the same way the gateway asks it — what can this machine actually run.
+		chosen := *engine
+		if chosen == "" {
+			chosen = sandbox.NewTier(dir, "", nil).Default()
+		}
 		registry.Workspaces = append(registry.Workspaces, control.Workspace{
-			Name: name, Path: absolute, Title: name, Image: *image, Network: *network, Engine: *engine,
+			Name: name, Path: absolute, Title: name, Image: *image, Network: *network, Engine: chosen,
 			KeepAlive: *keepAlive, Private: *privateNetworks,
 		})
 		if err := control.SaveRegistryFile(registry); err != nil {
 			log.Fatalf("acornfall: %v", err)
 		}
 		fmt.Printf("added %s at %s\n", name, absolute)
-		fmt.Printf("sandbox: %s, network %s, engine %s\n", imageLabel(*image), networkLabel(*network), engineLabel(*engine))
+		fmt.Printf("sandbox: %s, network %s, engine %s\n", imageLabel(*image), networkLabel(*network), engineLabel(chosen))
 		if *privateNetworks {
 			fmt.Println("private networks: reachable as this machine (its LAN and tailnet)")
 		} else {

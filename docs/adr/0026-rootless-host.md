@@ -48,10 +48,16 @@ engine gets the first one in that order that can run a workspace **with its netw
 driver answers that with `Egress`, separately from `Usable`, because a machine can run a sandbox
 without being able to give it a network. An engine that cannot is not a default.
 
-**3. The choice is recorded, once.** A new workspace gets the resolved name written into its
-record, and at startup any workspace that named none is recorded the same way. An empty field
-would mean "whatever this machine prefers", which is exactly the drift the engine rules forbid: a
-workspace that woke up on another machine would silently run somewhere nobody chose.
+**3. The choice is recorded when the workspace is made**, by the console, the API, and
+`acornfall workspace add`, each of which asks this machine the same question. An empty field means
+"whatever this machine prefers", which is exactly the drift the engine rules forbid: a workspace
+that woke up on another machine would silently run somewhere nobody chose.
+
+A record that still names no engine — everything made before this change — is *not* rewritten
+automatically: it was running the old default, microsandbox, and resolving it to the new
+preference would move a running workspace onto another engine without anybody choosing. Those are
+recorded by hand (`acornfall workspace list` shows which), and until they are, they follow the
+machine's preference, which on a machine that can run bubblewrap means bubblewrap.
 
 ## What this trades
 
