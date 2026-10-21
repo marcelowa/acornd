@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { EngineSummary, WorkspaceSummary } from "@/app/view-models";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,6 +51,15 @@ export function WorkspacesPanel({
 	const [engine, setEngine] = useState<string>(
 		engines.find((candidate) => candidate.isDefault)?.name ?? "",
 	);
+	// The engine list arrives with the first state frame, which can be after this mounts: pick the
+	// install's default then, unless someone has already chosen. Without this the selector sits
+	// with nothing chosen until the next reload.
+	useEffect(() => {
+		setEngine((current) => {
+			if (current !== "") return current;
+			return engines.find((candidate) => candidate.isDefault)?.name ?? "";
+		});
+	}, [engines]);
 	/** The workspace being renamed, if any: the dialog is about one row at a time. */
 	const [renaming, setRenaming] = useState<WorkspaceSummary | undefined>(undefined);
 	/** The workspace whose sandbox is being changed, if any. */
