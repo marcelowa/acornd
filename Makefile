@@ -116,7 +116,9 @@ test: lint ## the default tier: units and the feature suite, no hypervisor neede
 test-bwrap: ## the bubblewrap engine end to end: it fetches an image, so it is not part of `make test`
 	# A bwrap workspace gets its own copy of its image and carries egress with pasta; both are
 	# why this is its own tier, the same way the microVM tier needs /dev/kvm. Needs bubblewrap,
-	# passt, and iproute2 installed. The client and driver tests run in the fast tier already.
+	# passt installed: the namespace's address and routes are set over netlink by the gateway
+	# itself, so there is nothing else to install. The client and driver tests run in the fast
+	# tier already.
 	#
 	# ACORNFALL_BWRAP_ONLY makes a machine without them fail instead of skip: this target is the
 	# one place that says the tier ran, so a skip here would be a green run that tested nothing.

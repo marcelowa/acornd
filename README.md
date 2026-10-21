@@ -28,7 +28,7 @@ another worker, not changing the control plane.
 - make, gcc (builds and the `-race` tests)
 - an API key for a supported provider (or the dev provider below)
 - one sandbox engine: a hypervisor (`/dev/kvm`) for the default microVM engine, or
-  `bwrap` (bubblewrap) — `apt install bubblewrap passt iproute2`. On Ubuntu 24.04 the engine also
+  `bwrap` (bubblewrap) — `apt install bubblewrap passt`. On Ubuntu 24.04 the engine also
   needs unprivileged user namespaces: `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`
   (or an AppArmor profile for `/usr/bin/bwrap`, which covers a workspace with no egress)
 
@@ -67,7 +67,7 @@ A workspace runs on one engine, chosen when it is created and kept with its reco
 | engine | what it is | needs |
 |---|---|---|
 | `microsandbox` | one microVM per workspace (the default, and the strongest boundary) | `/dev/kvm`, and it fetches a 67 MB engine on first use |
-| `bwrap` | the workspace's own image in one long-lived bubblewrap sandbox per workspace (beta) | a user namespace, one image pull, and two network tools for egress: `apt install bubblewrap passt iproute2`; no KVM, 1.1 ms per command, 82 MB of disk per workspace |
+| `bwrap` | the workspace's own image in one long-lived bubblewrap sandbox per workspace (beta) | a user namespace, one image pull, and pasta for egress: `apt install bubblewrap passt`; no KVM, 1.1 ms per command, 82 MB of disk per workspace |
 | `host` | no sandbox: the tools run on your machine | nothing, and it is not isolated |
 
 ```bash

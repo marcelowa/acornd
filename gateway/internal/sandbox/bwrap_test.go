@@ -235,7 +235,7 @@ func TestBwrapCreateCarriesEgressWithPasta(t *testing.T) {
 	}
 	// The tools are resolved now, so a missing one is a sentence at create rather than a mystery
 	// in the middle of a turn.
-	if config.Network.Pasta != "/usr/bin/pasta" || config.Network.IP != "/usr/bin/ip" {
+	if config.Network.Pasta != "/usr/bin/pasta" {
 		t.Fatalf("tool paths: %+v", config.Network)
 	}
 	if config.Network.Address != sandboxAddress || config.Network.Gateway != sandboxGateway {
@@ -243,8 +243,9 @@ func TestBwrapCreateCarriesEgressWithPasta(t *testing.T) {
 	}
 }
 
-// A machine without the two packages cannot carry egress, and saying which one is missing is the
-// difference between a refusal somebody can act on and one they cannot.
+// A machine without pasta cannot carry egress, and saying which package provides it is the
+// difference between a refusal somebody can act on and one they cannot. Nothing else is needed:
+// the network namespace is configured over netlink by this binary (ADR 0026).
 func TestBwrapCreateNamesWhatEgressNeeds(t *testing.T) {
 	workspace := t.TempDir()
 	withOnly := func(available string) *Bwrap {
@@ -262,9 +263,9 @@ func TestBwrapCreateNamesWhatEgressNeeds(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "apt install passt") {
 		t.Fatalf("no pasta: %v, want the package that provides it", err)
 	}
-	_, err = withOnly("pasta").writeConfig(Policy{Workspace: workspace, Egress: true}, t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "iproute2") {
-		t.Fatalf("no ip: %v, want the package that provides it", err)
+	// Egress with pasta and nothing else is a complete network: no iproute2 to install.
+	if _, err := withOnly("pasta").writeConfig(Policy{Workspace: workspace, Egress: true}, t.TempDir()); err != nil {
+		t.Fatalf("pasta alone should be enough for egress: %v", err)
 	}
 	// Without egress neither is needed: a sandbox with no network needs no network tools.
 	if _, err := withOnly("bwrap").writeConfig(Policy{Workspace: workspace}, t.TempDir()); err != nil {
@@ -385,7 +386,7 @@ func TestBwrapSandboxArgvSharesPastaForEgress(t *testing.T) {
 		GuestSocket: guestSocketPath,
 		Network: bwrapNetwork{
 			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
-			Pasta: "/usr/bin/pasta", IP: "/usr/sbin/ip",
+			Pasta: "/usr/bin/pasta",
 		},
 	}
 	argv, err := driver.bootArgv(config)
@@ -404,9 +405,8 @@ func TestBwrapSandboxArgvSharesPastaForEgress(t *testing.T) {
 		"-t none -u none -T none -U none", "--no-map-gw",
 		"-a 10.0.2.15 -n 24 -g 10.0.2.2",
 		// pasta configures neither the address nor the route, so the sandbox does it from inside
-		// the namespace pasta made.
-		`addr add "$ADDR" dev eth0`,
-		`route add default via "$GATEWAY"`,
+		// the namespace pasta made: this binary over netlink, not a shell and not iproute2.
+		"/install/acornfall netns --address 10.0.2.15/24 --gateway 10.0.2.2",
 		"/usr/bin/bwrap",
 		"--share-net",
 	} {
@@ -633,7 +633,7 @@ func TestBwrapRefusesPrivateNetworksWithoutAGrant(t *testing.T) {
 		Run: "/state/ws/run", GuestRun: guestRunDir, GuestSocket: guestSocketPath,
 		Network: bwrapNetwork{
 			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
-			Pasta: "/usr/bin/pasta", IP: "/usr/sbin/ip",
+			Pasta: "/usr/bin/pasta",
 		},
 	}
 	argv, err := driver.bootArgv(config)
@@ -642,10 +642,9 @@ func TestBwrapRefusesPrivateNetworksWithoutAGrant(t *testing.T) {
 	}
 	joined := strings.Join(argv, " ")
 	for _, want := range []string{
-		"route add unreachable",
-		"100.64.0.0/10",
-		"192.168.0.0/16",
-		"169.254.0.0/16",
+		// The flag asks for the routes; the list itself lives where the routes are installed, so
+		// this asserts the request rather than repeating the list in a second place.
+		"acornfall netns --address 10.0.2.15/24 --gateway 10.0.2.2 --refuse-private",
 		"--dns-forward 10.0.2.3",
 	} {
 		if !strings.Contains(joined, want) {
@@ -664,7 +663,7 @@ func TestBwrapAGrantReachesPrivateNetworks(t *testing.T) {
 		Run: "/state/ws/run", GuestRun: guestRunDir, GuestSocket: guestSocketPath,
 		Network: bwrapNetwork{
 			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
-			Pasta: "/usr/bin/pasta", IP: "/usr/sbin/ip", Private: true,
+			Pasta: "/usr/bin/pasta", Private: true,
 		},
 	}
 	argv, err := driver.bootArgv(config)
@@ -672,7 +671,7 @@ func TestBwrapAGrantReachesPrivateNetworks(t *testing.T) {
 		t.Fatalf("argv: %v", err)
 	}
 	joined := strings.Join(argv, " ")
-	if strings.Contains(joined, "route add unreachable") {
+	if strings.Contains(joined, "--refuse-private") {
 		t.Errorf("a granted workspace should have no refused ranges:\n%s", joined)
 	}
 	if strings.Contains(joined, "--dns-forward") {

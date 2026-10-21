@@ -102,10 +102,10 @@ file. The packet never leaves the sandbox, so no host configuration, root access
 that can drift from the workspace's record is involved. See ADR 0025.
 
 What it costs: pasta's setup, once per workspace rather than once per command — 1.1 ms per command
-after that (ADR 0024). ICMP does not work (pasta is a userspace forwarder, so `ping` fails and TCP/UDP do not), and two packages
-have to be installed — `passt` for pasta and `iproute2` for the address step — because `Create`
-refuses a workspace whose egress it cannot carry rather than quietly putting it on the host's
-network.
+after that (ADR 0024). ICMP does not work (pasta is a userspace forwarder, so `ping` fails and TCP/UDP do not), and one package has
+to be installed — `passt` for pasta; the address and the routes are set by the gateway itself over
+netlink, so `iproute2` is not needed — because `Create` refuses a workspace whose egress it cannot
+carry rather than quietly putting it on the host's network.
 
 Running `tailscaled` **inside** a workspace is possible but is a different feature: it needs
 `/dev/net/tun` bound in and `--cap-add CAP_NET_ADMIN`, because **bwrap drops every capability by

@@ -239,7 +239,6 @@ type bwrapNetwork struct {
 	Address string `json:"address,omitempty"`
 	Gateway string `json:"gateway,omitempty"`
 	Pasta   string `json:"pasta,omitempty"`
-	IP      string `json:"ip,omitempty"`
 }
 
 // The sandbox's network, when it has one. It is the address space QEMU's user-mode network has
@@ -253,11 +252,12 @@ const (
 	// private. It is inside 10.0.2.0/24, whose connected route is more specific than the refused
 	// ranges, which is what keeps the gateway and this address reachable.
 	sandboxDNS = "10.0.2.3"
-	// privateRanges are refused inside the sandbox when it has no grant: this machine's own
-	// networks and the ranges that mean "inside", including the link-local metadata address a
-	// cloud machine answers on.
-	privateRanges = "10.0.0.0/8 100.64.0.0/10 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16"
 )
+
+// refusePrivate is the flag that asks the namespace's own configuration to install the routes
+// refusing private ranges. The list is not here: it lives where the routes are installed
+// (cmd/acornfall/netns.go), so one file decides what a workspace without a grant cannot reach.
+const refusePrivate = "--refuse-private"
 
 // Create resolves the policy into a config and the workspace's images, then boots it: control's
 // policy is "ensure created, then ensure running", and a sandbox that is created but not running
@@ -310,12 +310,8 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 		if err != nil {
 			return bwrapConfig{}, fmt.Errorf("%w: egress in a bwrap workspace is carried by pasta (install it: apt install passt)", ErrUnavailable)
 		}
-		ip, err := b.look("ip")
-		if err != nil {
-			return bwrapConfig{}, fmt.Errorf("%w: configuring a bwrap workspace's network needs ip (install it: apt install iproute2)", ErrUnavailable)
-		}
 		network = bwrapNetwork{
-			Mode: "pasta", Address: sandboxAddress, Gateway: sandboxGateway, Pasta: pasta, IP: ip,
+			Mode: "pasta", Address: sandboxAddress, Gateway: sandboxGateway, Pasta: pasta,
 			Private: policy.PrivateEgress,
 		}
 	}
@@ -682,29 +678,24 @@ func (b *Bwrap) bootArgv(config bwrapConfig) ([]string, error) {
 		return sandbox, nil
 	}
 	address, prefix, ok := strings.Cut(config.Network.Address, "/")
-	if !ok || config.Network.Pasta == "" || config.Network.IP == "" {
+	if !ok || config.Network.Pasta == "" || config.Supervisor == "" {
 		return nil, errors.New("sandbox: this workspace has egress but its config has no network to carry it: recreate the sandbox")
 	}
-	// pasta makes the namespace and the tap and configures neither, so this runs first, inside
-	// pasta's own namespace, where the address and the route are ours to set.
-	steps := []string{
-		`IP="$1"; ADDR="$2"; GATEWAY="$3"; shift 3`,
-		`"$IP" link set lo up`,
-		`"$IP" link set eth0 up`,
-		`"$IP" addr add "$ADDR" dev eth0`,
-		`"$IP" route add default via "$GATEWAY"`,
+	// pasta makes the namespace and the tap and configures neither, so the step it runs first
+	// is ours: it sets the address and the default route over netlink, refuses the ranges the
+	// workspace was not granted, then execs bubblewrap. Nothing here needs iproute2.
+	configure := []string{
+		config.Supervisor, "netns",
+		"--address", config.Network.Address,
+		"--gateway", config.Network.Gateway,
 	}
 	if !config.Network.Private {
 		// A route that says "unreachable" is the whole boundary: the packet never leaves the
 		// sandbox, so nothing on the machine or its overlay is dialled. The connected route to
 		// the gateway's /24 is more specific and stays, which is what DNS and the sandbox's own
 		// address need.
-		steps = append(steps,
-			`for range in `+privateRanges+`; do "$IP" route add unreachable "$range" 2>/dev/null; done`,
-			`for range in fc00::/7 fe80::/10; do "$IP" -6 route add unreachable "$range" 2>/dev/null; done`)
+		configure = append(configure, refusePrivate)
 	}
-	steps = append(steps, `exec "$@"`)
-	configure := strings.Join(steps, "\n")
 	argv := []string{
 		config.Network.Pasta, "-q",
 		// Outbound only. pasta's port forwarding defaults to "auto", which mirrors every service
@@ -722,10 +713,8 @@ func (b *Bwrap) bootArgv(config bwrapConfig) ([]string, error) {
 		// machine's networks. See resolveResolv.
 		argv = append(argv, "--dns-forward", sandboxDNS)
 	}
-	argv = append(argv,
-		"-a", address, "-n", prefix, "-g", config.Network.Gateway,
-		"--", "/bin/sh", "-c", configure, "sh", config.Network.IP, config.Network.Address, config.Network.Gateway,
-	)
+	argv = append(argv, "-a", address, "-n", prefix, "-g", config.Network.Gateway, "--")
+	argv = append(argv, configure...)
 	return append(argv, sandbox...), nil
 }
 

@@ -46,6 +46,12 @@ func main() {
 		supervisorCommand(os.Args[2:])
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "netns" {
+		// The namespace pasta made, configured before the sandbox's own process starts: a
+		// sandbox calls this, a person does not.
+		netnsCommand(os.Args[2:])
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "doctor" {
 		doctorCommand(os.Args[2:])
 		return

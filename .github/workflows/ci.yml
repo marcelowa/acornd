@@ -128,11 +128,12 @@ jobs:
         with:
           bun-version: latest
       - name: Install what the engine needs
-        # bubblewrap for the sandbox, pasta for its network, and iproute2 for the address step
+        # bubblewrap for the sandbox and pasta for its network: the namespace's address and
+        # routes are set by the gateway over netlink, so iproute2 is not on this list.
         # pasta does not do itself.
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq bubblewrap passt iproute2
+          sudo apt-get install -y -qq bubblewrap passt
       - name: Let bubblewrap make user namespaces
         # Ubuntu 24.04 gates unprivileged user namespaces behind AppArmor. A per-binary profile is
         # enough for bubblewrap on its own, and *not* enough for the sandbox this tier runs: the
