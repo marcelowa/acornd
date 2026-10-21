@@ -389,7 +389,9 @@ func (w *Workspaces) Remove(ctx context.Context, name string) error {
 	// The sandbox is deleted with the workspace: it is the one thing that holds what the
 	// agent accumulated inside it, and leaving it behind would leak a disk per forgotten
 	// workspace. A failure is reported and does not stop the removal the user asked for.
-	if manager := w.opts.Sandbox; manager != nil {
+	// Resolved for this workspace's own engine: the default engine's manager knows nothing about
+	// a sandbox another engine made, and asking it to delete one is a no-op that leaks the disk.
+	if manager := w.sandboxManagerFor(workspace); manager != nil {
 		if err := manager.Remove(ctx, workspace.Path); err != nil && !errors.Is(err, sandbox.ErrUnavailable) {
 			workerpool.Log("removing the sandbox for %s: %v", name, err)
 		}
@@ -1032,6 +1034,19 @@ func (w *Workspaces) Engines() []EngineInfo {
 		w.engines = infos
 	})
 	return w.engines
+}
+
+// sandboxManagerFor is the manager that owns a workspace's sandbox: the workspace's own engine
+// when it named one, the install's default when it did not, and nil when this install has no tier.
+// It is the same rule Control applies when it provisions, and the two have to agree or a workspace
+// is stopped by one engine and removed by another.
+func (w *Workspaces) sandboxManagerFor(workspace Workspace) *sandbox.Manager {
+	if name := strings.TrimSpace(workspace.Engine); name != "" && w.opts.Sandboxes != nil {
+		if manager, err := w.opts.Sandboxes.For(name); err == nil {
+			return manager
+		}
+	}
+	return w.opts.Sandbox
 }
 
 // engineManager resolves one engine's manager without starting anything: the tier builds and

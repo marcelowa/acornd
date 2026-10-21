@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 )
 
 // Where workspaces live is a decision someone makes, not one to guess.
@@ -93,5 +95,33 @@ func TestNestingFollowsTheInstallUnlessTheWorkspaceChooses(t *testing.T) {
 				t.Errorf("DisableVMNesting = %t, want %t", got, test.want)
 			}
 		})
+	}
+}
+
+// A workspace's sandbox belongs to the engine the workspace chose. Removing it must ask that
+// engine: the default one's manager answers "no such sandbox" and the disk stays — which is what
+// a real install showed, 88 MB per forgotten bwrap workspace.
+func TestAWorkspacesSandboxIsRemovedByItsOwnEngine(t *testing.T) {
+	tier := sandbox.NewTier(t.TempDir(), "", nil)
+	bwrap, err := tier.For("bwrap")
+	if err != nil {
+		t.Fatalf("tier: %v", err)
+	}
+	other, err := tier.For("host")
+	if err != nil {
+		t.Fatalf("tier: %v", err)
+	}
+	workspaces := NewWorkspaces(WorkspacesOptions{
+		Home:      t.TempDir(),
+		Sandbox:   other, // the install's default is something else entirely
+		Sandboxes: tier,
+	})
+
+	if got := workspaces.sandboxManagerFor(Workspace{Name: "w", Engine: "bwrap"}); got != bwrap {
+		t.Fatalf("a bwrap workspace resolves to %q, want the bwrap manager", got.Driver().Name())
+	}
+	// A workspace that named no engine still gets the install's default.
+	if got := workspaces.sandboxManagerFor(Workspace{Name: "w"}); got != other {
+		t.Fatalf("a default workspace resolves to %q, want the install default", got.Driver().Name())
 	}
 }
