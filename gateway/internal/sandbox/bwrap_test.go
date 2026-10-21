@@ -58,6 +58,7 @@ func testBwrap(t *testing.T, home string) (*Bwrap, *fakeBwrap) {
 		WithRunner(runner).
 		WithImageSource(fakeImage).
 		WithLookPath(func(string) (string, error) { return "/usr/bin/bwrap", nil })
+	driver.pasta = func(string) error { return nil }
 	return driver, runner
 }
 
@@ -129,7 +130,7 @@ func TestBwrapRefusesWhenTheMachineWillNotMakeAUserNamespace(t *testing.T) {
 		t.Fatalf("error is not a refusal: %v", err)
 	}
 	// The sentence names the reason and the fix, because "sandbox unavailable" is not one.
-	for _, want := range []string{"user namespace", "AppArmor", "Ubuntu 24.04"} {
+	for _, want := range []string{"user namespace", "AppArmor", "sysctl -w kernel.apparmor_restrict_unprivileged_userns=0"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q does not mention %q", err, want)
 		}
@@ -698,5 +699,24 @@ func TestBwrapWritesTheResolverItsNetworkCanReach(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "nameserver "+sandboxDNS) {
 		t.Fatalf("the resolver should name pasta's forwarder, got %q", content)
+	}
+}
+
+// The egress probe answers the question a start will ask: can pasta make a namespace here. It is
+// not a version check, and its refusal names the fix the way every other refusal does.
+func TestBwrapEgressProbeSaysWhatToDo(t *testing.T) {
+	// No pasta at all: the package is the fix.
+	driver := NewBwrap(t.TempDir()).
+		WithLookPath(func(string) (string, error) { return "", errors.New("not found") })
+	if err := driver.Egress(); err == nil || !strings.Contains(err.Error(), "apt install passt") {
+		t.Fatalf("no pasta: %v, want the package that provides it", err)
+	}
+	// pasta present but unable to make a namespace: the kernel policy is the fix, so the probe
+	// has to fail rather than ask for a version.
+	driver = NewBwrap(t.TempDir()).
+		WithLookPath(func(string) (string, error) { return "/usr/bin/pasta", nil })
+	driver.pasta = func(string) error { return errors.New("setting up user namespace: Operation not permitted") }
+	if err := driver.Egress(); err == nil || !strings.Contains(err.Error(), "Operation not permitted") {
+		t.Fatalf("a refused namespace should be passed through with its reason: %v", err)
 	}
 }

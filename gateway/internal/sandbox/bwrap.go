@@ -43,6 +43,8 @@ type Bwrap struct {
 	// resolver is the machine's resolver file and the file its upstream servers are in. Paths are
 	// fields so a test can answer for a machine that is not this one.
 	resolver resolverFiles
+	// pasta is the egress probe, a field so a test can answer without running one.
+	pasta func(string) error
 
 	once    sync.Once
 	version string
@@ -165,17 +167,41 @@ func (b *Bwrap) Usable() error {
 		if detail == "" {
 			detail = err.Error()
 		}
-		return fmt.Errorf("%w: bubblewrap cannot create a user namespace here: %s (Ubuntu 24.04+ restricts unprivileged user namespaces with AppArmor)", ErrUnavailable, lastLine(detail))
+		return fmt.Errorf("%w: bubblewrap cannot create a user namespace here: %s (Ubuntu 23.10 and later restrict them with AppArmor; fix: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0)", ErrUnavailable, lastLine(detail))
 	}
 	return nil
 }
 
-// Egress reports whether a workspace with its network on can run here: pasta carries it. A
-// machine without pasta can still run a workspace with its network off, which is why this is
-// not Usable.
+// Egress reports whether a workspace with its network on can run here: pasta carries it, and
+// that means pasta can make a namespace on this machine. A machine without pasta can still run a
+// workspace with its network off, which is why this is not Usable.
 func (b *Bwrap) Egress() error {
-	if _, err := b.look("pasta"); err != nil {
+	pasta, err := b.look("pasta")
+	if err != nil {
 		return fmt.Errorf("%w: a workspace with its network on needs pasta to carry it (install it: apt install passt)", ErrUnavailable)
+	}
+	if b.pasta != nil {
+		return b.pasta(pasta)
+	}
+	return probePasta(pasta)
+}
+
+// probePasta is a real probe, not a version check: pasta makes the namespace before it carries
+// anything, and a machine that refuses that refuses every network-on workspace at start. It runs
+// one cheap command there, which is what a start does anyway.
+func probePasta(pasta string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, pasta,
+		"-q", "-t", "none", "-u", "none", "-T", "none", "-U", "none", "--no-map-gw",
+		"-a", "10.0.2.15", "-n", "24", "-g", "10.0.2.2", "--", "/bin/true")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		detail := strings.TrimSpace(string(output))
+		if detail == "" {
+			detail = err.Error()
+		}
+		return fmt.Errorf("%w: pasta cannot make a network namespace here: %s", ErrUnavailable, lastLine(detail))
 	}
 	return nil
 }

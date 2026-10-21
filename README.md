@@ -27,10 +27,12 @@ another worker, not changing the control plane.
 - bun 1.4+
 - make, gcc (builds and the `-race` tests)
 - an API key for a supported provider (or the dev provider below)
-- one sandbox engine: a hypervisor (`/dev/kvm`) for the default microVM engine, or
-  `bwrap` (bubblewrap) — `apt install bubblewrap passt`. On Ubuntu 24.04 the engine also
-  needs unprivileged user namespaces: `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`
-  (or an AppArmor profile for `/usr/bin/bwrap`, which covers a workspace with no egress)
+- one sandbox engine, and the engine a new workspace gets is the first one this machine can
+  actually run ([ADR 0026](docs/adr/0026-rootless-host.md)):
+  - `bwrap` — `apt install bubblewrap passt`, no root needed beyond that. On Ubuntu 23.10+ it also
+    needs unprivileged user namespaces: `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`
+    (or an AppArmor profile for `/usr/bin/bwrap`, which covers a workspace with no egress)
+  - `microsandbox` — a hypervisor: `/dev/kvm`, and your user in the `kvm` group
 
 ## Setup
 
