@@ -170,6 +170,16 @@ func (b *Bwrap) Usable() error {
 	return nil
 }
 
+// Egress reports whether a workspace with its network on can run here: pasta carries it. A
+// machine without pasta can still run a workspace with its network off, which is why this is
+// not Usable.
+func (b *Bwrap) Egress() error {
+	if _, err := b.look("pasta"); err != nil {
+		return fmt.Errorf("%w: a workspace with its network on needs pasta to carry it (install it: apt install passt)", ErrUnavailable)
+	}
+	return nil
+}
+
 // Nesting reports that a hypervisor cannot run in this sandbox: the config does not bind
 // /dev/kvm, and binding it would be a deliberate grant rather than a default.
 func (b *Bwrap) Nesting(context.Context) NestingSupport {

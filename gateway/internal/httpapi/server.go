@@ -215,6 +215,12 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Engine != nil {
 		workspace.Engine = *body.Engine
+	} else {
+		// Recorded, not left blank: a blank engine means "whatever this machine prefers", and a
+		// workspace that woke up on a different machine would then run somewhere nobody chose.
+		// The preference is resolved once, here, where the machine that answered is the machine
+		// the workspace was made on.
+		workspace.Engine = s.workspaces.DefaultEngine()
 	}
 	if body.KeepAlive != nil {
 		workspace.KeepAlive = *body.KeepAlive

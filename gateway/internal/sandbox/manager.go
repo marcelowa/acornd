@@ -58,6 +58,12 @@ type Driver interface {
 	// facility, the permissions. It is checked before anything is created so that the
 	// refusal is an explanation rather than a crash.
 	Usable() error
+	// Egress reports whether a workspace with its network on can run here: bubblewrap needs
+	// pasta to carry it, the microVM needs nothing of the machine, and the host engine is the
+	// machine's own network. It is separate from Usable because a machine can run a sandbox
+	// without being able to give it a network, and choosing the engine a new workspace gets is
+	// a question about both.
+	Egress() error
 	// Nesting reports whether a sandbox on this machine could nest virtual machines, and why
 	// not when it could not. It is a capability, not a policy: whether a workspace asks for
 	// nesting is the policy's business, and the two have to agree before the engine hears

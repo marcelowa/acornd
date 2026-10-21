@@ -49,14 +49,32 @@ func TestTierRefusesAnEngineItDoesNotImplement(t *testing.T) {
 	}
 }
 
-func TestTierEmptyNameIsTheDefaultEngine(t *testing.T) {
+// An empty engine name is the machine's answer, not a constant: the first engine in the
+// preference order that can run a workspace with a network.
+func TestTierEmptyNameIsWhatTheMachineCanRun(t *testing.T) {
 	tier := NewTier(t.TempDir(), "", nil)
 	manager, err := tier.For("")
 	if err != nil {
 		t.Fatalf("default: %v", err)
 	}
-	if manager.Driver().Name() != DefaultEngine {
-		t.Fatalf("default engine is %q, want %q", manager.Driver().Name(), DefaultEngine)
+	if manager.Driver().Name() != tier.Default() {
+		t.Fatalf("empty name resolved to %q, want %q", manager.Driver().Name(), tier.Default())
+	}
+	// Whatever it chose has to be able to run a workspace here, network and all.
+	driver, err := Engine("", "", tier.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := driver.Usable(); err != nil {
+		t.Fatalf("%s is the default but cannot run here: %v", tier.Default(), err)
+	}
+	if err := driver.Egress(); err != nil {
+		t.Fatalf("%s is the default but cannot carry a network: %v", tier.Default(), err)
+	}
+	// The order is the policy: bubblewrap first, the unisolated engine last.
+	names := EngineNames()
+	if names[0] != "bwrap" || names[len(names)-1] != "host" {
+		t.Fatalf("preference order is %v, want bwrap first and host last", names)
 	}
 }
 

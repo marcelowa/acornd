@@ -310,6 +310,10 @@ func needsQuotes(value string) bool {
 	return strings.ContainsAny(value[:1], "-?:,[]{}#&*!|>'\"%@`")
 }
 
+// Egress needs nothing of the machine: the microVM's network is user-mode and internal, so a
+// workspace with its network on always has one.
+func (m *Microsandbox) Egress() error { return nil }
+
 // Nesting reports whether a sandbox here could nest virtual machines. Two things have to
 // agree: the engine has to allow nesting on its side and the machine has to be able to
 // grant it (nested virtualization on the host). On the pinned 0.7.6 there is no switch

@@ -377,6 +377,35 @@ func (w *Workspaces) Update(workspace Workspace) error {
 	return w.persist()
 }
 
+// RecordDefaultEngines writes down the engine for every workspace that named none, on the
+// machine that is going to run them, and reports how many it recorded. It runs once at startup.
+//
+// An empty engine field means "whatever this machine prefers", which is a fine thing to say
+// while making a workspace and a bad thing to leave in a record: the same workspace on another
+// machine would silently run on a different engine. Recording it makes the answer visible and
+// makes it stay.
+func (w *Workspaces) RecordDefaultEngines() (int, error) {
+	def := w.DefaultEngine()
+	w.mu.Lock()
+	changed := 0
+	for name, workspace := range w.registry {
+		if workspace.Engine != "" {
+			continue
+		}
+		workspace.Engine = def
+		w.registry[name] = workspace
+		changed++
+	}
+	w.mu.Unlock()
+	if changed == 0 {
+		return 0, nil
+	}
+	if err := w.persist(); err != nil {
+		return 0, err
+	}
+	return changed, nil
+}
+
 // Remove forgets a workspace. It never touches the folder or the history, the same way
 // deleting a conversation is a tombstone rather than a delete.
 func (w *Workspaces) Remove(ctx context.Context, name string) error {
@@ -1011,15 +1040,22 @@ type EngineInfo struct {
 	Problem string `json:"problem,omitempty"`
 }
 
+// DefaultEngine is the engine a workspace that names none gets: the install's own choice when
+// `--sandbox-engine` named one, otherwise the first engine this machine can actually run. It is
+// what a workspace records at creation, so the choice is made once and stays visible.
+func (w *Workspaces) DefaultEngine() string {
+	if w.opts.Sandbox != nil && w.opts.Sandbox.Driver() != nil {
+		return w.opts.Sandbox.Driver().Name()
+	}
+	return "host"
+}
+
 // Engines reports every engine this build implements, whether this machine can run it, and
 // which one a workspace with no engine of its own gets. It is cached: the answer changes when
 // somebody installs a package, not while a gateway runs.
 func (w *Workspaces) Engines() []EngineInfo {
 	w.enginesOnce.Do(func() {
-		def := sandbox.DefaultEngine
-		if w.opts.Sandbox != nil && w.opts.Sandbox.Driver() != nil {
-			def = w.opts.Sandbox.Driver().Name()
-		}
+		def := w.DefaultEngine()
 		infos := make([]EngineInfo, 0, len(sandbox.EngineNames()))
 		for _, name := range sandbox.EngineNames() {
 			info := EngineInfo{Name: name, Default: name == def}

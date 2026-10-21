@@ -45,6 +45,9 @@ func (h *Host) Install(context.Context, func(string, ...any)) error { return nil
 // facility, no group — just the machine the gateway already runs on.
 func (h *Host) Usable() error { return nil }
 
+// Egress is the machine's own network: the host engine runs commands where they already are.
+func (h *Host) Egress() error { return nil }
+
 // Nesting reports that there is no sandbox here to nest: the host engine's commands already
 // run on the machine itself, with all of it. The refusal is the honest one — a badge saying
 // "nested" over an unconfined run would be worse than useless.
@@ -101,9 +104,11 @@ func Engine(home, state, name string) (Driver, error) {
 	}
 }
 
-// EngineNames are the engines this build runs, strongest first and the unisolated one last,
-// which is the order a chooser should show them in.
-func EngineNames() []string { return []string{"microsandbox", "bwrap", "host"} }
+// EngineNames are the engines this build runs, in the order a machine prefers them: bubblewrap
+// first because it needs no hypervisor, no root, and no device — then the microVM, which is the
+// stronger boundary when a machine can give it one — then the host, which isolates nothing and
+// is last for that reason. It is also the order a chooser shows (ADR 0026).
+func EngineNames() []string { return []string{"bwrap", "microsandbox", "host"} }
 
 // ValidEngine reports whether a workspace may name an engine. The empty string is valid and
 // means the install's default; anything else has to be one this build implements, because a

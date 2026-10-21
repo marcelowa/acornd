@@ -285,6 +285,11 @@ func sandboxTier(ctx context.Context, home, state, engineName string) (*sandbox.
 	if err != nil {
 		return nil, nil, err
 	}
+	if engineName == "" {
+		// Not a silent choice: which engine a new workspace gets is a security decision, and the
+		// reason is this machine's ability, so it is said rather than discovered in a record.
+		log.Printf("sandbox: no engine named, and this machine can run %s, so that is the default (--sandbox-engine chooses another)", engine.Driver().Name())
+	}
 	report := engine.Report()
 	if problem := engine.Problem(); problem != nil {
 		log.Printf("sandbox: %v", problem)
@@ -629,11 +634,12 @@ func sandboxLabel(workspace control.Workspace) string {
 	return image + ", " + network
 }
 
-// engineLabel names the engine a workspace runs on, saying so when it follows the install's
-// default rather than a choice of its own.
+// engineLabel names the engine a workspace runs on. A workspace that named none says so: the
+// engine it will run on is this machine's answer, and the gateway records it the first time it
+// starts there rather than this command guessing at it.
 func engineLabel(engine string) string {
 	if engine == "" {
-		return sandbox.DefaultEngine + "*"
+		return "this machine's (unrecorded)"
 	}
 	return engine
 }

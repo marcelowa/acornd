@@ -31,6 +31,7 @@ func (f *fakeDriver) InstallDir() string { return "/home/me/.acornfall/tools/fak
 func (f *fakeDriver) StateDir() string   { return "/home/me/.acornfall/sandboxes" }
 func (f *fakeDriver) Env() []string      { return []string{"FAKE_HOME=" + f.StateDir()} }
 func (f *fakeDriver) Installed() bool    { return f.installed }
+func (f *fakeDriver) Egress() error      { return nil }
 
 func (f *fakeDriver) Install(_ context.Context, _ func(string, ...any)) error {
 	f.calls = append(f.calls, "install")
