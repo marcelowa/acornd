@@ -97,6 +97,23 @@ default** — a sandbox is root with no powers (`CapEff: 0`). Measured: the inte
 no-privilege alternative is `tailscaled --tun=userspace-networking`, which needs no device and no
 capability because applications reach it through a proxy.
 
+## What a host has to grant
+
+Two things a sandbox cannot do for itself, both found by the CI tier rather than by reasoning:
+
+- **A user namespace, and the one it nests inside.** A sandbox with egress runs inside pasta's
+  user namespace and makes one of its own. Ubuntu 24.04 gates unprivileged user namespaces
+  behind AppArmor: a profile for `/usr/bin/bwrap` is enough for bubblewrap on its own and *not*
+  enough for the nested one — the failure is `Couldn't write to /proc/self/uid_map` at create
+  time, and the host-wide switch (`kernel.apparmor_restrict_unprivileged_userns=0`) is what makes
+  it work. A per-binary profile is worth shipping anyway: it covers the workspace with no egress.
+- **A resolver the sandbox can reach.** Binding the machine's `/etc/resolv.conf` is wrong on any
+  machine that resolves through a local resolver: systemd-resolved answers on `127.0.0.53`, and
+  inside a sandbox `127.0.0.1` is the sandbox's own loopback. The driver binds the machine's
+  upstream servers instead, from the file the distribution writes them to, and the machine's own
+  file when it names something reachable. The symptom this prevents is an `apt-get update` that
+  works on the host and fails inside.
+
 ## What it costs
 
 - **The host root is visible read-only** under `--ro-bind / /`. Binding a rootfs directory

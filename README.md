@@ -28,7 +28,9 @@ another worker, not changing the control plane.
 - make, gcc (builds and the `-race` tests)
 - an API key for a supported provider (or the dev provider below)
 - one sandbox engine: a hypervisor (`/dev/kvm`) for the default microVM engine, or
-  `bwrap` (bubblewrap) for the beta engine — `apt install bubblewrap passt iproute2`
+  `bwrap` (bubblewrap) — `apt install bubblewrap passt iproute2`. On Ubuntu 24.04 the engine also
+  needs unprivileged user namespaces: `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`
+  (or an AppArmor profile for `/usr/bin/bwrap`, which covers a workspace with no egress)
 
 ## Setup
 
