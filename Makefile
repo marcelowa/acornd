@@ -37,6 +37,10 @@ build: ui-build ## build the gateway binary, with the interface embedded
 	# CGO off, so the binary is static: it runs as a sandbox's first process, and an image may
 	# have no libc at all (a musl image, or none). The release builds it this way too.
 	cd gateway && CGO_ENABLED=0 go build -o ../$(BIN) ./cmd/acornfall
+	# The release also ships macOS binaries, so a file that only builds on Linux is a broken
+	# release rather than a broken test: this is the cheapest place to notice, and the v0.13.1
+	# release failed on exactly that.
+	cd gateway && GOOS=darwin GOARCH=arm64 go build ./...
 
 ui-build: ## build the interface into the embed directory the gateway serves
 	cd ui && bun run build

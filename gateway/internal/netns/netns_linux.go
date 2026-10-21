@@ -1,3 +1,5 @@
+//go:build linux
+
 // Package netns configures a network namespace that belongs to one sandbox: the interfaces it
 // has, its address, its default route, and the routes that refuse what the workspace was not
 // granted.
