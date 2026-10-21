@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -25,7 +26,7 @@ type client struct {
 func startServer(t *testing.T) (*Server, string) {
 	t.Helper()
 	socket := filepath.Join(t.TempDir(), "supervisor.sock")
-	server := New(socket, "test")
+	server := New(socket, "test", 0)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(ctx) }()
@@ -195,6 +196,52 @@ func TestACommandSurvivesItsClientGoingAway(t *testing.T) {
 	output, exit := second.collect(t, "2")
 	if exit.Code != 0 || !strings.Contains(output, "still here") {
 		t.Fatalf("a new client could not run: %+v %q", exit, output)
+	}
+}
+
+// The sandbox stops itself when nothing is running in it: that is the timer under a gateway that
+// died and under a workspace control deliberately keeps warm.
+func TestAnIdleSandboxStopsItself(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "supervisor.sock")
+	server := New(socket, "test", 300*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	if err := WaitForReady(context.Background(), socket, 3*time.Second); err != nil {
+		t.Fatalf("ready: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("an idle sandbox did not stop itself")
+	}
+	if _, err := os.Stat(socket); !os.IsNotExist(err) {
+		t.Errorf("the socket outlived the sandbox: %v", err)
+	}
+}
+
+// A command is activity: a sandbox that is doing something is not idle, however long it takes.
+func TestARunningCommandKeepsTheSandboxAwake(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "supervisor.sock")
+	server := New(socket, "test", 300*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- server.Serve(ctx) }()
+	if err := WaitForReady(context.Background(), socket, 3*time.Second); err != nil {
+		t.Fatalf("ready: %v", err)
+	}
+	c := dial(t, socket)
+	c.send(t, Request{Type: "run", ID: "1", Argv: []string{"/bin/sh", "-c", "sleep 1.2; echo done"}, Env: map[string]string{"PATH": "/usr/bin:/bin"}})
+	output, exit := c.collect(t, "1")
+	if exit.Code != 0 || !strings.Contains(output, "done") {
+		t.Fatalf("the command was stopped as idle: %+v %q", exit, output)
+	}
+	select {
+	case <-stopped:
+		t.Fatal("the sandbox stopped while a command was running")
+	default:
 	}
 }
 

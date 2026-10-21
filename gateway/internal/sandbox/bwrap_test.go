@@ -25,7 +25,7 @@ func TestMain(m *testing.M) {
 			}
 		}
 		if socket != "" {
-			_ = supervise.New(socket, "test").Serve(context.Background())
+			_ = supervise.New(socket, "test", 0).Serve(context.Background())
 			os.Exit(0)
 		}
 	}
@@ -328,6 +328,7 @@ func TestBwrapSandboxArgvIsOneSandboxPerWorkspace(t *testing.T) {
 		GuestRun:    guestRunDir,
 		GuestSocket: guestSocketPath,
 		Network:     bwrapNetwork{Mode: "off"},
+		IdleTimeout: DefaultIdleTimeout,
 	}
 	argv, err := driver.sandboxArgv(config)
 	if err != nil {
@@ -350,6 +351,9 @@ func TestBwrapSandboxArgvIsOneSandboxPerWorkspace(t *testing.T) {
 		// The supervisor is this binary, bound in, and it is what the sandbox runs.
 		"--ro-bind /install/acornfall /usr/local/bin/acornfall",
 		"-- /usr/local/bin/acornfall sandbox-supervisor --socket /run/acornfall/s.sock",
+		// The same policy value the microVM engine is given: both engines answer "stop when idle"
+		// the same way, and a kept-alive workspace asks for a timeout that never fires.
+		"--idle-timeout 30m",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("argv should contain %q:\n%s", want, joined)

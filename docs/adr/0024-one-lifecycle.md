@@ -98,6 +98,10 @@ Three consequences worth writing down:
   `worker/src/microsandbox.ts`); and what it *must* not do is fire on a workspace that asked to
   be kept alive, so `keep_alive` sets the policy's idle timeout to
   `KeptAliveIdleTimeout` — control still decides, the engine is told what to do about it.
+- **The sandbox has its own idle timer too**, `--idle-timeout`, fed by the same policy value as
+  the microVM engine's: 30 minutes by default, and a value that never fires for a workspace that
+  asked to be kept alive. Both engines now answer "stop when idle" the same way, and each has the
+  net under a gateway that died.
 - **A clean shutdown stops every sandbox; a crash does not.** `Workspaces.Close` closes each
   control, and each close stops its sandbox. So "the sandbox survives the gateway" means a
   gateway that died, not one that was asked to stop — which is why adoption is the recovery path

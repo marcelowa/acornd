@@ -197,6 +197,9 @@ type bwrapConfig struct {
 	GuestSocket string `json:"guestSocket"`
 	Run         string `json:"run"`
 	GuestRun    string `json:"guestRun"`
+	// IdleTimeout stops a sandbox nothing has run in for a while. It is the same policy value the
+	// microVM engine is given, so both engines answer the question the same way.
+	IdleTimeout string `json:"idleTimeout"`
 	// Beta notes what this shape does not do yet, so the file does not read as a promise.
 	Beta string `json:"beta"`
 }
@@ -327,6 +330,7 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 		Bwrap:       bwrapPath,
 		Run:         run,
 		GuestRun:    guestRunDir,
+		IdleTimeout: policy.IdleTimeout,
 		Beta:        "one sandbox per workspace, held by this binary as its first process",
 	}
 	data, err := json.MarshalIndent(config, "", "  ")
@@ -693,7 +697,13 @@ func (b *Bwrap) sandboxArgv(config bwrapConfig) ([]string, error) {
 		// Share the network namespace of whoever started bubblewrap: pasta, when there is one.
 		argv = append(argv, "--share-net")
 	}
-	return append(argv, "--", guestSupervisor, "sandbox-supervisor", "--socket", config.GuestSocket), nil
+	argv = append(argv, "--", guestSupervisor, "sandbox-supervisor", "--socket", config.GuestSocket)
+	if config.IdleTimeout != "" {
+		// A kept-alive workspace is given a timeout that never fires rather than none at all, so
+		// the flag always says what the policy decided.
+		argv = append(argv, "--idle-timeout", config.IdleTimeout)
+	}
+	return argv, nil
 }
 
 // guestHome is where the private home appears inside the sandbox: the root's own home when there

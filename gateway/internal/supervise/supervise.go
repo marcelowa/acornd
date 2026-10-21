@@ -73,6 +73,10 @@ type Server struct {
 	// version is reported to a client that asks, which is how the driver distinguishes a
 	// supervisor that is up from a socket file left by one that is not.
 	version string
+	// idle is how long the sandbox may sit with nothing running before it stops itself. It is
+	// the engine's own timer, the same shape a microVM engine keeps: the net under a gateway
+	// that died, and under a workspace control deliberately keeps warm. Zero never stops.
+	idle time.Duration
 
 	mu    sync.Mutex
 	runs  map[string]*run
@@ -80,6 +84,8 @@ type Server struct {
 	// shuttingDown stops new runs and ends Serve.
 	shuttingDown bool
 	listener     net.Listener
+	// logger is where an idle stop says so; nil is silent.
+	logger func(string, ...any)
 }
 
 // run is one command, from request to exit.
@@ -92,13 +98,65 @@ type run struct {
 	clients map[*conn]struct{}
 }
 
-// New builds a supervisor that will listen on socket.
-func New(socket, version string) *Server {
+// New builds a supervisor that will listen on socket. It stops itself when it has been idle for
+// idle, or never when that is zero.
+func New(socket, version string, idle time.Duration) *Server {
 	return &Server{
 		socket:  socket,
 		version: version,
+		idle:    idle,
 		runs:    map[string]*run{},
 		conns:   map[*conn]struct{}{},
+	}
+}
+
+// WithLogger reports what the sandbox does on its own, which for an idle stop is the only
+// explanation a log will have.
+func (s *Server) WithLogger(logger func(string, ...any)) *Server {
+	s.logger = logger
+	return s
+}
+
+// idleLoop stops the sandbox when nothing has run in it for a while. It checks often enough that
+// a deadline is not missed by much and rarely enough that it costs nothing.
+func (s *Server) idleLoop(ctx context.Context) {
+	if s.idle <= 0 {
+		return
+	}
+	interval := s.idle / 4
+	if interval < 100*time.Millisecond {
+		interval = 100 * time.Millisecond
+	}
+	if interval > 30*time.Second {
+		interval = 30 * time.Second
+	}
+	last := time.Now()
+	activity := func() {
+		s.mu.Lock()
+		if len(s.runs) > 0 {
+			last = time.Now()
+		}
+		s.mu.Unlock()
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			activity()
+			if time.Since(last) < s.idle {
+				continue
+			}
+			// Nothing has run for the whole window: a sandbox holding nothing is the thing the
+			// timer exists to reclaim, and control starts it again when a command arrives.
+			if s.logger != nil {
+				s.logger("idle for %s: stopping the sandbox", s.idle.Truncate(time.Second))
+			}
+			s.Shutdown()
+			return
+		}
 	}
 }
 
@@ -125,6 +183,10 @@ func (s *Server) Serve(ctx context.Context) error {
 
 	// A signal means the sandbox is being stopped: take the commands with it rather than
 	// leaving processes behind in a namespace nobody can reach.
+	// The timer runs with the server: a sandbox that has been left alone stops itself, which is
+	// what keeps a gateway that died from leaving one behind.
+	go s.idleLoop(ctx)
+
 	stopping := make(chan os.Signal, 1)
 	signal.Notify(stopping, syscall.SIGTERM, syscall.SIGINT)
 	defer signal.Stop(stopping)

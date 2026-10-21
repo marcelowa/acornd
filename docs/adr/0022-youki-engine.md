@@ -1,6 +1,7 @@
 # ADR 0022 — youki as a sandbox engine
 
-Status: spike done, not built — bwrap shipped first, see [ADR 0023](0023-bwrap-engine.md)
+Status: spike done, not built — bwrap shipped first ([ADR 0023](0023-bwrap-engine.md),
+[ADR 0024](0024-one-lifecycle.md)); what youki still needs is at the end of this record
 Date: 2026-10-26
 
 ## Why this exists
@@ -171,6 +172,48 @@ not inside itself. A VM has its own kernel, so namespaces start clean inside it.
 | first output chunk | +18 ms | +31 ms |
 | image | ours to unpack (29.8 MB → 82 MB) | the engine's |
 | nesting as the outer engine | acornfall yes, youki no | acornfall yes (needs nested KVM) |
+
+## What building bwrap solved for youki
+
+bwrap was built first, and it was the same problem. Everything below is now engine-neutral and
+already written, tested, and in use — a youki driver uses it rather than reimplementing it.
+
+| what the spike said youki needed | what exists now |
+|---|---|
+| a joiner for its broken rootless `exec` | **not needed any more.** `acornfall sandbox-supervisor` (ADR 0024) runs inside the sandbox as its first process and runs commands itself: no `setns`, no fd ordering, no per-command sandbox. Its protocol is `run` / `kill` / `shutdown` over a Unix socket. |
+| an image unpacked into a directory | `internal/sandbox/image.go`: registry auth by challenge, platform choice out of an index, per-layer digest verification, whiteouts, and a cached unpack. `copytree.go` gives a workspace its own copy. youki names the result in `root.path`. |
+| a lifecycle with create/start/stop/remove | ADR 0024: the four verbs, `List`/`Status` from our own record, a pid and a socket, adoption after a crash, `keep_alive`, and control as the only owner of the idle rule. A youki container is an instance like any other. |
+| secrets | the supervisor starts every command with exactly the environment it is sent, so secrets are the environment row ADR 0021 already has. youki's own secret surface is not needed. |
+| per-workspace engine choice | `sandbox.Tier`, `Workspace.Engine`, the create form, and `workspace add --sandbox`. A third engine is a new file plus a name in `EngineNames`. |
+| egress without the machine's stack | **pasta, outside the engine.** The spike had pasta attach to a namespace the engine made, which needs a joiner. Building bwrap found the simpler shape: pasta makes the namespace, configures nothing, and the engine's process runs *inside it*. A youki OCI config that omits the network namespace inherits pasta's, so it needs no network code at all. |
+| a binary that runs inside a sandbox | releases build `CGO_ENABLED=0`; `make build` now does too. An image may have no libc, and the supervisor still has to run. |
+
+## What youki still needs
+
+Short list, because the rest is done:
+
+1. **A `config.json` derived from the policy.** The mounts are the ones `sandboxArgv` builds for
+   bwrap today — the workspace read-write at its own path, the image as `/`, uid/gid mapping
+   `0 ↔ the user`, `/dev`, `/proc`, a `/tmp` tmpfs, the global resources read-only, the socket's
+   folder on both sides — expressed as OCI mounts and namespaces instead of argv. Capabilities
+   dropped, and **the network namespace omitted** when pasta carries egress.
+2. **An absolute `cgroupsPath`, and a delegated cgroup to point it at.** This is measured in the
+   spike and it is a trap: a user namespace forces youki's systemd cgroup manager
+   (`builder_impl.rs`: `use_systemd || user_ns_config.is_some()`), and there is no systemd inside
+   a sandbox, so a plain rootless create fails with "systemd support for managing cgroups is not
+   available". An absolute path selects the cgroupfs v2 manager instead. Budgets then need the
+   unit created with `Delegate=yes` and `DelegateSubgroup=init` and `+memory +pids` written to
+   `cgroup.subtree_control` by us, because systemd 257 does not do it for a `Delegate=` list.
+   **This is the budgets implementation**, and bwrap needs it too: neither engine has resource
+   limits today.
+3. **Vendoring.** youki is in no Debian release: fetch a static tarball and verify a checksum,
+   which is the install pattern `internal/sandbox` already uses for the microVM engine.
+4. **Our own record is the truth, not `youki list`.** Rootless youki's own `ps`, `list`, and
+   `exec` were all unreliable in the spike; the config, the pid, and the socket are what control
+   trusts.
+5. **It still cannot nest.** A youki sandbox cannot hold another youki sandbox (measured: the
+   kernel refuses the inner procfs mount). The outer engine decides that, and bwrap is the answer
+   there.
 
 ## What this does not settle
 

@@ -22,16 +22,17 @@ import (
 func supervisorCommand(argv []string) {
 	flags := flag.NewFlagSet("sandbox-supervisor", flag.ContinueOnError)
 	socket := flags.String("socket", "", "the Unix socket to serve on")
+	idle := flags.Duration("idle-timeout", 0, "stop the sandbox when nothing has run in it for this long (0 never stops)")
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
 	if *socket == "" {
-		fmt.Fprintln(os.Stderr, "usage: acornfall sandbox-supervisor --socket PATH")
+		fmt.Fprintln(os.Stderr, "usage: acornfall sandbox-supervisor --socket PATH [--idle-timeout 30m]")
 		os.Exit(2)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	server := supervise.New(*socket, "")
+	server := supervise.New(*socket, "", *idle).WithLogger(log.Printf)
 	if err := server.Serve(ctx); err != nil {
 		log.Fatalf("sandbox-supervisor: %v", err)
 	}
