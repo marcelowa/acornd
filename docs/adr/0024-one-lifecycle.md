@@ -90,9 +90,17 @@ Three consequences worth writing down:
 - A workspace's sandbox holds one process more than before — which is the point.
 - `keep_alive` exists on every workspace, and idle eviction respects it. That is what makes
   "a workspace that runs a cron job" a thing that can be true.
-- **microsandbox's own `idle_timeout` is now the second owner of a rule control owns.** It has not
-  been removed: a VM stopping itself is safe (the next start adopts and boots it), and removing it
-  is a policy change of its own. It should go when the policy is next touched, and this is the
-  note that says why.
+- **microsandbox's own `idle_timeout` stays, and is not a second owner after all.** Three things
+  asked and answered: control's eviction never touches the general workspace and does not run at
+  all when the gateway is dead, so the engine's timer is the net under both; the worker attaches
+  with `connectOrStart`, so a sandbox the engine stopped for being idle is a cold start rather
+  than an error (that is why the client already had a wake path, see `openSandbox` in
+  `worker/src/microsandbox.ts`); and what it *must* not do is fire on a workspace that asked to
+  be kept alive, so `keep_alive` sets the policy's idle timeout to
+  `KeptAliveIdleTimeout` — control still decides, the engine is told what to do about it.
+- **A clean shutdown stops every sandbox; a crash does not.** `Workspaces.Close` closes each
+  control, and each close stops its sandbox. So "the sandbox survives the gateway" means a
+  gateway that died, not one that was asked to stop — which is why adoption is the recovery path
+  and not the normal one.
 - The image is still a copy per workspace ([ADR 0023](0023-bwrap-engine.md)); an overlay is the
   next thing that shrinks a workspace, and it is now the largest remaining gap.

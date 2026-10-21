@@ -84,3 +84,19 @@ func TestNameSurvivesOddFolders(t *testing.T) {
 		}
 	}
 }
+
+// A workspace that runs something tells the engine not to stop it for being idle. Control owns
+// the rule, and this is how the policy says so to an engine that keeps its own timer.
+func TestAKeptAliveWorkspaceIsNotStoppedForBeingIdle(t *testing.T) {
+	kept := Policy{Image: DefaultImage, Workspace: "/work/ws"}
+	if got := kept.withDefaults().IdleTimeout; got != DefaultIdleTimeout {
+		t.Fatalf("default idle timeout: %q", got)
+	}
+	kept.IdleTimeout = KeptAliveIdleTimeout
+	if kept.withDefaults().IdleTimeout != KeptAliveIdleTimeout {
+		t.Fatal("a policy's own idle timeout must survive the defaults")
+	}
+	if KeptAliveIdleTimeout == DefaultIdleTimeout {
+		t.Fatal("a kept-alive workspace must ask for a different timeout than the default")
+	}
+}

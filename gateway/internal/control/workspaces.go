@@ -94,13 +94,20 @@ func (w Workspace) SandboxPolicy(home, userHome string, disableVMNesting bool) s
 	if w.DisableVMNesting != nil {
 		disableVMNesting = *w.DisableVMNesting
 	}
-	return sandbox.Policy{
+	policy := sandbox.Policy{
 		Image:            w.Image,
 		Workspace:        w.Path,
 		Egress:           w.Network != NetworkOff,
 		DisableVMNesting: disableVMNesting,
 		Global:           sandbox.GlobalPaths(home, userHome),
 	}
+	if w.KeepAlive {
+		// An engine that stops idle sandboxes on its own has to be told not to here: control
+		// already exempts this workspace from eviction, and a sandbox stopped under a live worker
+		// is woken by the next command — which kills the daemons it was kept alive for.
+		policy.IdleTimeout = sandbox.KeptAliveIdleTimeout
+	}
+	return policy
 }
 
 // ValidNetwork reports whether a network value means something. An unknown value is refused
