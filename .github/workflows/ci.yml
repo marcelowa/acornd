@@ -125,6 +125,19 @@ jobs:
       - name: Install what the engine needs
         # bubblewrap for the sandbox, pasta for its network, and iproute2 for the address step
         # pasta does not do itself. A runner that cannot install them fails here, loudly.
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap passt iproute2
+        #
+        # `sudo` is not on every runner — a container-based runner is already root, and one
+        # without sudo at all is a runner that cannot run this tier. Both are said plainly.
+        run: |
+          for tool in bwrap pasta ip; do
+            command -v "$tool" >/dev/null || missing=1
+          done
+          if [ -z "${missing:-}" ]; then echo "bubblewrap, pasta, and ip are already here"; exit 0; fi
+          if [ "$(id -u)" -eq 0 ]; then SUDO=""; else
+            command -v sudo >/dev/null || { echo "::error::this runner has no sudo and is not root, so the engine's packages cannot be installed"; exit 1; }
+            SUDO=sudo
+          fi
+          $SUDO apt-get update -qq
+          $SUDO apt-get install -y -qq bubblewrap passt iproute2
       - run: make deps
       - run: make test-bwrap
