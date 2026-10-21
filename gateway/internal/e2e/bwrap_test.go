@@ -1,6 +1,8 @@
 package e2e
 
 import (
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -171,5 +173,57 @@ func TestBwrapWorkspaceInstallsIntoItsOwnImage(t *testing.T) {
 	// Nothing of this reached the host: the workspace's root is its own folder.
 	if _, err := os.Stat(filepath.Join(s.Home, "sandboxes", "bwrap")); err != nil {
 		t.Fatalf("the engine's folder should hold the image and the workspace's copy: %v", err)
+	}
+}
+
+// A sandbox must not reach the machine's own loopback. Two routes used to carry it there: pasta's
+// automatic port forwarding, which mirrors every service the machine listens on into the sandbox's
+// loopback — the acornfall API on 7777 among them, with no authentication in front of it — and the
+// gateway translation that maps 10.0.2.2 onto the same loopback. Both are closed in the argv, and
+// this fails if either comes back.
+func TestABwrapSandboxCannotReachTheMachinesLoopback(t *testing.T) {
+	t.Parallel()
+	bwrapEngine(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening on the machine's loopback: %v", err)
+	}
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+
+	s := start(t,
+		withScript(
+			scriptRule{
+				Match: "reach the host",
+				Tools: []scriptTool{{Name: "bash", Args: map[string]any{
+					"command": fmt.Sprintf(
+						`try() { timeout 3 bash -c "exec 3<>/dev/tcp/$1/$2" 2>/dev/null && echo "$1:$2 open" || echo "$1:$2 closed"; }; `+
+							`try 127.0.0.1 %d; try 10.0.2.2 %d`, port, port),
+				}}},
+				Reply: "probed",
+			},
+		),
+	)
+	c := s.client()
+	root := c.waitForConversation("general")
+	c.prompt("general", root, "reach the host")
+	output := c.waitForText("general", root, "probed").lastToolResult()
+
+	for _, want := range []string{
+		fmt.Sprintf("127.0.0.1:%d closed", port),
+		fmt.Sprintf("10.0.2.2:%d closed", port),
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("the sandbox should not reach the machine, want %q in %q", want, output)
+		}
 	}
 }

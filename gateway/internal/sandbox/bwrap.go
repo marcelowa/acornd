@@ -674,6 +674,15 @@ func (b *Bwrap) bootArgv(config bwrapConfig) ([]string, error) {
 	}, "\n")
 	argv := []string{
 		config.Network.Pasta, "-q",
+		// Outbound only. pasta's port forwarding defaults to "auto", which mirrors every service
+		// the machine listens on into the sandbox's loopback — the acornfall API on 7777 and sshd
+		// on 22 among them — and that is the machine's own surface, not the workspace's. Nothing in
+		// the sandbox needs a port opened for it, and nothing here is a port the machine should
+		// offer into a workspace.
+		"-t", "none", "-u", "none", "-T", "none", "-U", "none",
+		// The gateway address would otherwise be translated to the machine's loopback, which is
+		// the same surface by another name. See docs/adr/0023-bwrap-engine.md.
+		"--no-map-gw",
 		"-a", address, "-n", prefix, "-g", config.Network.Gateway,
 		"--", "/bin/sh", "-c", configure, "sh", config.Network.IP, config.Network.Address, config.Network.Gateway,
 	}

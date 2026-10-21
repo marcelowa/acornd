@@ -397,6 +397,11 @@ func TestBwrapSandboxArgvSharesPastaForEgress(t *testing.T) {
 		t.Fatalf("the boot argv starts with %q, want pasta", argv[0])
 	}
 	for _, want := range []string{
+		// The machine's own loopback is not the workspace's, by either route pasta offers: the
+		// automatic port forwarding mirrors every host listener into the sandbox, and the gateway
+		// translation maps 10.0.2.2 onto the same loopback. A sandbox that reached 127.0.0.1:7777
+		// would be talking to the acornfall that runs it.
+		"-t none -u none -T none -U none", "--no-map-gw",
 		"-a 10.0.2.15 -n 24 -g 10.0.2.2",
 		// pasta configures neither the address nor the route, so the sandbox does it from inside
 		// the namespace pasta made.

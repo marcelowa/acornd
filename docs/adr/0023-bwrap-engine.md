@@ -79,11 +79,26 @@ MagicDNS over the tailnet:     100.64.0.15  peer.example.ts.net
 
 Two consequences worth stating:
 
-- **The tailnet comes along for free.** pasta dials from the host side, so the host's routing —
-  `tailscale0`, MagicDNS at `100.100.100.100`, any peer — applies to whatever the sandbox dials.
-  Nothing is configured and no key is involved.
-- **The machine's `127.0.0.1` is not the sandbox's.** A dev server in a workspace binds its own
-  loopback, and the host's loopback answers only at pasta's gateway address.
+- **The tailnet comes along for free, and that is what `network: on` means.** pasta dials from the
+  host side, so the host's routing — `tailscale0`, MagicDNS at `100.100.100.100`, any peer — applies
+  to whatever the sandbox dials. Nothing is configured and no key is involved, which also means the
+  peers see this machine: a workspace with its network on can reach what this machine can reach, as
+  this machine. It is a workspace's own field on its record for that reason, not a detail of the
+  engine, and `network: off` leaves nothing to inherit.
+- **The machine's `127.0.0.1` is not the sandbox's — since 0.12.2.** It was until then, and that is
+  the one claim this ADR made that the code did not hold. pasta's port forwarding defaults to
+  `auto`, which mirrors every service the machine listens on into the sandbox's loopback, and its
+  gateway translation maps 10.0.2.2 onto that same loopback: a workspace could open
+  `127.0.0.1:7777` and talk to the acornfall that ran it, which serves its API with no
+  authentication. It could also read every other listener on the machine — sshd, a database, a dev
+  server. `-t none -u none -T none -U none --no-map-gw` closes both routes, and
+  `TestABwrapSandboxCannotReachTheMachinesLoopback` is what keeps them closed.
+
+What egress still does not do, and nothing in pasta can: it has no per-destination filter. A
+workspace whose network is on reaches private ranges, link-local metadata addresses and the tailnet
+exactly as far as the machine does. Filtering that is a host firewall with a grant per sandbox,
+which needs root at install time and is not built yet; until it is, the honest control is the
+workspace's own `network` field, and the dialog says what turning it on grants.
 
 What it costs: pasta's setup, once per workspace rather than once per command — 1.1 ms per command
 after that (ADR 0024). ICMP does not work (pasta is a userspace forwarder, so `ping` fails and TCP/UDP do not), and two packages

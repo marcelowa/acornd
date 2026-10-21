@@ -119,6 +119,14 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 							<ToggleGroupItem value="on">on</ToggleGroupItem>
 							<ToggleGroupItem value="off">off</ToggleGroupItem>
 						</ToggleGroup>
+						{/* What the switch grants, named where it is thrown. Egress is the machine's
+						    own reach — its tailnet, its private networks — not a firewall rule the
+						    workspace was given, and that is a thing to read before turning it on. */}
+						<Text size="2xs" tone="muted">
+							{network === "on"
+								? "reaches the network as this machine: its tailnet and private networks included"
+								: "no network at all: nothing to install, nothing to fetch"}
+						</Text>
 					</SettingsField>
 					<SettingsField label="while idle">
 						<ToggleGroup
