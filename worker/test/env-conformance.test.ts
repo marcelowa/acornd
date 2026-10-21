@@ -42,7 +42,8 @@ registerEnvConformance(
 // run — which is what CI, having no bubblewrap, found the hard way.
 const bwrapUsable =
 	Bun.which("bwrap") !== null &&
-	Bun.spawnSync(["bwrap", "--ro-bind", "/", "/", "--unshare-all", "--", "/bin/true"]).exitCode === 0;
+	Bun.spawnSync(["bwrap", "--ro-bind", "/", "/", "--unshare-all", "--", "/bin/true"]).exitCode ===
+		0;
 
 if (bwrapUsable) {
 	registerEnvConformance(
