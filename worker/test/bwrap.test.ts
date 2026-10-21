@@ -2,27 +2,21 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bwrapArguments, guestHome, openSandbox, spawnFor } from "../src/bwrap.ts";
+import { fakeSupervisor, type Fake } from "./fake-supervisor.ts";
+import { openSandbox } from "../src/bwrap.ts";
 import type { SandboxClient } from "../src/sandbox.ts";
 
 /**
- * The bubblewrap engine through its own client, against the real binary. The engine is a
- * namespace view built per command, so what there is to check is that the view is the one the
- * config asks for: the workspace bound read-write, the install folder hidden, the global
- * resources read-only, the network a setting, and a kill that reaches the command.
+ * The bubblewrap client against the protocol its sandbox speaks.
  *
- * A machine without a working user namespace skips: the driver's own refusal is the Go
- * suite's business, and this one needs a real sandbox to say anything.
+ * The sandbox itself — bubblewrap, its mounts, the supervisor — is Go's, and the end-to-end tests
+ * cover it against a real one. What is only the client's is here: that a request carries the argv
+ * it was given and exactly the environment it built, that output streams, that an abort becomes a
+ * kill, and that a command the sandbox could not start is a spawn failure rather than an exit code.
+ *
+ * The fake answers the protocol and runs the real commands, so the streaming path is real even
+ * though the sandbox is not.
  */
-const probe = Bun.spawnSync(["bwrap", "--ro-bind", "/", "/", "--unshare-all", "--", "/bin/true"]);
-const usable = probe.exitCode === 0;
-const whenUsable = usable ? test : test.skip;
-// Egress is carried by pasta, and configured with ip: a machine with neither cannot answer the
-// network questions below, so it skips them rather than failing them.
-const pastaPath = Bun.which("pasta") ?? "/usr/bin/pasta";
-const ipPath = Bun.which("ip") ?? "/usr/sbin/ip";
-const whenNetworked =
-	usable && Bun.which("pasta") !== null && Bun.which("ip") !== null ? test : test.skip;
 
 const opened: string[] = [];
 
@@ -33,27 +27,19 @@ afterEach(async () => {
 
 interface Opened {
 	dir: string;
-	hidden: string;
-	global: string;
-	readOnly: string;
+	state: string;
 	client: SandboxClient;
+	fake: Fake;
 }
 
-/** A workspace and the config control would have written for it. */
+/** A workspace, its config, and a supervisor to talk to. */
 async function open(network: "pasta" | "off" = "off"): Promise<Opened> {
 	const root = await realpath(await mkdtemp(join(tmpdir(), "acornfall-bwrap-")));
 	opened.push(root);
 	const dir = join(root, "work");
 	const state = join(root, "state");
-	const hidden = join(root, "home");
-	const global = join(root, "agents");
-	const readOnly = join(hidden, "skills");
-	for (const path of [dir, state, hidden, global, readOnly])
-		await mkdir(path, { recursive: true });
-	await writeFile(join(hidden, "credentials.json"), '{"secret":"not for the sandbox"}\n');
-	await writeFile(join(readOnly, "SKILL.md"), "read me\n");
-	await writeFile(join(dir, "note.txt"), "in the workspace\n");
-
+	for (const path of [dir, state, join(state, "home")]) await mkdir(path, { recursive: true });
+	const fake = await fakeSupervisor(root);
 	const name = "acornfall-test";
 	await writeFile(
 		join(state, `${name}.json`),
@@ -63,241 +49,137 @@ async function open(network: "pasta" | "off" = "off"): Promise<Opened> {
 			image: "debian:stable-slim",
 			network:
 				network === "pasta"
-					? {
-							mode: "pasta" as const,
-							address: "10.0.2.15/24",
-							gateway: "10.0.2.2",
-							pasta: pastaPath,
-							ip: ipPath,
-						}
-					: { mode: "off" as const },
+					? { mode: "pasta", address: "10.0.2.15/24", gateway: "10.0.2.2" }
+					: { mode: "off" },
+			rootfs: join(root, "rootfs"),
 			home: join(state, "home"),
-			hidden,
-			readOnly: [global, readOnly],
+			hidden: join(root, "hidden"),
+			readOnly: [],
+			socket: fake.socket,
 		}),
 	);
-	await mkdir(join(state, "home"), { recursive: true });
 	process.env.ACORNFALL_BWRAP_STATE = state;
-	return { dir, hidden, global, readOnly, client: await openSandbox(name, dir) };
+	return { dir, state, client: await openSandbox(name, dir), fake };
 }
 
-whenUsable("a command streams as it runs and reports its exit code", async () => {
-	const { client } = await open();
-	const chunks: string[] = [];
-	const result = await client.exec("printf one; sleep 0.2; printf two", {
-		onChunk: (chunk) => chunks.push(new TextDecoder().decode(chunk.data)),
-	});
-	expect(result.code).toBe(0);
-	expect(result.stopped).toBeUndefined();
-	expect(new TextDecoder().decode(result.stdout)).toBe("onetwo");
-	// Streaming, not buffering: the first chunk arrives before the command ends.
-	expect(chunks.length).toBeGreaterThan(1);
+test("a command streams as it runs and reports its exit code", async () => {
+	const { client, fake } = await open();
+	try {
+		const chunks: string[] = [];
+		const result = await client.exec("printf one; sleep 0.2; printf two", {
+			onChunk: (chunk) => chunks.push(new TextDecoder().decode(chunk.data)),
+		});
+		expect(result.code).toBe(0);
+		expect(result.stopped).toBeUndefined();
+		expect(new TextDecoder().decode(result.stdout)).toBe("onetwo");
+		// Streaming, not buffering: the first chunk arrives before the command ends.
+		expect(chunks.length).toBeGreaterThan(1);
 
-	const failed = await client.exec("printf bad >&2; exit 3", {});
-	expect(failed.code).toBe(3);
-	expect(new TextDecoder().decode(failed.stderr)).toBe("bad");
+		const failed = await client.exec("printf bad >&2; exit 3", {});
+		expect(failed.code).toBe(3);
+		expect(new TextDecoder().decode(failed.stderr)).toBe("bad");
+	} finally {
+		await fake.close();
+	}
 });
 
-whenUsable("the workspace is bound read-write, and writes are the user's own", async () => {
-	const { dir, client } = await open();
-	await client.exec("printf inside > written.txt", { cwd: dir });
-	expect(await client.read(join(dir, "written.txt"))).toBe("inside");
-	expect(new TextDecoder().decode((await client.exec("pwd", {})).stdout).trim()).toBe(dir);
+test("the request carries the argv it was given and the directory the command runs in", async () => {
+	const { dir, client, fake } = await open();
+	try {
+		await client.exec(["printf", "%s", "argv"], {});
+		await client.mkdir(join(dir, "sub"));
+		await client.exec("pwd", { cwd: join(dir, "sub") });
+		const [first, second] = fake.captured;
+		expect(first?.argv).toEqual(["printf", "%s", "argv"]);
+		expect(first?.dir).toBe(dir);
+		expect(second?.argv).toEqual(["/bin/sh", "-c", "pwd"]);
+		expect(second?.dir).toBe(join(dir, "sub"));
+	} finally {
+		await fake.close();
+	}
 });
 
-whenUsable("the install folder is hidden and the global resources are read-only", async () => {
-	const { hidden, readOnly, dir, client } = await open();
-	// credentials.json lives inside the hidden folder: a sandbox that could read it would be
-	// reading the worker's key, which is the one thing ADR 0012 keeps out.
-	const hiddenFile = await client.exec(`cat ${join(hidden, "credentials.json")}`, {
-		clearEnv: true,
-	});
-	expect(hiddenFile.code).not.toBe(0);
-	expect(new TextDecoder().decode(hiddenFile.stdout)).toBe("");
+test("the environment is exactly what the caller gets: secrets in, nothing else", async () => {
+	const { state, client, fake } = await open();
+	try {
+		await client.exec("true", { env: { GITHUB_TOKEN: "from the vault" } });
+		const withSecret = fake.captured.at(-1);
+		expect(withSecret?.env["GITHUB_TOKEN"]).toBe("from the vault");
+		// The private home and a search path that finds a toolchain installed there.
+		// The sandbox's home, not the machine's: the machine's home is not in the image.
+		expect(withSecret?.env["HOME"]).toBe("/root");
+		expect(withSecret?.env["PATH"]).toStartWith(`${join(state, "home")}/.local/bin`);
 
-	// A skill's own directory is readable at its own path, and writing it is refused.
-	const skill = await client.exec(`cat ${join(readOnly, "SKILL.md")}`, { clearEnv: true });
-	expect(new TextDecoder().decode(skill.stdout)).toBe("read me\n");
-	const tamper = await client.exec(`printf x >> ${join(readOnly, "SKILL.md")}`, {
-		clearEnv: true,
-	});
-	expect(tamper.code).not.toBe(0);
-	expect((await client.exec(`printf x > ${join(dir, "ok.txt")}`, { clearEnv: true })).code).toBe(
-		0,
-	);
+		// clearEnv is the caller saying "nothing but what I pass", and it has to mean it.
+		process.env.ACORNFALL_SHOULD_NOT_LEAK = "yes";
+		await client.exec("true", { clearEnv: true });
+		const cleared = fake.captured.at(-1);
+		expect(cleared?.env["ACORNFALL_SHOULD_NOT_LEAK"]).toBeUndefined();
+		delete process.env.ACORNFALL_SHOULD_NOT_LEAK;
+	} finally {
+		await fake.close();
+	}
 });
 
-whenUsable("the host root is read-only, and the workspace is not", async () => {
-	const { client } = await open();
-	const write = await client.exec("printf x > /usr/local/break-it", { clearEnv: true });
-	expect(write.code).not.toBe(0);
-	expect(new TextDecoder().decode(write.stderr)).toContain("Read-only file system");
+test("a timeout and an abort stop the command and say which happened", async () => {
+	const { client, fake } = await open();
+	try {
+		const started = Date.now();
+		const timedOut = await client.exec("sleep 5", { timeoutMs: 200 });
+		expect(timedOut.stopped).toBe("timeout");
+		expect(timedOut.code).toBe(143);
+		expect(Date.now() - started).toBeLessThan(3000);
+
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), 100);
+		const aborted = await client.exec("sleep 5", { signal: controller.signal });
+		clearTimeout(timer);
+		expect(aborted.stopped).toBe("aborted");
+		expect(aborted.code).toBe(143);
+	} finally {
+		await fake.close();
+	}
 });
 
-whenNetworked("the network is the workspace's setting", async () => {
-	const off = await open("off");
-	const isolates = await off.client.exec("cat /proc/net/dev", { clearEnv: true });
-	// A netns of its own: loopback is the only interface, so egress is not there to leak.
-	const interfaces = new TextDecoder()
-		.decode(isolates.stdout)
-		.split("\n")
-		.filter((line) => line.includes(":"))
-		.map((line) => line.trim().split(":")[0]);
-	expect(interfaces).toEqual(["lo"]);
-
-	// With pasta the sandbox has a tap of its own, and the machine's interfaces are not in it.
-	const on = await open("pasta");
-	const shares = await on.client.exec("cat /proc/net/dev", { clearEnv: true });
-	const named = new TextDecoder()
-		.decode(shares.stdout)
-		.split("\n")
-		.filter((line) => line.includes(":"))
-		.map((line) => line.trim().split(":")[0]);
-	expect(named).toContain("eth0");
-	expect(named).not.toContain("tailscale0");
+test("a program the sandbox cannot start is a spawn failure, not an exit code", async () => {
+	const { client, fake } = await open();
+	try {
+		expect(client.exec(["not-a-program"], {})).rejects.toThrow("no such file or directory");
+	} finally {
+		await fake.close();
+	}
 });
 
-whenUsable("secrets arrive in the environment and nothing else does", async () => {
-	const { client } = await open();
-	const secret = await client.exec('printf %s "$GITHUB_TOKEN"', {
-		env: { GITHUB_TOKEN: "from the vault" },
-	});
-	expect(new TextDecoder().decode(secret.stdout)).toBe("from the vault");
-	// clearEnv is the caller saying "nothing but what I pass", and it has to mean it.
-	const cleared = await client.exec('printf %s "$GITHUB_TOKEN"', { clearEnv: true });
-	expect(new TextDecoder().decode(cleared.stdout)).toBe("");
-});
-
-whenUsable("a timeout and an abort stop the command and say which happened", async () => {
-	const { client } = await open();
-	const started = Date.now();
-	const timedOut = await client.exec("sleep 5", { timeoutMs: 200 });
-	expect(timedOut.stopped).toBe("timeout");
-	expect(timedOut.code).toBe(143);
-	expect(Date.now() - started).toBeLessThan(3000);
-
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), 100);
-	const aborted = await client.exec("sleep 5", { signal: controller.signal });
-	clearTimeout(timer);
-	expect(aborted.stopped).toBe("aborted");
-	expect(aborted.code).toBe(143);
-});
-
-whenUsable("the workspace's own home is where installs land", async () => {
-	const { client } = await open();
-	const home = await client.exec('printf %s "$HOME"', { clearEnv: true });
-	const printed = new TextDecoder().decode(home.stdout);
-	// The config's own home, not the worker's: only what a workspace installs lives here.
-	expect(printed).toEndWith("/state/home");
-	const written = await client.exec("printf installed > $HOME/.toolchain", { clearEnv: true });
-	expect(written.code).toBe(0);
-	expect(await client.read(join(printed, ".toolchain"))).toBe("installed");
+test("files are read, written, and listed in the workspace", async () => {
+	const { dir, client, fake } = await open();
+	try {
+		const hello = join(dir, "hello.txt");
+		await client.write(hello, "from the test\n");
+		expect(await client.read(hello)).toBe("from the test\n");
+		const entries = await client.list(dir);
+		expect(entries.map((entry) => entry.name)).toEqual(["hello.txt"]);
+		await client.rename(hello, join(dir, "renamed.txt"));
+		expect(await client.read(join(dir, "renamed.txt"))).toBe("from the test\n");
+		await client.remove(join(dir, "renamed.txt"), {});
+		expect(await client.read(join(dir, "renamed.txt"))).toBeNull();
+	} finally {
+		await fake.close();
+	}
 });
 
 test("a config for another workspace is refused", async () => {
-	const { client } = await open();
-	expect(client.name).toStartWith("bwrap:");
-	// The name control sends has to resolve to the config of the folder the worker was told
-	// about, or a command could run in somebody else's workspace.
-	expect(openSandbox("acornfall-test", "/somewhere/else")).rejects.toThrow(
-		"is not the config for",
-	);
+	const { fake } = await open();
+	try {
+		expect(openSandbox("acornfall-test", "/somewhere/else")).rejects.toThrow(
+			"is not the config for",
+		);
+	} finally {
+		await fake.close();
+	}
 });
 
-// The argv is where the image shape lives, and it can be checked without a user namespace: a
-// rootfs changes what `/` is, and hiding the install folder then has nothing left to hide.
-test("a workspace with an image runs in that image, as its own root", () => {
-	const config = {
-		engine: "bwrap",
-		workspace: "/work/ws",
-		image: "debian:stable-slim",
-		network: {
-			mode: "pasta" as const,
-			address: "10.0.2.15/24",
-			gateway: "10.0.2.2",
-			pasta: "/usr/bin/pasta",
-			ip: "/usr/sbin/ip",
-		},
-		rootfs: "/state/acornfall-test/rootfs",
-		home: "/state/acornfall-test/home",
-		hidden: "/home/me/.acornfall",
-		readOnly: ["/home/me/.agents"],
-	};
-	const args = bwrapArguments(config, ["sh", "-c", "true"], "/work/ws", {}).join(" ");
-	expect(args).toContain("--bind /state/acornfall-test/rootfs / ");
-	expect(args).not.toContain("--ro-bind / /");
-	// Root inside, the user outside: the single mapping is what keeps ownership theirs.
-	expect(args).toContain("--uid 0 --gid 0");
-	// A container root still needs the machine's resolver.
-	expect(args).toContain("--ro-bind /etc/resolv.conf /etc/resolv.conf");
-	expect(args).toContain("--bind /state/acornfall-test/home /root ");
-	// Nothing on the filesystem holds the install folder, so nothing has to be hidden.
-	expect(args).not.toContain("--tmpfs /home/me/.acornfall");
-	expect(guestHome(config)).toBe("/root");
-	// The global resources are still read-only at their own paths.
-	expect(args).toContain("--ro-bind /home/me/.agents /home/me/.agents");
-});
-
-test("without an image the host's root is the root, read-only, with the install folder hidden", () => {
-	const config = {
-		engine: "bwrap",
-		workspace: "/work/ws",
-		image: "debian:stable-slim",
-		network: { mode: "off" as const },
-		home: "/state/acornfall-test/home",
-		hidden: "/home/me/.acornfall",
-	};
-	const args = bwrapArguments(config, ["true"], "/work/ws", {}).join(" ");
-	expect(args).toContain("--ro-bind / /");
-	expect(args).toContain("--tmpfs /home/me/.acornfall");
-	expect(args).not.toContain("--uid 0");
-	expect(args).not.toContain("--share-net");
-	expect(guestHome(config)).toBe("/state/acornfall-test/home");
-});
-
-// Pasta carries egress: the sandbox is on its own namespace, and what configures that namespace
-// runs between pasta and bubblewrap.
-test("an egress workspace runs through pasta, which configures the namespace first", () => {
-	const config = {
-		engine: "bwrap",
-		workspace: "/work/ws",
-		image: "debian:stable-slim",
-		network: {
-			mode: "pasta" as const,
-			address: "10.0.2.15/24",
-			gateway: "10.0.2.2",
-			pasta: "/usr/bin/pasta",
-			ip: "/usr/sbin/ip",
-		},
-		rootfs: "/state/ws/rootfs",
-		home: "/state/ws/home",
-		hidden: "/home/me/.acornfall",
-	};
-	const args = bwrapArguments(config, ["sh", "-c", "true"], "/work/ws", {}).join(" ");
-	// The sandbox's namespace is pasta's: bubblewrap shares it instead of making one.
-	expect(args).toContain("--share-net");
-
-	const spawn = spawnFor(config, ["sh", "-c", "true"]);
-	expect(spawn[0]).toBe("/usr/bin/pasta");
-	// The address and the route are set from inside that namespace, where they are ours to set.
-	expect(spawn.join(" ")).toContain('addr add "$ADDR" dev eth0');
-	expect(spawn.join(" ")).toContain('route add default via "$GATEWAY"');
-	expect(spawn.slice(0, -1).join(" ")).toContain("-a 10.0.2.15 -n 24 -g 10.0.2.2");
-	// And bubblewrap is what the script becomes, after the arguments that configure the namespace.
-	expect(spawn.indexOf("bwrap")).toBeGreaterThan(spawn.indexOf("/usr/sbin/ip"));
-	expect(spawn.indexOf("bwrap")).toBeGreaterThan(spawn.indexOf("10.0.2.2"));
-});
-
-test("a workspace with no network does not involve pasta at all", () => {
-	const config = {
-		engine: "bwrap",
-		workspace: "/work/ws",
-		image: "debian:stable-slim",
-		network: { mode: "off" as const },
-		home: "/state/ws/home",
-		hidden: "/home/me/.acornfall",
-	};
-	expect(bwrapArguments(config, ["true"], "/work/ws", {}).join(" ")).not.toContain("--share-net");
-	expect(spawnFor(config, ["true"])[0]).toBe("bwrap");
+test("a sandbox that is not answering says so, and says what stops it", async () => {
+	const { client, fake } = await open();
+	await fake.close();
+	expect(client.exec("true", {})).rejects.toThrow("is not answering");
 });

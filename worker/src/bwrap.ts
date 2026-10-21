@@ -1,18 +1,23 @@
+import { connect, type Socket } from "node:net";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { concatChunks, type ExecOptions, type ExecResult, type SandboxClient } from "./sandbox.ts";
 import { WorkspaceFiles } from "./workspace-files.ts";
 
 /**
- * The bubblewrap engine: namespaces built from an argv, with no runtime and no sandbox object.
+ * The bubblewrap engine: a sandbox that runs as one process per workspace, with this worker's
+ * binary as its first process inside.
  *
- * Control writes one config per workspace to `ACORNFALL_BWRAP_STATE` — the same file a person
- * can read — and this turns it into the argv of every command. That is the whole engine: there
- * is nothing to boot, nothing to attach to, and nothing that survives a command but what it
- * wrote. See docs/adr/0023-bwrap-engine.md.
+ * Control writes one config per workspace to `ACORNFALL_BWRAP_STATE` — the same file a person can
+ * read — starts the sandbox, and the sandbox's supervisor answers on a Unix socket. A command
+ * here is a request over that socket: the supervisor runs it inside the namespaces it already
+ * holds, streams it back, and reaps what it leaves behind. That is why a daemon outlives the
+ * command that started it, and why a command costs a fork instead of a sandbox.
  *
  * File operations are the host's, unchanged: bubblewrap binds a folder at the path it already
  * has, so a path means the same thing inside and outside.
+ *
+ * See docs/adr/0023-bwrap-engine.md.
  */
 export function engineName(): string {
 	return "bwrap";
@@ -35,178 +40,55 @@ export async function openSandbox(name: string, workspace: string): Promise<Sand
 	return new BwrapClient(config);
 }
 
-/** What control resolved for one workspace: paths, network, and the private home. */
+/** What control resolved for one workspace: paths, the sandbox's socket, and its private home. */
 export interface BwrapConfig {
 	engine: string;
 	workspace: string;
 	image: string;
-	/** "off" is a namespace with no interfaces; "pasta" forwards through the host. */
-	network: BwrapNetwork;
-	/** The workspace's own unpacked image, bound as `/`. Absent means the host's root. */
+	/** How a command reaches the network, recorded for the person reading the file. */
+	network: { mode: "off" | "pasta"; address?: string; gateway?: string };
+	/** The workspace's own unpacked image, bound as `/`. */
 	rootfs?: string;
-	/** The private home language toolchains install into. */
+	/** The private home, where a toolchain installed by one command is found by the next. */
 	home: string;
-	/** The install folder, hidden by a tmpfs: credentials and state live in there. */
+	/** The install folder, hidden when the machine's root is the root. */
 	hidden: string;
-	/** Global resource folders, bound back read-only after the tmpfs. */
 	readOnly?: string[];
+	/** The sandbox's supervisor: where it listens, for this worker. */
+	socket: string;
 }
-
-/** How a command reaches the network, as control resolved it. */
-export interface BwrapNetwork {
-	mode: "off" | "pasta";
-	/** The sandbox's own address inside its namespace, with its prefix: 10.0.2.15/24. */
-	address?: string;
-	/** pasta's address inside that namespace: the sandbox's way out, and nothing on the host. */
-	gateway?: string;
-	pasta?: string;
-	ip?: string;
-}
-
-/**
- * What runs between pasta and bubblewrap: pasta makes the namespace and the tap but configures
- * neither, so this does, from inside that namespace as its root, and then becomes the sandbox.
- * The arguments are positional and the script is a constant, so no value is ever parsed as code.
- */
-const configureScript = [
-	'IP="$1"; ADDR="$2"; GATEWAY="$3"; shift 3',
-	'"$IP" link set lo up',
-	'"$IP" link set eth0 up',
-	'"$IP" addr add "$ADDR" dev eth0',
-	'"$IP" route add default via "$GATEWAY"',
-	'exec "$@"',
-].join("\n");
 
 const systemPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
 /**
- * What a command's PATH starts with. Tools a workspace installs itself land in its own home,
- * so the two folders every unprivileged installer uses come first — otherwise a toolchain that
+ * What a command's PATH starts with. Tools a workspace installs itself land in its own home, so
+ * the two folders every unprivileged installer uses come first — otherwise a toolchain that
  * survived one command would still not be found by the next one.
  */
 function searchPath(home: string): string {
 	return `${home}/.local/bin:${home}/.cargo/bin:${home}/.bun/bin:${systemPath}`;
 }
 
-/**
- * The argv that puts one command inside this workspace's sandbox: the mounts, the namespaces,
- * the environment, and the command. It is a function of the config alone, which is what makes
- * it testable without a user namespace.
- */
-export function bwrapArguments(
-	config: BwrapConfig,
-	argv: readonly string[],
-	cwd: string,
-	env: Record<string, string>,
-): string[] {
-	const image = config.rootfs !== undefined;
-	return [
-		// The workspace's own image when it has one: its `/` is then a tree that is disposable
-		// with the workspace, and an install in it outlives the command. Without one the host's
-		// root is the root, read-only, which is the older shape.
-		...(image
-			? [
-					"--bind",
-					config.rootfs as string,
-					"/",
-					// A root of its own: a single mapping makes root inside the user who owns the
-					// sandbox outside, so files still land owned by them.
-					"--uid",
-					"0",
-					"--gid",
-					"0",
-					// The resolver is the one thing a root genuinely needs from its machine.
-					"--ro-bind",
-					"/etc/resolv.conf",
-					"/etc/resolv.conf",
-				]
-			: ["--ro-bind", "/", "/"]),
-		"--dev",
-		"/dev",
-		"--proc",
-		"/proc",
-		"--tmpfs",
-		"/tmp",
-		// The install folder is hidden only when the host's root is the root: credentials and
-		// state live in there, and inside an image they are not on the filesystem at all.
-		...(image ? [] : ["--tmpfs", config.hidden]),
-		// The global resources, read-only at their own paths: a skill's instructions name their
-		// own directory, and a script beside a skill has to be a path that works.
-		...[...(config.readOnly ?? [])].flatMap((path) => ["--ro-bind", path, path]),
-		"--bind",
-		config.home,
-		guestHome(config),
-		"--bind",
-		config.workspace,
-		config.workspace,
-		"--unshare-all",
-		// A sandbox with egress shares the network namespace of whoever started bubblewrap: pasta,
-		// which is why `--share-net` here means pasta's namespace and not the machine's.
-		...(config.network.mode === "off" ? [] : ["--share-net"]),
-		// A command that outlives the worker is a command nobody can stop; the worker's kill
-		// then reaches bubblewrap and bubblewrap takes its child with it.
-		"--die-with-parent",
-		"--clearenv",
-		...Object.entries(env).flatMap(([key, value]) => ["--setenv", key, value]),
-		"--chdir",
-		cwd,
-		"--",
-		...argv,
-	];
-}
-
-/** Where the private home appears inside the sandbox: the root's own home when there is an
- * image, and its real path when the host's root is the root. */
+/** Where the private home appears inside the sandbox. */
 export function guestHome(config: BwrapConfig): string {
 	return config.rootfs === undefined ? config.home : "/root";
 }
 
-/**
- * What to run: bubblewrap alone when the sandbox has no network, or pasta in front of it.
- *
- * pasta makes a network namespace and a tap, forwards what the sandbox sends through the
- * host, and runs a command inside that namespace. It configures neither the address nor the
- * route, so a short script does that first — it runs as root inside pasta's namespace, which
- * is the only place those are its to set.
- */
-export function spawnFor(config: BwrapConfig, args: string[]): string[] {
-	const network = config.network;
-	if (network.mode === "off") {
-		// The command's own argv, not the network's: bubblewrap is the program.
-		return ["bwrap", ...args];
-	}
-	if (network.pasta === undefined || network.ip === undefined) {
-		throw new Error(
-			"this workspace has egress but no pasta path in its config: recreate the sandbox (acornfall workspace remove, then open it)",
-		);
-	}
-	const [address, prefix] = (network.address ?? "").split("/");
-	const gateway = network.gateway ?? "";
-	return [
-		network.pasta,
-		"-q",
-		"-a",
-		address ?? "",
-		"-n",
-		prefix ?? "24",
-		"-g",
-		gateway,
-		"--",
-		"/bin/sh",
-		"-c",
-		configureScript,
-		"sh",
-		network.ip,
-		network.address ?? "",
-		gateway,
-		"bwrap",
-		...args,
-	];
+/** One request's frames, as the supervisor speaks them. */
+interface Event {
+	type: "ready" | "started" | "chunk" | "exit" | "error";
+	id?: string;
+	stream?: "stdout" | "stderr";
+	data?: string;
+	code?: number;
+	stopped?: string;
+	error?: string;
 }
 
 class BwrapClient extends WorkspaceFiles implements SandboxClient {
 	readonly name: string;
 	private readonly config: BwrapConfig;
+	private nextID = 0;
 
 	constructor(config: BwrapConfig) {
 		super();
@@ -215,10 +97,10 @@ class BwrapClient extends WorkspaceFiles implements SandboxClient {
 	}
 
 	/**
-	 * The environment a command sees. An environment engine delivers secrets by putting them
-	 * in this process, so a command that inherits inherits them; `clearEnv` is how a caller
-	 * asks for nothing but what it passes. Nothing else leaks in either way: the sandbox is
-	 * built with `--clearenv` and only these entries are handed over.
+	 * The environment a command sees. An environment engine delivers secrets by putting them in
+	 * this process, so a command that inherits inherits them; `clearEnv` is how a caller asks for
+	 * nothing but what it passes. Nothing else reaches the sandbox: the supervisor starts a
+	 * command with exactly this map and nothing of its own.
 	 */
 	private environment(options: ExecOptions): Record<string, string> {
 		const inherited = options.clearEnv === true ? {} : { ...process.env };
@@ -226,79 +108,134 @@ class BwrapClient extends WorkspaceFiles implements SandboxClient {
 		for (const [key, value] of Object.entries({ ...inherited, ...options.env })) {
 			if (typeof value === "string") env[key] = value;
 		}
-		env["HOME"] ??= guestHome(this.config);
-		env["PATH"] = searchPath(env["HOME"] ?? guestHome(this.config));
+		// The sandbox's own home, always: the machine's is not in the image, so an install there
+		// would land nowhere and a `~` would mean a path the command cannot see.
+		env["HOME"] = guestHome(this.config);
+		env["PATH"] = searchPath(this.config.home);
 		return env;
 	}
 
 	async exec(command: string | readonly string[], options: ExecOptions): Promise<ExecResult> {
 		const argv = typeof command === "string" ? ["/bin/sh", "-c", command] : [...command];
 		if (argv.length === 0) throw new Error("empty argv: no program to run");
-		const env = this.environment(options);
-		const args = bwrapArguments(this.config, argv, options.cwd ?? this.config.workspace, env);
-		const proc = Bun.spawn(spawnFor(this.config, args), {
-			stdin: "ignore",
-			stdout: "pipe",
-			stderr: "pipe",
-			// Its own session, so the kill below takes bubblewrap and everything it started.
-			detached: true,
+		const request = {
+			type: "run" as const,
+			id: String(++this.nextID),
+			argv,
+			env: this.environment(options),
+			dir: options.cwd ?? this.config.workspace,
+		};
+		const socket = await this.connect();
+		try {
+			return await this.pump(socket, request, options);
+		} finally {
+			socket.destroy();
+		}
+	}
+
+	/** One connection per command: connecting to a Unix socket costs less than a millisecond. */
+	private connect(): Promise<Socket> {
+		return new Promise((resolve, reject) => {
+			const socket = connect(this.config.socket);
+			const failed = (error: Error): void => {
+				reject(
+					new Error(
+						`the sandbox at ${this.config.socket} is not answering (${error.message}): the workspace's sandbox stops when the workspace is stopped`,
+					),
+				);
+			};
+			socket.once("error", failed);
+			socket.once("connect", () => {
+				socket.removeListener("error", failed);
+				socket.on("error", () => {
+					// A broken connection ends the command; the exit or the close below reports it.
+				});
+				resolve(socket);
+			});
 		});
+	}
+
+	/**
+	 * Sends the request and reads its frames until it exits. A kill is a request of its own, sent
+	 * on the same connection, so a command that outlives the abort is not left running.
+	 */
+	private pump(
+		socket: Socket,
+		request: {
+			type: "run";
+			id: string;
+			argv: readonly string[];
+			env: Record<string, string>;
+			dir: string;
+		},
+		options: ExecOptions,
+	): Promise<ExecResult> {
 		const stdout: Uint8Array[] = [];
 		const stderr: Uint8Array[] = [];
 		let stopped: "aborted" | "timeout" | undefined;
-		const stop = (reason: "aborted" | "timeout"): void => {
+		const kill = (reason: "aborted" | "timeout"): void => {
 			if (stopped !== undefined) return;
 			stopped = reason;
-			try {
-				process.kill(-proc.pid, "SIGKILL");
-			} catch {
-				proc.kill("SIGKILL");
-			}
+			socket.write(`${JSON.stringify({ type: "kill", id: request.id })}\n`);
 		};
-		const abort = (): void => stop("aborted");
+		const abort = (): void => kill("aborted");
 		if (options.signal?.aborted === true) abort();
 		else options.signal?.addEventListener("abort", abort, { once: true });
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		if (options.timeoutMs !== undefined && options.timeoutMs > 0) {
-			timer = setTimeout(() => stop("timeout"), options.timeoutMs);
+			timer = setTimeout(() => kill("timeout"), options.timeoutMs);
 		}
-		const drain = async (
-			stream: ReadableStream<Uint8Array>,
-			chunks: Uint8Array[],
-			kind: "stdout" | "stderr",
-		): Promise<void> => {
-			for await (const data of stream) {
-				chunks.push(data);
-				options.onChunk?.({ stream: kind, data });
-			}
-		};
-		try {
-			await Promise.all([
-				drain(proc.stdout, stdout, "stdout"),
-				drain(proc.stderr, stderr, "stderr"),
-			]);
-		} finally {
-			if (timer !== undefined) clearTimeout(timer);
-			options.signal?.removeEventListener("abort", abort);
-		}
-		const out = concatChunks(stdout);
-		const fail = concatChunks(stderr);
-		const code = stopped === undefined ? await proc.exited : 143;
-		// bubblewrap could not start the program at all — it is not in this sandbox. The host
-		// engine reports that as a thrown error, so this engine does too: an argv that names a
-		// program that is not there is a spawn failure, not a command that exited 1.
-		const spawnFailure =
-			/^bwrap: execvp .*: (No such file or directory|Permission denied)$/m.exec(
-				new TextDecoder().decode(fail),
-			);
-		if (spawnFailure !== null && stopped === undefined) {
-			throw new Error(spawnFailure[0]);
-		}
-		return {
-			code,
-			stdout: out,
-			stderr: fail,
-			...(stopped === undefined ? {} : { stopped }),
-		};
+		socket.write(`${JSON.stringify(request)}\n`);
+
+		return new Promise<ExecResult>((resolve, reject) => {
+			let buffered = "";
+			const finish = (result: ExecResult | Error): void => {
+				if (timer !== undefined) clearTimeout(timer);
+				options.signal?.removeEventListener("abort", abort);
+				if (result instanceof Error) reject(result);
+				else resolve({ ...result, ...(stopped === undefined ? {} : { stopped }) });
+			};
+			socket.on("data", (chunk: Buffer) => {
+				buffered += chunk.toString("utf8");
+				let newline = buffered.indexOf("\n");
+				while (newline >= 0) {
+					const line = buffered.slice(0, newline);
+					buffered = buffered.slice(newline + 1);
+					newline = buffered.indexOf("\n");
+					if (line.trim() === "") continue;
+					let event: Event;
+					try {
+						event = JSON.parse(line) as Event;
+					} catch {
+						continue;
+					}
+					if (event.id !== undefined && event.id !== request.id) continue;
+					if (event.type === "chunk") {
+						const data = new Uint8Array(Buffer.from(event.data ?? "", "base64"));
+						if (event.stream === "stderr") stderr.push(data);
+						else stdout.push(data);
+						options.onChunk?.({ stream: event.stream ?? "stdout", data });
+					} else if (event.type === "error") {
+						// The supervisor could not start the program: that is a spawn failure, which
+						// is what the host engine reports as a thrown error.
+						finish(new Error(event.error ?? "the sandbox could not start the command"));
+					} else if (event.type === "exit") {
+						finish({
+							code: stopped === undefined ? (event.code ?? 0) : 143,
+							stdout: concatChunks(stdout),
+							stderr: concatChunks(stderr),
+						});
+					}
+				}
+			});
+			socket.on("close", () => {
+				finish(
+					new Error(
+						"the sandbox closed the connection before the command finished: it may have been stopped",
+					),
+				);
+			});
+			socket.on("error", (error: Error) => finish(error));
+		});
 	}
 }

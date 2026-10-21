@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerEnvConformance } from "@earendil-works/pi-durable/testing";
+import { fakeSupervisor } from "./fake-supervisor.ts";
 import { openSandbox as openBwrap } from "../src/bwrap.ts";
 import { openSandbox } from "../src/host.ts";
 import { SandboxExecutionEnv } from "../src/sandbox-env.ts";
@@ -57,6 +58,11 @@ if (bwrapUsable) {
 			);
 			const state = await mkdtemp(join(tmpdir(), "acornfall-envconf-state-"));
 			const name = "acornfall-envconf";
+			// The conformance suite is about the harness contract, not about isolation: a
+			// supervisor that answers the protocol is enough, and the real one is the end-to-end
+			// tests' business.
+			const fake = await fakeSupervisor(state);
+			const socket = fake.socket;
 			await writeFile(
 				join(state, `${name}.json`),
 				JSON.stringify({
@@ -64,6 +70,7 @@ if (bwrapUsable) {
 					workspace,
 					image: "debian:stable-slim",
 					network: { mode: "off" },
+					socket,
 					home: join(state, "home"),
 					hidden: join(state, "hidden"),
 				}),
@@ -75,6 +82,7 @@ if (bwrapUsable) {
 			try {
 				await use(new SandboxExecutionEnv(sandbox, workspace));
 			} finally {
+				await fake.close();
 				delete process.env.ACORNFALL_BWRAP_STATE;
 				await rm(workspace, { recursive: true, force: true });
 				await rm(state, { recursive: true, force: true });

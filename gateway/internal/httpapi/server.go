@@ -160,6 +160,9 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 		// Engine is which sandbox engine this workspace runs on: microsandbox, bwrap, or
 		// host. Absent means the install's default. See docs/adr/0022 and 0023.
 		Engine *string `json:"engine"`
+		// KeepAlive keeps this workspace's sandbox running when nobody is watching it, which is
+		// what a workspace that runs a daemon or a cron job needs.
+		KeepAlive *bool `json:"keep_alive"`
 		// DisableVMNesting, when true, keeps this workspace's sandbox from nesting;
 		// absent or false follows the install's --disable-vm-nesting.
 		DisableVMNesting *bool `json:"disable_vm_nesting"`
@@ -206,6 +209,9 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 	if body.Engine != nil {
 		workspace.Engine = *body.Engine
 	}
+	if body.KeepAlive != nil {
+		workspace.KeepAlive = *body.KeepAlive
+	}
 	if body.DisableVMNesting != nil {
 		workspace.DisableVMNesting = body.DisableVMNesting
 	}
@@ -227,11 +233,12 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 	// path: moving a workspace to a folder of the interface's choosing is exactly what the
 	// workspaces folder exists to prevent.
 	var body struct {
-		Title   *string `json:"title"`
-		Image   *string `json:"image"`
-		Network *string `json:"network"`
-		Engine  *string `json:"engine"`
-		Trusted *bool   `json:"trusted"`
+		Title     *string `json:"title"`
+		Image     *string `json:"image"`
+		Network   *string `json:"network"`
+		Engine    *string `json:"engine"`
+		KeepAlive *bool   `json:"keep_alive"`
+		Trusted   *bool   `json:"trusted"`
 		// DisableVMNesting, when present, keeps this workspace's sandbox from nesting;
 		// absent leaves the workspace's own setting alone.
 		DisableVMNesting *bool `json:"disable_vm_nesting"`
@@ -255,6 +262,9 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		existing.Engine = *body.Engine
+	}
+	if body.KeepAlive != nil {
+		existing.KeepAlive = *body.KeepAlive
 	}
 	if body.Title != nil {
 		existing.Title = *body.Title

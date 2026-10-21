@@ -17,6 +17,8 @@ export interface WireWorkspace {
 	network?: string | undefined;
 	/** Which sandbox engine this workspace runs on; absent means the install default. */
 	engine?: string | undefined;
+	/** Kept running when nobody is watching: a workspace with a daemon or a cron job. */
+	keep_alive?: boolean | undefined;
 	running: boolean;
 }
 

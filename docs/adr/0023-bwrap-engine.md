@@ -85,8 +85,8 @@ Two consequences worth stating:
 - **The machine's `127.0.0.1` is not the sandbox's.** A dev server in a workspace binds its own
   loopback, and the host's loopback answers only at pasta's gateway address.
 
-What it costs: **49 ms** per command instead of 6 (pasta's own setup is the difference), ICMP does
-not work (pasta is a userspace forwarder, so `ping` fails and TCP/UDP do not), and two packages
+What it costs: pasta's setup, once per workspace rather than once per command — 1.1 ms per command
+after that (ADR 0024). ICMP does not work (pasta is a userspace forwarder, so `ping` fails and TCP/UDP do not), and two packages
 have to be installed — `passt` for pasta and `iproute2` for the address step — because `Create`
 refuses a workspace whose egress it cannot carry rather than quietly putting it on the host's
 network.
@@ -179,8 +179,10 @@ Two things are still deliberately missing, and this is a beta because of them:
 - **A copy, not an overlay.** Each workspace pays its image's size on disk (82 MB for
   `debian:stable-slim`) and a copy at creation. An overlay with a shared read-only lower layer
   is the optimisation, and it needs a mount this engine cannot make for itself.
-- **No persistent sandbox.** Every command is a sandbox, so no daemon outlives it and there is
-  no `exec` into a running one. That is the supervisor this ADR's second half describes.
+- ~~No persistent sandbox.~~ **Built since:** the workspace's sandbox is one process, with this
+  binary as its first process inside and a socket the worker connects to. A command costs
+  **1.1 ms** instead of 50, and a daemon outlives the command that started it. See
+  [ADR 0024](0024-one-lifecycle.md).
 
 A bwrap workspace therefore needs a registry once, as the microVM engine needs one for its
 first image (ADR 0012). A failed fetch is a refusal — a workspace is created with its image or

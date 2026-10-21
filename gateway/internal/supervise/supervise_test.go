@@ -1,0 +1,257 @@
+package supervise
+
+import (
+	"bufio"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"net"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+// client is the other end: a test that talks the protocol the worker will talk.
+type client struct {
+	conn    net.Conn
+	encoder *json.Encoder
+	decoder *json.Decoder
+	mu      sync.Mutex
+}
+
+func startServer(t *testing.T) (*Server, string) {
+	t.Helper()
+	socket := filepath.Join(t.TempDir(), "supervisor.sock")
+	server := New(socket, "test")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		server.Shutdown()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Error("the supervisor did not stop")
+		}
+	})
+	if err := WaitForReady(ctx, socket, 3*time.Second); err != nil {
+		t.Fatalf("ready: %v", err)
+	}
+	return server, socket
+}
+
+func dial(t *testing.T, socket string) *client {
+	t.Helper()
+	connection, err := net.Dial("unix", socket)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { connection.Close() })
+	return &client{conn: connection, encoder: json.NewEncoder(connection), decoder: json.NewDecoder(bufio.NewReader(connection))}
+}
+
+func (c *client) send(t *testing.T, request Request) {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.encoder.Encode(request); err != nil {
+		t.Fatalf("send %s: %v", request.Type, err)
+	}
+}
+
+// collect reads events for one command until it exits, returning its output and exit event.
+func (c *client) collect(t *testing.T, id string) (string, Event) {
+	t.Helper()
+	var output strings.Builder
+	deadline := time.Now().Add(10 * time.Second)
+	_ = c.conn.SetReadDeadline(deadline)
+	for {
+		var event Event
+		if err := c.decoder.Decode(&event); err != nil {
+			t.Fatalf("decode while waiting for %s: %v", id, err)
+		}
+		if event.ID != "" && event.ID != id {
+			continue
+		}
+		switch event.Type {
+		case "chunk":
+			data, err := base64.StdEncoding.DecodeString(event.Data)
+			if err != nil {
+				t.Fatalf("chunk is not base64: %v", err)
+			}
+			output.Write(data)
+		case "exit", "error":
+			return output.String(), event
+		}
+	}
+}
+
+func TestARunStreamsAndReportsItsExitCode(t *testing.T) {
+	_, socket := startServer(t)
+	c := dial(t, socket)
+	c.send(t, Request{
+		Type: "run",
+		ID:   "1",
+		Argv: []string{"/bin/sh", "-c", "printf one; printf two >&2; exit 3"},
+		Env:  map[string]string{"PATH": "/usr/bin:/bin"},
+		Dir:  "/",
+	})
+	output, event := c.collect(t, "1")
+	if event.Type != "exit" {
+		t.Fatalf("event: %+v", event)
+	}
+	if event.Code != 3 {
+		t.Errorf("exit code %d, want 3", event.Code)
+	}
+	if !strings.Contains(output, "one") || !strings.Contains(output, "two") {
+		t.Errorf("output %q should carry both streams", output)
+	}
+}
+
+// The environment is exactly what was sent: a supervisor that inherited its own environment
+// would hand the sandbox everything the worker holds.
+func TestARunSeesOnlyTheEnvironmentItWasSent(t *testing.T) {
+	t.Setenv("ACORNFALL_SUPERVISOR_SHOULD_NOT_LEAK", "yes")
+	_, socket := startServer(t)
+	c := dial(t, socket)
+	c.send(t, Request{
+		Type: "run",
+		ID:   "1",
+		Argv: []string{"/bin/sh", "-c", `printf '%s' "$ONLY"`},
+		Env:  map[string]string{"ONLY": "this"},
+	})
+	output, _ := c.collect(t, "1")
+	if output != "this" {
+		t.Fatalf("output %q, want only what was sent", output)
+	}
+
+	c.send(t, Request{
+		Type: "run",
+		ID:   "2",
+		Argv: []string{"/bin/sh", "-c", `printf '%s' "${ACORNFALL_SUPERVISOR_SHOULD_NOT_LEAK:-absent}"`},
+		Env:  map[string]string{},
+	})
+	output, _ = c.collect(t, "2")
+	if output != "absent" {
+		t.Fatalf("the supervisor's own environment leaked into a command: %q", output)
+	}
+}
+
+// A kill takes what the command started, not only the command: a shell that started a server is
+// not the process that has to die.
+func TestKillEndsTheCommandAndWhatItStarted(t *testing.T) {
+	_, socket := startServer(t)
+	c := dial(t, socket)
+	c.send(t, Request{
+		Type: "run",
+		ID:   "1",
+		Argv: []string{"/bin/sh", "-c", "sleep 30 & sleep 30 & echo started; wait"},
+		Env:  map[string]string{"PATH": "/usr/bin:/bin"},
+	})
+	// Wait for the command to be up before killing it, so the test is about the kill and not a
+	// race against the spawn.
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		c.send(t, Request{Type: "kill", ID: "1"})
+	}()
+	output, event := c.collect(t, "1")
+	if !strings.Contains(output, "started") {
+		t.Fatalf("output %q", output)
+	}
+	if event.Stopped != "killed" {
+		t.Errorf("stopped: %q, want killed", event.Stopped)
+	}
+	// Nothing of it is left running.
+	time.Sleep(100 * time.Millisecond)
+	if out := runQuietly(t, "pgrep", "-c", "-f", "sleep 30"); strings.TrimSpace(out) != "0" {
+		t.Errorf("sleepers survived the kill: %q", out)
+	}
+}
+
+// A client that goes away does not take the workspace's processes with it: a worker restart is
+// not a sandbox stop.
+func TestACommandSurvivesItsClientGoingAway(t *testing.T) {
+	_, socket := startServer(t)
+	first := dial(t, socket)
+	first.send(t, Request{
+		Type: "run",
+		ID:   "1",
+		Argv: []string{"/bin/sh", "-c", "echo started; sleep 2; echo finished"},
+		Env:  map[string]string{"PATH": "/usr/bin:/bin"},
+	})
+	// Read the first chunk, then hang up.
+	_ = first.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var event Event
+	_ = first.decoder.Decode(&event)
+	first.conn.Close()
+	time.Sleep(2500 * time.Millisecond)
+	// Still running; a second client can attach and start its own command.
+	second := dial(t, socket)
+	second.send(t, Request{Type: "run", ID: "2", Argv: []string{"/bin/echo", "still here"}, Env: map[string]string{}, Dir: "/"})
+	output, exit := second.collect(t, "2")
+	if exit.Code != 0 || !strings.Contains(output, "still here") {
+		t.Fatalf("a new client could not run: %+v %q", exit, output)
+	}
+}
+
+func TestPingAnswersWithTheVersion(t *testing.T) {
+	_, socket := startServer(t)
+	c := dial(t, socket)
+	c.send(t, Request{Type: "ping"})
+	var event Event
+	_ = c.conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if err := c.decoder.Decode(&event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Type != "ready" || event.Version != "test" {
+		t.Fatalf("event: %+v", event)
+	}
+}
+
+func TestShutdownStopsTheServerAndItsCommands(t *testing.T) {
+	server, socket := startServer(t)
+	c := dial(t, socket)
+	c.send(t, Request{Type: "run", ID: "1", Argv: []string{"/bin/sleep", "30"}, Env: map[string]string{}, Dir: "/"})
+	time.Sleep(200 * time.Millisecond)
+	c.send(t, Request{Type: "shutdown"})
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		server.mu.Lock()
+		running := len(server.runs)
+		server.mu.Unlock()
+		if running == 0 {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("shutdown left a command running")
+}
+
+func TestAnUnknownRequestIsRefused(t *testing.T) {
+	_, socket := startServer(t)
+	c := dial(t, socket)
+	c.send(t, Request{Type: "dance", ID: "1"})
+	var event Event
+	_ = c.conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if err := c.decoder.Decode(&event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Type != "error" || !strings.Contains(event.Error, "unknown request") {
+		t.Fatalf("event: %+v", event)
+	}
+}
+
+// runQuietly is a helper for the kill test: it runs a program and returns what it printed.
+func runQuietly(t *testing.T, name string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command(name, args...).Output()
+	if err != nil && len(out) == 0 {
+		// A count of zero exits non-zero, which is the answer this asks for.
+		return "0"
+	}
+	return string(out)
+}

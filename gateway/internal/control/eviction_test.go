@@ -37,10 +37,12 @@ func TestEvictionStopsOnlyIdleUnwatchedWorkspaces(t *testing.T) {
 	busy.conversations = []protocol.ConversationInfo{{ID: "1", Running: true}}
 	busy.mu.Unlock()
 	recent := start("recent")
+	keptAlive := start("daemon")
+	workspaces.registry["daemon"] = Workspace{Name: "daemon", Path: t.TempDir(), KeepAlive: true}
 	general := start(GeneralWorkspaceName)
 
 	longAgo := time.Now().Add(-2 * idleEviction)
-	for _, name := range []string{"idle", "watched", "busy", GeneralWorkspaceName} {
+	for _, name := range []string{"idle", "watched", "busy", "daemon", GeneralWorkspaceName} {
 		workspaces.used[name] = longAgo
 	}
 	workspaces.used["recent"] = time.Now()
@@ -53,7 +55,9 @@ func TestEvictionStopsOnlyIdleUnwatchedWorkspaces(t *testing.T) {
 	if !stopped["idle"] {
 		t.Error("an idle workspace nobody is watching should be stopped")
 	}
-	for _, name := range []string{"watched", "busy", "recent", GeneralWorkspaceName} {
+	// A workspace that keeps a daemon running is never idle: stopping it would kill what it is
+	// for, and its next cron run would not happen.
+	for _, name := range []string{"watched", "busy", "recent", "daemon", GeneralWorkspaceName} {
 		if stopped[name] {
 			t.Errorf("%s should not be stopped", name)
 		}
@@ -72,6 +76,7 @@ func TestEvictionStopsOnlyIdleUnwatchedWorkspaces(t *testing.T) {
 		t.Error("a watched workspace must stay started")
 	}
 	_ = recent
+	_ = keptAlive
 	_ = general
 }
 

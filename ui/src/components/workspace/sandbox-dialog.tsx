@@ -20,7 +20,7 @@ export interface SandboxDialogProps {
 	workspace?: WorkspaceSummary | undefined;
 	/** The last thing the server refused, in its own words. */
 	failure?: string | undefined;
-	onSave: (name: string, change: { image: string; network: string }) => void;
+	onSave: (name: string, change: { image: string; network: string; keepAlive: boolean }) => void;
 	onClose: () => void;
 }
 
@@ -36,6 +36,7 @@ export interface SandboxDialogProps {
 export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDialogProps) {
 	const [image, setImage] = useState(workspace?.image ?? "");
 	const [network, setNetwork] = useState(workspace?.network ?? "on");
+	const [keepAlive, setKeepAlive] = useState(workspace?.keepAlive === true);
 	/** The value the field last sent, so the outcome belongs to this field's own commit. */
 	const [attempt, setAttempt] = useState<string | undefined>(undefined);
 
@@ -43,8 +44,9 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 	useEffect(() => {
 		setImage(workspace?.image ?? "");
 		setNetwork(workspace?.network ?? "on");
+		setKeepAlive(workspace?.keepAlive === true);
 		setAttempt(undefined);
-	}, [workspace?.name, workspace?.image, workspace?.network]);
+	}, [workspace?.name, workspace?.image, workspace?.network, workspace?.keepAlive]);
 
 	const committedImage = workspace?.image ?? "";
 	const imageDirty = image !== committedImage;
@@ -91,7 +93,7 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 								onClick={() => {
 									if (workspace === undefined) return;
 									setAttempt(image);
-									onSave(workspace.name, { image, network });
+									onSave(workspace.name, { image, network, keepAlive });
 								}}
 							>
 								Apply
@@ -107,7 +109,7 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 								if (next !== "on" && next !== "off") return;
 								if (workspace === undefined) return;
 								setNetwork(next);
-								onSave(workspace.name, { image, network: next });
+								onSave(workspace.name, { image, network: next, keepAlive });
 							}}
 							variant="outline"
 							size="sm"
@@ -117,6 +119,30 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 							<ToggleGroupItem value="on">on</ToggleGroupItem>
 							<ToggleGroupItem value="off">off</ToggleGroupItem>
 						</ToggleGroup>
+					</SettingsField>
+					<SettingsField label="while idle">
+						<ToggleGroup
+							type="single"
+							value={keepAlive ? "on" : "off"}
+							onValueChange={(next) => {
+								if (next !== "on" && next !== "off") return;
+								if (workspace === undefined) return;
+								const keep = next === "on";
+								setKeepAlive(keep);
+								onSave(workspace.name, { image, network, keepAlive: keep });
+							}}
+							variant="outline"
+							size="sm"
+							spacing={0}
+							aria-label="Keep this workspace's sandbox running while idle"
+						>
+							<ToggleGroupItem value="off">stop when idle</ToggleGroupItem>
+							<ToggleGroupItem value="on">keep running</ToggleGroupItem>
+						</ToggleGroup>
+						<Text size="2xs" tone="muted">
+							Stopping a sandbox kills what is running in it: a daemon or a cron job
+							needs keep running.
+						</Text>
 					</SettingsField>
 					<Text size="2xs" tone="muted">
 						Applies as chosen; the image on Apply. Either way it takes effect at the

@@ -283,7 +283,10 @@ export interface Platform {
 	thinkingFor: (model: string) => PickerGroup[];
 	/** Any workspace's image and network, by name: the workspaces screen's rows are not the one
 	 * in view, and its menu is where a sandbox is changed. */
-	setWorkspaceSandbox: (name: string, change: { image: string; network: string }) => void;
+	setWorkspaceSandbox: (
+		name: string,
+		change: { image: string; network: string; keepAlive?: boolean },
+	) => void;
 	/** A new workspace, on the engine chosen for it. */
 	createWorkspace: (name: string, engine?: string) => void;
 	/** The engines the create form offers, with this machine's answer for each. */
@@ -1073,7 +1076,7 @@ export function usePlatform(): Platform {
 	// A row on the workspaces screen is not the workspace in view, so the name comes from the
 	// caller: the gateway takes it either way.
 	const setWorkspaceSandbox = useCallback(
-		(name: string, change: { image: string; network: string }) => {
+		(name: string, change: { image: string; network: string; keepAlive?: boolean }) => {
 			act(updateWorkspace(name, change), () => void reload());
 		},
 		[act, reload],

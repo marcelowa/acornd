@@ -173,6 +173,7 @@ export function toWorkspaces(workspaces: WireWorkspace[], activeName: string): W
 		image: workspace.image,
 		network: workspace.network,
 		engine: workspace.engine,
+		keepAlive: workspace.keep_alive === true,
 	}));
 }
 

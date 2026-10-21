@@ -34,7 +34,9 @@ deps: ## install worker, interface, and tool dependencies
 	cd tools && bun install
 
 build: ui-build ## build the gateway binary, with the interface embedded
-	cd gateway && go build -o ../$(BIN) ./cmd/acornfall
+	# CGO off, so the binary is static: it runs as a sandbox's first process, and an image may
+	# have no libc at all (a musl image, or none). The release builds it this way too.
+	cd gateway && CGO_ENABLED=0 go build -o ../$(BIN) ./cmd/acornfall
 
 ui-build: ## build the interface into the embed directory the gateway serves
 	cd ui && bun run build

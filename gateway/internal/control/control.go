@@ -141,6 +141,8 @@ type WorkspaceState struct {
 	General bool   `json:"general"`
 	Image   string `json:"image,omitempty"`
 	Network string `json:"network,omitempty"`
+	// KeepAlive is whether this workspace's sandbox is exempt from idle eviction.
+	KeepAlive bool `json:"keep_alive,omitempty"`
 	// Engine is which sandbox engine this workspace runs on; empty means the install default.
 	Engine string `json:"engine,omitempty"`
 	// DisableVMNesting is nil when this workspace follows the install's --disable-vm-nesting,

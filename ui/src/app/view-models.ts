@@ -20,6 +20,8 @@ export interface WorkspaceSummary {
 	network?: string | undefined;
 	/** The sandbox engine this workspace runs on, as the row says it. */
 	engine?: string | undefined;
+	/** Its sandbox is exempt from idle eviction: it runs something. */
+	keepAlive?: boolean | undefined;
 }
 
 /** One sandbox engine the create form offers. */

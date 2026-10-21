@@ -41,6 +41,11 @@ func main() {
 		secretCommand(os.Args[2:])
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "sandbox-supervisor" {
+		// The sandbox's own first process: a sandbox calls this, a person does not.
+		supervisorCommand(os.Args[2:])
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "doctor" {
 		doctorCommand(os.Args[2:])
 		return
@@ -468,6 +473,7 @@ func workspaceCommand(argv []string) {
 	image := flags.String("image", "", "sandbox image for this workspace, e.g. golang:1.24 (default: "+sandbox.DefaultImage+")")
 	network := flags.String("network", "", `sandbox network: "on" (default) or "off"`)
 	engine := flags.String("sandbox", "", "sandbox engine for this workspace: microsandbox, bwrap, or host (default: the install's --sandbox-engine)")
+	keepAlive := flags.Bool("keep-alive", false, "keep this workspace's sandbox running when nobody is watching it (for daemons and cron jobs)")
 	// Flags after the name and the folder are documented in the usage below, and the standard
 	// flag package stops at the first positional. Splitting them is what makes
 	// `workspace add demo ~/work/demo --sandbox bwrap` mean what it says.
@@ -535,7 +541,7 @@ func workspaceCommand(argv []string) {
 			}
 		}
 		registry.Workspaces = append(registry.Workspaces, control.Workspace{
-			Name: name, Path: absolute, Title: name, Image: *image, Network: *network, Engine: *engine,
+			Name: name, Path: absolute, Title: name, Image: *image, Network: *network, Engine: *engine, KeepAlive: *keepAlive,
 		})
 		if err := control.SaveRegistryFile(registry); err != nil {
 			log.Fatalf("acornfall: %v", err)

@@ -9,7 +9,28 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/acornfall/acornfall/gateway/internal/supervise"
 )
+
+// TestMain lets this binary be the sandbox's supervisor, which is what a started sandbox runs.
+// The driver binds this executable into the sandbox and runs it with the supervisor's arguments;
+// a test binary that ignored them would start a second test run inside the sandbox instead.
+func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == "sandbox-supervisor" {
+		socket := ""
+		for index, argument := range os.Args {
+			if argument == "--socket" && index+1 < len(os.Args) {
+				socket = os.Args[index+1]
+			}
+		}
+		if socket != "" {
+			_ = supervise.New(socket, "test").Serve(context.Background())
+			os.Exit(0)
+		}
+	}
+	os.Exit(m.Run())
+}
 
 // fakeBwrap answers the two calls the driver makes — the version and the probe — so the suite
 // runs the same on a machine with bubblewrap and one without.
@@ -40,10 +61,14 @@ func testBwrap(t *testing.T, home string) (*Bwrap, *fakeBwrap) {
 	return driver, runner
 }
 
-// fakeImage is a registry that answers with a two-file root, so the pull is not this suite's
+// fakeImage is a registry that answers with a minimal root, so the pull is not this suite's
 // business (image_test.go covers it) and no test needs a network.
+//
+// The root carries this binary's own libraries when it has any: the sandbox runs this executable
+// as its supervisor, and an image with no libc can only run a static one — which is exactly what a
+// release build is, and exactly what a test binary is not.
 func fakeImage(_ context.Context, reference, dest string, _ func(string, ...any)) error {
-	for _, dir := range []string{filepath.Join(dest, "etc"), filepath.Join(dest, "usr", "bin")} {
+	for _, dir := range []string{filepath.Join(dest, "etc"), filepath.Join(dest, "usr", "bin"), filepath.Join(dest, "usr", "local", "bin")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
@@ -51,7 +76,34 @@ func fakeImage(_ context.Context, reference, dest string, _ func(string, ...any)
 	if err := os.WriteFile(filepath.Join(dest, "etc", "os-release"), []byte("ID=test\n"), 0o644); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dest, "usr", "bin", "sh"), []byte("#!/bin/sh\n"), 0o755)
+	if err := os.WriteFile(filepath.Join(dest, "usr", "bin", "sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		return err
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return nil
+	}
+	libraries, err := exec.Command("ldd", executable).Output()
+	if err != nil {
+		return nil
+	}
+	for _, field := range strings.Fields(string(libraries)) {
+		if !strings.HasPrefix(field, "/") {
+			continue
+		}
+		target := filepath.Join(dest, field)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		content, err := os.ReadFile(field)
+		if err != nil {
+			continue
+		}
+		if err := os.WriteFile(target, content, 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func TestBwrapVersionIsBubblewrapsOwn(t *testing.T) {
@@ -113,7 +165,7 @@ func TestBwrapCreateWritesWhatTheWorkspaceRunsUnder(t *testing.T) {
 		Egress:    false,
 		Global:    []string{filepath.Join(home, "skills"), filepath.Join(home, "absent")},
 	}
-	if err := driver.Create(context.Background(), policy, t.TempDir()); err != nil {
+	if _, err := driver.writeConfig(policy, t.TempDir()); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(driver.StateDir(), Name(workspace)+".json"))
@@ -162,7 +214,7 @@ func TestBwrapCreateCarriesEgressWithPasta(t *testing.T) {
 	driver = driver.WithLookPath(func(name string) (string, error) {
 		return "/usr/bin/" + name, nil
 	})
-	if err := driver.Create(context.Background(), Policy{Workspace: workspace, Egress: true}, t.TempDir()); err != nil {
+	if _, err := driver.writeConfig(Policy{Workspace: workspace, Egress: true}, t.TempDir()); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(driver.StateDir(), Name(workspace)+".json"))
@@ -201,16 +253,16 @@ func TestBwrapCreateNamesWhatEgressNeeds(t *testing.T) {
 				return "", errors.New("not found")
 			})
 	}
-	err := withOnly("bwrap").Create(context.Background(), Policy{Workspace: workspace, Egress: true}, t.TempDir())
+	_, err := withOnly("bwrap").writeConfig(Policy{Workspace: workspace, Egress: true}, t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "apt install passt") {
 		t.Fatalf("no pasta: %v, want the package that provides it", err)
 	}
-	err = withOnly("pasta").Create(context.Background(), Policy{Workspace: workspace, Egress: true}, t.TempDir())
+	_, err = withOnly("pasta").writeConfig(Policy{Workspace: workspace, Egress: true}, t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "iproute2") {
 		t.Fatalf("no ip: %v, want the package that provides it", err)
 	}
 	// Without egress neither is needed: a sandbox with no network needs no network tools.
-	if err := withOnly("bwrap").Create(context.Background(), Policy{Workspace: workspace}, t.TempDir()); err != nil {
+	if _, err := withOnly("bwrap").writeConfig(Policy{Workspace: workspace}, t.TempDir()); err != nil {
 		t.Fatalf("network off should not need pasta: %v", err)
 	}
 }
@@ -221,7 +273,7 @@ func TestBwrapCreateIsIdempotent(t *testing.T) {
 	driver, _ := testBwrap(t, home)
 	policy := Policy{Workspace: workspace}
 	for i := 0; i < 2; i++ {
-		if err := driver.Create(context.Background(), policy, t.TempDir()); err != nil {
+		if _, err := driver.writeConfig(policy, t.TempDir()); err != nil {
 			t.Fatalf("create %d: %v", i, err)
 		}
 	}
@@ -236,7 +288,7 @@ func TestBwrapRemoveDeletesTheHomeAndNotTheWorkspace(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	driver, _ := testBwrap(t, home)
-	if err := driver.Create(context.Background(), Policy{Workspace: workspace}, t.TempDir()); err != nil {
+	if _, err := driver.writeConfig(Policy{Workspace: workspace}, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(driver.StateDir(), Name(workspace)+".json")
@@ -258,22 +310,170 @@ func TestBwrapRemoveDeletesTheHomeAndNotTheWorkspace(t *testing.T) {
 	}
 }
 
-func TestBwrapHasNoSandboxObject(t *testing.T) {
+// The sandbox's argv is one command that holds the workspace's view for as long as the sandbox
+// lives: the mounts are decided once, and commands run inside it.
+func TestBwrapSandboxArgvIsOneSandboxPerWorkspace(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
+	config := bwrapConfig{
+		Engine:      "bwrap",
+		Workspace:   "/work/ws",
+		Image:       "debian:stable-slim",
+		Rootfs:      "/state/ws/rootfs",
+		Home:        "/state/ws/home",
+		Hidden:      "/home/me/.acornfall",
+		ReadOnly:    []string{"/home/me/.agents"},
+		Bwrap:       "/usr/bin/bwrap",
+		Supervisor:  "/install/acornfall",
+		Run:         "/state/ws/run",
+		GuestRun:    guestRunDir,
+		GuestSocket: guestSocketPath,
+		Network:     bwrapNetwork{Mode: "off"},
+	}
+	argv, err := driver.sandboxArgv(config)
+	if err != nil {
+		t.Fatalf("argv: %v", err)
+	}
+	joined := strings.Join(argv, " ")
+	if argv[0] != "/usr/bin/bwrap" {
+		t.Fatalf("argv starts with %q", argv[0])
+	}
+	for _, want := range []string{
+		// The workspace's own image as `/`, as root inside a single mapping.
+		"--bind /state/ws/rootfs / --uid 0 --gid 0",
+		// A root still needs the machine's resolver, read-only.
+		"--ro-bind /etc/resolv.conf /etc/resolv.conf",
+		// The private home, the workspace at its own path, and the socket's folder on both sides.
+		"--bind /state/ws/home /root",
+		"--bind /work/ws /work/ws",
+		"--bind /state/ws/run /run/acornfall",
+		"--ro-bind /home/me/.agents /home/me/.agents",
+		// The supervisor is this binary, bound in, and it is what the sandbox runs.
+		"--ro-bind /install/acornfall /usr/local/bin/acornfall",
+		"-- /usr/local/bin/acornfall sandbox-supervisor --socket /run/acornfall/s.sock",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("argv should contain %q:\n%s", want, joined)
+		}
+	}
+	// No egress: a namespace with no interfaces, and nothing of the machine's stack.
+	if strings.Contains(joined, "--share-net") {
+		t.Errorf("network off must not share a network namespace:\n%s", joined)
+	}
+}
+
+// With egress the sandbox still gets a namespace of its own; pasta is what carries it, so the
+// bubblewrap process shares pasta's namespace rather than the machine's.
+func TestBwrapSandboxArgvSharesPastaForEgress(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	config := bwrapConfig{
+		Workspace:   "/work/ws",
+		Rootfs:      "/state/ws/rootfs",
+		Home:        "/state/ws/home",
+		Bwrap:       "/usr/bin/bwrap",
+		Supervisor:  "/install/acornfall",
+		Run:         "/state/ws/run",
+		GuestRun:    guestRunDir,
+		GuestSocket: guestSocketPath,
+		Network: bwrapNetwork{
+			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
+			Pasta: "/usr/bin/pasta", IP: "/usr/sbin/ip",
+		},
+	}
+	argv, err := driver.bootArgv(config)
+	if err != nil {
+		t.Fatalf("argv: %v", err)
+	}
+	joined := strings.Join(argv, " ")
+	if argv[0] != "/usr/bin/pasta" {
+		t.Fatalf("the boot argv starts with %q, want pasta", argv[0])
+	}
+	for _, want := range []string{
+		"-a 10.0.2.15 -n 24 -g 10.0.2.2",
+		// pasta configures neither the address nor the route, so the sandbox does it from inside
+		// the namespace pasta made.
+		`addr add "$ADDR" dev eth0`,
+		`route add default via "$GATEWAY"`,
+		"/usr/bin/bwrap",
+		"--share-net",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("boot argv should contain %q:\n%s", want, joined)
+		}
+	}
+}
+
+// A socket path has a length limit, and the host side carries the workspace's name. That is a
+// refusal with a sentence, not a kernel error passed through.
+func TestBwrapRefusesASocketPathThatIsTooLong(t *testing.T) {
+	home := filepath.Join(t.TempDir(), strings.Repeat("very-long-folder-name/", 4))
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workspace := t.TempDir()
+	driver, _ := testBwrap(t, home)
+	_, err := driver.writeConfig(Policy{Workspace: workspace}, t.TempDir())
+	if err == nil {
+		t.Skip("this machine's temp folder is short enough that the path fits")
+	}
+	if !strings.Contains(err.Error(), "too long") || !strings.Contains(err.Error(), "--state") {
+		t.Fatalf("the refusal should name the limit and the way out: %v", err)
+	}
+}
+
+// A created sandbox is a running sandbox: control's policy is "ensure created, then ensure
+// running", so Create boots it and the engine reports it. A stopped one is listed as stopped, so
+// the next attempt starts it instead of remaking it.
+func TestBwrapHasALifecycleLikeEveryOtherEngine(t *testing.T) {
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("no bubblewrap on this machine")
+	}
+	home := t.TempDir()
+	workspace := t.TempDir()
+	driver := NewBwrap(home).
+		WithImageSource(fakeImage).
+		WithLookPath(func(name string) (string, error) {
+			if path, err := exec.LookPath(name); err == nil {
+				return path, nil
+			}
+			return "/usr/bin/" + name, nil
+		})
+	t.Cleanup(func() { _ = driver.Remove(context.Background(), Name(workspace)) })
+	if err := driver.Create(context.Background(), Policy{Workspace: workspace}, t.TempDir()); err != nil {
+		if strings.Contains(err.Error(), "user namespace") {
+			t.Skipf("this machine will not make a user namespace: %v", err)
+		}
+		t.Fatalf("create: %v", err)
+	}
 	instances, err := driver.List(context.Background())
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(instances) != 0 {
-		t.Fatalf("listed %d sandboxes; bwrap has no objects to list", len(instances))
+	if len(instances) != 1 || !instances[0].Running() {
+		t.Fatalf("a created sandbox should be listed and running: %+v", instances)
 	}
-	// Start and Stop are no-ops that must not fail: a workspace whose engine boots nothing
-	// still provisions on every worker start.
-	if err := driver.Start(context.Background(), "x", nil); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	if err := driver.Stop(context.Background(), "x"); err != nil {
+	if err := driver.Stop(context.Background(), Name(workspace)); err != nil {
 		t.Fatalf("stop: %v", err)
+	}
+	instances, _ = driver.List(context.Background())
+	if len(instances) != 1 || instances[0].Running() {
+		t.Fatalf("a stopped sandbox should be listed and not running: %+v", instances)
+	}
+	// The files are the point of stopping rather than removing.
+	if _, err := os.Stat(filepath.Join(driver.StateDir(), Name(workspace), "rootfs")); err != nil {
+		t.Fatalf("stop took the workspace's root with it: %v", err)
+	}
+	if err := driver.Start(context.Background(), Name(workspace), nil); err != nil {
+		t.Fatalf("start after stop: %v", err)
+	}
+	instances, _ = driver.List(context.Background())
+	if len(instances) != 1 || !instances[0].Running() {
+		t.Fatalf("a restarted sandbox should be running: %+v", instances)
+	}
+	if err := driver.Remove(context.Background(), Name(workspace)); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if instances, _ := driver.List(context.Background()); len(instances) != 0 {
+		t.Fatalf("a removed sandbox is gone: %+v", instances)
 	}
 }
 

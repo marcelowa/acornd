@@ -65,11 +65,12 @@ A workspace runs on one engine, chosen when it is created and kept with its reco
 | engine | what it is | needs |
 |---|---|---|
 | `microsandbox` | one microVM per workspace (the default, and the strongest boundary) | `/dev/kvm`, and it fetches a 67 MB engine on first use |
-| `bwrap` | the workspace's own image inside a bubblewrap namespace view, per command (beta) | a user namespace, one image pull, and two network tools for egress: `apt install bubblewrap passt iproute2`; no KVM, 78 KB, 6 ms per command (49 ms with egress), 82 MB of disk per workspace |
+| `bwrap` | the workspace's own image in one long-lived bubblewrap sandbox per workspace (beta) | a user namespace, one image pull, and two network tools for egress: `apt install bubblewrap passt iproute2`; no KVM, 1.1 ms per command, 82 MB of disk per workspace |
 | `host` | no sandbox: the tools run on your machine | nothing, and it is not isolated |
 
 ```bash
 ./bin/acornfall workspace add demo ~/work/demo --sandbox bwrap   # or the engine switch on the create form
+./bin/acornfall workspace add daemons ~/work/daemons --keep-alive  # a workspace that runs things
 ./bin/acornfall workspace list                                    # the engine is a column
 ACORNFALL_IMAGE_TEST=1 make test                                  # the bwrap end-to-end tests, which fetch an image
 ```
@@ -77,9 +78,11 @@ ACORNFALL_IMAGE_TEST=1 make test                                  # the bwrap en
 A bwrap workspace gets its own copy of its image, so `apt install` works inside it and the
 machine's own tools are never touched. Its network, when on, is a namespace of its own that
 pasta forwards through the host: the sandbox has no address on your network, and dialing your
-tailnet works because the host does the dialing. What it gives up today: the copy costs its image's size
-on disk, and it has no sandbox to stop — every command is a sandbox, so no daemon or cron
-outlives it. [ADR 0023](docs/adr/0023-bwrap-engine.md) has the measurements and the limits.
+tailnet works because the host does the dialing. The sandbox is one process per workspace with
+acornfall itself as its first process inside, so a daemon a command starts keeps running, and
+every engine has the same create / start / stop / remove lifecycle
+([ADR 0024](docs/adr/0024-one-lifecycle.md)). What it gives up today: the copy costs its image's
+size on disk ([ADR 0023](docs/adr/0023-bwrap-engine.md)).
 
 ### Install from a release (one binary, no toolchain)
 

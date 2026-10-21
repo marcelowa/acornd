@@ -244,10 +244,15 @@ export interface WorkspaceChange {
 	title?: string;
 	image?: string;
 	network?: string;
+	/** Kept running when idle: for a workspace that runs a daemon or a cron job. */
+	keepAlive?: boolean;
 }
 
 export function updateWorkspace(workspace: string, change: WorkspaceChange): Promise<void> {
-	return post(workspacePath(workspace, "/update"), change);
+	// The wire says keep_alive, the interface says keepAlive: one conversion, here.
+	const { keepAlive, ...rest } = change;
+	const body = keepAlive === undefined ? rest : { ...rest, keep_alive: keepAlive };
+	return post(workspacePath(workspace, "/update"), body);
 }
 
 /** Where a default is being set: this workspace, or every workspace. */

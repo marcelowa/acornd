@@ -62,6 +62,11 @@ type Workspace struct {
 	// default, which is on. A string rather than a bool so that "not set" is expressible —
 	// and so an allowlist can be added later without a migration.
 	Network string `json:"network,omitempty"`
+	// KeepAlive keeps this workspace's sandbox running when nothing is watching it. It is for a
+	// workspace that runs a daemon or a cron job: stopping an idle sandbox kills its processes,
+	// which is fine for a folder and not fine for a server. Off by default, because the point of
+	// stopping is that a personal machine is not holding workspaces nobody is using.
+	KeepAlive bool `json:"keep_alive,omitempty"`
 	// Engine is which sandbox engine this workspace runs on: microsandbox, bwrap, or host.
 	// Empty means the install's default, from --sandbox-engine. Like Image, it takes effect
 	// at the next sandbox, because a running sandbox is where the dependencies live.
@@ -103,6 +108,9 @@ func (w Workspace) SandboxPolicy(home, userHome string, disableVMNesting bool) s
 func ValidNetwork(value string) bool {
 	return value == "" || value == "on" || value == NetworkOff
 }
+
+// ValidKeepAlive is a bool on the wire; nothing to validate. It is here so that a caller reading
+// the create and update handlers sees the same shape for every workspace setting.
 
 // Views renders workspaces for the interface, which is the only place `running` belongs.
 //
@@ -727,6 +735,11 @@ func (w *Workspaces) evictCandidates() []*Control {
 	var stopping []*Control
 	for name, control := range w.controls {
 		if name == GeneralWorkspaceName {
+			continue
+		}
+		// A workspace that runs something keeps running: its sandbox's processes die with it,
+		// and a cron job that is not there at its next run is worse than a few megabytes held.
+		if workspace, ok := w.registry[name]; ok && workspace.KeepAlive {
 			continue
 		}
 		if w.idleFor(name) < idleEviction {
