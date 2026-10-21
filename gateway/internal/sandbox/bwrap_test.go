@@ -542,3 +542,56 @@ func TestBwrapRealBinary(t *testing.T) {
 		t.Skipf("this machine will not make a user namespace: %v", err)
 	}
 }
+
+// A machine that resolves through a loopback address cannot hand that address to a sandbox:
+// 127.0.0.1 in there is the sandbox's own loopback. The measured symptom is an `apt-get update`
+// that works on the host and fails inside.
+func TestBwrapBindsUpstreamResolversWhenTheMachineUsesALoopbackOne(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "host-resolv.conf")
+	upstream := filepath.Join(dir, "upstream-resolv.conf")
+	if err := os.WriteFile(host, []byte("nameserver 127.0.0.53\nsearch example.test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(upstream, []byte("nameserver 100.100.100.100\nnameserver 1.1.1.1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	driver := NewBwrap(t.TempDir())
+	driver.resolver = resolverFiles{Host: host, Upstream: upstream}
+	workspace := filepath.Join(dir, "state", "acornfall-test")
+	got, err := driver.resolverFile(workspace)
+	if err != nil {
+		t.Fatalf("resolver: %v", err)
+	}
+	if got == "" || got == host {
+		t.Fatalf("the machine's loopback resolver was bound: %q", got)
+	}
+	bound, err := os.ReadFile(got)
+	if err != nil {
+		t.Fatalf("the file to bind: %v", err)
+	}
+	if !strings.Contains(string(bound), "100.100.100.100") {
+		t.Fatalf("the bound file should carry the machine's upstreams, got %q", bound)
+	}
+}
+
+func TestBwrapBindsTheMachinesOwnResolverWhenItIsUsable(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "host-resolv.conf")
+	if err := os.WriteFile(host, []byte("nameserver 192.0.2.53\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	driver := NewBwrap(t.TempDir())
+	driver.resolver = resolverFiles{Host: host, Upstream: filepath.Join(dir, "absent")}
+	got, err := driver.resolverFile(filepath.Join(dir, "state", "acornfall-test"))
+	if err != nil {
+		t.Fatalf("resolver: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("a usable resolver needs no copy, got %q", got)
+	}
+	// And the argv falls back to the machine's own file.
+	if resolverOrHost(bwrapConfig{}) != "/etc/resolv.conf" {
+		t.Fatal("the fallback is the machine's own resolver file")
+	}
+}

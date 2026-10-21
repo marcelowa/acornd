@@ -32,6 +32,7 @@ type Bwrap struct {
 	home string
 	// state is where one JSON file per workspace's config lives.
 	state string
+	// resolver paths are fields on Bwrap; this is the type they use.
 	// runner runs bubblewrap. It is an interface so the argv can be asserted in tests, and
 	// the probe can be answered without a user namespace.
 	runner Runner
@@ -39,6 +40,9 @@ type Bwrap struct {
 	// pull fetches an image into a directory. It is a field so a test can answer without a
 	// registry, the same way the runner answers without a binary.
 	pull imageSource
+	// resolver is the machine's resolver file and the file its upstream servers are in. Paths are
+	// fields so a test can answer for a machine that is not this one.
+	resolver resolverFiles
 
 	once    sync.Once
 	version string
@@ -48,10 +52,11 @@ type Bwrap struct {
 // distribution package, and installing one is the operator's business, not a gateway's.
 func NewBwrap(home string) *Bwrap {
 	return &Bwrap{
-		home:  home,
-		state: filepath.Join(home, "sandboxes", "bwrap"),
-		look:  exec.LookPath,
-		pull:  pullImage,
+		home:     home,
+		state:    filepath.Join(home, "sandboxes", "bwrap"),
+		look:     exec.LookPath,
+		pull:     pullImage,
+		resolver: resolverFiles{Host: "/etc/resolv.conf", Upstream: "/run/systemd/resolve/resolv.conf"},
 	}
 }
 
@@ -187,6 +192,9 @@ type bwrapConfig struct {
 	Home     string   `json:"home"`
 	Hidden   string   `json:"hidden"`
 	ReadOnly []string `json:"readOnly,omitempty"`
+	// ResolvConf is the file bound at /etc/resolv.conf: the machine's own, or a copy of its
+	// upstreams when the machine's points at a loopback resolver the sandbox cannot reach.
+	ResolvConf string `json:"resolvConf,omitempty"`
 	// Supervisor is this binary, bound read-only into the sandbox: it runs there as the sandbox's
 	// first process and holds the namespaces open. Socket is where a worker finds it, and
 	// GuestSocket is the same socket as the supervisor sees it. Run and GuestRun are the folder
@@ -283,6 +291,10 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 		}
 	}
 	sort.Strings(readonly)
+	resolvConf, err := b.resolverFile(b.workspaceDir(Name(policy.Workspace)))
+	if err != nil {
+		return bwrapConfig{}, err
+	}
 	network := bwrapNetwork{Mode: NetworkOffName}
 	if policy.Egress {
 		pasta, err := b.look("pasta")
@@ -324,6 +336,7 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 		Home:        home,
 		Hidden:      b.home,
 		ReadOnly:    readonly,
+		ResolvConf:  resolvConf,
 		Supervisor:  executable,
 		Socket:      socket,
 		GuestSocket: guestSocketPath,
@@ -678,8 +691,8 @@ func (b *Bwrap) sandboxArgv(config bwrapConfig) ([]string, error) {
 		argv = append(argv, "--bind", config.Rootfs, "/",
 			// Root inside a single mapping, so files written by root land owned by the user.
 			"--uid", "0", "--gid", "0",
-			// A root of its own still needs the machine's resolver.
-			"--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf")
+			// A root of its own still needs the machine's resolver, or its upstreams.
+			"--ro-bind", resolverOrHost(config), "/etc/resolv.conf")
 	} else {
 		argv = append(argv, "--ro-bind", "/", "/", "--tmpfs", config.Hidden)
 	}
@@ -758,4 +771,67 @@ func (b *Bwrap) logTail(name string) string {
 		lines = lines[len(lines)-3:]
 	}
 	return strings.Join(lines, "; ")
+}
+
+// resolverFiles is where a machine keeps its resolver configuration: the file in use, and the one
+// its upstream servers are written to when a local resolver owns 127.0.0.53.
+type resolverFiles struct {
+	Host     string
+	Upstream string
+}
+
+// resolverOrHost is the file a sandbox reads for DNS.
+func resolverOrHost(config bwrapConfig) string {
+	if config.ResolvConf != "" {
+		return config.ResolvConf
+	}
+	return "/etc/resolv.conf"
+}
+
+// resolverFile decides what a sandbox should read for DNS, and is not as obvious as binding the
+// machine's own file.
+//
+// When the machine resolves through a loopback address — systemd-resolved at 127.0.0.53, which is
+// what most distributions do — a sandbox cannot use it: 127.0.0.1 inside a sandbox is the
+// sandbox's own loopback, where nothing listens. The measured symptom is an `apt-get update` that
+// works on the host and fails in the sandbox. The machine's upstream servers are in a file of
+// their own, so that is what gets bound; everything else binds the machine's file unchanged.
+func (b *Bwrap) resolverFile(workspaceDir string) (string, error) {
+	raw, err := os.ReadFile(b.resolver.Host)
+	if err != nil {
+		// No resolver file to read: binding the machine's path is what the argv did before, and
+		// a sandbox with no DNS says so when a command tries to resolve something.
+		return "", nil
+	}
+	if !hasLoopbackServers(string(raw)) {
+		return "", nil
+	}
+	upstream, err := os.ReadFile(b.resolver.Upstream)
+	if err != nil {
+		return "", nil
+	}
+	if err := os.MkdirAll(workspaceDir, 0o700); err != nil {
+		return "", err
+	}
+	path := filepath.Join(workspaceDir, "resolv.conf")
+	if err := os.WriteFile(path, upstream, 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// hasLoopbackServers reports whether a resolver file names an address that only means something
+// on the machine itself: 127.0.0.0/8 and ::1.
+func hasLoopbackServers(contents string) bool {
+	for _, line := range strings.Split(contents, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != "nameserver" {
+			continue
+		}
+		address := fields[1]
+		if strings.HasPrefix(address, "127.") || address == "::1" {
+			return true
+		}
+	}
+	return false
 }
