@@ -37,16 +37,12 @@ registerEnvConformance(
  * without a hypervisor. A machine that will not make a user namespace skips, because there is
  * no sandbox to conform to; the driver's refusal is covered in the Go suite.
  */
-const bwrapProbe = Bun.spawnSync([
-	"bwrap",
-	"--ro-bind",
-	"/",
-	"/",
-	"--unshare-all",
-	"--",
-	"/bin/true",
-]);
-const bwrapUsable = bwrapProbe.exitCode === 0;
+// `Bun.spawnSync` throws when the program is missing instead of returning a status, so the
+// presence check comes first: a machine without bubblewrap skips this suite rather than failing the
+// run — which is what CI, having no bubblewrap, found the hard way.
+const bwrapUsable =
+	Bun.which("bwrap") !== null &&
+	Bun.spawnSync(["bwrap", "--ro-bind", "/", "/", "--unshare-all", "--", "/bin/true"]).exitCode === 0;
 
 if (bwrapUsable) {
 	registerEnvConformance(
