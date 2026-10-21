@@ -18,6 +18,25 @@ export interface WorkspaceSummary {
 	active: boolean;
 	image?: string | undefined;
 	network?: string | undefined;
+	/** The sandbox engine this workspace runs on, resolved: a workspace that names none gets the
+	 * install's default, and the row says which that is rather than leaving a blank. */
+	engine?: string | undefined;
+	/** What the row shows for it: the product's name for the engine, or its own. */
+	engineLabel?: string | undefined;
+	/** Its sandbox is exempt from idle eviction: it runs something. */
+	keepAlive?: boolean | undefined;
+}
+
+/** One sandbox engine the create form offers. */
+export interface EngineSummary {
+	name: string;
+	/** The engine a workspace with no choice of its own gets. */
+	isDefault: boolean;
+	/** False means this machine cannot run it; `problem` says why. */
+	usable: boolean;
+	problem?: string | undefined;
+	/** A short word for a narrow control: the engine's own name, or its family. */
+	label: string;
 }
 
 /** One secret's delivery, never its value. */

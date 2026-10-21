@@ -62,6 +62,15 @@ type Workspace struct {
 	// default, which is on. A string rather than a bool so that "not set" is expressible —
 	// and so an allowlist can be added later without a migration.
 	Network string `json:"network,omitempty"`
+	// KeepAlive keeps this workspace's sandbox running when nothing is watching it. It is for a
+	// workspace that runs a daemon or a cron job: stopping an idle sandbox kills its processes,
+	// which is fine for a folder and not fine for a server. Off by default, because the point of
+	// stopping is that a personal machine is not holding workspaces nobody is using.
+	KeepAlive bool `json:"keep_alive,omitempty"`
+	// Engine is which sandbox engine this workspace runs on: microsandbox, bwrap, or host.
+	// Empty means the install's default, from --sandbox-engine. Like Image, it takes effect
+	// at the next sandbox, because a running sandbox is where the dependencies live.
+	Engine string `json:"engine,omitempty"`
 	// DisableVMNesting is whether this workspace's sandbox must not nest virtual machines:
 	// run a hypervisor inside it. Nil means "not set", which follows the install's
 	// --disable-vm-nesting; a pointer because true is a choice and absent is not. Like Image,
@@ -85,13 +94,20 @@ func (w Workspace) SandboxPolicy(home, userHome string, disableVMNesting bool) s
 	if w.DisableVMNesting != nil {
 		disableVMNesting = *w.DisableVMNesting
 	}
-	return sandbox.Policy{
+	policy := sandbox.Policy{
 		Image:            w.Image,
 		Workspace:        w.Path,
 		Egress:           w.Network != NetworkOff,
 		DisableVMNesting: disableVMNesting,
 		Global:           sandbox.GlobalPaths(home, userHome),
 	}
+	if w.KeepAlive {
+		// An engine that stops idle sandboxes on its own has to be told not to here: control
+		// already exempts this workspace from eviction, and a sandbox stopped under a live worker
+		// is woken by the next command — which kills the daemons it was kept alive for.
+		policy.IdleTimeout = sandbox.KeptAliveIdleTimeout
+	}
+	return policy
 }
 
 // ValidNetwork reports whether a network value means something. An unknown value is refused
@@ -99,6 +115,9 @@ func (w Workspace) SandboxPolicy(home, userHome string, disableVMNesting bool) s
 func ValidNetwork(value string) bool {
 	return value == "" || value == "on" || value == NetworkOff
 }
+
+// ValidKeepAlive is a bool on the wire; nothing to validate. It is here so that a caller reading
+// the create and update handlers sees the same shape for every workspace setting.
 
 // Views renders workspaces for the interface, which is the only place `running` belongs.
 //
@@ -132,8 +151,12 @@ type WorkspacesOptions struct {
 	Update func() UpdateSummary
 	// Model is the install default, from --model.
 	Model string
-	// Sandbox is the machine's sandbox tier, shared by every workspace.
+	// Sandbox is the install's default engine, shared by every workspace that does not name
+	// one of its own.
 	Sandbox *sandbox.Manager
+	// Sandboxes holds every engine this install can run, so a workspace that names one gets
+	// that engine rather than the default. Nil means this install has one engine only.
+	Sandboxes *sandbox.Tier
 	// Vault is the install-wide tool-secret store. Nil means this install has none, which
 	// is a state the interface reports rather than a reason not to open a workspace.
 	Vault *vault.Store
@@ -160,6 +183,11 @@ type Workspaces struct {
 	controls map[string]*Control
 	starting map[string]*sync.Mutex
 	closed   bool
+
+	// engines is the machine's answer for the chooser, computed once: it changes when a
+	// package is installed, not while a gateway runs.
+	enginesOnce sync.Once
+	engines     []EngineInfo
 
 	// used is guarded by usedMu rather than by mu, because it changes on every request:
 	// taking the registry's write lock to store a timestamp would put the hot path in
@@ -422,6 +450,8 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 		SettingsPath:     filepath.Join(w.opts.Home, "state", name, "settings.json"),
 		DraftsPath:       filepath.Join(w.opts.Home, "state", name, "drafts.json"),
 		Sandbox:          w.opts.Sandbox,
+		Sandboxes:        w.opts.Sandboxes,
+		Engines:          w.Engines,
 		Vault:            w.opts.Vault,
 		WorkerCommand:    w.opts.WorkerCommand,
 		WorkerDir:        w.opts.WorkerDir,
@@ -714,6 +744,11 @@ func (w *Workspaces) evictCandidates() []*Control {
 		if name == GeneralWorkspaceName {
 			continue
 		}
+		// A workspace that runs something keeps running: its sandbox's processes die with it,
+		// and a cron job that is not there at its next run is worse than a few megabytes held.
+		if workspace, ok := w.registry[name]; ok && workspace.KeepAlive {
+			continue
+		}
 		if w.idleFor(name) < idleEviction {
 			continue
 		}
@@ -735,6 +770,9 @@ func validateWorkspace(workspace Workspace) error {
 	}
 	if strings.TrimSpace(workspace.Path) == "" {
 		return fmt.Errorf("workspace %q needs a folder", workspace.Name)
+	}
+	if !sandbox.ValidEngine(workspace.Engine) {
+		return fmt.Errorf("workspace %q names an unknown sandbox engine %q (choose one of %s)", workspace.Name, workspace.Engine, strings.Join(sandbox.EngineNames(), ", "))
 	}
 	return nil
 }
@@ -942,6 +980,71 @@ func (w *Workspaces) migrate() error {
 				_ = os.Remove(path)
 			}
 		}
+	}
+	return nil
+}
+
+// EngineInfo is one sandbox engine this install can run, as the chooser shows it. It is a
+// machine fact, not a workspace's: the same for every workspace, cached because a listing is
+// served on every state request.
+type EngineInfo struct {
+	Name      string `json:"name"`
+	Default   bool   `json:"default,omitempty"`
+	Isolated  bool   `json:"isolated"`
+	Installed bool   `json:"installed"`
+	Version   string `json:"version,omitempty"`
+	// Problem is why this machine cannot run the engine, in a sentence. An engine that is
+	// listed with a problem is still offered: the person choosing should see the reason.
+	Problem string `json:"problem,omitempty"`
+}
+
+// Engines reports every engine this build implements, whether this machine can run it, and
+// which one a workspace with no engine of its own gets. It is cached: the answer changes when
+// somebody installs a package, not while a gateway runs.
+func (w *Workspaces) Engines() []EngineInfo {
+	w.enginesOnce.Do(func() {
+		def := sandbox.DefaultEngine
+		if w.opts.Sandbox != nil && w.opts.Sandbox.Driver() != nil {
+			def = w.opts.Sandbox.Driver().Name()
+		}
+		infos := make([]EngineInfo, 0, len(sandbox.EngineNames()))
+		for _, name := range sandbox.EngineNames() {
+			info := EngineInfo{Name: name, Default: name == def}
+			manager := w.engineManager(name)
+			if manager != nil {
+				report := manager.Report()
+				info.Installed = report.Installed
+				info.Version = report.Version
+				info.Isolated = report.Isolated
+				if problem := report.Problem; problem != "" {
+					info.Problem = problem
+				}
+				// A probe this machine answers, not a claim from a table: bubblewrap checks a
+				// user namespace, the microVM engine checks its hypervisor.
+				if info.Problem == "" {
+					if err := manager.Driver().Usable(); err != nil {
+						info.Problem = err.Error()
+					}
+				}
+			}
+			infos = append(infos, info)
+		}
+		w.engines = infos
+	})
+	return w.engines
+}
+
+// engineManager resolves one engine's manager without starting anything: the tier builds and
+// caches managers, and building one installs nothing.
+func (w *Workspaces) engineManager(name string) *sandbox.Manager {
+	if w.opts.Sandboxes != nil {
+		if manager, err := w.opts.Sandboxes.For(name); err == nil {
+			return manager
+		}
+		return nil
+	}
+	if w.opts.Sandbox != nil && w.opts.Sandbox.Driver() != nil && w.opts.Sandbox.Driver().Name() == name {
+		return w.opts.Sandbox
 	}
 	return nil
 }

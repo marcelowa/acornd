@@ -106,3 +106,41 @@ jobs:
       - run: make deps
       - run: make test-sandbox
 
+
+  bwrap:
+    # The third engine's tier: real bubblewrap, real pasta, a real image pulled from a registry.
+    # The fast tier covers the driver and the client against fakes; this is the one job that runs
+    # the thing itself.
+    #
+    # It runs on a hosted runner because it needs three packages installed, and the self-hosted
+    # runner has neither sudo nor root — the tier would fail on the box that is meant to run it.
+    # Ubuntu 24.04 gates unprivileged user namespaces behind AppArmor, so it gets the profile
+    # Ubuntu documents for bubblewrap; without it the engine is unusable there for a reason that
+    # has nothing to do with this code.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27.1"
+          cache-dependency-path: gateway/go.sum
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install what the engine needs
+        # bubblewrap for the sandbox, pasta for its network, and iproute2 for the address step
+        # pasta does not do itself.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap passt iproute2
+      - name: Let bubblewrap make user namespaces
+        # Ubuntu 24.04 gates unprivileged user namespaces behind AppArmor. A per-binary profile is
+        # enough for bubblewrap on its own, and *not* enough for the sandbox this tier runs: the
+        # sandbox's user namespace nests inside the one pasta makes, and the second one is refused
+        # ("Couldn't write to /proc/self/uid_map"). The switch is the documented host-wide answer,
+        # and on a runner that is only running this tier it is the right one.
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --ro-bind / / --unshare-all -- /bin/true && echo "bubblewrap can make a user namespace"
+      - run: make deps
+      - run: make test-bwrap

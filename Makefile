@@ -6,7 +6,7 @@ DATA ?= $(HOME)/.acornfall
 ADDR ?= 0.0.0.0:7777
 URL ?= http://127.0.0.1:7777
 
-.PHONY: help deps build typecheck lint modernize tools commits check test test-sandbox sandbox-preflight ui ui-build run dev fmt clean release release-branch
+.PHONY: help deps build typecheck lint modernize tools commits check test test-sandbox test-bwrap sandbox-preflight ui ui-build run dev fmt clean release release-branch
 
 # The linters, installed into the Go and bun toolchains rather than vendored. `make lint` runs
 # whichever are present and names the ones that are not, so a missing tool is a message and
@@ -34,7 +34,9 @@ deps: ## install worker, interface, and tool dependencies
 	cd tools && bun install
 
 build: ui-build ## build the gateway binary, with the interface embedded
-	cd gateway && go build -o ../$(BIN) ./cmd/acornfall
+	# CGO off, so the binary is static: it runs as a sandbox's first process, and an image may
+	# have no libc at all (a musl image, or none). The release builds it this way too.
+	cd gateway && CGO_ENABLED=0 go build -o ../$(BIN) ./cmd/acornfall
 
 ui-build: ## build the interface into the embed directory the gateway serves
 	cd ui && bun run build
@@ -110,6 +112,16 @@ test: lint ## the default tier: units and the feature suite, no hypervisor neede
 	# -count=1 because the suite's inputs include worker/src and the built interface, which
 	# Go's test cache cannot see: a cached pass would be a pass for code that has changed.
 	cd gateway && ACORNFALL_NO_SANDBOX=1 go test -short -race -count=1 -parallel $(TEST_PARALLEL) ./...
+
+test-bwrap: ## the bubblewrap engine end to end: it fetches an image, so it is not part of `make test`
+	# A bwrap workspace gets its own copy of its image and carries egress with pasta; both are
+	# why this is its own tier, the same way the microVM tier needs /dev/kvm. Needs bubblewrap,
+	# passt, and iproute2 installed. The client and driver tests run in the fast tier already.
+	#
+	# ACORNFALL_BWRAP_ONLY makes a machine without them fail instead of skip: this target is the
+	# one place that says the tier ran, so a skip here would be a green run that tested nothing.
+	cd worker && env -u ACORNFALL_NO_SANDBOX ACORNFALL_BWRAP_ONLY=1 bun test test/bwrap.test.ts test/env-conformance.test.ts
+	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_BWRAP_ONLY=1 ACORNFALL_IMAGE_TEST=1 go test -count=1 ./internal/e2e/ -run 'Bwrap|TwoEngines|KeepsTheEngine'
 
 test-sandbox: sandbox-preflight ## the engine boundary: live driver, SDK client, and its e2e tests
 	# env -u so a shell that exported the fast tier's switch cannot silently turn this into a

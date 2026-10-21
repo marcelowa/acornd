@@ -220,8 +220,16 @@ export function removeWorkspace(name: string): Promise<void> {
 	return post(`/api/workspaces/${encodeURIComponent(name)}/remove`, {});
 }
 
-export function createWorkspace(name: string): Promise<void> {
-	return post("/api/workspaces", { name });
+/**
+ * A new workspace, with the engine chosen before it exists: the engine decides what a
+ * workspace's sandbox is, and a workspace that wanted a microVM should not have to run once
+ * on another engine to change it.
+ */
+export function createWorkspace(name: string, engine?: string): Promise<void> {
+	return post("/api/workspaces", {
+		name,
+		...(engine === undefined || engine === "" ? {} : { engine }),
+	});
 }
 
 /** A new conversation, created and selected; the answer is the state it is now in. */
@@ -236,10 +244,15 @@ export interface WorkspaceChange {
 	title?: string;
 	image?: string;
 	network?: string;
+	/** Kept running when idle: for a workspace that runs a daemon or a cron job. */
+	keepAlive?: boolean;
 }
 
 export function updateWorkspace(workspace: string, change: WorkspaceChange): Promise<void> {
-	return post(workspacePath(workspace, "/update"), change);
+	// The wire says keep_alive, the interface says keepAlive: one conversion, here.
+	const { keepAlive, ...rest } = change;
+	const body = keepAlive === undefined ? rest : { ...rest, keep_alive: keepAlive };
+	return post(workspacePath(workspace, "/update"), body);
 }
 
 /** Where a default is being set: this workspace, or every workspace. */

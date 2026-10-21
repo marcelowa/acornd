@@ -62,6 +62,12 @@ type Options struct {
 	Registry func() []Workspace
 	// WorkspacesDir is where new workspaces are created, so the interface can say so.
 	WorkspacesDir string
+	// Sandboxes holds every engine this install can run, so a workspace that names an engine
+	// gets that engine rather than the install's default. Nil means this build has one.
+	Sandboxes *sandbox.Tier
+	// Engines is the machine's engine list for the chooser: names, versions, and why one
+	// cannot run here. Nil reports none, which is what an install with no sandbox tier has.
+	Engines func() []EngineInfo
 	// Sandbox is the machine's sandbox tier. Nil means this Control was built without one,
 	// which is what ACORNFALL_NO_SANDBOX asks the gateway for: the workspace still opens and
 	// its tools refuse.
@@ -135,6 +141,10 @@ type WorkspaceState struct {
 	General bool   `json:"general"`
 	Image   string `json:"image,omitempty"`
 	Network string `json:"network,omitempty"`
+	// KeepAlive is whether this workspace's sandbox is exempt from idle eviction.
+	KeepAlive bool `json:"keep_alive,omitempty"`
+	// Engine is which sandbox engine this workspace runs on; empty means the install default.
+	Engine string `json:"engine,omitempty"`
 	// DisableVMNesting is nil when this workspace follows the install's --disable-vm-nesting,
 	// and a choice of its own otherwise. True refuses nesting; absent or false allows it
 	// wherever the engine and the machine can.
@@ -175,9 +185,12 @@ type Conversation struct {
 
 // State is everything the UI needs to render before any frame arrives.
 type State struct {
-	Workspace     WorkspaceState          `json:"workspace"`
-	Workspaces    []WorkspaceState        `json:"workspaces"`
-	WorkspacesDir string                  `json:"workspacesDir"`
+	Workspace     WorkspaceState   `json:"workspace"`
+	Workspaces    []WorkspaceState `json:"workspaces"`
+	WorkspacesDir string           `json:"workspacesDir"`
+	// Engines is what a new workspace may run on, with this machine's answer for each. It is
+	// a machine fact, so it is the same in every state frame.
+	Engines       []EngineInfo            `json:"engines,omitempty"`
 	Harness       string                  `json:"harness"`
 	Capabilities  protocol.Capabilities   `json:"capabilities"`
 	Conversation  *Conversation           `json:"conversation,omitempty"`
@@ -267,6 +280,12 @@ type Control struct {
 	// sandbox is what the agent's tools can reach, refreshed when the worker starts. It is
 	// nil-free on purpose: "no sandbox" is a state the interface has to be able to show.
 	sandbox SandboxState
+	// engine resolves this workspace's engine once, because a workspace's engine is a
+	// property of its record and the record only changes through SetWorkspace.
+	engineMu      sync.Mutex
+	engineDone    bool
+	engineManager *sandbox.Manager
+	engineProblem error
 	// One notification per death, drained by the single supervisor loop. A restart loop
 	// per death would compound: every failed attempt is another death.
 	workerExited chan struct{}
@@ -524,7 +543,7 @@ func (c *Control) startWorker(ctx context.Context) error {
 	sandboxState := c.provisionSandbox(ctx)
 	if sandboxState.Tools {
 		args = append(args, "--sandbox", sandbox.Name(c.opts.Workspace.Path))
-		if driver := c.opts.Sandbox.Driver(); driver != nil {
+		if driver := c.sandboxDriver(); driver != nil {
 			// The worker attaches with this engine's SDK: naming it here is how the two sides
 			// of one install cannot disagree about which engine is in use.
 			args = append(args, "--sandbox-engine", driver.Name())
@@ -533,10 +552,7 @@ func (c *Control) startWorker(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	delivery := sandbox.DeliverySubstitute
-	if c.opts.Sandbox != nil {
-		delivery = c.opts.Sandbox.SecretDelivery()
-	}
+	delivery := c.SecretDelivery()
 	delivered := c.resolveSecrets(delivery).delivered
 	if len(delivered) > 0 {
 		// The prompt carries names and descriptions only; a substitute engine never gives the
@@ -555,8 +571,9 @@ func (c *Control) startWorker(ctx context.Context) error {
 			args = append(args, "--secrets", string(encoded))
 		}
 	}
-	env := sandboxEnv(c.opts.Sandbox)
-	if c.opts.Sandbox != nil && c.opts.Sandbox.SecretEnvInWorker() {
+	manager := c.sandboxManager()
+	env := sandboxEnv(manager)
+	if manager != nil && manager.SecretEnvInWorker() {
 		for _, secret := range delivered {
 			env = append(env, secret.Name+"="+secret.Value)
 		}
@@ -857,8 +874,18 @@ func (c *Control) Busy() bool {
 // SetWorkspace applies a changed record: a folder that moved, or trust being granted.
 func (c *Control) SetWorkspace(workspace Workspace) {
 	c.mu.Lock()
+	changed := c.opts.Workspace.Engine != workspace.Engine
 	c.opts.Workspace = workspace
 	c.mu.Unlock()
+	if changed {
+		// A different engine is a different manager, and the next worker start must resolve
+		// it rather than reuse the one that belonged to the last record.
+		c.engineMu.Lock()
+		c.engineDone = false
+		c.engineManager = nil
+		c.engineProblem = nil
+		c.engineMu.Unlock()
+	}
 }
 
 // Commands lists this workspace's slash commands, global first and workspace shadowing.
@@ -911,13 +938,66 @@ func (c *Control) Close() {
 	// The worker is gone, so nothing can use the sandbox: stopping it frees the memory and
 	// the engine's own idle timeout would do it anyway. Its disk stays, so a workspace that
 	// installed dependencies yesterday still has them.
-	if manager := c.opts.Sandbox; manager != nil {
+	if manager := c.sandboxManager(); manager != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), sandbox.Timeout)
 		defer cancel()
 		if err := manager.Stop(ctx, c.opts.Workspace.Path); err != nil && !errors.Is(err, sandbox.ErrUnavailable) {
 			workerpool.Log("stopping the sandbox for %s: %v", c.opts.Workspace.Name, err)
 		}
 	}
+}
+
+// sandbox is the manager for this workspace's engine: the workspace's own choice when its
+// record names one, the install's default when it does not. An engine this build does not
+// implement is a problem the state reports, never a fallback to another engine — a workspace
+// that asked for a sandbox must not quietly be handed a different one.
+func (c *Control) sandboxManager() *sandbox.Manager {
+	c.engineMu.Lock()
+	defer c.engineMu.Unlock()
+	if c.engineDone {
+		return c.engineManager
+	}
+	c.engineDone = true
+	// Read the record under the record's own lock: SetWorkspace may be rewriting it.
+	c.mu.RLock()
+	engine := c.opts.Workspace.Engine
+	c.mu.RUnlock()
+	if c.opts.Sandboxes != nil && strings.TrimSpace(engine) != "" {
+		manager, err := c.opts.Sandboxes.For(engine)
+		if err != nil {
+			c.engineProblem = err
+			return nil
+		}
+		c.engineManager = manager
+		return manager
+	}
+	c.engineManager = c.opts.Sandbox
+	return c.engineManager
+}
+
+// engineList is what a new workspace may run on. Nil when this install has no tier: an empty
+// list and "no sandbox at all" are different states, and the interface shows them differently.
+func (c *Control) engineList() []EngineInfo {
+	if c.opts.Engines == nil {
+		return nil
+	}
+	return c.opts.Engines()
+}
+
+// sandboxDriver is the engine behind this workspace, or nil.
+func (c *Control) sandboxDriver() sandbox.Driver {
+	if manager := c.sandboxManager(); manager != nil {
+		return manager.Driver()
+	}
+	return nil
+}
+
+// sandboxProblem is why this workspace has no manager, when it named an engine this build
+// does not implement. Nil is the ordinary answer.
+func (c *Control) sandboxProblem() error {
+	c.engineMu.Lock()
+	defer c.engineMu.Unlock()
+	return c.engineProblem
 }
 
 // sandboxEnv is what the worker needs to reach the engine's sandboxes, or nothing when there
@@ -933,8 +1013,11 @@ func sandboxEnv(manager *sandbox.Manager) []string {
 // reach. It never fails the worker: a machine without a hypervisor is a supported state, and
 // the tools refuse rather than running unconfined.
 func (c *Control) provisionSandbox(ctx context.Context) SandboxState {
-	manager := c.opts.Sandbox
+	manager := c.sandboxManager()
 	if manager == nil {
+		if problem := c.sandboxProblem(); problem != nil {
+			return SandboxState{Problem: problem.Error()}
+		}
 		return SandboxState{Problem: "no sandbox is configured: tool execution is disabled"}
 	}
 	report := manager.Report()
@@ -1010,10 +1093,10 @@ func secretPlaceholder(delivery sandbox.Delivery, name string) string {
 
 // SecretDelivery is the engine's way of delivering a secret, for the card's validation.
 func (c *Control) SecretDelivery() sandbox.Delivery {
-	if c.opts.Sandbox == nil {
-		return sandbox.DeliverySubstitute
+	if manager := c.sandboxManager(); manager != nil {
+		return manager.SecretDelivery()
 	}
-	return c.opts.Sandbox.SecretDelivery()
+	return sandbox.DeliverySubstitute
 }
 
 // resolveSecrets reads the workspace's effective set and asks what this engine can do with
@@ -1076,7 +1159,7 @@ func (c *Control) ApplySecrets(ctx context.Context, deferRestart bool) error {
 	if !c.WorkerUp() {
 		return nil
 	}
-	manager := c.opts.Sandbox
+	manager := c.sandboxManager()
 	if manager == nil {
 		return nil
 	}
@@ -1139,7 +1222,7 @@ func (c *Control) applyPendingSecretRestart(ctx context.Context) {
 		c.lifecycle.Unlock()
 		return
 	}
-	manager := c.opts.Sandbox
+	manager := c.sandboxManager()
 	if manager == nil {
 		c.lifecycle.Unlock()
 		return
@@ -1306,6 +1389,7 @@ func (c *Control) StateFor(conversationID string) State {
 		},
 		Workspaces:    workspaces,
 		WorkspacesDir: c.opts.WorkspacesDir,
+		Engines:       c.engineList(),
 		Harness:       c.describe.Provider,
 		Capabilities:  c.describe.Capabilities,
 		Conversations: c.toConversations(c.conversations),
@@ -2707,10 +2791,7 @@ func (c *Control) answerSecretList(frame protocol.Frame) {
 	if worker == nil {
 		return
 	}
-	delivery := sandbox.DeliverySubstitute
-	if c.opts.Sandbox != nil {
-		delivery = c.opts.Sandbox.SecretDelivery()
-	}
+	delivery := c.SecretDelivery()
 	resolved := c.resolveSecrets(delivery)
 	infos := make([]protocol.SecretInfo, 0, len(resolved.state))
 	restarting := c.SecretsRestart()

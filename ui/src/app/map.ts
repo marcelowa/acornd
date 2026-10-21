@@ -1,6 +1,7 @@
 import type {
 	BusyAction,
 	ConversationSummary,
+	EngineSummary,
 	ModelChoice,
 	PickerGroup,
 	ProviderSummary,
@@ -12,6 +13,7 @@ import type {
 	WireAgentSummary,
 	WireContentBlock,
 	WireConversation,
+	WireEngine,
 	WireEntry,
 	WireMessage,
 	WireProvider,
@@ -159,17 +161,60 @@ function toolEntry(
 	};
 }
 
-/** The workspaces as the rail lists them, with the one in view marked. */
-export function toWorkspaces(workspaces: WireWorkspace[], activeName: string): WorkspaceSummary[] {
-	return workspaces.map((workspace) => ({
-		name: workspace.name,
-		title: workspace.title,
-		path: workspace.path,
-		general: workspace.general,
-		running: workspace.running,
-		active: workspace.name === activeName,
-		image: workspace.image,
-		network: workspace.network,
+/**
+ * What a person calls an engine: the product's name for it where the product has one, and the
+ * engine's own name otherwise. The chooser and the row have to agree, or the same workspace is
+ * "bwrap" in one place and "bubblewrap" in another.
+ */
+export function engineLabel(engine: string): string {
+	return engine === "microsandbox" ? "microVM" : engine;
+}
+
+/**
+ * The workspaces as the rail lists them, with the one in view marked. `defaultEngine` is the
+ * install's own, which a workspace that names none runs on — resolved here so that every row can
+ * say what it runs on instead of only the ones that chose.
+ */
+export function toWorkspaces(
+	workspaces: WireWorkspace[],
+	activeName: string,
+	defaultEngine = "",
+): WorkspaceSummary[] {
+	return workspaces.map((workspace) => {
+		const engine =
+			workspace.engine === undefined || workspace.engine === ""
+				? defaultEngine
+				: workspace.engine;
+		return {
+			name: workspace.name,
+			title: workspace.title,
+			path: workspace.path,
+			general: workspace.general,
+			running: workspace.running,
+			active: workspace.name === activeName,
+			image: workspace.image,
+			network: workspace.network,
+			engine: engine === "" ? undefined : engine,
+			engineLabel: engine === "" ? undefined : engineLabel(engine),
+			keepAlive: workspace.keep_alive === true,
+		};
+	});
+}
+
+/**
+ * The engines the create form offers, in the order the gateway lists them: strongest first.
+ * `label` is the engine's own name, except the engine names the product elsewhere: a
+ * "microsandbox" is a microVM to the person choosing one.
+ */
+export function toEngines(engines: WireEngine[] | undefined): EngineSummary[] {
+	return (engines ?? []).map((engine) => ({
+		name: engine.name,
+		isDefault: engine.default === true,
+		usable: engine.installed && engine.problem === undefined,
+		// The gateway's refusals carry its own "sandbox unavailable:" prefix, which is an internal
+		// marker: what a person needs is the sentence after it, and the fix it names.
+		problem: engine.problem?.replace(/^sandbox unavailable:\s*/, ""),
+		label: engineLabel(engine.name),
 	}));
 }
 

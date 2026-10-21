@@ -68,6 +68,11 @@ const (
 	DefaultCPUs        = 2
 	DefaultMemory      = "2G"
 	DefaultIdleTimeout = "30m"
+	// KeptAliveIdleTimeout is what a workspace that runs something tells the engine instead: a
+	// daemon or a cron job must not be stopped for being idle, and this is long enough that it
+	// never fires in practice while still being a number the engine understands. Control owns the
+	// rule; this is how a policy expresses it to an engine that keeps a timer of its own.
+	KeptAliveIdleTimeout = "720h"
 )
 
 func (p Policy) withDefaults() Policy {

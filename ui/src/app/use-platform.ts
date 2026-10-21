@@ -60,6 +60,7 @@ import {
 	textOf,
 	toAgentGroups,
 	toConversation,
+	toEngines,
 	toModelChoices,
 	toModelGroups,
 	toProviders,
@@ -73,6 +74,7 @@ import type {
 	BusyAction,
 	ChoicePicker,
 	ConversationSummary,
+	EngineSummary,
 	PickerGroup,
 	ProviderSummary,
 	SandboxSummary,
@@ -281,8 +283,14 @@ export interface Platform {
 	thinkingFor: (model: string) => PickerGroup[];
 	/** Any workspace's image and network, by name: the workspaces screen's rows are not the one
 	 * in view, and its menu is where a sandbox is changed. */
-	setWorkspaceSandbox: (name: string, change: { image: string; network: string }) => void;
-	createWorkspace: (name: string) => void;
+	setWorkspaceSandbox: (
+		name: string,
+		change: { image: string; network: string; keepAlive?: boolean },
+	) => void;
+	/** A new workspace, on the engine chosen for it. */
+	createWorkspace: (name: string, engine?: string) => void;
+	/** The engines the create form offers, with this machine's answer for each. */
+	engines: EngineSummary[];
 	removeWorkspace: (name: string) => void;
 	renameWorkspace: (name: string, title: string) => void;
 	/** Every provider, connected first: the settings screen lists these. */
@@ -732,13 +740,20 @@ export function usePlatform(): Platform {
 	const contextFold = useMemo(() => foldContext(view?.entries ?? []), [view]);
 
 	const workspaces = useMemo(
-		() => toWorkspaces(state?.workspaces ?? [], state?.workspace?.name ?? ""),
+		() =>
+			toWorkspaces(
+				state?.workspaces ?? [],
+				state?.workspace?.name ?? "",
+				// The install's default, so a workspace that chose nothing still says what it runs on.
+				state?.engines?.find((engine) => engine.default === true)?.name ?? "",
+			),
 		[state],
 	);
 	const sandbox = useMemo(
 		() => (state === undefined ? undefined : toSandbox(state.sandbox)),
 		[state],
 	);
+	const engines = useMemo(() => toEngines(state?.engines), [state]);
 	const deleted = useMemo(
 		() =>
 			(state?.conversations ?? [])
@@ -1067,15 +1082,15 @@ export function usePlatform(): Platform {
 	// A row on the workspaces screen is not the workspace in view, so the name comes from the
 	// caller: the gateway takes it either way.
 	const setWorkspaceSandbox = useCallback(
-		(name: string, change: { image: string; network: string }) => {
+		(name: string, change: { image: string; network: string; keepAlive?: boolean }) => {
 			act(updateWorkspace(name, change), () => void reload());
 		},
 		[act, reload],
 	);
 
 	const createWorkspace = useCallback(
-		(name: string) => {
-			act(createWorkspaceRequest(name), () => {
+		(name: string, engine?: string) => {
+			act(createWorkspaceRequest(name, engine), () => {
 				// The workspace opens on its first conversation, which the gateway makes for a
 				// workspace that has none — so there is nothing to create here, and creating one
 				// would leave the new workspace with two.
@@ -1410,6 +1425,7 @@ export function usePlatform(): Platform {
 		thinkingFor,
 		setWorkspaceSandbox,
 		createWorkspace,
+		engines,
 		removeWorkspace,
 		usage: lastUsage(view?.entries ?? []),
 		contextWindow,

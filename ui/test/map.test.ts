@@ -7,6 +7,7 @@ import {
 	textOf,
 	toAgentGroups,
 	toConversation,
+	toEngines,
 	toModelChoices,
 	toProviders,
 	toSandbox,
@@ -512,5 +513,94 @@ describe("the provider list", () => {
 		expect(rows[0]?.source).toBe("OPENCODE_API_KEY");
 		expect(rows[0]?.authTypes).toEqual(["api_key", "oauth"]);
 		expect(toProviders([provider()])[0]?.authTypes).toEqual([]);
+	});
+});
+
+describe("the engines a workspace can be created on", () => {
+	test("keeps the gateway's order and names the microVM engine for a person", () => {
+		const engines = toEngines([
+			{ name: "microsandbox", default: true, isolated: true, installed: true },
+			{ name: "bwrap", isolated: true, installed: true },
+		]);
+		expect(engines.map((engine) => engine.label)).toEqual(["microVM", "bwrap"]);
+		expect(engines[0]?.isDefault).toBe(true);
+		expect(engines[1]?.isDefault).toBe(false);
+	});
+
+	test("offers an engine this machine cannot run, with the reason", () => {
+		const [host] = toEngines([
+			{
+				name: "host",
+				isolated: false,
+				installed: true,
+				problem: "the host engine is not isolated",
+			},
+		]);
+		expect(host?.usable).toBe(false);
+		expect(host?.problem).toContain("not isolated");
+	});
+
+	test("has nothing to offer when the gateway reported none", () => {
+		expect(toEngines(undefined)).toEqual([]);
+	});
+});
+
+describe("which engine a row says", () => {
+	const wire = (engine?: string) => ({
+		name: "demo",
+		path: "/tmp/demo",
+		title: "Demo",
+		general: false,
+		running: false,
+		...(engine === undefined ? {} : { engine }),
+	});
+
+	test("a workspace that chose nothing says what the install's default is", () => {
+		expect(toWorkspaces([wire()], "demo", "microsandbox")[0]?.engine).toBe("microsandbox");
+		// The product's name for it, so the row and the chooser agree.
+		expect(toWorkspaces([wire()], "demo", "microsandbox")[0]?.engineLabel).toBe("microVM");
+	});
+
+	test("a workspace's own engine wins over the default", () => {
+		const [row] = toWorkspaces([wire("bwrap")], "demo", "microsandbox");
+		expect(row?.engine).toBe("bwrap");
+		expect(row?.engineLabel).toBe("bwrap");
+	});
+
+	test("an install that reported no engines leaves the row silent", () => {
+		expect(toWorkspaces([wire()], "demo")[0]?.engineLabel).toBeUndefined();
+	});
+});
+
+describe("why an engine cannot be chosen", () => {
+	test("the refusal keeps its sentence and drops the gateway's internal prefix", () => {
+		const [bwrap] = toEngines([
+			{
+				name: "bwrap",
+				isolated: true,
+				installed: true,
+				problem:
+					"sandbox unavailable: bubblewrap cannot create a user namespace here: Permission denied",
+			},
+		]);
+		expect(bwrap?.usable).toBe(false);
+		expect(bwrap?.problem).toBe(
+			"bubblewrap cannot create a user namespace here: Permission denied",
+		);
+	});
+
+	test("an engine that is simply not installed says what to install", () => {
+		const [bwrap] = toEngines([
+			{
+				name: "bwrap",
+				isolated: true,
+				installed: false,
+				problem:
+					"sandbox unavailable: bubblewrap is not installed (install it: apt install bubblewrap)",
+			},
+		]);
+		expect(bwrap?.problem).toBe(
+			"bubblewrap is not installed (install it: apt install bubblewrap)",
+		);
 	});
 });

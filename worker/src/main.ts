@@ -176,6 +176,8 @@ async function sandboxEngine(name: string): Promise<SandboxEngine | undefined> {
 	switch (name) {
 		case "microsandbox":
 			return await import("./microsandbox.ts");
+		case "bwrap":
+			return await import("./bwrap.ts");
 		case "host":
 			return await import("./host.ts");
 		default:

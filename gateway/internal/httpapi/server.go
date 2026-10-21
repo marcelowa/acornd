@@ -13,6 +13,7 @@ import (
 
 	"github.com/acornfall/acornfall/gateway/internal/control"
 	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 	"github.com/acornfall/acornfall/gateway/internal/update"
 )
 
@@ -140,6 +141,9 @@ func (s *Server) listing() map[string]any {
 	return map[string]any{
 		"workspacesDir": s.workspaces.Dir(),
 		"workspaces":    control.Views(s.workspaces.List()),
+		// Every engine this build can run and whether this machine can: the chooser shows all
+		// of them, with the sentence that says why one cannot be used here.
+		"engines": s.workspaces.Engines(),
 	}
 }
 
@@ -153,6 +157,12 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 		Path    *string `json:"path"`
 		Image   *string `json:"image"`
 		Network *string `json:"network"`
+		// Engine is which sandbox engine this workspace runs on: microsandbox, bwrap, or
+		// host. Absent means the install's default. See docs/adr/0022 and 0023.
+		Engine *string `json:"engine"`
+		// KeepAlive keeps this workspace's sandbox running when nobody is watching it, which is
+		// what a workspace that runs a daemon or a cron job needs.
+		KeepAlive *bool `json:"keep_alive"`
 		// DisableVMNesting, when true, keeps this workspace's sandbox from nesting;
 		// absent or false follows the install's --disable-vm-nesting.
 		DisableVMNesting *bool `json:"disable_vm_nesting"`
@@ -172,6 +182,12 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `network is "on" or "off"`, http.StatusBadRequest)
 		return
 	}
+	if body.Engine != nil && !sandbox.ValidEngine(*body.Engine) {
+		// Named, never defaulted: a workspace that asked for a sandbox and got another engine
+		// would be a security change nobody chose.
+		http.Error(w, "sandbox engine is one of "+strings.Join(sandbox.EngineNames(), ", "), http.StatusBadRequest)
+		return
+	}
 	if body.Path != nil {
 		// Refused rather than ignored: accepting and dropping it would be a field that does
 		// nothing, and pointing at a folder elsewhere is the operator's command.
@@ -189,6 +205,12 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Network != nil {
 		workspace.Network = *body.Network
+	}
+	if body.Engine != nil {
+		workspace.Engine = *body.Engine
+	}
+	if body.KeepAlive != nil {
+		workspace.KeepAlive = *body.KeepAlive
 	}
 	if body.DisableVMNesting != nil {
 		workspace.DisableVMNesting = body.DisableVMNesting
@@ -211,10 +233,12 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 	// path: moving a workspace to a folder of the interface's choosing is exactly what the
 	// workspaces folder exists to prevent.
 	var body struct {
-		Title   *string `json:"title"`
-		Image   *string `json:"image"`
-		Network *string `json:"network"`
-		Trusted *bool   `json:"trusted"`
+		Title     *string `json:"title"`
+		Image     *string `json:"image"`
+		Network   *string `json:"network"`
+		Engine    *string `json:"engine"`
+		KeepAlive *bool   `json:"keep_alive"`
+		Trusted   *bool   `json:"trusted"`
 		// DisableVMNesting, when present, keeps this workspace's sandbox from nesting;
 		// absent leaves the workspace's own setting alone.
 		DisableVMNesting *bool `json:"disable_vm_nesting"`
@@ -231,6 +255,16 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 		// should be told, not humoured.
 		http.Error(w, `network is "on" or "off"`, http.StatusBadRequest)
 		return
+	}
+	if body.Engine != nil {
+		if !sandbox.ValidEngine(*body.Engine) {
+			http.Error(w, "sandbox engine is one of "+strings.Join(sandbox.EngineNames(), ", "), http.StatusBadRequest)
+			return
+		}
+		existing.Engine = *body.Engine
+	}
+	if body.KeepAlive != nil {
+		existing.KeepAlive = *body.KeepAlive
 	}
 	if body.Title != nil {
 		existing.Title = *body.Title

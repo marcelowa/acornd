@@ -50,6 +50,16 @@ export function WorkspaceRow({
 					<Text size="2xs" tone="muted" className="truncate font-mono">
 						{workspace.path}
 					</Text>
+					{/* Every row says which engine it runs on, the default included: two workspaces
+					 * on different engines are the thing a reader has to be able to tell apart. */}
+					{workspace.engineLabel !== undefined && workspace.engineLabel !== "" ? (
+						<Badge
+							variant="outline"
+							aria-label={`Sandbox engine ${workspace.engineLabel}`}
+						>
+							{workspace.engineLabel}
+						</Badge>
+					) : null}
 				</div>
 			</div>
 			<div className="flex shrink-0 items-center gap-2">
