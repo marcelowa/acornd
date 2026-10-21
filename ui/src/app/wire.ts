@@ -19,6 +19,8 @@ export interface WireWorkspace {
 	engine?: string | undefined;
 	/** Kept running when nobody is watching: a workspace with a daemon or a cron job. */
 	keep_alive?: boolean | undefined;
+	/** May reach private networks as this machine: its LAN and its tailnet. Off unless asked. */
+	private?: boolean | undefined;
 	running: boolean;
 }
 

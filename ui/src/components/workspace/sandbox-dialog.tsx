@@ -20,7 +20,10 @@ export interface SandboxDialogProps {
 	workspace?: WorkspaceSummary | undefined;
 	/** The last thing the server refused, in its own words. */
 	failure?: string | undefined;
-	onSave: (name: string, change: { image: string; network: string; keepAlive: boolean }) => void;
+	onSave: (
+		name: string,
+		change: { image: string; network: string; keepAlive: boolean; private: boolean },
+	) => void;
 	onClose: () => void;
 }
 
@@ -37,6 +40,7 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 	const [image, setImage] = useState(workspace?.image ?? "");
 	const [network, setNetwork] = useState(workspace?.network ?? "on");
 	const [keepAlive, setKeepAlive] = useState(workspace?.keepAlive === true);
+	const [privateNetworks, setPrivateNetworks] = useState(workspace?.private === true);
 	/** The value the field last sent, so the outcome belongs to this field's own commit. */
 	const [attempt, setAttempt] = useState<string | undefined>(undefined);
 
@@ -46,7 +50,13 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 		setNetwork(workspace?.network ?? "on");
 		setKeepAlive(workspace?.keepAlive === true);
 		setAttempt(undefined);
-	}, [workspace?.name, workspace?.image, workspace?.network, workspace?.keepAlive]);
+	}, [
+		workspace?.name,
+		workspace?.image,
+		workspace?.network,
+		workspace?.keepAlive,
+		workspace?.private,
+	]);
 
 	const committedImage = workspace?.image ?? "";
 	const imageDirty = image !== committedImage;
@@ -93,7 +103,12 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 								onClick={() => {
 									if (workspace === undefined) return;
 									setAttempt(image);
-									onSave(workspace.name, { image, network, keepAlive });
+									onSave(workspace.name, {
+										image,
+										network,
+										keepAlive,
+										private: privateNetworks,
+									});
 								}}
 							>
 								Apply
@@ -109,7 +124,12 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 								if (next !== "on" && next !== "off") return;
 								if (workspace === undefined) return;
 								setNetwork(next);
-								onSave(workspace.name, { image, network: next, keepAlive });
+								onSave(workspace.name, {
+									image,
+									network: next,
+									keepAlive,
+									private: privateNetworks,
+								});
 							}}
 							variant="outline"
 							size="sm"
@@ -128,6 +148,38 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 								: "no network at all: nothing to install, nothing to fetch"}
 						</Text>
 					</SettingsField>
+					{network === "on" && (
+						<SettingsField label="private networks">
+							<ToggleGroup
+								type="single"
+								value={privateNetworks ? "on" : "off"}
+								onValueChange={(next) => {
+									if (next !== "on" && next !== "off") return;
+									if (workspace === undefined) return;
+									const allow = next === "on";
+									setPrivateNetworks(allow);
+									onSave(workspace.name, {
+										image,
+										network,
+										keepAlive,
+										private: allow,
+									});
+								}}
+								variant="outline"
+								size="sm"
+								spacing={0}
+								aria-label="Let this workspace reach private networks"
+							>
+								<ToggleGroupItem value="off">blocked</ToggleGroupItem>
+								<ToggleGroupItem value="on">allowed</ToggleGroupItem>
+							</ToggleGroup>
+							<Text size="2xs" tone="muted">
+								{privateNetworks
+									? "reaches this machine's LAN, link-local addresses, and its tailnet, as this machine"
+									: "public internet only: this machine's LAN, link-local addresses, and its tailnet are refused"}
+							</Text>
+						</SettingsField>
+					)}
 					<SettingsField label="while idle">
 						<ToggleGroup
 							type="single"
@@ -137,7 +189,12 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 								if (workspace === undefined) return;
 								const keep = next === "on";
 								setKeepAlive(keep);
-								onSave(workspace.name, { image, network, keepAlive: keep });
+								onSave(workspace.name, {
+									image,
+									network,
+									keepAlive: keep,
+									private: privateNetworks,
+								});
 							}}
 							variant="outline"
 							size="sm"

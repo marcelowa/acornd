@@ -622,3 +622,82 @@ func TestBwrapKeepsTheIdleTimeoutAPolicyNames(t *testing.T) {
 		t.Fatalf("idle timeout: %q, want %q", config.IdleTimeout, KeptAliveIdleTimeout)
 	}
 }
+
+// A workspace with no private-networks grant is given routes that refuse them, and pasta carries
+// its DNS, so nothing about the machine's own networks is reachable from inside.
+func TestBwrapRefusesPrivateNetworksWithoutAGrant(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	config := bwrapConfig{
+		Workspace: "/work/ws", Rootfs: "/state/ws/rootfs", Home: "/state/ws/home",
+		Bwrap: "/usr/bin/bwrap", Supervisor: "/install/acornfall",
+		Run: "/state/ws/run", GuestRun: guestRunDir, GuestSocket: guestSocketPath,
+		Network: bwrapNetwork{
+			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
+			Pasta: "/usr/bin/pasta", IP: "/usr/sbin/ip",
+		},
+	}
+	argv, err := driver.bootArgv(config)
+	if err != nil {
+		t.Fatalf("argv: %v", err)
+	}
+	joined := strings.Join(argv, " ")
+	for _, want := range []string{
+		"route add unreachable",
+		"100.64.0.0/10",
+		"192.168.0.0/16",
+		"169.254.0.0/16",
+		"--dns-forward 10.0.2.3",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("a sandbox without a grant should carry %q:\n%s", want, joined)
+		}
+	}
+}
+
+// A workspace that asked for private networks gets the machine's networks and the machine's
+// resolver: the grant is the difference, and it is visible in the argv.
+func TestBwrapAGrantReachesPrivateNetworks(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	config := bwrapConfig{
+		Workspace: "/work/ws", Rootfs: "/state/ws/rootfs", Home: "/state/ws/home",
+		Bwrap: "/usr/bin/bwrap", Supervisor: "/install/acornfall",
+		Run: "/state/ws/run", GuestRun: guestRunDir, GuestSocket: guestSocketPath,
+		Network: bwrapNetwork{
+			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
+			Pasta: "/usr/bin/pasta", IP: "/usr/sbin/ip", Private: true,
+		},
+	}
+	argv, err := driver.bootArgv(config)
+	if err != nil {
+		t.Fatalf("argv: %v", err)
+	}
+	joined := strings.Join(argv, " ")
+	if strings.Contains(joined, "route add unreachable") {
+		t.Errorf("a granted workspace should have no refused ranges:\n%s", joined)
+	}
+	if strings.Contains(joined, "--dns-forward") {
+		t.Errorf("a granted workspace reads the machine's resolver, not pasta's:\n%s", joined)
+	}
+}
+
+// The sandbox's resolver file is written by acornfall when the machine's is unreachable from
+// inside: pasta's address, forwarded to the machine's own resolver.
+func TestBwrapWritesTheResolverItsNetworkCanReach(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	workspace := t.TempDir()
+	name := Name(workspace)
+	path, err := driver.resolveResolv(name, bwrapNetwork{Mode: "pasta"})
+	if err != nil {
+		t.Fatalf("resolver: %v", err)
+	}
+	if path == "" {
+		t.Fatal("a sandbox without a grant should read a file of its own")
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "nameserver "+sandboxDNS) {
+		t.Fatalf("the resolver should name pasta's forwarder, got %q", content)
+	}
+}

@@ -94,11 +94,12 @@ Two consequences worth stating:
   server. `-t none -u none -T none -U none --no-map-gw` closes both routes, and
   `TestABwrapSandboxCannotReachTheMachinesLoopback` is what keeps them closed.
 
-What egress still does not do, and nothing in pasta can: it has no per-destination filter. A
-workspace whose network is on reaches private ranges, link-local metadata addresses and the tailnet
-exactly as far as the machine does. Filtering that is a host firewall with a grant per sandbox,
-which needs root at install time and is not built yet; until it is, the honest control is the
-workspace's own `network` field, and the dialog says what turning it on grants.
+What egress does about the rest of the machine's reach: it is refused by route, not by firewall. A
+workspace with no private-networks grant is given `unreachable` routes for `10.0.0.0/8`,
+`100.64.0.0/10`, `169.254.0.0/16`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7` and `fe80::/10`
+inside its own network namespace, and a resolver that names pasta rather than the machine's own
+file. The packet never leaves the sandbox, so no host configuration, root access, or firewall rule
+that can drift from the workspace's record is involved. See ADR 0025.
 
 What it costs: pasta's setup, once per workspace rather than once per command — 1.1 ms per command
 after that (ADR 0024). ICMP does not work (pasta is a userspace forwarder, so `ping` fails and TCP/UDP do not), and two packages

@@ -62,6 +62,11 @@ type Workspace struct {
 	// default, which is on. A string rather than a bool so that "not set" is expressible —
 	// and so an allowlist can be added later without a migration.
 	Network string `json:"network,omitempty"`
+	// Private is whether the sandbox may reach private networks: this machine's own LAN,
+	// link-local addresses, and any overlay it is part of, such as a tailnet. Off by default:
+	// the network a workspace gets is the public internet unless someone said otherwise, because
+	// a sandbox that reaches the machine's private networks does so as the machine.
+	Private bool `json:"private,omitempty"`
 	// KeepAlive keeps this workspace's sandbox running when nothing is watching it. It is for a
 	// workspace that runs a daemon or a cron job: stopping an idle sandbox kills its processes,
 	// which is fine for a folder and not fine for a server. Off by default, because the point of
@@ -98,6 +103,7 @@ func (w Workspace) SandboxPolicy(home, userHome string, disableVMNesting bool) s
 		Image:            w.Image,
 		Workspace:        w.Path,
 		Egress:           w.Network != NetworkOff,
+		PrivateEgress:    w.Private,
 		DisableVMNesting: disableVMNesting,
 		Global:           sandbox.GlobalPaths(home, userHome),
 	}
@@ -353,6 +359,11 @@ func (w *Workspaces) Update(workspace Workspace) error {
 	// new process. Stopping it here is what makes a move mean something immediately instead of
 	// at the next idle eviction.
 	restart := control != nil && existing.Path != workspace.Path
+	// A private-networks grant is built into the sandbox when it starts, so a change needs a new
+	// one. Withdrawing it is a downgrade and waits for nothing.
+	if control != nil && existing.Private != workspace.Private {
+		restart = true
+	}
 	if restart {
 		delete(w.controls, workspace.Name)
 	}

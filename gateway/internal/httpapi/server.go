@@ -157,6 +157,10 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 		Path    *string `json:"path"`
 		Image   *string `json:"image"`
 		Network *string `json:"network"`
+		// Private lets the sandbox reach private networks as this machine: its LAN, link-local
+		// addresses, and its tailnet. Absent means no, which is what every workspace gets unless
+		// it asks. See docs/adr/0025-sandbox-egress.md.
+		Private *bool `json:"private"`
 		// Engine is which sandbox engine this workspace runs on: microsandbox, bwrap, or
 		// host. Absent means the install's default. See docs/adr/0022 and 0023.
 		Engine *string `json:"engine"`
@@ -206,6 +210,9 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 	if body.Network != nil {
 		workspace.Network = *body.Network
 	}
+	if body.Private != nil {
+		workspace.Private = *body.Private
+	}
 	if body.Engine != nil {
 		workspace.Engine = *body.Engine
 	}
@@ -236,6 +243,7 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 		Title     *string `json:"title"`
 		Image     *string `json:"image"`
 		Network   *string `json:"network"`
+		Private   *bool   `json:"private"`
 		Engine    *string `json:"engine"`
 		KeepAlive *bool   `json:"keep_alive"`
 		Trusted   *bool   `json:"trusted"`
@@ -274,6 +282,9 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Network != nil {
 		existing.Network = *body.Network
+	}
+	if body.Private != nil {
+		existing.Private = *body.Private
 	}
 	if body.DisableVMNesting != nil {
 		existing.DisableVMNesting = body.DisableVMNesting

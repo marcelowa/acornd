@@ -19,7 +19,10 @@ export interface WorkspacesPanelProps {
 	onRename: (name: string, title: string) => void;
 	onForget: (name: string) => void;
 	/** A row's sandbox, changed from the row's own menu. */
-	onUpdateSandbox: (name: string, change: { image: string; network: string }) => void;
+	onUpdateSandbox: (
+		name: string,
+		change: { image: string; network: string; keepAlive: boolean; private: boolean },
+	) => void;
 	/** The last refusal, in the server's words: the sandbox dialog shows its own. */
 	failure?: string | undefined;
 }

@@ -38,6 +38,12 @@ type Policy struct {
 	// Egress allows the sandbox to reach the network. On by default for new workspaces;
 	// ADR 0012 records what that exposes.
 	Egress bool
+	// PrivateEgress lets the sandbox reach private networks: the machine's own LAN, its
+	// link-local metadata address, and any overlay the machine is part of, such as a tailnet.
+	// Off by default, and the difference is visible on the machine: with it off the sandbox is
+	// given routes that refuse those ranges, because egress that carries the machine's routing
+	// table reaches them as the machine otherwise. See docs/adr/0025-sandbox-egress.md.
+	PrivateEgress bool
 	// Workspace is the host folder mounted into the sandbox at the same path, which is what
 	// makes a path mean the same thing on both sides.
 	Workspace string

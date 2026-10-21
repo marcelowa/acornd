@@ -197,6 +197,7 @@ export function toWorkspaces(
 			engine: engine === "" ? undefined : engine,
 			engineLabel: engine === "" ? undefined : engineLabel(engine),
 			keepAlive: workspace.keep_alive === true,
+			private: workspace.private === true,
 		};
 	});
 }

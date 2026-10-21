@@ -474,6 +474,7 @@ func workspaceCommand(argv []string) {
 	network := flags.String("network", "", `sandbox network: "on" (default) or "off"`)
 	engine := flags.String("sandbox", "", "sandbox engine for this workspace: microsandbox, bwrap, or host (default: the install's --sandbox-engine)")
 	keepAlive := flags.Bool("keep-alive", false, "keep this workspace's sandbox running when nobody is watching it (for daemons and cron jobs)")
+	privateNetworks := flags.Bool("private", false, "let this workspace's sandbox reach private networks as this machine: its LAN, link-local addresses, and its tailnet (default: public internet only)")
 	// Flags after the name and the folder are documented in the usage below, and the standard
 	// flag package stops at the first positional. Splitting them is what makes
 	// `workspace add demo ~/work/demo --sandbox bwrap` mean what it says.
@@ -483,7 +484,7 @@ func workspaceCommand(argv []string) {
 	}
 	args := positional
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: acornfall workspace <list|add|remove> [--sandbox ENGINE] [--image IMAGE] [--network on|off]")
+		fmt.Fprintln(os.Stderr, "usage: acornfall workspace <list|add|remove> [--sandbox ENGINE] [--image IMAGE] [--network on|off] [--private]")
 		os.Exit(2)
 	}
 	if *network != "" && !control.ValidNetwork(*network) {
@@ -520,7 +521,7 @@ func workspaceCommand(argv []string) {
 		fmt.Printf("\nworkspaces folder: %s\n", registry.WorkspacesDir)
 	case "add":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: acornfall workspace add <name> [folder] [--sandbox ENGINE] [--image IMAGE] [--network on|off]")
+			fmt.Fprintln(os.Stderr, "usage: acornfall workspace add <name> [folder] [--sandbox ENGINE] [--image IMAGE] [--network on|off] [--private]")
 			os.Exit(2)
 		}
 		name := args[1]
@@ -541,13 +542,19 @@ func workspaceCommand(argv []string) {
 			}
 		}
 		registry.Workspaces = append(registry.Workspaces, control.Workspace{
-			Name: name, Path: absolute, Title: name, Image: *image, Network: *network, Engine: *engine, KeepAlive: *keepAlive,
+			Name: name, Path: absolute, Title: name, Image: *image, Network: *network, Engine: *engine,
+			KeepAlive: *keepAlive, Private: *privateNetworks,
 		})
 		if err := control.SaveRegistryFile(registry); err != nil {
 			log.Fatalf("acornfall: %v", err)
 		}
 		fmt.Printf("added %s at %s\n", name, absolute)
 		fmt.Printf("sandbox: %s, network %s, engine %s\n", imageLabel(*image), networkLabel(*network), engineLabel(*engine))
+		if *privateNetworks {
+			fmt.Println("private networks: reachable as this machine (its LAN and tailnet)")
+		} else {
+			fmt.Println("private networks: refused (public internet only)")
+		}
 	case "remove":
 		if len(args) < 2 {
 			fmt.Fprintln(os.Stderr, "usage: acornfall workspace remove <name>")

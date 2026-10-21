@@ -230,6 +230,10 @@ const socketLimit = 106
 // created, so a missing one is a sentence then rather than a mystery in the middle of a turn.
 type bwrapNetwork struct {
 	Mode string `json:"mode"`
+	// Private is whether this sandbox may reach private networks. False, the default, gives it
+	// routes that refuse them: pasta carries the machine's own routing table, so a sandbox whose
+	// routes say nothing reaches the machine's LAN and its overlay as the machine does.
+	Private bool `json:"private,omitempty"`
 	// Address is the sandbox's own address inside that namespace, and Gateway is pasta's address
 	// there. Both live inside the sandbox: nothing about them appears on the host.
 	Address string `json:"address,omitempty"`
@@ -244,6 +248,15 @@ type bwrapNetwork struct {
 const (
 	sandboxAddress = "10.0.2.15/24"
 	sandboxGateway = "10.0.2.2"
+	// sandboxDNS is where the sandbox sends its queries when its private networks are refused:
+	// pasta maps it to the machine's own resolver, so DNS never needs a route into anything
+	// private. It is inside 10.0.2.0/24, whose connected route is more specific than the refused
+	// ranges, which is what keeps the gateway and this address reachable.
+	sandboxDNS = "10.0.2.3"
+	// privateRanges are refused inside the sandbox when it has no grant: this machine's own
+	// networks and the ranges that mean "inside", including the link-local metadata address a
+	// cloud machine answers on.
+	privateRanges = "10.0.0.0/8 100.64.0.0/10 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16"
 )
 
 // Create resolves the policy into a config and the workspace's images, then boots it: control's
@@ -291,10 +304,6 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 		}
 	}
 	sort.Strings(readonly)
-	resolvConf, err := b.resolverFile(b.workspaceDir(Name(policy.Workspace)))
-	if err != nil {
-		return bwrapConfig{}, err
-	}
 	network := bwrapNetwork{Mode: NetworkOffName}
 	if policy.Egress {
 		pasta, err := b.look("pasta")
@@ -305,7 +314,14 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 		if err != nil {
 			return bwrapConfig{}, fmt.Errorf("%w: configuring a bwrap workspace's network needs ip (install it: apt install iproute2)", ErrUnavailable)
 		}
-		network = bwrapNetwork{Mode: "pasta", Address: sandboxAddress, Gateway: sandboxGateway, Pasta: pasta, IP: ip}
+		network = bwrapNetwork{
+			Mode: "pasta", Address: sandboxAddress, Gateway: sandboxGateway, Pasta: pasta, IP: ip,
+			Private: policy.PrivateEgress,
+		}
+	}
+	resolvConf, err := b.resolveResolv(Name(policy.Workspace), network)
+	if err != nil {
+		return bwrapConfig{}, err
 	}
 	executable, err := os.Executable()
 	if err != nil {
@@ -372,6 +388,13 @@ func (b *Bwrap) Start(ctx context.Context, name string, _ []Secret) error {
 	if b.answers(config.Socket) {
 		return nil
 	}
+	// Decided again here, not only when the sandbox was created: a sandbox made by an earlier
+	// build has no grant and points at the machine's resolver, which its network now refuses.
+	resolvConf, err := b.resolveResolv(name, config.Network)
+	if err != nil {
+		return err
+	}
+	config.ResolvConf = resolvConf
 	argv, err := b.bootArgv(config)
 	if err != nil {
 		return err
@@ -664,14 +687,24 @@ func (b *Bwrap) bootArgv(config bwrapConfig) ([]string, error) {
 	}
 	// pasta makes the namespace and the tap and configures neither, so this runs first, inside
 	// pasta's own namespace, where the address and the route are ours to set.
-	configure := strings.Join([]string{
+	steps := []string{
 		`IP="$1"; ADDR="$2"; GATEWAY="$3"; shift 3`,
 		`"$IP" link set lo up`,
 		`"$IP" link set eth0 up`,
 		`"$IP" addr add "$ADDR" dev eth0`,
 		`"$IP" route add default via "$GATEWAY"`,
-		`exec "$@"`,
-	}, "\n")
+	}
+	if !config.Network.Private {
+		// A route that says "unreachable" is the whole boundary: the packet never leaves the
+		// sandbox, so nothing on the machine or its overlay is dialled. The connected route to
+		// the gateway's /24 is more specific and stays, which is what DNS and the sandbox's own
+		// address need.
+		steps = append(steps,
+			`for range in `+privateRanges+`; do "$IP" route add unreachable "$range" 2>/dev/null; done`,
+			`for range in fc00::/7 fe80::/10; do "$IP" -6 route add unreachable "$range" 2>/dev/null; done`)
+	}
+	steps = append(steps, `exec "$@"`)
+	configure := strings.Join(steps, "\n")
 	argv := []string{
 		config.Network.Pasta, "-q",
 		// Outbound only. pasta's port forwarding defaults to "auto", which mirrors every service
@@ -683,9 +716,16 @@ func (b *Bwrap) bootArgv(config bwrapConfig) ([]string, error) {
 		// The gateway address would otherwise be translated to the machine's loopback, which is
 		// the same surface by another name. See docs/adr/0023-bwrap-engine.md.
 		"--no-map-gw",
+	}
+	if !config.Network.Private {
+		// The sandbox's resolver is pasta itself, so DNS answers without a route into the
+		// machine's networks. See resolveResolv.
+		argv = append(argv, "--dns-forward", sandboxDNS)
+	}
+	argv = append(argv,
 		"-a", address, "-n", prefix, "-g", config.Network.Gateway,
 		"--", "/bin/sh", "-c", configure, "sh", config.Network.IP, config.Network.Address, config.Network.Gateway,
-	}
+	)
 	return append(argv, sandbox...), nil
 }
 
@@ -795,6 +835,30 @@ func resolverOrHost(config bwrapConfig) string {
 		return config.ResolvConf
 	}
 	return "/etc/resolv.conf"
+}
+
+// resolveResolv decides what a sandbox should read for DNS.
+//
+// A workspace granted private networks reads the machine's resolver, because it can reach it. One
+// without the grant cannot: the machine's resolver is often an overlay address (Tailscale's
+// MagicDNS at 100.100.100.100, systemd-resolved at 127.0.0.53), which is on the list of ranges the
+// sandbox refuses. That sandbox reads a file naming pasta, which forwards the query to the machine's
+// resolver from the machine's side — the sandbox never needs a route into anything private, and a
+// name still resolves.
+func (b *Bwrap) resolveResolv(name string, network bwrapNetwork) (string, error) {
+	if network.Mode != "pasta" || network.Private {
+		return b.resolverFile(b.workspaceDir(name))
+	}
+	path := filepath.Join(b.workspaceDir(name), "pasta-resolv.conf")
+	content := "# written by acornfall: pasta forwards these queries to the machine's resolver\n" +
+		"nameserver " + sandboxDNS + "\n"
+	if err := os.MkdirAll(b.workspaceDir(name), 0o700); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // resolverFile decides what a sandbox should read for DNS, and is not as obvious as binding the

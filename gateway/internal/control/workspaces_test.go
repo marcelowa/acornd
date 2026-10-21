@@ -125,3 +125,15 @@ func TestAWorkspacesSandboxIsRemovedByItsOwnEngine(t *testing.T) {
 		t.Fatalf("a default workspace resolves to %q, want the install default", got.Driver().Name())
 	}
 }
+
+// The grant is a workspace's own field and reaches the engine's policy as one.
+func TestAPrivateNetworksGrantReachesThePolicy(t *testing.T) {
+	workspace := Workspace{Name: "w", Path: "/work/w"}
+	if workspace.SandboxPolicy("/home", "/users/u", false).PrivateEgress {
+		t.Fatal("a workspace that asked for nothing should not reach private networks")
+	}
+	workspace.Private = true
+	if !workspace.SandboxPolicy("/home", "/users/u", false).PrivateEgress {
+		t.Fatal("a workspace that asked for private networks should carry the grant")
+	}
+}

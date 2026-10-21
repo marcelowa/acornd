@@ -315,6 +315,33 @@ describe("the wire mapping", () => {
 		);
 		expect(workspaces.map((workspace) => workspace.active)).toEqual([false, true]);
 		expect(workspaces[1]?.network).toBe("off");
+		// Private networks are a grant the workspace either has or does not. A workspace that
+		// never mentioned it is blocked, which is the default the dialog shows.
+		expect(workspaces.map((workspace) => workspace.private)).toEqual([false, false]);
+	});
+
+	test("a private-networks grant reaches the row", () => {
+		const workspaces = toWorkspaces(
+			[
+				{
+					name: "general",
+					title: "acornfall",
+					path: "/acornfall",
+					general: true,
+					running: true,
+				},
+				{
+					name: "lab",
+					title: "Lab",
+					path: "/tmp/ws-lab",
+					general: false,
+					running: true,
+					private: true,
+				},
+			],
+			"general",
+		);
+		expect(workspaces.map((workspace) => workspace.private)).toEqual([false, true]);
 	});
 
 	test("a scope's defaults map to picker values, and an empty layer stays empty", () => {

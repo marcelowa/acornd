@@ -246,6 +246,8 @@ export interface WorkspaceChange {
 	network?: string;
 	/** Kept running when idle: for a workspace that runs a daemon or a cron job. */
 	keepAlive?: boolean;
+	/** May reach private networks as this machine; absent leaves the workspace's setting alone. */
+	private?: boolean;
 }
 
 export function updateWorkspace(workspace: string, change: WorkspaceChange): Promise<void> {

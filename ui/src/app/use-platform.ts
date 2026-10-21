@@ -285,7 +285,7 @@ export interface Platform {
 	 * in view, and its menu is where a sandbox is changed. */
 	setWorkspaceSandbox: (
 		name: string,
-		change: { image: string; network: string; keepAlive?: boolean },
+		change: { image: string; network: string; keepAlive?: boolean; private?: boolean },
 	) => void;
 	/** A new workspace, on the engine chosen for it. */
 	createWorkspace: (name: string, engine?: string) => void;
@@ -1082,7 +1082,10 @@ export function usePlatform(): Platform {
 	// A row on the workspaces screen is not the workspace in view, so the name comes from the
 	// caller: the gateway takes it either way.
 	const setWorkspaceSandbox = useCallback(
-		(name: string, change: { image: string; network: string; keepAlive?: boolean }) => {
+		(
+			name: string,
+			change: { image: string; network: string; keepAlive?: boolean; private?: boolean },
+		) => {
 			act(updateWorkspace(name, change), () => void reload());
 		},
 		[act, reload],

@@ -227,3 +227,75 @@ func TestABwrapSandboxCannotReachTheMachinesLoopback(t *testing.T) {
 		}
 	}
 }
+
+// A workspace with no private-networks grant cannot reach this machine's private address, while
+// the public internet still works: egress carries the machine's routing table, so the boundary
+// has to be drawn inside the sandbox.
+//
+// The machine's own address is the target: pasta reaches it before the refusal because that is
+// what a NAT through the host does, and it is the closest thing to a tailnet peer a test can set
+// up without one.
+func TestABwrapSandboxCannotReachPrivateNetworks(t *testing.T) {
+	t.Parallel()
+	bwrapEngine(t)
+	address := hostPrivateIPv4(t)
+	if address == "" {
+		t.Skip("this machine has no private IPv4 address to aim at")
+	}
+	listener, err := net.Listen("tcp", net.JoinHostPort(address, "0"))
+	if err != nil {
+		t.Fatalf("listening on %s: %v", address, err)
+	}
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+
+	s := start(t,
+		withScript(
+			scriptRule{
+				Match: "reach the private network",
+				Tools: []scriptTool{{Name: "bash", Args: map[string]any{
+					"command": fmt.Sprintf(
+						`try() { timeout 3 bash -c "exec 3<>/dev/tcp/$1/$2" 2>/dev/null && echo "$1:$2 open" || echo "$1:$2 closed"; }; `+
+							`try %s %d`, address, port),
+				}}},
+				Reply: "probed-private",
+			},
+		),
+	)
+	c := s.client()
+	root := c.waitForConversation("general")
+	c.prompt("general", root, "reach the private network")
+	output := c.waitForText("general", root, "probed-private").lastToolResult()
+	if want := fmt.Sprintf("%s:%d closed", address, port); !strings.Contains(output, want) {
+		t.Fatalf("the sandbox reached this machine's private address, want %q in %q", want, output)
+	}
+}
+
+// hostPrivateIPv4 is this machine's own private address, or empty when it has none: the ranges a
+// sandbox refuses by default.
+func hostPrivateIPv4(t *testing.T) string {
+	t.Helper()
+	addresses, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, address := range addresses {
+		ip, _, err := net.ParseCIDR(address.String())
+		if err != nil || ip.To4() == nil || ip.IsLoopback() {
+			continue
+		}
+		if ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+			return ip.String()
+		}
+	}
+	return ""
+}

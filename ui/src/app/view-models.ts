@@ -25,6 +25,8 @@ export interface WorkspaceSummary {
 	engineLabel?: string | undefined;
 	/** Its sandbox is exempt from idle eviction: it runs something. */
 	keepAlive?: boolean | undefined;
+	/** Its sandbox may reach private networks as this machine: its LAN and its tailnet. */
+	private?: boolean | undefined;
 }
 
 /** One sandbox engine the create form offers. */
