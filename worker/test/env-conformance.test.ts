@@ -45,6 +45,14 @@ const bwrapUsable =
 	Bun.spawnSync(["bwrap", "--ro-bind", "/", "/", "--unshare-all", "--", "/bin/true"]).exitCode ===
 		0;
 
+// `make test-bwrap` is the run that says this tier ran, so a skip there would be a green run that
+// tested nothing on the one machine meant to test it: with ACORNFALL_BWRAP_ONLY it fails instead.
+if (!bwrapUsable && process.env.ACORNFALL_BWRAP_ONLY === "1") {
+	throw new Error(
+		"no usable bubblewrap on this machine (apt install bubblewrap): the bwrap tier needs it",
+	);
+}
+
 if (bwrapUsable) {
 	registerEnvConformance(
 		{ describe, expect, it },

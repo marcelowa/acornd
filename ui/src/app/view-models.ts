@@ -18,8 +18,11 @@ export interface WorkspaceSummary {
 	active: boolean;
 	image?: string | undefined;
 	network?: string | undefined;
-	/** The sandbox engine this workspace runs on, as the row says it. */
+	/** The sandbox engine this workspace runs on, resolved: a workspace that names none gets the
+	 * install's default, and the row says which that is rather than leaving a blank. */
 	engine?: string | undefined;
+	/** What the row shows for it: the product's name for the engine, or its own. */
+	engineLabel?: string | undefined;
 	/** Its sandbox is exempt from idle eviction: it runs something. */
 	keepAlive?: boolean | undefined;
 }

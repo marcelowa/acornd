@@ -50,11 +50,14 @@ export function WorkspaceRow({
 					<Text size="2xs" tone="muted" className="truncate font-mono">
 						{workspace.path}
 					</Text>
-					{/* The engine is which sandbox this workspace runs on; a row that hides it
-					 * would make two workspaces on different engines look the same. */}
-					{workspace.engine !== undefined && workspace.engine !== "" ? (
-						<Badge variant="outline" aria-label={`Sandbox engine ${workspace.engine}`}>
-							{workspace.engine}
+					{/* Every row says which engine it runs on, the default included: two workspaces
+					 * on different engines are the thing a reader has to be able to tell apart. */}
+					{workspace.engineLabel !== undefined && workspace.engineLabel !== "" ? (
+						<Badge
+							variant="outline"
+							aria-label={`Sandbox engine ${workspace.engineLabel}`}
+						>
+							{workspace.engineLabel}
 						</Badge>
 					) : null}
 				</div>

@@ -428,20 +428,31 @@ func bwrapEngine(t *testing.T) {
 
 // bwrapAvailable is the machine half, for a test that chooses the engine itself rather than
 // asking start to choose it.
+//
+// It skips on a machine that cannot run the tier, unless ACORNFALL_BWRAP_ONLY says this *is* the
+// bwrap tier — then it fails, because a tier that silently skips on the one machine meant to run
+// it is how its bug class survives. `make test-bwrap` sets that switch.
 func bwrapAvailable(t *testing.T) {
 	t.Helper()
+	only := os.Getenv("ACORNFALL_BWRAP_ONLY") != ""
+	missing := func(format string, args ...any) {
+		if only {
+			t.Fatalf(format, args...)
+		}
+		t.Skipf(format, args...)
+	}
 	if _, err := exec.LookPath("bwrap"); err != nil {
-		t.Skip("no bubblewrap on this machine")
+		missing("no bubblewrap on this machine (apt install bubblewrap)")
 	}
 	// Egress is carried by pasta and configured with ip, and a workspace without one of them
 	// cannot be created at all.
 	for _, tool := range []struct{ name, pkg string }{{"pasta", "passt"}, {"ip", "iproute2"}} {
 		if _, err := exec.LookPath(tool.name); err != nil {
-			t.Skipf("no %s on this machine: a bwrap workspace with egress needs it (apt install %s)", tool.name, tool.pkg)
+			missing("no %s on this machine: a bwrap workspace with egress needs it (apt install %s)", tool.name, tool.pkg)
 		}
 	}
 	if os.Getenv("ACORNFALL_IMAGE_TEST") == "" {
-		t.Skip("a bwrap workspace fetches its image: set ACORNFALL_IMAGE_TEST=1 to run this")
+		missing("a bwrap workspace fetches its image: set ACORNFALL_IMAGE_TEST=1 to run this")
 	}
 }
 

@@ -30,6 +30,7 @@ const workspaces: WorkspaceSummary[] = [
 		general: true,
 		running: true,
 		active: true,
+		engineLabel: "microVM",
 	},
 	{
 		name: "demo",
@@ -39,6 +40,7 @@ const workspaces: WorkspaceSummary[] = [
 		running: false,
 		active: false,
 		engine: "bwrap",
+		engineLabel: "bwrap",
 	},
 	{
 		name: "something",

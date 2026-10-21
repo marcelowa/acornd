@@ -120,6 +120,16 @@ export function WorkspacesPanel({
 						))}
 					</ToggleGroup>
 				) : null}
+				{/* Why an engine cannot be chosen, in words: the switch is disabled and its tooltip
+				 * never opens, so the reason has to be somewhere a reader finds it. */}
+				{engines
+					.filter((candidate) => !candidate.usable)
+					.map((candidate) => (
+						<Text key={candidate.name} size="2xs" tone="muted">
+							{candidate.label}:{" "}
+							{candidate.problem ?? "not available on this machine"}
+						</Text>
+					))}
 				<div className="flex flex-wrap items-center gap-2">
 					<Input
 						inputSize="sm"

@@ -117,8 +117,11 @@ test-bwrap: ## the bubblewrap engine end to end: it fetches an image, so it is n
 	# A bwrap workspace gets its own copy of its image and carries egress with pasta; both are
 	# why this is its own tier, the same way the microVM tier needs /dev/kvm. Needs bubblewrap,
 	# passt, and iproute2 installed. The client and driver tests run in the fast tier already.
-	cd worker && env -u ACORNFALL_NO_SANDBOX bun test test/bwrap.test.ts test/env-conformance.test.ts
-	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_IMAGE_TEST=1 go test -count=1 ./internal/e2e/ -run 'Bwrap|TwoEngines|KeepsTheEngine'
+	#
+	# ACORNFALL_BWRAP_ONLY makes a machine without them fail instead of skip: this target is the
+	# one place that says the tier ran, so a skip here would be a green run that tested nothing.
+	cd worker && env -u ACORNFALL_NO_SANDBOX ACORNFALL_BWRAP_ONLY=1 bun test test/bwrap.test.ts test/env-conformance.test.ts
+	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_BWRAP_ONLY=1 ACORNFALL_IMAGE_TEST=1 go test -count=1 ./internal/e2e/ -run 'Bwrap|TwoEngines|KeepsTheEngine'
 
 test-sandbox: sandbox-preflight ## the engine boundary: live driver, SDK client, and its e2e tests
 	# env -u so a shell that exported the fast tier's switch cannot silently turn this into a

@@ -544,3 +544,63 @@ describe("the engines a workspace can be created on", () => {
 		expect(toEngines(undefined)).toEqual([]);
 	});
 });
+
+describe("which engine a row says", () => {
+	const wire = (engine?: string) => ({
+		name: "demo",
+		path: "/tmp/demo",
+		title: "Demo",
+		general: false,
+		running: false,
+		...(engine === undefined ? {} : { engine }),
+	});
+
+	test("a workspace that chose nothing says what the install's default is", () => {
+		expect(toWorkspaces([wire()], "demo", "microsandbox")[0]?.engine).toBe("microsandbox");
+		// The product's name for it, so the row and the chooser agree.
+		expect(toWorkspaces([wire()], "demo", "microsandbox")[0]?.engineLabel).toBe("microVM");
+	});
+
+	test("a workspace's own engine wins over the default", () => {
+		const [row] = toWorkspaces([wire("bwrap")], "demo", "microsandbox");
+		expect(row?.engine).toBe("bwrap");
+		expect(row?.engineLabel).toBe("bwrap");
+	});
+
+	test("an install that reported no engines leaves the row silent", () => {
+		expect(toWorkspaces([wire()], "demo")[0]?.engineLabel).toBeUndefined();
+	});
+});
+
+describe("why an engine cannot be chosen", () => {
+	test("the refusal keeps its sentence and drops the gateway's internal prefix", () => {
+		const [bwrap] = toEngines([
+			{
+				name: "bwrap",
+				isolated: true,
+				installed: true,
+				problem:
+					"sandbox unavailable: bubblewrap cannot create a user namespace here: Permission denied",
+			},
+		]);
+		expect(bwrap?.usable).toBe(false);
+		expect(bwrap?.problem).toBe(
+			"bubblewrap cannot create a user namespace here: Permission denied",
+		);
+	});
+
+	test("an engine that is simply not installed says what to install", () => {
+		const [bwrap] = toEngines([
+			{
+				name: "bwrap",
+				isolated: true,
+				installed: false,
+				problem:
+					"sandbox unavailable: bubblewrap is not installed (install it: apt install bubblewrap)",
+			},
+		]);
+		expect(bwrap?.problem).toBe(
+			"bubblewrap is not installed (install it: apt install bubblewrap)",
+		);
+	});
+});

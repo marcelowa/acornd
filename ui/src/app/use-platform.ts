@@ -740,7 +740,13 @@ export function usePlatform(): Platform {
 	const contextFold = useMemo(() => foldContext(view?.entries ?? []), [view]);
 
 	const workspaces = useMemo(
-		() => toWorkspaces(state?.workspaces ?? [], state?.workspace?.name ?? ""),
+		() =>
+			toWorkspaces(
+				state?.workspaces ?? [],
+				state?.workspace?.name ?? "",
+				// The install's default, so a workspace that chose nothing still says what it runs on.
+				state?.engines?.find((engine) => engine.default === true)?.name ?? "",
+			),
 		[state],
 	);
 	const sandbox = useMemo(
