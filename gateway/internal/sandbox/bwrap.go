@@ -691,8 +691,12 @@ func (b *Bwrap) sandboxArgv(config bwrapConfig) ([]string, error) {
 		"--bind", config.Home, guestHome(config),
 		"--bind", config.Workspace, config.Workspace,
 		"--bind", config.Run, config.GuestRun,
-		"--ro-bind", config.Supervisor, guestSupervisor,
-		"--unshare-all")
+		"--ro-bind", config.Supervisor, guestSupervisor)
+	// A user namespace of the sandbox's own, with the single mapping that makes root inside the
+	// user outside. It nests inside the one pasta makes when there is egress, which is worth
+	// knowing: on a host that restricts unprivileged user namespaces (Ubuntu 24.04 and its
+	// AppArmor gate) that second one is what gets refused. See the note in ADR 0023.
+	argv = append(argv, "--unshare-all")
 	if config.Network.Mode != NetworkOffName {
 		// Share the network namespace of whoever started bubblewrap: pasta, when there is one.
 		argv = append(argv, "--share-net")

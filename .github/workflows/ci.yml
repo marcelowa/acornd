@@ -134,11 +134,13 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq bubblewrap passt iproute2
       - name: Let bubblewrap make user namespaces
-        # abi/4.0 profiles are the 24.04 mechanism; `userns,` is what bubblewrap needs and what the
-        # distribution refuses by default.
+        # Ubuntu 24.04 gates unprivileged user namespaces behind AppArmor. A per-binary profile is
+        # enough for bubblewrap on its own, and *not* enough for the sandbox this tier runs: the
+        # sandbox's user namespace nests inside the one pasta makes, and the second one is refused
+        # ("Couldn't write to /proc/self/uid_map"). The switch is the documented host-wide answer,
+        # and on a runner that is only running this tier it is the right one.
         run: |
-          sudo sh -c 'printf "%s\n" "abi <abi/4.0>," "include <tunables/global>" "profile bwrap /usr/bin/bwrap flags=(unconfined) {" "  userns," "}" > /etc/apparmor.d/bwrap'
-          sudo apparmor_parser -r /etc/apparmor.d/bwrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           bwrap --ro-bind / / --unshare-all -- /bin/true && echo "bubblewrap can make a user namespace"
       - run: make deps
       - run: make test-bwrap
