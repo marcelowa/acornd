@@ -230,10 +230,13 @@ Settings > Secrets lists them; the conversation menu has the same page, and an a
 needs one shows the card. The headless path reads the value from stdin:
 
 ```bash
-acornfall secret add --global --description "release token" \
-  --hosts api.github.com,github.com GITHUB_TOKEN < token.txt
+acornfall secret add GITHUB_TOKEN --global --description "release token" \
+  --hosts api.github.com,github.com < token.txt
 acornfall secret list
+acornfall secret show GITHUB_TOKEN      # what it is for, and where; never the value
 ```
+
+A workspace secret names its workspace instead of its folder: `--workspace demo`.
 
 ### Without an API key
 

@@ -11,167 +11,326 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/acornfall/acornfall/gateway/internal/control"
 	"github.com/acornfall/acornfall/gateway/internal/vault"
 )
 
 // secretCommand is the headless way to set a tool secret. The value comes from stdin,
-// never argv: a value in argv is in the shell history and in every process listing.
+// never argv: a value in argv is in the shell history and in every process listing. What a
+// secret *is* (its scope, hosts, and substitution) is printed by `show`, without the value,
+// which is the one thing that never comes back out.
 func secretCommand(argv []string) {
-	if len(argv) == 0 {
-		secretUsage()
-		os.Exit(2)
+	if len(argv) > 0 {
+		switch argv[0] {
+		case "list":
+			secretList(argv[1:])
+			return
+		case "add":
+			secretAdd(argv[1:])
+			return
+		case "show":
+			secretShow(argv[1:])
+			return
+		case "rotate":
+			secretRotate(argv[1:])
+			return
+		case "remove":
+			secretRemove(argv[1:])
+			return
+		case "help", "-h", "--help":
+			secretUsage(os.Stdout)
+			return
+		}
 	}
-	command := argv[0]
-	flags := flag.NewFlagSet("secret", flag.ContinueOnError)
+	secretUsage(os.Stderr)
+	os.Exit(2)
+}
+
+func secretUsage(w *os.File) {
+	fmt.Fprint(w, `usage: acornfall secret <command>
+
+  list                  every secret; --workspace NAME for what one workspace receives
+  add <NAME>            store one, from stdin: --global or --workspace NAME, --description,
+                        --hosts a,b, --query, --body, --no-headers, --no-env
+  show <NAME>           everything about it except the value
+  rotate <NAME>         replace the value, from stdin
+  remove <NAME>         delete it
+
+acornfall secret <command> -h    explains that command's flags
+
+The value is read from stdin, never argv. It is never printed again.`)
+}
+
+// secretScopeFlag is the one scope every verb takes, and the error that says so.
+type secretScope struct {
+	global    *bool
+	workspace *string
+}
+
+func (s *secretScope) register(flags *flag.FlagSet) {
+	s.global = flags.Bool("global", false, "this secret is on every workspace")
+	s.workspace = flags.String("workspace", "", "this secret belongs to this workspace (by name)")
+}
+
+// resolve names the folder the secret belongs to. A workspace is named, not pathed: the
+// registry is the one place that decides where a workspace lives.
+func (s secretScope) resolve(dir string) (vault.Scope, string, error) {
+	name := strings.TrimSpace(*s.workspace)
+	switch {
+	case *s.global && name != "":
+		return "", "", errors.New("name one scope: --global or --workspace NAME, not both")
+	case !*s.global && name == "":
+		return "", "", errors.New("name one scope: --global or --workspace NAME")
+	case *s.global:
+		return vault.Global, "", nil
+	}
+	path, err := workspacePath(dir, name)
+	if err != nil {
+		return "", "", err
+	}
+	return vault.Workspace, path, nil
+}
+
+// workspacePath finds a workspace's folder by its name.
+func workspacePath(dir, name string) (string, error) {
+	registry, err := control.LoadRegistryFile(filepath.Join(dir, "workspaces.json"))
+	if err != nil {
+		return "", err
+	}
+	for _, workspace := range registry.Workspaces {
+		if workspace.Name == name {
+			return workspace.Path, nil
+		}
+	}
+	names := make([]string, 0, len(registry.Workspaces))
+	for _, workspace := range registry.Workspaces {
+		names = append(names, workspace.Name)
+	}
+	if len(names) == 0 {
+		return "", fmt.Errorf("no workspace %q: none are registered yet", name)
+	}
+	return "", fmt.Errorf("no workspace %q; there is %s", name, strings.Join(names, ", "))
+}
+
+// secretAdd stores a value. The description is required because a list of names with no
+// sentence beside them is a list nobody can choose from.
+func secretAdd(argv []string) {
+	flags := flag.NewFlagSet("secret add", flag.ContinueOnError)
+	scope := secretScope{}
+	scope.register(flags)
 	dataDir := flags.String("data-dir", "", "the acornfall folder")
-	global := flags.Bool("global", false, "this secret is on every workspace")
-	workspace := flags.String("workspace", "", "this secret belongs to this workspace folder")
 	description := flags.String("description", "", "what the secret is for, shown in lists")
 	hosts := flags.String("hosts", "", "comma-separated hosts the secret may reach")
 	query := flags.Bool("query", false, "allow substitution in the URL query")
 	body := flags.Bool("body", false, "allow substitution in the request body")
 	noHeaders := flags.Bool("no-headers", false, "refuse substitution in request headers")
-	allowEnv := flags.Bool("allow-env", true, "let a container engine put the value in the sandbox")
 	noEnv := flags.Bool("no-env", false, "keep the value out of a container sandbox")
-	if err := flags.Parse(argv[1:]); err != nil {
+	flags.Usage = func() {
+		fmt.Fprint(os.Stderr, `usage: acornfall secret add <NAME> < value [flags]
+
+  --global | --workspace NAME   which workspaces receive it (exactly one)
+  --description TEXT            what it is for, shown in lists
+  --hosts a,b                   the hosts it may reach; anything else gets no value
+  --query --body --no-headers   where in the request it may be substituted
+  --no-env                      keep the value out of a container sandbox
+  --data-dir DIR                the acornfall folder (default: ~/.acornfall)
+`)
+	}
+	flagArgs, positional := splitFlags(argv, map[string]bool{
+		"data-dir": true, "workspace": true, "description": true, "hosts": true,
+	})
+	if err := flags.Parse(flagArgs); err != nil {
 		os.Exit(2)
 	}
-	dir, err := resolveDataDir(*dataDir)
+	name, ok := oneName(positional, "add")
+	if !ok {
+		flags.Usage()
+		os.Exit(2)
+	}
+	dir, store := openVault(*dataDir)
+	kind, folder, err := scope.resolve(dir)
 	if err != nil {
 		secretFail(err)
 	}
-	store, err := vault.Open(filepath.Join(dir, "secrets.json"))
+	if strings.TrimSpace(*description) == "" {
+		secretFail(errors.New("--description is required: what is this secret for?"))
+	}
+	value, err := readSecretValue()
 	if err != nil {
 		secretFail(err)
 	}
+	substitution := vault.Substitution{Headers: !*noHeaders, Query: *query, Body: *body}
+	if substitution == (vault.Substitution{}) {
+		secretFail(errors.New("allow at least one substitution location: headers, --query, or --body"))
+	}
+	hostList := splitHosts(*hosts)
+	envAllowed := !*noEnv
+	meta, err := store.Upsert(vault.Upsert{
+		Name:         name,
+		Description:  *description,
+		Scope:        kind,
+		Workspace:    folder,
+		Value:        value,
+		Hosts:        &hostList,
+		Substitution: &substitution,
+		AllowEnv:     &envAllowed,
+	})
+	if err != nil {
+		secretFail(err)
+	}
+	fmt.Printf("stored %s (%s)\n", meta.Name, describeScope(meta))
+}
 
-	switch command {
-	case "list":
-		secretList(store, *workspace)
-	case "add":
-		name, scope, scopePath, err := secretTarget(flags, *global, *workspace)
-		if err != nil {
-			secretFail(err)
-		}
-		if strings.TrimSpace(*description) == "" {
-			secretFail(errors.New("--description is required: what is this secret for?"))
-		}
-		value, err := readSecretValue()
-		if err != nil {
-			secretFail(err)
-		}
-		substitution := vault.Substitution{
-			Headers: !*noHeaders,
-			Query:   *query,
-			Body:    *body,
-		}
-		if substitution == (vault.Substitution{}) {
-			secretFail(errors.New("allow at least one substitution location: headers, --query, or --body"))
-		}
-		hostList := splitHosts(*hosts)
-		envAllowed := *allowEnv && !*noEnv
-		meta, err := store.Upsert(vault.Upsert{
-			Name:         name,
-			Description:  *description,
-			Scope:        scope,
-			Workspace:    scopePath,
-			Value:        value,
-			Hosts:        &hostList,
-			Substitution: &substitution,
-			AllowEnv:     &envAllowed,
-		})
-		if err != nil {
-			secretFail(err)
-		}
-		fmt.Printf("stored %s (%s)\n", meta.Name, describeScope(meta))
-	case "rotate":
-		name, scope, scopePath, err := secretTarget(flags, *global, *workspace)
-		if err != nil {
-			secretFail(err)
-		}
-		value, err := readSecretValue()
-		if err != nil {
-			secretFail(err)
-		}
-		meta, err := store.Rotate(scope, scopePath, name, value)
-		if err != nil {
-			secretFail(err)
-		}
-		fmt.Printf("rotated %s (%s)\n", meta.Name, describeScope(meta))
-	case "rm":
-		name, scope, scopePath, err := secretTarget(flags, *global, *workspace)
-		if err != nil {
-			secretFail(err)
-		}
-		if err := store.Delete(scope, scopePath, name); err != nil {
-			secretFail(err)
-		}
-		fmt.Printf("removed %s\n", name)
-	default:
-		secretUsage()
+func secretRotate(argv []string) {
+	flags := flag.NewFlagSet("secret rotate", flag.ContinueOnError)
+	scope := secretScope{}
+	scope.register(flags)
+	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	flags.Usage = func() {
+		fmt.Fprint(os.Stderr, "usage: acornfall secret rotate <NAME> < value [--global|--workspace NAME]\n\nThe value is read from stdin; nothing else changes.\n")
+	}
+	flagArgs, positional := splitFlags(argv, map[string]bool{"data-dir": true, "workspace": true})
+	if err := flags.Parse(flagArgs); err != nil {
 		os.Exit(2)
 	}
-}
-
-func secretUsage() {
-	fmt.Fprintln(os.Stderr, `usage:
-  acornfall secret list [--workspace <folder>]
-  acornfall secret add --global|--workspace <folder> --description <text> [--hosts a,b] [--query] [--body] [--no-headers] [--no-env] <NAME> < value
-  acornfall secret rotate --global|--workspace <folder> <NAME> < value
-  acornfall secret rm --global|--workspace <folder> <NAME>
-
-The value is read from stdin, never argv. It is never printed again.`)
-}
-
-func secretFail(err error) {
-	fmt.Fprintf(os.Stderr, "acornfall secret: %v\n", err)
-	os.Exit(1)
-}
-
-// secretTarget reads the name and the one scope the command names. A global secret and a
-// workspace secret are different entries, so exactly one scope is required.
-func secretTarget(flags *flag.FlagSet, global bool, workspace string) (string, vault.Scope, string, error) {
-	if flags.NArg() != 1 {
-		return "", "", "", errors.New("name one secret; see acornfall secret")
+	name, ok := oneName(positional, "rotate")
+	if !ok {
+		flags.Usage()
+		os.Exit(2)
 	}
-	name := flags.Arg(0)
-	if global == (strings.TrimSpace(workspace) != "") {
-		return "", "", "", errors.New("name one scope: --global or --workspace <folder>")
-	}
-	if global {
-		return name, vault.Global, "", nil
-	}
-	path, err := filepath.Abs(workspace)
+	dir, store := openVault(*dataDir)
+	kind, folder, err := scope.resolve(dir)
 	if err != nil {
-		return "", "", "", err
+		secretFail(err)
 	}
-	info, err := os.Stat(path)
+	value, err := readSecretValue()
 	if err != nil {
-		return "", "", "", fmt.Errorf("workspace %s: %w", path, err)
+		secretFail(err)
 	}
-	if !info.IsDir() {
-		return "", "", "", fmt.Errorf("workspace %s is not a folder", path)
+	meta, err := store.Rotate(kind, folder, name, value)
+	if err != nil {
+		secretFail(err)
 	}
-	return name, vault.Workspace, path, nil
+	fmt.Printf("rotated %s (%s)\n", meta.Name, describeScope(meta))
 }
 
-// readSecretValue reads one value from stdin and drops the newline the shell or a file
-// usually adds. It refuses an empty value rather than storing one nobody can use.
-func readSecretValue() (string, error) {
-	payload, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
+func secretRemove(argv []string) {
+	flags := flag.NewFlagSet("secret remove", flag.ContinueOnError)
+	scope := secretScope{}
+	scope.register(flags)
+	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	flags.Usage = func() {
+		fmt.Fprint(os.Stderr, "usage: acornfall secret remove <NAME> [--global|--workspace NAME]\n")
+	}
+	flagArgs, positional := splitFlags(argv, map[string]bool{"data-dir": true, "workspace": true})
+	if err := flags.Parse(flagArgs); err != nil {
+		os.Exit(2)
+	}
+	name, ok := oneName(positional, "remove")
+	if !ok {
+		flags.Usage()
+		os.Exit(2)
+	}
+	dir, store := openVault(*dataDir)
+	kind, folder, err := scope.resolve(dir)
 	if err != nil {
-		return "", err
+		secretFail(err)
 	}
-	value := strings.TrimRight(string(payload), "\r\n")
-	if value == "" {
-		return "", errors.New("empty value on stdin")
+	if err := store.Delete(kind, folder, name); err != nil {
+		secretFail(err)
 	}
-	return value, nil
+	fmt.Printf("removed %s\n", name)
 }
 
-func secretList(store *vault.Store, workspace string) {
-	if strings.TrimSpace(workspace) != "" {
-		path, err := filepath.Abs(workspace)
+// secretShow prints what is stored for a name — every scope it exists in, since the same name
+// can be global and per workspace — and never the value. It is the answer to "which hosts does
+// this hold a value for", which is the question a secret raises.
+func secretShow(argv []string) {
+	flags := flag.NewFlagSet("secret show", flag.ContinueOnError)
+	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	flags.Usage = func() {
+		fmt.Fprint(os.Stderr, "usage: acornfall secret show <NAME>\n\nThe value is not printed, or stored anywhere it could be printed.\n")
+	}
+	flagArgs, positional := splitFlags(argv, map[string]bool{"data-dir": true})
+	if err := flags.Parse(flagArgs); err != nil {
+		os.Exit(2)
+	}
+	name, ok := oneName(positional, "show")
+	if !ok {
+		flags.Usage()
+		os.Exit(2)
+	}
+	_, store := openVault(*dataDir)
+	all, err := store.List()
+	if err != nil {
+		secretFail(err)
+	}
+	found := 0
+	for _, meta := range all {
+		if meta.Name != name {
+			continue
+		}
+		found++
+		scope := "global"
+		if meta.Scope != vault.Global {
+			scope = "workspace " + dash(workspaceNameOf(meta.Workspace))
+		}
+		fmt.Printf("%s (%s)\n", meta.Name, scope)
+		fmt.Printf("  description    %s\n", dash(meta.Description))
+		fmt.Printf("  hosts          %s\n", dash(strings.Join(meta.Hosts, ", ")))
+		fmt.Printf("  substitution   %s\n", substitutionLabel(meta.Substitution))
+		fmt.Printf("  container env  %s\n", yesNo(meta.AllowEnv))
+		fmt.Printf("  rotated        %s\n", stamp(meta.RotatedAt))
+		if meta.Overridden {
+			fmt.Printf("  note           a workspace entry with this name replaces it there\n")
+		}
+		if meta.Overrides {
+			fmt.Printf("  note           this replaces the global entry here\n")
+		}
+		fmt.Println()
+	}
+	if found == 0 {
+		secretFail(fmt.Errorf("no secret named %q", name))
+	}
+}
+
+// workspaceNameOf is the folder's name, which is what a person called it. The vault stores the
+// path because a workspace can be moved; a name is how it is referred to.
+func workspaceNameOf(path string) string {
+	if path == "" {
+		return ""
+	}
+	return filepath.Base(path)
+}
+
+func substitutionLabel(substitution vault.Substitution) string {
+	var parts []string
+	if substitution.Headers {
+		parts = append(parts, "headers")
+	}
+	if substitution.Query {
+		parts = append(parts, "query")
+	}
+	if substitution.Body {
+		parts = append(parts, "body")
+	}
+	if len(parts) == 0 {
+		return "none (the value is only ever stored)"
+	}
+	return strings.Join(parts, ", ")
+}
+
+func secretList(argv []string) {
+	flags := flag.NewFlagSet("secret list", flag.ContinueOnError)
+	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	workspace := flags.String("workspace", "", "show what this workspace receives, by name")
+	flagArgs, _ := splitFlags(argv, map[string]bool{"data-dir": true, "workspace": true})
+	if err := flags.Parse(flagArgs); err != nil {
+		os.Exit(2)
+	}
+	dir, store := openVault(*dataDir)
+	if strings.TrimSpace(*workspace) != "" {
+		path, err := workspacePath(dir, *workspace)
 		if err != nil {
 			secretFail(err)
 		}
@@ -194,7 +353,7 @@ func secretList(store *vault.Store, workspace string) {
 	fmt.Fprintln(writer, "NAME\tSCOPE\tWORKSPACE\tDESCRIPTION\tHOSTS\tENV\tROTATED")
 	for _, meta := range all {
 		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			meta.Name, meta.Scope, dash(meta.Workspace), meta.Description,
+			meta.Name, meta.Scope, dash(workspaceNameOf(meta.Workspace)), meta.Description,
 			dash(strings.Join(meta.Hosts, ",")), yesNo(meta.AllowEnv), stamp(meta.RotatedAt))
 	}
 	_ = writer.Flush()
@@ -219,6 +378,45 @@ func printEffective(effective []vault.Meta) {
 	_ = writer.Flush()
 }
 
+func openVault(dataDirFlag string) (string, *vault.Store) {
+	dir, err := resolveDataDir(dataDirFlag)
+	if err != nil {
+		secretFail(err)
+	}
+	store, err := vault.Open(filepath.Join(dir, "secrets.json"))
+	if err != nil {
+		secretFail(err)
+	}
+	return dir, store
+}
+
+// oneName is the single positional every verb but list takes.
+func oneName(positional []string, verb string) (string, bool) {
+	if len(positional) != 1 {
+		return "", false
+	}
+	return positional[0], true
+}
+
+func secretFail(err error) {
+	fmt.Fprintf(os.Stderr, "acornfall secret: %v\n", err)
+	os.Exit(1)
+}
+
+// readSecretValue reads one value from stdin and drops the newline the shell or a file
+// usually adds. It refuses an empty value rather than storing one nobody can use.
+func readSecretValue() (string, error) {
+	payload, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	value := strings.TrimRight(string(payload), "\r\n")
+	if value == "" {
+		return "", errors.New("empty value on stdin")
+	}
+	return value, nil
+}
+
 func splitHosts(value string) []string {
 	if strings.TrimSpace(value) == "" {
 		return nil
@@ -237,7 +435,7 @@ func describeScope(meta vault.Meta) string {
 	if meta.Scope == vault.Global {
 		return "global"
 	}
-	return "workspace " + meta.Workspace
+	return "workspace " + workspaceNameOf(meta.Workspace)
 }
 
 func dash(value string) string {
