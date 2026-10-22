@@ -712,6 +712,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 						<Transcript
 							entries={platform.entries}
 							ready={platform.ready}
+							opening={platform.opening}
 							onFork={platform.fork}
 						/>
 					)

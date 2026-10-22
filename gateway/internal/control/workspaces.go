@@ -131,10 +131,31 @@ func ValidNetwork(value string) bool {
 // A conversion rather than a field-by-field copy, because the two shapes are the same shape:
 // a field added to one and not the other is then a compile error instead of a value that
 // quietly stops reaching the interface.
-func Views(list []Workspace) []WorkspaceState {
+// Views is the wire shape of a workspace list, with the status each one is in. A nil progress
+// function means the caller has none to give, and the views then say nothing about it.
+func Views(list []Workspace, progress func(string) Progress) []WorkspaceState {
 	views := make([]WorkspaceState, 0, len(list))
 	for _, workspace := range list {
-		views = append(views, WorkspaceState(workspace))
+		view := WorkspaceState{
+			Name:             workspace.Name,
+			Path:             workspace.Path,
+			Title:            workspace.Title,
+			General:          workspace.General,
+			Image:            workspace.Image,
+			Network:          workspace.Network,
+			Private:          workspace.Private,
+			KeepAlive:        workspace.KeepAlive,
+			Engine:           workspace.Engine,
+			DisableVMNesting: workspace.DisableVMNesting,
+			Running:          workspace.Running,
+		}
+		if progress != nil {
+			state := progress(workspace.Name)
+			view.Status = state.Status
+			view.Stage = state.Stage
+			view.Error = state.Error
+		}
+		views = append(views, view)
 	}
 	return views
 }
@@ -187,6 +208,7 @@ type Workspaces struct {
 	dir      string
 	registry map[string]Workspace
 	controls map[string]*Control
+	progress map[string]Progress
 	starting map[string]*sync.Mutex
 	closed   bool
 
@@ -392,6 +414,7 @@ func (w *Workspaces) Remove(ctx context.Context, name string) error {
 	control := w.controls[name]
 	delete(w.registry, name)
 	delete(w.controls, name)
+	delete(w.progress, name)
 	w.mu.Unlock()
 	w.forgetUsed(name)
 	if control != nil {
@@ -452,7 +475,12 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 		return control, nil
 	}
 
+	// From here the workspace is opening, and a second client asks what it is doing rather than
+	// waiting for it: the stage comes from the code that is doing the work.
+	w.setProgress(name, Progress{Status: StatusOpening, Stage: "starting", Since: time.Now()})
 	control = New(Options{
+		OnStage:       w.stage(name),
+		Progress:      w.Progress,
 		Workspace:     workspace,
 		Credentials:   filepath.Join(w.opts.DataDir, "credentials.json"),
 		Registry:      w.List,
@@ -478,6 +506,13 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 	w.mu.Lock()
 	w.controls[name] = control
 	w.mu.Unlock()
+	// A harness that did not come up is a workspace that opened with its tools disabled: it is
+	// reported as failed, with the worker's own sentence, rather than as ready.
+	if control.WorkerUp() {
+		w.setProgress(name, Progress{Status: StatusReady, Since: time.Now()})
+	} else {
+		w.setProgress(name, Progress{Status: StatusFailed, Error: control.WorkerError(), Since: time.Now()})
+	}
 	w.markUsed(name)
 	workerpool.Log("workspace %s started (%s)", name, workspace.Path)
 	return control, nil
@@ -694,6 +729,72 @@ func (w *Workspaces) Route(ctx context.Context, workspaceName string) (Workspace
 	return workspace, control, nil
 }
 
+// The states a workspace can be in between "asked for" and "usable". They are strings because
+// they cross the API, and the interface shows them as they are.
+const (
+	StatusStopped = "stopped"
+	StatusOpening = "opening"
+	StatusReady   = "ready"
+	StatusFailed  = "failed"
+)
+
+// Progress is what a workspace's start is doing. The stage is a sentence from the code that is
+// doing the work, so the interface can say "copying the image" instead of showing nothing.
+type Progress struct {
+	Status string    `json:"status"`
+	Stage  string    `json:"stage,omitempty"`
+	Since  time.Time `json:"since,omitzero"`
+	Error  string    `json:"error,omitempty"`
+}
+
+// Progress reports where a workspace is: stopped, opening (with the step it is on), ready, or
+// failed. It never starts anything, so the interface can ask this while a start is in flight.
+func (w *Workspaces) Progress(name string) Progress {
+	if name == "" {
+		name = GeneralWorkspaceName
+	}
+	w.mu.RLock()
+	control := w.controls[name]
+	progress, known := w.progress[name]
+	w.mu.RUnlock()
+	// A live control answers for itself: a harness that came up and then died is failed, not
+	// ready, and the stored entry would still say ready.
+	if control != nil {
+		if control.WorkerUp() {
+			return Progress{Status: StatusReady}
+		}
+		return Progress{Status: StatusFailed, Error: control.WorkerError()}
+	}
+	if !known {
+		return Progress{Status: StatusStopped}
+	}
+	return progress
+}
+
+// setProgress records a step. Called while a workspace opens, so it is short and happens under
+// the lock the registry already uses.
+func (w *Workspaces) setProgress(name string, progress Progress) {
+	if progress.Since.IsZero() {
+		progress.Since = time.Now()
+	}
+	w.mu.Lock()
+	if w.progress == nil {
+		w.progress = map[string]Progress{}
+	}
+	w.progress[name] = progress
+	w.mu.Unlock()
+}
+
+// stage is what a workspace's start tells the interface as it goes.
+func (w *Workspaces) stage(name string) func(string) {
+	return func(step string) {
+		if strings.TrimSpace(step) == "" {
+			return
+		}
+		w.setProgress(name, Progress{Status: StatusOpening, Stage: step, Since: time.Now()})
+	}
+}
+
 // markUsed records that a workspace was asked for, which is what keeps an actively used
 // one from being evicted.
 func (w *Workspaces) markUsed(name string) {
@@ -767,6 +868,12 @@ func (w *Workspaces) evictCandidates() []*Control {
 		if control.Watching() || control.Busy() {
 			continue
 		}
+		// Stopped is a state the interface shows, so it is recorded with the others. This runs
+		// under the registry lock, which is why it does not go through setProgress.
+		if w.progress == nil {
+			w.progress = map[string]Progress{}
+		}
+		w.progress[name] = Progress{Status: StatusStopped, Since: time.Now()}
 		stopping = append(stopping, control)
 		delete(w.controls, name)
 	}

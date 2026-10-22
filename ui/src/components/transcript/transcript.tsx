@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { ArrowDown } from "lucide-react";
+import { ArrowDown, Loader2 } from "lucide-react";
 import type { TranscriptEntry } from "@/app/view-models";
 import { Measure } from "@/components/layout/measure";
 import { Stack } from "@/components/layout/stack";
@@ -18,6 +18,12 @@ import { UserMessage } from "./user-message";
 
 export interface TranscriptProps {
 	entries: TranscriptEntry[];
+	/**
+	 * The workspace is opening, and this is the step it is on. It is not a wait with nothing to
+	 * say: starting a workspace can copy an image, and the step is what tells someone whether to
+	 * wait or go and look at the machine.
+	 */
+	opening?: { stage?: string | undefined } | undefined;
 	/**
 	 * The first load has not landed: the transcript shows a loading line, not the empty
 	 * state — inviting someone to start a conversation over content about to arrive is a
@@ -86,7 +92,13 @@ function Entry({
  * Entries render as turns with two rhythms: tight within a turn, wide between turns. When
  * the reader has scrolled away, a pill offers the way back.
  */
-export function Transcript({ entries, ready = true, onOpenConversation, onFork }: TranscriptProps) {
+export function Transcript({
+	entries,
+	ready = true,
+	opening,
+	onOpenConversation,
+	onFork,
+}: TranscriptProps) {
 	const scroller = useRef<HTMLDivElement>(null);
 	const following = useRef(true);
 	const [away, setAway] = useState(false);
@@ -145,7 +157,22 @@ export function Transcript({ entries, ready = true, onOpenConversation, onFork }
 				className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden [&>*]:shrink-0"
 			>
 				<Measure size="wide" padding="lg">
-					{!ready ? (
+					{opening !== undefined ? (
+						<Stack gap="sm" align="center" className="py-16 text-center">
+							<span className="flex items-center gap-2">
+								<Loader2
+									aria-hidden
+									className="size-4 animate-spin text-muted-foreground"
+								/>
+								<Text tone="muted">Opening this workspace…</Text>
+							</span>
+							{opening.stage === undefined || opening.stage === "" ? null : (
+								<Text size="2xs" tone="muted" className="font-mono">
+									{opening.stage}
+								</Text>
+							)}
+						</Stack>
+					) : !ready ? (
 						<Stack gap="sm" align="center" className="py-16 text-center">
 							<Text tone="muted">Loading…</Text>
 						</Stack>

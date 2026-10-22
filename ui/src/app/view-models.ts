@@ -27,6 +27,12 @@ export interface WorkspaceSummary {
 	keepAlive?: boolean | undefined;
 	/** Its sandbox may reach private networks as this machine: its LAN and its tailnet. */
 	private?: boolean | undefined;
+	/** stopped, opening, ready, or failed: where it is between being asked for and usable. */
+	status?: string | undefined;
+	/** The step an opening workspace is on, in the server's words. */
+	stage?: string | undefined;
+	/** Why it failed, when it failed. */
+	error?: string | undefined;
 }
 
 /** One sandbox engine the create form offers. */

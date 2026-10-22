@@ -759,6 +759,18 @@ type workspaceRef struct {
 	// default.
 	Engine  string `json:"engine"`
 	Running bool   `json:"running"`
+	// Status is stopped, opening, ready, or failed, and Stage is the step an opening workspace is
+	// on: the interface shows it instead of an empty pane while a workspace comes up.
+	Status string `json:"status"`
+	Stage  string `json:"stage"`
+	Error  string `json:"error"`
+}
+
+// workspaceStatus is the cheap answer about one workspace, which never starts it.
+type workspaceStatus struct {
+	Status string `json:"status"`
+	Stage  string `json:"stage"`
+	Error  string `json:"error"`
 }
 
 type state struct {

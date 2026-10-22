@@ -329,7 +329,7 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return bwrapConfig{}, err
 	}
-	rootfs, err := b.workspaceRootfs(Name(policy.Workspace), image)
+	rootfs, err := b.workspaceRootfs(policy, Name(policy.Workspace), image)
 	if err != nil {
 		return bwrapConfig{}, err
 	}
@@ -548,16 +548,20 @@ func (b *Bwrap) Remove(_ context.Context, name string) error {
 // copy rather than a shared read-only tree with a layer on top: an install inside the sandbox
 // is then an ordinary write to an ordinary directory, which needs no privileged mount, no
 // overlay, and no cleanup beyond removing the folder.
-func (b *Bwrap) workspaceRootfs(name, image string) (string, error) {
+func (b *Bwrap) workspaceRootfs(policy Policy, name, image string) (string, error) {
 	rootfs := filepath.Join(b.workspaceDir(name), "rootfs")
 	if info, err := os.Stat(filepath.Join(rootfs, ".acornfall-rootfs")); err == nil && !info.IsDir() {
 		return rootfs, nil
 	}
+	// The workspace's own copy is the slow part of a first start — 84 MB of image, more after the
+	// project's tools — so the two steps that take the time are named as they happen.
+	policy.Stage("preparing the image")
 	base, err := b.imageBase(image)
 	if err != nil {
 		return "", err
 	}
 	// Replaced whole, so a half-copied tree cannot be mistaken for a finished one.
+	policy.Stage("copying the image")
 	_ = os.RemoveAll(rootfs)
 	if err := copyTree(base, rootfs); err != nil {
 		return "", fmt.Errorf("sandbox: copying the image for this workspace: %w", err)

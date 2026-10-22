@@ -134,3 +134,28 @@ func TestAPrivateNetworksGrantReachesThePolicy(t *testing.T) {
 		t.Fatal("a workspace that asked for private networks should carry the grant")
 	}
 }
+
+// Where a workspace is has to be answerable while it is opening: the interface asks this on a
+// timer, and a workspace's start is the request that takes seconds.
+func TestProgressTracksAnOpeningWorkspace(t *testing.T) {
+	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: t.TempDir()})
+	if got := workspaces.Progress("slow"); got.Status != StatusStopped {
+		t.Fatalf("a workspace nobody asked for is stopped, got %q", got.Status)
+	}
+	// The stages come from the code doing the work, through the callback the layer hands it.
+	stage := workspaces.stage("slow")
+	stage("preparing the image")
+	opening := workspaces.Progress("slow")
+	if opening.Status != StatusOpening || opening.Stage != "preparing the image" {
+		t.Fatalf("the step should be reported as it happens, got %+v", opening)
+	}
+	workspaces.setProgress("slow", Progress{Status: StatusReady})
+	if got := workspaces.Progress("slow"); got.Status != StatusReady || got.Stage != "" {
+		t.Fatalf("a ready workspace says ready and nothing else, got %+v", got)
+	}
+	// The list carries the same answer, because that is what the rail reads.
+	views := Views([]Workspace{{Name: "slow"}}, workspaces.Progress)
+	if len(views) != 1 || views[0].Status != StatusReady {
+		t.Fatalf("the view should carry the status, got %+v", views)
+	}
+}

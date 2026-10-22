@@ -22,6 +22,23 @@ export interface WireWorkspace {
 	/** May reach private networks as this machine: its LAN and its tailnet. Off unless asked. */
 	private?: boolean | undefined;
 	running: boolean;
+	/** Where this workspace is between "asked for" and "usable": stopped, opening, ready, or
+	 * failed. `running` is only the harness being up; a workspace that is opening has no harness
+	 * yet, which is exactly what the interface has to say. */
+	status?: string | undefined;
+	/** The step an opening workspace is on, in the words of the code doing it. */
+	stage?: string | undefined;
+	/** Why it failed, when it failed. */
+	error?: string | undefined;
+}
+
+/** One workspace's start, as the status endpoint answers it: a cheap question that never starts
+ * anything, so the interface can show a step instead of an empty pane. */
+export interface WireWorkspaceStatus {
+	status: string;
+	stage?: string | undefined;
+	since?: string | undefined;
+	error?: string | undefined;
 }
 
 /** One sandbox engine this install can run, and whether this machine can. */

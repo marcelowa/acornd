@@ -1,4 +1,4 @@
-import { Ellipsis } from "lucide-react";
+import { Ellipsis, Loader2 } from "lucide-react";
 import type { WorkspaceSummary } from "@/app/view-models";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -63,7 +63,20 @@ export function WorkspaceRow({
 				</div>
 			</div>
 			<div className="flex shrink-0 items-center gap-2">
-				{workspace.active ? (
+				{workspace.status === "opening" ? (
+					// It is already on its way: opening it again does nothing, and the step is the
+					// answer to "why is nothing happening".
+					<Badge variant="outline" aria-label="Opening">
+						<span className="flex items-center gap-1.5">
+							<Loader2 aria-hidden className="size-3 animate-spin" />
+							opening
+						</span>
+					</Badge>
+				) : workspace.status === "failed" ? (
+					<Badge variant="outline" aria-label={workspace.error ?? "Did not start"}>
+						failed
+					</Badge>
+				) : workspace.active ? (
 					<Badge variant="soft">in view</Badge>
 				) : (
 					<Button

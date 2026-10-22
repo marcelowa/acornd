@@ -14,6 +14,7 @@ import {
 	createWorkspace as createWorkspaceRequest,
 	fetchCommands,
 	fetchState,
+	fetchWorkspaceStatus,
 	forkConversation,
 	hideConversation,
 	logoutProvider,
@@ -103,6 +104,9 @@ const THEME_KEY = "acornfall.ui.theme";
 /** How long a keystroke waits before the draft is written down. The words are on screen the
  * whole time: the wait is only so a sentence is not one POST and one state event per letter. */
 const DRAFT_SETTLE_MS = 400;
+/** How often a workspace that is opening is asked which step it is on. Fast enough that the line
+ * changes when the work does, slow enough that it is one request a second. */
+const openingPollMs = 700;
 
 interface Route {
 	/** Which of the interface's screens is in view; the conversation is the one behind them. */
@@ -238,6 +242,8 @@ export interface Platform {
 	clearFailure: () => void;
 	/** Ask the server for the state again; a success clears the last refusal. */
 	reload: () => void;
+	/** The workspace in view is opening, with the step it is on, or undefined when it is up. */
+	opening?: { stage: string } | undefined;
 	workerUp: boolean;
 	workerError?: string | undefined;
 	conversations: ConversationSummary[];
@@ -397,6 +403,9 @@ export function usePlatform(): Platform {
 	const [state, setState] = useState<WireState | undefined>(undefined);
 	const [secretRequest, setSecretRequest] = useState<WireSecretEvent | undefined>(undefined);
 	const [view, setView] = useState<WireView | undefined>(undefined);
+	/** A workspace that is opening, and the step it is on. Undefined means it is up (or failed,
+	 * which is the failure strip's business). */
+	const [opening, setOpening] = useState<{ stage: string } | undefined>(undefined);
 	const [senders, setSenders] = useState<Record<string, WireSender>>({});
 	/**
 	 * The steer-or-queued mark a message was sent with, per conversation and entry id. The wire
@@ -576,8 +585,32 @@ export function usePlatform(): Platform {
 		setView(undefined);
 		setSenders({});
 
+		// A workspace that is not up yet is a state, not a wait: the status is cheap and says
+		// which step it is on, so the pane can say "copying the image" instead of nothing while
+		// the state request — which starts the workspace — would be blocking.
 		const load = async (): Promise<void> => {
 			try {
+				const progress = await fetchWorkspaceStatus(workspace);
+				if (cancelled) return;
+				if (progress.status === "opening" || progress.status === "stopped") {
+					setOpening({ stage: progress.stage ?? "" });
+					if (progress.status === "stopped") {
+						// A stopped workspace is one nobody has asked for yet, and the state request
+						// is what starts it. It is sent now and its answer dropped: it only returns
+						// when the workspace is up, and the poll above is what reports the steps
+						// meanwhile.
+						void fetchState(workspace, route.conversation).catch(() => undefined);
+					}
+					window.setTimeout(() => {
+						if (!cancelled) void load();
+					}, openingPollMs);
+					return;
+				}
+				setOpening(undefined);
+				if (progress.status === "failed") {
+					setFailure(progress.error ?? "the harness for this workspace did not start");
+					return;
+				}
 				const next = await fetchState(workspace, route.conversation);
 				if (cancelled) return;
 				setState(next);
@@ -678,6 +711,9 @@ export function usePlatform(): Platform {
 
 	const reload = useCallback(async (): Promise<void> => {
 		try {
+			// A retry is a decision to wait: whatever an earlier poll was saying about the step is
+			// not worth keeping on screen next to a request that is now in flight.
+			setOpening(undefined);
 			setState(await fetchState(workspace, route.conversation));
 			setFailure(undefined);
 		} catch (cause) {
@@ -1070,6 +1106,7 @@ export function usePlatform(): Platform {
 		// Opening a workspace leaves the layer: the row is the layer's own action.
 		setWorkspacesOpen(false);
 		setView(undefined);
+		setOpening(undefined);
 		setRoute({
 			screen: "conversation",
 			workspace: name,
@@ -1411,6 +1448,7 @@ export function usePlatform(): Platform {
 		active:
 			active === undefined ? undefined : toConversation(active, activeId, seen[active.id]),
 		subagent,
+		opening,
 		workerUp: state?.workerUp ?? false,
 		workerError: state?.workerError,
 		steerable: state?.capabilities.steer ?? false,

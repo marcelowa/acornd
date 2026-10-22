@@ -9,6 +9,7 @@ import type {
 	WireSender,
 	WireState,
 	WireView,
+	WireWorkspaceStatus,
 } from "./wire";
 
 /**
@@ -25,6 +26,16 @@ export async function fetchState(workspace: string, conversation: string): Promi
 	const response = await fetch(`/api/state?${query}`);
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
 	return (await response.json()) as WireState;
+}
+
+/**
+ * Where a workspace is, without opening it. The state request starts a workspace and can take
+ * seconds; this one answers immediately, so the interface can say what is happening meanwhile.
+ */
+export async function fetchWorkspaceStatus(workspace: string): Promise<WireWorkspaceStatus> {
+	const response = await fetch(workspacePath(workspace, "/status"));
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	return (await response.json()) as WireWorkspaceStatus;
 }
 
 export interface StreamHandlers {

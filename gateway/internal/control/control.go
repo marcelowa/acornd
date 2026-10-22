@@ -68,6 +68,12 @@ type Options struct {
 	// Engines is the machine's engine list for the chooser: names, versions, and why one
 	// cannot run here. Nil reports none, which is what an install with no sandbox tier has.
 	Engines func() []EngineInfo
+	// Progress reports where a workspace is, so the list in every state frame says which ones
+	// are opening, failed, or ready. Nil means the states carry no status.
+	Progress func(name string) Progress
+	// OnStage reports a step that takes time while a workspace opens: starting the harness,
+	// preparing an image, booting the sandbox. Nil means nobody is listening.
+	OnStage func(step string)
 	// Sandbox is the machine's sandbox tier. Nil means this Control was built without one,
 	// which is what ACORNFALL_NO_SANDBOX asks the gateway for: the workspace still opens and
 	// its tools refuse.
@@ -148,6 +154,12 @@ type WorkspaceState struct {
 	// wherever the engine and the machine can.
 	DisableVMNesting *bool `json:"disable_vm_nesting,omitempty"`
 	Running          bool  `json:"running"`
+	// Status is stopped, opening, ready, or failed; Stage is the step an opening workspace is on,
+	// in the words of the code doing it. They are separate from Running because a workspace that
+	// is opening has no worker yet, and "not running" would say nothing about why.
+	Status string `json:"status,omitempty"`
+	Stage  string `json:"stage,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 // Inherited reports which fields the active conversation left to the defaults.
@@ -538,6 +550,7 @@ func (c *Control) startWorker(ctx context.Context) error {
 	// The sandbox is made first, because the worker is told to use it and refuses to run
 	// anything without it. A failure is a state, not a stop: the workspace opens, the tools
 	// say what is missing, and the rest of the product works.
+	c.stage("preparing the sandbox")
 	sandboxState := c.provisionSandbox(ctx)
 	if sandboxState.Tools {
 		args = append(args, "--sandbox", sandbox.Name(c.opts.Workspace.Path))
@@ -826,10 +839,17 @@ func (c *Control) workspaceList() []WorkspaceState {
 	if c.opts.Registry == nil {
 		return nil
 	}
-	return Views(c.opts.Registry())
+	return Views(c.opts.Registry(), c.opts.Progress)
 }
 
 // WorkerUp reports whether this workspace's harness process is running.
+// WorkerError is what went wrong when the harness did not come up, in its own words.
+func (c *Control) WorkerError() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.workerError
+}
+
 func (c *Control) WorkerUp() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -1007,6 +1027,14 @@ func sandboxEnv(manager *sandbox.Manager) []string {
 	return manager.Driver().Env()
 }
 
+// stage reports what this workspace's start is doing, to whoever is watching. Nil-safe: a
+// Control built by a command or a test has nobody to tell.
+func (c *Control) stage(step string) {
+	if c.opts.OnStage != nil {
+		c.opts.OnStage(step)
+	}
+}
+
 // provisionSandbox makes sure this workspace has a sandbox and reports what the tools may
 // reach. It never fails the worker: a machine without a hypervisor is a supported state, and
 // the tools refuse rather than running unconfined.
@@ -1027,6 +1055,7 @@ func (c *Control) provisionSandbox(ctx context.Context) SandboxState {
 	delivery := manager.SecretDelivery()
 	resolved := c.resolveSecrets(delivery)
 	policy := c.opts.Workspace.SandboxPolicy(c.opts.DataDir, c.opts.UserHome)
+	policy.OnStage = c.stage
 	policy.Secrets = resolved.delivered
 	if _, err := manager.Produce(ctx, policy, filepath.Dir(c.opts.StoragePath)); err != nil {
 		state.Problem = err.Error()

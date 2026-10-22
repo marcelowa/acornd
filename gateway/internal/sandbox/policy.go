@@ -35,6 +35,10 @@ type Policy struct {
 	// it has the switch. A sandbox on a machine that cannot nest still boots. See
 	// docs/adr/0018-disable-vm-nesting.md.
 	DisableVMNesting bool
+	// OnStage reports a step that takes time — pulling an image, copying it, booting the engine —
+	// so the interface can say what is happening instead of showing an empty pane. Nil means
+	// nobody is listening, which is the case for a command or a test.
+	OnStage func(step string)
 	// Egress allows the sandbox to reach the network. On by default for new workspaces;
 	// ADR 0012 records what that exposes.
 	Egress bool
@@ -185,4 +189,12 @@ func slugify(value string) string {
 		return "ws"
 	}
 	return out
+}
+
+// Stage reports a step that takes time. It is nil-safe: a policy built by a caller with no
+// interface attached says nothing.
+func (p Policy) Stage(step string) {
+	if p.OnStage != nil {
+		p.OnStage(step)
+	}
 }

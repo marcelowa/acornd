@@ -49,6 +49,7 @@ func (s *Server) Handler() http.Handler {
 	// general one, so existing links and scripts keep working.
 	for _, base := range []string{"/api/workspaces/{ws}", "/api"} {
 		mux.HandleFunc("GET "+base+"/state", s.state)
+		mux.HandleFunc("GET "+base+"/status", s.workspaceStatus)
 		mux.HandleFunc("GET "+base+"/stream", s.stream)
 		mux.HandleFunc("GET "+base+"/conversations", s.conversations)
 		mux.HandleFunc("POST "+base+"/conversations", s.createConversation)
@@ -140,7 +141,7 @@ func (s *Server) workspaceList(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listing() map[string]any {
 	return map[string]any{
 		"workspacesDir": s.workspaces.Dir(),
-		"workspaces":    control.Views(s.workspaces.List()),
+		"workspaces":    control.Views(s.workspaces.List(), s.workspaces.Progress),
 		// Every engine this build can run and whether this machine can: the chooser shows all
 		// of them, with the sentence that says why one cannot be used here.
 		"engines": s.workspaces.Engines(),
@@ -335,6 +336,24 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, ctl.StateFor(r.URL.Query().Get("conversation")))
+}
+
+// workspaceStatus answers where a workspace is, and never starts it: opening a workspace is the
+// request that takes seconds, so the interface asks this first and shows the step it is on
+// instead of an empty pane. The status also rides every state frame, for the list.
+func (s *Server) workspaceStatus(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("ws")
+	if name == "" {
+		name = r.URL.Query().Get("workspace")
+	}
+	if name == "" {
+		name = control.GeneralWorkspaceName
+	}
+	if _, known := s.workspaces.Get(name); !known {
+		http.Error(w, "no workspace "+name, http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.workspaces.Progress(name))
 }
 
 // stream is SSE. Commands are POSTs; this direction is the only streaming one,

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Each workspace is its own everything: its own folder, its own harness process, its own
@@ -231,5 +232,68 @@ func TestTheTrustFlagIsGone(t *testing.T) {
 	// And the workspace it was aimed at is untouched and still serving.
 	if got := c.state("general"); got.Workspace.Name != "general" || !got.WorkerUp {
 		t.Errorf("a refused update should change nothing, got %+v", got.Workspace)
+	}
+}
+
+// A workspace takes seconds to come up — a worker, an image copy, a sandbox boot — and the
+// interface has to say so instead of leaving an empty pane. The status endpoint answers without
+// starting anything, and once a start is under way it names the step in the words of the code
+// doing it.
+func TestAnOpeningWorkspaceSaysWhichStepItIsOn(t *testing.T) {
+	t.Parallel()
+	notSandbox(t)
+	s := start(t)
+	c := s.client()
+	c.createWorkspace("coming-up")
+
+	// Asked before anything wanted it: stopped, and answered now rather than in two seconds.
+	started := time.Now()
+	var before workspaceStatus
+	c.get("/api/workspaces/coming-up/status", &before)
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("the status of a stopped workspace should not wait for a start, took %s", elapsed)
+	}
+	if before.Status != "stopped" {
+		t.Fatalf("a workspace nobody asked for is stopped, got %q", before.Status)
+	}
+
+	// The state request is what starts it; the status is what the interface watches while that
+	// request is in flight.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.state("coming-up")
+	}()
+	stages := make(map[string]bool)
+	deadline := time.Now().Add(30 * time.Second)
+	var last workspaceStatus
+	for time.Now().Before(deadline) {
+		var status workspaceStatus
+		c.get("/api/workspaces/coming-up/status", &status)
+		last = status
+		if status.Status == "opening" && status.Stage != "" {
+			stages[status.Stage] = true
+		}
+		if status.Status == "ready" || status.Status == "failed" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	<-done
+	if last.Status != "ready" {
+		t.Fatalf("the workspace should end up ready, got %q (%s)", last.Status, last.Error)
+	}
+	if len(stages) == 0 {
+		t.Fatalf("no step was ever reported while the workspace opened")
+	}
+	// And the list says the same thing, because that is what the rail reads.
+	after := c.state("general")
+	for _, workspace := range after.Workspaces {
+		if workspace.Name != "coming-up" {
+			continue
+		}
+		if workspace.Status != "ready" || !workspace.Running {
+			t.Fatalf("the list should say ready and running, got %+v", workspace)
+		}
 	}
 }

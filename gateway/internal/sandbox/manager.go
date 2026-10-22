@@ -266,6 +266,7 @@ func (m *Manager) Report() Report {
 func (m *Manager) Produce(ctx context.Context, policy Policy, dir string) (string, error) {
 	// First use is what installs the engine, so a gateway starts fast and a machine that
 	// cannot sandbox says so when it matters.
+	policy.Stage("preparing the sandbox engine")
 	if err := m.ensure(ctx); err != nil {
 		return "", err
 	}
@@ -284,11 +285,13 @@ func (m *Manager) Produce(ctx context.Context, policy Policy, dir string) (strin
 		if instance.Running() {
 			return name, nil
 		}
+		policy.Stage("booting the sandbox")
 		if err := m.driver.Start(ctx, name, policy.Secrets); err != nil {
 			return "", err
 		}
 		return name, nil
 	}
+	policy.Stage("booting the sandbox")
 	if err := m.driver.Create(ctx, policy, dir); err != nil {
 		return "", err
 	}
