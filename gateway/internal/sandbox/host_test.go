@@ -66,23 +66,23 @@ func TestHostSaysThereIsNothingToNest(t *testing.T) {
 // Engine is how a run names what it wants. A name nobody implements is refused with the
 // choices: defaulting to the host for a typo would turn a sandboxed run unconfined.
 func TestEngineRefusesANameItDoesNotImplement(t *testing.T) {
-	home := t.TempDir()
-	driver, err := Engine(home, "", "")
+	dataDir := t.TempDir()
+	driver, err := Engine(dataDir, "", "")
 	if err != nil || driver.Name() != "microsandbox" {
 		t.Fatalf("the default engine is microsandbox, got %v %v", driver, err)
 	}
-	driver, err = Engine(home, "/tmp/somewhere", "microsandbox")
+	driver, err = Engine(dataDir, "/tmp/somewhere", "microsandbox")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if driver.StateDir() != "/tmp/somewhere" {
 		t.Errorf("the state directory should reach the driver, got %q", driver.StateDir())
 	}
-	driver, err = Engine(home, "", "host")
+	driver, err = Engine(dataDir, "", "host")
 	if err != nil || driver.Name() != "host" {
 		t.Fatalf("host should be selectable, got %v %v", driver, err)
 	}
-	_, err = Engine(home, "", "sandbox-exec")
+	_, err = Engine(dataDir, "", "sandbox-exec")
 	if err == nil || !strings.Contains(err.Error(), "host") || !strings.Contains(err.Error(), "microsandbox") {
 		t.Errorf("an unknown engine should name the choices, got %v", err)
 	}
@@ -91,12 +91,12 @@ func TestEngineRefusesANameItDoesNotImplement(t *testing.T) {
 // The manager's report carries the isolation flag and the produced sandbox works without an
 // install: this is the path a host-engine workspace takes.
 func TestTheHostEngineProduceAndReport(t *testing.T) {
-	home := t.TempDir()
-	workspace := filepath.Join(home, "work")
+	dataDir := t.TempDir()
+	workspace := filepath.Join(dataDir, "work")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manager, err := Open(context.Background(), Options{Home: home, Driver: NewHost()})
+	manager, err := Open(context.Background(), Options{DataDir: dataDir, Driver: NewHost()})
 	if err != nil {
 		t.Fatal(err)
 	}

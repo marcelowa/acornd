@@ -12,30 +12,30 @@ import (
 // reach. Everything it may read lives in a named resource folder, which is why the mount
 // list is spelled out rather than mounting the install and hoping.
 func TestGlobalPathsAreTheResourceFoldersAndNeverTheInstall(t *testing.T) {
-	home := t.TempDir()
+	dataDir := t.TempDir()
 	userHome := t.TempDir()
-	if err := EnsureGlobal(home, userHome); err != nil {
+	if err := EnsureGlobal(dataDir, userHome); err != nil {
 		t.Fatal(err)
 	}
-	for _, folder := range globalFolders(home, userHome) {
+	for _, folder := range globalFolders(dataDir, userHome) {
 		info, err := os.Stat(folder)
 		if err != nil || !info.IsDir() {
 			t.Errorf("%s should exist after EnsureGlobal: %v", folder, err)
 		}
 	}
 
-	paths := GlobalPaths(home, userHome)
+	paths := GlobalPaths(dataDir, userHome)
 	want := []string{
 		filepath.Join(userHome, ".agents"),
-		filepath.Join(home, "agents"),
-		filepath.Join(home, "skills"),
-		filepath.Join(home, "prompts"),
-		filepath.Join(home, "commands"),
+		filepath.Join(dataDir, "agents"),
+		filepath.Join(dataDir, "skills"),
+		filepath.Join(dataDir, "prompts"),
+		filepath.Join(dataDir, "commands"),
 	}
 	if !slices.Equal(paths, want) {
 		t.Errorf("the mounted paths should be the resource folders, got %v want %v", paths, want)
 	}
-	for _, forbidden := range []string{home, filepath.Join(home, "credentials.json"), filepath.Join(home, "state")} {
+	for _, forbidden := range []string{dataDir, filepath.Join(dataDir, "credentials.json"), filepath.Join(dataDir, "state")} {
 		if slices.Contains(paths, forbidden) {
 			t.Errorf("%s must never be mounted into a sandbox", forbidden)
 		}
@@ -46,19 +46,19 @@ func TestGlobalPathsAreTheResourceFoldersAndNeverTheInstall(t *testing.T) {
 // the user's behalf the way an empty folder can: config.json is mounted when it exists, and
 // a sandbox made before it was written does not see it until it is recreated.
 func TestTheGlobalConfigIsMountedOnlyWhenItExists(t *testing.T) {
-	home := t.TempDir()
+	dataDir := t.TempDir()
 	userHome := t.TempDir()
-	if err := EnsureGlobal(home, userHome); err != nil {
+	if err := EnsureGlobal(dataDir, userHome); err != nil {
 		t.Fatal(err)
 	}
-	config := filepath.Join(home, "config.json")
-	if slices.Contains(GlobalPaths(home, userHome), config) {
+	config := filepath.Join(dataDir, "config.json")
+	if slices.Contains(GlobalPaths(dataDir, userHome), config) {
 		t.Error("an install with no config.json should not mount one")
 	}
 	if err := os.WriteFile(config, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(GlobalPaths(home, userHome), config) {
+	if !slices.Contains(GlobalPaths(dataDir, userHome), config) {
 		t.Error("config.json should be mounted once it exists")
 	}
 }

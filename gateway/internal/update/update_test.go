@@ -49,18 +49,18 @@ func testTags(releases []Release) string {
 
 func testManager(t *testing.T) (*Manager, string) {
 	t.Helper()
-	home := t.TempDir()
+	dataDir := t.TempDir()
 	bin := filepath.Join(t.TempDir(), "acornfall")
 	if err := os.WriteFile(bin, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manager := New(home, bin)
+	manager := New(dataDir, bin)
 	manager.migrateDir = t.TempDir()
 	manager.client = &http.Client{}
 	if err := manager.SetCurrentVersion("v0.8.0"); err != nil {
 		t.Fatal(err)
 	}
-	return manager, home
+	return manager, dataDir
 }
 
 func TestCheckFindsNewRelease(t *testing.T) {
@@ -331,12 +331,12 @@ func TestBuildVersionStampsFreshInstall(t *testing.T) {
 	old := BuildVersion
 	BuildVersion = "v0.9.0"
 	defer func() { BuildVersion = old }()
-	home := t.TempDir()
+	dataDir := t.TempDir()
 	bin := filepath.Join(t.TempDir(), "acornfall")
 	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manager := New(home, bin)
+	manager := New(dataDir, bin)
 	if err := manager.Open(); err != nil {
 		t.Fatal(err)
 	}
@@ -347,12 +347,12 @@ func TestBuildVersionStampsFreshInstall(t *testing.T) {
 }
 
 func TestDevBuildNeverPrompts(t *testing.T) {
-	home := t.TempDir()
+	dataDir := t.TempDir()
 	bin := filepath.Join(t.TempDir(), "acornfall")
 	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manager := New(home, bin)
+	manager := New(dataDir, bin)
 	manager.client = &http.Client{}
 	// No version file: current stays "dev".
 	if err := manager.Open(); err != nil {
@@ -373,14 +373,14 @@ func TestDevBuildNeverPrompts(t *testing.T) {
 }
 
 func TestBackupKeepsLastThree(t *testing.T) {
-	manager, home := testManager(t)
-	if err := os.WriteFile(filepath.Join(home, "workspaces.json"), []byte("{}"), 0o600); err != nil {
+	manager, dataDir := testManager(t)
+	if err := os.WriteFile(filepath.Join(dataDir, "workspaces.json"), []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(home, "state", "general"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(dataDir, "state", "general"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(home, "state", "general", "session.sqlite"), []byte("db"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dataDir, "state", "general", "session.sqlite"), []byte("db"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for range 5 {
@@ -395,9 +395,9 @@ func TestBackupKeepsLastThree(t *testing.T) {
 }
 
 func TestBackupSkipsSecrets(t *testing.T) {
-	manager, home := testManager(t)
+	manager, dataDir := testManager(t)
 	for _, name := range []string{"credentials.json", "secrets.json"} {
-		if err := os.WriteFile(filepath.Join(home, name), []byte("secret"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(dataDir, name), []byte("secret"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}

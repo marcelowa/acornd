@@ -177,7 +177,7 @@ development loop or a test, `ACORNFALL_SANDBOX_ENGINE` names one for the whole i
 runs the tools on this machine with no isolation ([ADR 0015](docs/adr/0015-host-engine.md)).
 
 Two environment variables cover what a service manager should not have to pass as flags:
-`ACORNFALL_HOME` for the install folder and `ACORNFALL_WORKER` for the worker's sources. A flag
+`ACORNFALL_DATA_DIR` for the install folder and `ACORNFALL_WORKER` for the worker's sources. A flag
 wins over the variable.
 
 ### Reaching it from another machine

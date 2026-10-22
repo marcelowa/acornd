@@ -54,7 +54,7 @@ need root. Run with nothing to see what this machine needs.
 		runPlanAsRoot(*planPath)
 		return
 	}
-	home, err := resolveDataDir(*dataDir)
+	folder, err := resolveDataDir(*dataDir)
 	if err != nil {
 		logf("acornfall setup: %v", err)
 		os.Exit(2)
@@ -62,11 +62,11 @@ need root. Run with nothing to see what this machine needs.
 	if *probe {
 		// The hidden half of "probe as the account that runs acornfall": root re-executes this
 		// binary with that account's credentials, and all it does is answer with the checks.
-		writeProbe(home)
+		writeProbe(folder)
 		return
 	}
 	root := os.Geteuid() == 0
-	account, err := accountFor(*forUser, root, home)
+	account, err := accountFor(*forUser, root, folder)
 	if err != nil {
 		logf("acornfall setup: %v", err)
 		os.Exit(2)
@@ -75,7 +75,7 @@ need root. Run with nothing to see what this machine needs.
 	if root {
 		fmt.Printf("checking for the account that runs acornfall: %s (%s)\n\n", who, account.Basis)
 	}
-	report, err := probeAs(account, home)
+	report, err := probeAs(account, folder)
 	if err != nil {
 		logf("acornfall setup: %v", err)
 		os.Exit(2)
@@ -134,7 +134,7 @@ need root. Run with nothing to see what this machine needs.
 	// account. A group added to an account is not in any running process's groups, and no command
 	// can add it there: only a new session can.
 	fmt.Println()
-	after, err := probeAs(account, home)
+	after, err := probeAs(account, folder)
 	if err != nil {
 		logf("acornfall setup: %v", err)
 		os.Exit(1)
@@ -295,9 +295,9 @@ type setupReport struct {
 
 // gatherSetup asks the drivers, which is the same code a start would run: a check here that
 // passes while a start fails would be worse than no check.
-func gatherSetup(home string) setupReport {
-	bwrap := sandbox.NewBwrap(home)
-	hypervisor := sandbox.NewMicrosandbox(home)
+func gatherSetup(dataDir string) setupReport {
+	bwrap := sandbox.NewBwrap(dataDir)
+	hypervisor := sandbox.NewMicrosandbox(dataDir)
 	report := setupReport{
 		PackageManager:   packageManager(),
 		BwrapPath:        bwrap.InstallDir(),

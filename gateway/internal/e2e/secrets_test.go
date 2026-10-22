@@ -71,7 +71,7 @@ func TestSecretsAreStoredAndListedWithoutValues(t *testing.T) {
 		t.Errorf("hosts or allowEnv are wrong: %+v", global)
 	}
 
-	file := filepath.Join(s.Home, "secrets.json")
+	file := filepath.Join(s.DataDir, "secrets.json")
 	info, err := os.Stat(file)
 	if err != nil {
 		t.Fatalf("the vault file should exist: %v", err)
@@ -235,14 +235,14 @@ func TestSecretCLIWritesTheVault(t *testing.T) {
 	s := start(t)
 	c := s.client()
 
-	add := exec.Command(gatewayBin, "secret", "add", "--data-dir", s.Home, "--global",
+	add := exec.Command(gatewayBin, "secret", "add", "--data-dir", s.DataDir, "--global",
 		"--description", "created by the CLI", "--hosts", "api.example.com", "CLI_TOKEN")
 	add.Stdin = strings.NewReader("cli-first-value\n")
 	if out, err := add.CombinedOutput(); err != nil {
 		t.Fatalf("secret add: %v\n%s", err, out)
 	}
 
-	list := exec.Command(gatewayBin, "secret", "list", "--data-dir", s.Home)
+	list := exec.Command(gatewayBin, "secret", "list", "--data-dir", s.DataDir)
 	out, err := list.CombinedOutput()
 	if err != nil {
 		t.Fatalf("secret list: %v\n%s", err, out)
@@ -260,12 +260,12 @@ func TestSecretCLIWritesTheVault(t *testing.T) {
 		t.Errorf("the gateway should see the CLI's secret: %+v", listed.Secrets)
 	}
 
-	rotate := exec.Command(gatewayBin, "secret", "rotate", "--data-dir", s.Home, "--global", "CLI_TOKEN")
+	rotate := exec.Command(gatewayBin, "secret", "rotate", "--data-dir", s.DataDir, "--global", "CLI_TOKEN")
 	rotate.Stdin = strings.NewReader("cli-second-value\n")
 	if out, err := rotate.CombinedOutput(); err != nil {
 		t.Fatalf("secret rotate: %v\n%s", err, out)
 	}
-	payload, err := os.ReadFile(filepath.Join(s.Home, "secrets.json"))
+	payload, err := os.ReadFile(filepath.Join(s.DataDir, "secrets.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

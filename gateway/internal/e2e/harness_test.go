@@ -176,7 +176,7 @@ type system struct {
 	t   *testing.T
 	cfg settings
 
-	Home          string
+	DataDir       string
 	WorkspacesDir string
 	General       string
 	Addr          string
@@ -229,7 +229,7 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 		}
 		os.RemoveAll(shortHome)
 	})
-	s.Home = shortHome
+	s.DataDir = shortHome
 	// A stable path, not a per-run one: it holds the image every sandbox boots from, and a
 	// fresh directory per run means a registry pull per run — which is how a suite runs into
 	// an anonymous pull limit. The sandboxes themselves are removed by the tests that made
@@ -239,7 +239,7 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	// The general workspace is created where the product creates one: inside the workspaces
 	// folder, by name. Nothing points the gateway at a folder any more.
 	s.General = filepath.Join(s.WorkspacesDir, "general")
-	for _, dir := range []string{s.Home, s.WorkspacesDir, s.General} {
+	for _, dir := range []string{s.DataDir, s.WorkspacesDir, s.General} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -248,10 +248,10 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	// does not pay for a download per test. A host-engine test never touches this driver.
 	_, bwrapTest := bwrapEngineTests.Load(t.Name())
 	if _, host := hostEngineTests.Load(t.Name()); engineHome != "" && !host && !bwrapTest {
-		if err := os.MkdirAll(filepath.Join(s.Home, "tools"), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(s.DataDir, "tools"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		link := filepath.Join(s.Home, "tools", "microsandbox")
+		link := filepath.Join(s.DataDir, "tools", "microsandbox")
 		_ = os.RemoveAll(link)
 		if err := os.Symlink(filepath.Join(engineHome, "tools", "microsandbox"), link); err != nil {
 			t.Fatal(err)
@@ -263,7 +263,7 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 
 	args := []string{
 		"start",
-		"--home", s.Home,
+		"--data-dir", s.DataDir,
 		"--workspaces-dir", s.WorkspacesDir,
 		"--host", "127.0.0.1",
 		"--port", "0",
@@ -294,8 +294,8 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	// switches that decide how this install behaves are forwarded explicitly.
 	env := []string{
 		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + s.Home,
-		"ACORNFALL_HOME=" + s.Home,
+		"HOME=" + s.DataDir,
+		"ACORNFALL_DATA_DIR=" + s.DataDir,
 		// The worker sources are a folder, and a folder is a thing the environment says
 		// (ACORNFALL_WORKER) rather than a flag on the server.
 		"ACORNFALL_WORKER=" + workerDir,
@@ -312,7 +312,7 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 		env = append(env, "ACORNFALL_NO_SANDBOX="+noSandbox)
 	}
 	if len(s.cfg.script) > 0 {
-		scriptPath := filepath.Join(s.Home, "script.json")
+		scriptPath := filepath.Join(s.DataDir, "script.json")
 		payload := map[string]any{"rules": s.cfg.script}
 		if s.cfg.slow {
 			payload["tokensPerSecond"] = slowTokensPerSecond
@@ -416,8 +416,8 @@ func keepSandboxes() bool {
 }
 
 // engineBinary finds the installed engine under a home, whatever version it is.
-func engineBinary(home string) string {
-	matches, err := filepath.Glob(filepath.Join(home, "tools", "microsandbox", "*", "bin", "msb"))
+func engineBinary(dataDir string) string {
+	matches, err := filepath.Glob(filepath.Join(dataDir, "tools", "microsandbox", "*", "bin", "msb"))
 	if err != nil || len(matches) == 0 {
 		return ""
 	}
@@ -554,7 +554,7 @@ func (s *system) writeWorkspace(t *testing.T, rel, content string) {
 
 func (s *system) writeHome(t *testing.T, rel, content string) {
 	t.Helper()
-	writeFile(t, filepath.Join(s.Home, rel), content)
+	writeFile(t, filepath.Join(s.DataDir, rel), content)
 }
 
 func writeFile(t *testing.T, path, content string) {

@@ -14,7 +14,7 @@ import (
 // Tested here rather than through the clock: waiting fifteen minutes for a sweep is not a test
 // anyone runs, and the decision is a pure function of three facts.
 func TestEvictionStopsOnlyIdleUnwatchedWorkspaces(t *testing.T) {
-	workspaces := NewWorkspaces(WorkspacesOptions{Home: t.TempDir()})
+	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: t.TempDir()})
 	if err := workspaces.loadRegistry(); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestEvictionStopsOnlyIdleUnwatchedWorkspaces(t *testing.T) {
 
 // The general workspace is where a fresh client lands, so it is never evicted even when idle.
 func TestTheGeneralWorkspaceIsNeverEvicted(t *testing.T) {
-	workspaces := NewWorkspaces(WorkspacesOptions{Home: t.TempDir()})
+	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: t.TempDir()})
 	if err := workspaces.loadRegistry(); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestTheGeneralWorkspaceIsNeverEvicted(t *testing.T) {
 // A workspace nobody has ever asked for is idle rather than infinitely recent: it has no worker
 // to keep.
 func TestAnUnusedWorkspaceIsIdle(t *testing.T) {
-	workspaces := NewWorkspaces(WorkspacesOptions{Home: t.TempDir()})
+	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: t.TempDir()})
 	if got := workspaces.idleFor("never-heard-of-it"); got < idleEviction {
 		t.Errorf("an unknown workspace should count as idle, got %s", got)
 	}

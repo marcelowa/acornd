@@ -230,13 +230,13 @@ func TestSetupChecksTheAccountThatRunsAcornfall(t *testing.T) {
 		name      string
 		requested string
 		root      bool
-		home      string
+		dataDir   string
 		want      string
 	}{
-		{name: "an ordinary user is the account", root: false, home: t.TempDir(), want: current.Username},
-		{name: "--for wins", requested: current.Username, root: true, home: t.TempDir(), want: current.Username},
+		{name: "an ordinary user is the account", root: false, dataDir: t.TempDir(), want: current.Username},
+		{name: "--for wins", requested: current.Username, root: true, dataDir: t.TempDir(), want: current.Username},
 	} {
-		account, err := accountFor(test.requested, test.root, test.home)
+		account, err := accountFor(test.requested, test.root, test.dataDir)
 		if err != nil {
 			t.Fatalf("%s: %v", test.name, err)
 		}
@@ -256,11 +256,11 @@ func TestSetupTakesTheAccountFromTheInstallFolder(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("only root can be told which account to act for")
 	}
-	home := t.TempDir()
-	if err := os.Chown(home, 12345, 12345); err != nil {
+	dataDir := t.TempDir()
+	if err := os.Chown(dataDir, 12345, 12345); err != nil {
 		t.Skipf("cannot change the folder's owner here: %v", err)
 	}
-	account, err := accountFor("", true, home)
+	account, err := accountFor("", true, dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}

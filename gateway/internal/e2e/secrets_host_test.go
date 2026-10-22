@@ -15,7 +15,7 @@ func TestHostEngineDeliversSecretsIntoTheWorkerEnvironment(t *testing.T) {
 	workspaceResources(t)
 	s := start(t,
 		withSetup(func(t *testing.T, s *system) {
-			writeVault(t, s.Home, []map[string]any{
+			writeVault(t, s.DataDir, []map[string]any{
 				{
 					"name":         "ENV_TOKEN",
 					"description":  "a value the host engine may hold",

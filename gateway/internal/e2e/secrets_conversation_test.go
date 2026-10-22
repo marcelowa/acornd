@@ -101,7 +101,7 @@ func TestTheConversationListsSecretsWithoutValues(t *testing.T) {
 	const value = "listed-value-that-must-not-be-shown"
 	s := start(t,
 		withSetup(func(t *testing.T, s *system) {
-			writeVault(t, s.Home, []map[string]any{{
+			writeVault(t, s.DataDir, []map[string]any{{
 				"name":         "LIST_TOKEN",
 				"description":  "a token the agent should know about",
 				"scope":        "global",

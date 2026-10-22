@@ -105,10 +105,10 @@ const ecosystemDir = ".agents"
 // globalFolders are the install's resource folders, which exist in every install so that a
 // sandbox's mount always resolves: the user's bundle in full, then the install's own. The
 // prompt-template folder has two names because both are read.
-func globalFolders(home, userHome string) []string {
+func globalFolders(dataDir, userHome string) []string {
 	folders := []string{filepath.Join(userHome, ecosystemDir)}
 	for _, name := range []string{"agents", "skills", "prompts", "commands"} {
-		folders = append(folders, filepath.Join(home, name))
+		folders = append(folders, filepath.Join(dataDir, name))
 	}
 	return folders
 }
@@ -120,9 +120,9 @@ func globalFolders(home, userHome string) []string {
 // `<home>` itself is deliberately absent: it holds credentials.json, token, and state/, and
 // the agent has no business reading any of them. That is the whole reason the list is
 // explicit. See docs/adr/0014-global-resources-in-the-sandbox.md.
-func GlobalPaths(home, userHome string) []string {
-	paths := globalFolders(home, userHome)
-	config := filepath.Join(home, "config.json")
+func GlobalPaths(dataDir, userHome string) []string {
+	paths := globalFolders(dataDir, userHome)
+	config := filepath.Join(dataDir, "config.json")
 	if info, err := os.Stat(config); err == nil && !info.IsDir() {
 		paths = append(paths, config)
 	}
@@ -132,8 +132,8 @@ func GlobalPaths(home, userHome string) []string {
 // EnsureGlobal creates the folders GlobalPaths names, so a fresh install has somewhere to
 // mount from. It does not create config.json: an empty one would be a decision about
 // defaults nobody made, and the mount is skipped while the file is absent.
-func EnsureGlobal(home, userHome string) error {
-	for _, folder := range globalFolders(home, userHome) {
+func EnsureGlobal(dataDir, userHome string) error {
+	for _, folder := range globalFolders(dataDir, userHome) {
 		if err := os.MkdirAll(folder, 0o700); err != nil {
 			return fmt.Errorf("create %s: %w", folder, err)
 		}

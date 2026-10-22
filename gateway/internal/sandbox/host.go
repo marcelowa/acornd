@@ -83,16 +83,16 @@ func (h *Host) Remove(context.Context, string) error          { return nil }
 // Engines are the drivers this build can run, by the name the worker matches with its own
 // client. An unknown name is refused with the list, never silently defaulted: a run that
 // meant microsandbox and got the host would be a security change nobody asked for.
-func Engine(home, state, name string) (Driver, error) {
+func Engine(dataDir, state, name string) (Driver, error) {
 	switch name {
 	case "", "microsandbox":
-		driver := NewMicrosandbox(home)
+		driver := NewMicrosandbox(dataDir)
 		if state != "" {
 			driver = driver.WithStateDir(state)
 		}
 		return driver, nil
 	case "bwrap":
-		driver := NewBwrap(home)
+		driver := NewBwrap(dataDir)
 		if state != "" {
 			driver = driver.WithStateDir(state)
 		}

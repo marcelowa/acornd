@@ -6,12 +6,12 @@ import (
 	"testing"
 )
 
-func testInput(home string) Input {
+func testInput(dataDir string) Input {
 	return Input{
-		Home:            home,
+		DataDir:         dataDir,
 		Current:         "v0.9.0",
 		Worker:          "v0.9.0",
-		BunPath:         filepath.Join(home, "tools", "bun-1.4.3", "bun"),
+		BunPath:         filepath.Join(dataDir, "tools", "bun-1.4.3", "bun"),
 		BunOK:           true,
 		EngineName:      "microsandbox",
 		EngineVersion:   "0.7.6",
@@ -32,8 +32,8 @@ func byName(requirements []Requirement, name string) Requirement {
 }
 
 func TestSatisfiedInstallIsQuiet(t *testing.T) {
-	home := t.TempDir()
-	requirements := Check(testInput(home))
+	dataDir := t.TempDir()
+	requirements := Check(testInput(dataDir))
 	if !Satisfied(requirements) {
 		for _, requirement := range requirements {
 			if !requirement.OK {
@@ -44,8 +44,8 @@ func TestSatisfiedInstallIsQuiet(t *testing.T) {
 }
 
 func TestMissingPiecesNameFixes(t *testing.T) {
-	home := t.TempDir()
-	input := testInput(home)
+	dataDir := t.TempDir()
+	input := testInput(dataDir)
 	input.Worker = ""
 	input.BunOK = false
 	input.HasCredential = false
@@ -67,8 +67,8 @@ func TestMissingPiecesNameFixes(t *testing.T) {
 }
 
 func TestEngineRefusalIsStated(t *testing.T) {
-	home := t.TempDir()
-	input := testInput(home)
+	dataDir := t.TempDir()
+	input := testInput(dataDir)
 	input.EngineInstalled = false
 	input.EngineProblem = ""
 	input.EngineDisabled = "ACORNFALL_NO_SANDBOX is set"
@@ -79,8 +79,8 @@ func TestEngineRefusalIsStated(t *testing.T) {
 }
 
 func TestEngineProblemFails(t *testing.T) {
-	home := t.TempDir()
-	input := testInput(home)
+	dataDir := t.TempDir()
+	input := testInput(dataDir)
 	input.EngineInstalled = false
 	input.EngineProblem = "no hypervisor"
 	if requirement := byName(Check(input), "engine"); requirement.OK {
@@ -89,21 +89,21 @@ func TestEngineProblemFails(t *testing.T) {
 }
 
 func TestCredentialsReadTheFile(t *testing.T) {
-	home := t.TempDir()
-	if HasCredential(home) {
+	dataDir := t.TempDir()
+	if HasCredential(dataDir) {
 		t.Fatal("no file, no credential")
 	}
-	if err := os.WriteFile(filepath.Join(home, "credentials.json"), []byte(`{"x":{"type":"api_key"}}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dataDir, "credentials.json"), []byte(`{"x":{"type":"api_key"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if !HasCredential(home) {
+	if !HasCredential(dataDir) {
 		t.Fatal("a stored key must count")
 	}
 }
 
 func TestWorkerSkewAgainstBinarySatisfies(t *testing.T) {
-	home := t.TempDir()
-	input := testInput(home)
+	dataDir := t.TempDir()
+	input := testInput(dataDir)
 	input.Current = "v0.9.8"
 	input.RuntimeTag = "v0.9.9"
 	input.Worker = "v0.9.9"

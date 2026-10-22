@@ -29,7 +29,7 @@ import (
 // command runs under is written to the engine's state folder, so a person can read what a
 // workspace is allowed to be, and the worker reads the same file to build the argv.
 type Bwrap struct {
-	home string
+	dataDir string
 	// state is where one JSON file per workspace's config lives.
 	state string
 	// resolver paths are fields on Bwrap; this is the type they use.
@@ -52,10 +52,10 @@ type Bwrap struct {
 
 // NewBwrap builds the driver. Unlike the microVM engine it installs nothing: bubblewrap is a
 // distribution package, and installing one is the operator's business, not a gateway's.
-func NewBwrap(home string) *Bwrap {
+func NewBwrap(dataDir string) *Bwrap {
 	return &Bwrap{
-		home:     home,
-		state:    filepath.Join(home, "sandboxes", "bwrap"),
+		dataDir:  dataDir,
+		state:    filepath.Join(dataDir, "sandboxes", "bwrap"),
 		look:     exec.LookPath,
 		pull:     pullImage,
 		resolver: resolverFiles{Host: "/etc/resolv.conf", Upstream: "/run/systemd/resolve/resolv.conf"},
@@ -225,7 +225,7 @@ type bwrapConfig struct {
 	// install inside the sandbox lands and stays: the host never sees it, and removing the
 	// sandbox removes it.
 	Rootfs   string   `json:"rootfs,omitempty"`
-	Home     string   `json:"home"`
+	DataDir  string   `json:"home"`
 	Hidden   string   `json:"hidden"`
 	ReadOnly []string `json:"readOnly,omitempty"`
 	// ResolvConf is the file bound at /etc/resolv.conf: the machine's own, or a copy of its
@@ -325,8 +325,8 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 	if err := os.MkdirAll(b.state, 0o700); err != nil {
 		return bwrapConfig{}, err
 	}
-	home := b.workspaceHome(Name(policy.Workspace))
-	if err := os.MkdirAll(home, 0o700); err != nil {
+	dataDir := b.workspaceHome(Name(policy.Workspace))
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return bwrapConfig{}, err
 	}
 	rootfs, err := b.workspaceRootfs(Name(policy.Workspace), image)
@@ -381,8 +381,8 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 		Image:       image,
 		Network:     network,
 		Rootfs:      rootfs,
-		Home:        home,
-		Hidden:      b.home,
+		DataDir:     dataDir,
+		Hidden:      b.dataDir,
 		ReadOnly:    readonly,
 		ResolvConf:  resolvConf,
 		Supervisor:  executable,
@@ -775,7 +775,7 @@ func (b *Bwrap) sandboxArgv(config bwrapConfig) ([]string, error) {
 		argv = append(argv, "--ro-bind", path, path)
 	}
 	argv = append(argv,
-		"--bind", config.Home, guestHome(config),
+		"--bind", config.DataDir, guestHome(config),
 		"--bind", config.Workspace, config.Workspace,
 		"--bind", config.Run, config.GuestRun,
 		"--ro-bind", config.Supervisor, guestSupervisor)
@@ -801,7 +801,7 @@ func (b *Bwrap) sandboxArgv(config bwrapConfig) ([]string, error) {
 // is an image, and its real path when the machine's root is the root.
 func guestHome(config bwrapConfig) string {
 	if config.Rootfs == "" {
-		return config.Home
+		return config.DataDir
 	}
 	return "/root"
 }

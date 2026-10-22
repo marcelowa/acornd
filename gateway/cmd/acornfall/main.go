@@ -113,24 +113,18 @@ func serve(argv []string) error {
 	flags := flag.NewFlagSet("acornfall start", flag.ContinueOnError)
 	host := flags.String("host", "0.0.0.0", "interface to listen on (default: every interface)")
 	port := flags.Int("port", 7777, "port to listen on")
-	home := flags.String("home", "", "the acornfall folder: config, credentials, state, workspaces (default: ~/.acornfall)")
-	dataDir := flags.String("data-dir", "", "alias for --home")
+	dataDir := flags.String("data-dir", "", "the acornfall folder: config, credentials, state, workspaces (default: ~/.acornfall)")
 	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornfall/workspaces)")
-	sandboxState := flags.String("sandbox-state", "", "where sandboxes, images, and snapshots are kept (default: <home>/sandboxes); must be a short path")
+	sandboxState := flags.String("sandbox-state", "", "where sandboxes, images, and snapshots are kept (default: <data-dir>/sandboxes); must be a short path")
 	workerCommand := flags.String("worker", "", `worker command (default: ensured bun over ensured sources)`)
 	if err := flags.Parse(argv); err != nil {
 		return err
 	}
 
-	dir := *home
-	if dir == "" {
-		dir = *dataDir
-	}
-	resolved, err := resolveDataDir(dir)
+	dir, err := resolveDataDir(*dataDir)
 	if err != nil {
 		return err
 	}
-	dir = resolved
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -196,7 +190,7 @@ func serve(argv []string) error {
 	go updates.StartLoop(ctx)
 
 	workspaces := control.NewWorkspaces(control.WorkspacesOptions{
-		Home:          dir,
+		DataDir:       dir,
 		UserHome:      userHome,
 		WorkspacesDir: *workspacesDir,
 		WorkerCommand: command,
@@ -292,7 +286,7 @@ func serve(argv []string) error {
 // ACORNFALL_NO_SANDBOX is that refusal on purpose, not a fallback: no engine is configured,
 // nothing is installed or booted, and the worker's tools refuse. Tests use it so one command
 // behaves the same on a machine with /dev/kvm and in CI, which auto-detecting did not.
-func sandboxTier(ctx context.Context, home, state, engineName string) (*sandbox.Manager, *sandbox.Tier, error) {
+func sandboxTier(ctx context.Context, dataDir, state, engineName string) (*sandbox.Manager, *sandbox.Tier, error) {
 	if os.Getenv("ACORNFALL_NO_SANDBOX") != "" {
 		log.Printf("sandbox: disabled by ACORNFALL_NO_SANDBOX; commands and file tools will refuse")
 		return nil, nil, nil
@@ -300,7 +294,7 @@ func sandboxTier(ctx context.Context, home, state, engineName string) (*sandbox.
 	_ = ctx
 	// Every engine this build has, one manager each, so a workspace can choose its own. The
 	// default is the one --sandbox-engine names; a workspace that names one wins over it.
-	tier := sandbox.NewTier(home, state, log.Printf)
+	tier := sandbox.NewTier(dataDir, state, log.Printf)
 	engine, err := tier.For(engineName)
 	if err != nil {
 		return nil, nil, err
@@ -343,8 +337,8 @@ func versionCommand(argv []string) {
 	fmt.Println(version)
 }
 
-func versionString(home string) (string, error) {
-	manager := update.New(home, "")
+func versionString(dataDir string) (string, error) {
+	manager := update.New(dataDir, "")
 	if err := manager.Open(); err != nil {
 		return "", err
 	}
@@ -491,12 +485,11 @@ func resolveDataDir(flagValue string) (string, error) {
 	if flagValue != "" {
 		return filepath.Abs(flagValue)
 	}
-	if env := os.Getenv("ACORNFALL_HOME"); env != "" {
+	if env := os.Getenv("ACORNFALL_DATA_DIR"); env != "" {
 		return filepath.Abs(env)
 	}
-	if env := os.Getenv("ACORNFALL_DATA"); env != "" {
-		return filepath.Abs(env)
-	}
+	// The user's own home, not this install's folder: the two are different answers and the
+	// same word, which is why the install folder is called dataDir everywhere now.
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err

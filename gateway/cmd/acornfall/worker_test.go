@@ -21,8 +21,8 @@ func TestResolveWorkerPrefersExplicit(t *testing.T) {
 }
 
 func TestResolveWorkerEnvDirUsesSystemBun(t *testing.T) {
-	home := t.TempDir()
-	manager := update.New(home, "")
+	dataDir := t.TempDir()
+	manager := update.New(dataDir, "")
 	sources := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(sources, "src"), 0o755); err != nil {
 		t.Fatal(err)
@@ -41,8 +41,8 @@ func TestResolveWorkerEnvDirUsesSystemBun(t *testing.T) {
 }
 
 func TestResolveWorkerDefaultsToManaged(t *testing.T) {
-	home := t.TempDir()
-	manager := update.New(home, "")
+	dataDir := t.TempDir()
+	manager := update.New(dataDir, "")
 	got, dir, managed := resolveWorker("", manager)
 	if !managed {
 		t.Fatal("default worker must be managed")
@@ -56,11 +56,11 @@ func TestResolveWorkerDefaultsToManaged(t *testing.T) {
 }
 
 func TestVersionStringReadsFile(t *testing.T) {
-	home := t.TempDir()
-	if err := os.WriteFile(home+"/version", []byte("v0.9.0\n"), 0o644); err != nil {
+	dataDir := t.TempDir()
+	if err := os.WriteFile(dataDir+"/version", []byte("v0.9.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	version, err := versionString(home)
+	version, err := versionString(dataDir)
 	if err != nil || version != "v0.9.0" {
 		t.Fatalf("version = %q, %v", version, err)
 	}

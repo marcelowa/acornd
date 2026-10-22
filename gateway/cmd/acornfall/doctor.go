@@ -100,11 +100,11 @@ type engineReport struct {
 // sandboxReports asks every engine this build knows, in the order a workspace would be given
 // one. Each answer stands alone: an engine that cannot run here says why, and that is the
 // answer, not a failure of the report.
-func sandboxReports(home string) []engineReport {
-	defaultEngine := sandbox.NewTier(home, "", nil).Default()
+func sandboxReports(dataDir string) []engineReport {
+	defaultEngine := sandbox.NewTier(dataDir, "", nil).Default()
 	reports := make([]engineReport, 0, len(sandbox.EngineNames()))
 	for _, name := range sandbox.EngineNames() {
-		manager, err := reportManager(home, name)
+		manager, err := reportManager(dataDir, name)
 		if err != nil {
 			reports = append(reports, engineReport{Report: sandbox.Report{Engine: name, Problem: err.Error()}, Default: name == defaultEngine})
 			continue
@@ -171,10 +171,10 @@ func stateOf(engine engineReport) string {
 
 // readyInput gathers what the readiness list reads from the managers
 // doctor already owns. Report-only where possible: doctor changes nothing.
-func readyInput(home string, updater *update.Manager, health update.Preflight, report sandbox.Report, engineName string) ready.Input {
+func readyInput(dataDir string, updater *update.Manager, health update.Preflight, report sandbox.Report, engineName string) ready.Input {
 	_, bunOK := updater.BunInstalled()
 	return ready.Input{
-		Home:            home,
+		DataDir:         dataDir,
 		Current:         health.Version,
 		RuntimeTag:      updater.RuntimeTag(),
 		Worker:          updater.WorkerVersion(),
@@ -188,7 +188,7 @@ func readyInput(home string, updater *update.Manager, health update.Preflight, r
 		EngineDisabled:  disabledReason(),
 		Latest:          health.Latest,
 		ReleasesNote:    health.Releases,
-		HasCredential:   ready.HasCredential(home),
+		HasCredential:   ready.HasCredential(dataDir),
 	}
 }
 
@@ -203,17 +203,17 @@ func disabledReason() string {
 
 // readyInputForBoot gathers the boot-time readiness list. The engine may
 // be nil (refused tier): that is a stated answer, not a missing one.
-func readyInputForBoot(home string, updates *update.Manager, engine *sandbox.Manager) ready.Input {
+func readyInputForBoot(dataDir string, updates *update.Manager, engine *sandbox.Manager) ready.Input {
 	_, bunOK := updates.BunInstalled()
 	status := updates.Status()
 	input := ready.Input{
-		Home:          home,
+		DataDir:       dataDir,
 		Current:       status.Current,
 		RuntimeTag:    updates.RuntimeTag(),
 		Worker:        updates.WorkerVersion(),
 		BunPath:       updates.BunPath(),
 		BunOK:         bunOK,
-		HasCredential: ready.HasCredential(home),
+		HasCredential: ready.HasCredential(dataDir),
 		Latest:        status.Latest,
 	}
 	if engine == nil {
@@ -237,13 +237,13 @@ func readyInputForBoot(home string, updates *update.Manager, engine *sandbox.Man
 // reportManager builds the report-only manager doctor describes. It has to name an engine:
 // without a driver, Open refuses ("sandbox: Driver is required") and doctor can only report
 // that failure, never the tier it exists to diagnose.
-func reportManager(home, engineName string) (*sandbox.Manager, error) {
-	driver, err := sandbox.Engine(home, "", engineName)
+func reportManager(dataDir, engineName string) (*sandbox.Manager, error) {
+	driver, err := sandbox.Engine(dataDir, "", engineName)
 	if err != nil {
 		return nil, err
 	}
 	return sandbox.Open(context.Background(), sandbox.Options{
-		Home:       home,
+		DataDir:    dataDir,
 		Driver:     driver,
 		ReportOnly: true,
 	})

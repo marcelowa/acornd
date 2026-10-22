@@ -51,10 +51,10 @@ func (f *fakeBwrap) Run(_ context.Context, args ...string) (string, error) {
 	return "", nil
 }
 
-func testBwrap(t *testing.T, home string) (*Bwrap, *fakeBwrap) {
+func testBwrap(t *testing.T, dataDir string) (*Bwrap, *fakeBwrap) {
 	t.Helper()
 	runner := &fakeBwrap{version: "bubblewrap 0.11.0"}
-	driver := NewBwrap(home).
+	driver := NewBwrap(dataDir).
 		WithRunner(runner).
 		WithImageSource(fakeImage).
 		WithLookPath(func(string) (string, error) { return "/usr/bin/bwrap", nil })
@@ -119,8 +119,8 @@ func TestBwrapVersionIsBubblewrapsOwn(t *testing.T) {
 }
 
 func TestBwrapRefusesWhenTheMachineWillNotMakeAUserNamespace(t *testing.T) {
-	home := t.TempDir()
-	driver, runner := testBwrap(t, home)
+	dataDir := t.TempDir()
+	driver, runner := testBwrap(t, dataDir)
 	runner.probe = errors.New("exit status 1")
 	err := driver.Usable()
 	if err == nil {
@@ -151,20 +151,20 @@ func TestBwrapInstallNamesTheCommand(t *testing.T) {
 }
 
 func TestBwrapCreateWritesWhatTheWorkspaceRunsUnder(t *testing.T) {
-	home := t.TempDir()
+	dataDir := t.TempDir()
 	workspace := filepath.Join(t.TempDir(), "work")
-	if err := os.MkdirAll(filepath.Join(home, "skills"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(dataDir, "skills"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	driver, _ := testBwrap(t, home)
+	driver, _ := testBwrap(t, dataDir)
 	policy := Policy{
 		Workspace: workspace,
 		Image:     "debian:stable-slim",
 		Egress:    false,
-		Global:    []string{filepath.Join(home, "skills"), filepath.Join(home, "absent")},
+		Global:    []string{filepath.Join(dataDir, "skills"), filepath.Join(dataDir, "absent")},
 	}
 	if _, err := driver.writeConfig(policy, t.TempDir()); err != nil {
 		t.Fatalf("create: %v", err)
@@ -190,12 +190,12 @@ func TestBwrapCreateWritesWhatTheWorkspaceRunsUnder(t *testing.T) {
 	}
 	// Only folders that exist are mounted: a mount that does not resolve would make every
 	// command fail, and a later-created folder is the next command's business.
-	if len(config.ReadOnly) != 1 || config.ReadOnly[0] != filepath.Join(home, "skills") {
+	if len(config.ReadOnly) != 1 || config.ReadOnly[0] != filepath.Join(dataDir, "skills") {
 		t.Fatalf("read-only mounts: %v", config.ReadOnly)
 	}
 	// The private home is inside the engine's folder, so removing the sandbox removes it.
-	if !strings.HasPrefix(config.Home, driver.StateDir()) {
-		t.Fatalf("home %q is not inside %q", config.Home, driver.StateDir())
+	if !strings.HasPrefix(config.DataDir, driver.StateDir()) {
+		t.Fatalf("home %q is not inside %q", config.DataDir, driver.StateDir())
 	}
 	// The workspace's own copy of its image, and the apt line that makes a container root
 	// usable under a single-mapping user namespace.
@@ -205,7 +205,7 @@ func TestBwrapCreateWritesWhatTheWorkspaceRunsUnder(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(config.Rootfs, "etc", "apt", "apt.conf.d", "99-acornfall")); err != nil {
 		t.Fatalf("the apt sandbox line was not written: %v", err)
 	}
-	info, err := os.Stat(config.Home)
+	info, err := os.Stat(config.DataDir)
 	if err != nil || !info.IsDir() {
 		t.Fatalf("home was not created: %v", err)
 	}
@@ -214,9 +214,9 @@ func TestBwrapCreateWritesWhatTheWorkspaceRunsUnder(t *testing.T) {
 // Egress is carried by pasta: the sandbox gets an address inside a namespace of its own, and the
 // host's own stack is not what a command is on.
 func TestBwrapCreateCarriesEgressWithPasta(t *testing.T) {
-	home := t.TempDir()
+	dataDir := t.TempDir()
 	workspace := t.TempDir()
-	driver, _ := testBwrap(t, home)
+	driver, _ := testBwrap(t, dataDir)
 	driver = driver.WithLookPath(func(name string) (string, error) {
 		return "/usr/bin/" + name, nil
 	})
@@ -275,9 +275,9 @@ func TestBwrapCreateNamesWhatEgressNeeds(t *testing.T) {
 }
 
 func TestBwrapCreateIsIdempotent(t *testing.T) {
-	home := t.TempDir()
+	dataDir := t.TempDir()
 	workspace := t.TempDir()
-	driver, _ := testBwrap(t, home)
+	driver, _ := testBwrap(t, dataDir)
 	policy := Policy{Workspace: workspace}
 	for i := 0; i < 2; i++ {
 		if _, err := driver.writeConfig(policy, t.TempDir()); err != nil {
@@ -292,9 +292,9 @@ func TestBwrapCreateIsIdempotent(t *testing.T) {
 }
 
 func TestBwrapRemoveDeletesTheHomeAndNotTheWorkspace(t *testing.T) {
-	home := t.TempDir()
+	dataDir := t.TempDir()
 	workspace := t.TempDir()
-	driver, _ := testBwrap(t, home)
+	driver, _ := testBwrap(t, dataDir)
 	if _, err := driver.writeConfig(Policy{Workspace: workspace}, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestBwrapSandboxArgvIsOneSandboxPerWorkspace(t *testing.T) {
 		Workspace:   "/work/ws",
 		Image:       "debian:stable-slim",
 		Rootfs:      "/state/ws/rootfs",
-		Home:        "/state/ws/home",
+		DataDir:     "/state/ws/home",
 		Hidden:      "/home/me/.acornfall",
 		ReadOnly:    []string{"/home/me/.agents"},
 		Bwrap:       "/usr/bin/bwrap",
@@ -379,7 +379,7 @@ func TestBwrapSandboxArgvSharesPastaForEgress(t *testing.T) {
 	config := bwrapConfig{
 		Workspace:   "/work/ws",
 		Rootfs:      "/state/ws/rootfs",
-		Home:        "/state/ws/home",
+		DataDir:     "/state/ws/home",
 		Bwrap:       "/usr/bin/bwrap",
 		Supervisor:  "/install/acornfall",
 		Run:         "/state/ws/run",
@@ -420,12 +420,12 @@ func TestBwrapSandboxArgvSharesPastaForEgress(t *testing.T) {
 // A socket path has a length limit, and the host side carries the workspace's name. That is a
 // refusal with a sentence, not a kernel error passed through.
 func TestBwrapRefusesASocketPathThatIsTooLong(t *testing.T) {
-	home := filepath.Join(t.TempDir(), strings.Repeat("very-long-folder-name/", 4))
-	if err := os.MkdirAll(home, 0o755); err != nil {
+	dataDir := filepath.Join(t.TempDir(), strings.Repeat("very-long-folder-name/", 4))
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	workspace := t.TempDir()
-	driver, _ := testBwrap(t, home)
+	driver, _ := testBwrap(t, dataDir)
 	_, err := driver.writeConfig(Policy{Workspace: workspace}, t.TempDir())
 	if err == nil {
 		t.Skip("this machine's temp folder is short enough that the path fits")
@@ -442,9 +442,9 @@ func TestBwrapHasALifecycleLikeEveryOtherEngine(t *testing.T) {
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		t.Skip("no bubblewrap on this machine")
 	}
-	home := t.TempDir()
+	dataDir := t.TempDir()
 	workspace := t.TempDir()
-	driver := NewBwrap(home).
+	driver := NewBwrap(dataDir).
 		WithImageSource(fakeImage).
 		WithLookPath(func(name string) (string, error) {
 			if path, err := exec.LookPath(name); err == nil {
@@ -629,7 +629,7 @@ func TestBwrapKeepsTheIdleTimeoutAPolicyNames(t *testing.T) {
 func TestBwrapRefusesPrivateNetworksWithoutAGrant(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
 	config := bwrapConfig{
-		Workspace: "/work/ws", Rootfs: "/state/ws/rootfs", Home: "/state/ws/home",
+		Workspace: "/work/ws", Rootfs: "/state/ws/rootfs", DataDir: "/state/ws/home",
 		Bwrap: "/usr/bin/bwrap", Supervisor: "/install/acornfall",
 		Run: "/state/ws/run", GuestRun: guestRunDir, GuestSocket: guestSocketPath,
 		Network: bwrapNetwork{
@@ -659,7 +659,7 @@ func TestBwrapRefusesPrivateNetworksWithoutAGrant(t *testing.T) {
 func TestBwrapAGrantReachesPrivateNetworks(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
 	config := bwrapConfig{
-		Workspace: "/work/ws", Rootfs: "/state/ws/rootfs", Home: "/state/ws/home",
+		Workspace: "/work/ws", Rootfs: "/state/ws/rootfs", DataDir: "/state/ws/home",
 		Bwrap: "/usr/bin/bwrap", Supervisor: "/install/acornfall",
 		Run: "/state/ws/run", GuestRun: guestRunDir, GuestSocket: guestSocketPath,
 		Network: bwrapNetwork{

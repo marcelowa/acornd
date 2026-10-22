@@ -25,7 +25,7 @@ import (
 // asks the control's lock whether it is free, which is true exactly when the registry is
 // being read from outside it. No timing, no goroutines, no flakes.
 func TestStateDoesNotTakeTheRegistryLockInsideItsOwn(t *testing.T) {
-	workspaces := NewWorkspaces(WorkspacesOptions{Home: t.TempDir()})
+	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: t.TempDir()})
 	if err := workspaces.loadRegistry(); err != nil {
 		t.Fatal(err)
 	}

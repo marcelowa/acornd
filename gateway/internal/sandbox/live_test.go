@@ -11,8 +11,8 @@ import (
 // one. A fresh directory per run means a fresh pull of the image every run, which is how a
 // suite meets a registry's anonymous rate limit; the shared directory is also what the e2e
 // suite's image cache is.
-func liveDriver(home string) *Microsandbox {
-	driver := NewMicrosandbox(home)
+func liveDriver(dataDir string) *Microsandbox {
+	driver := NewMicrosandbox(dataDir)
 	if state := os.Getenv("ACORNFALL_SANDBOX_STATE"); state != "" {
 		driver = driver.WithStateDir(state)
 	}
@@ -24,22 +24,22 @@ func TestLiveProduceAndStop(t *testing.T) {
 	if os.Getenv("ACORNFALL_LIVE_SANDBOX") == "" {
 		t.Skip("set ACORNFALL_LIVE_SANDBOX=1 to boot a real sandbox")
 	}
-	home := t.TempDir()
-	ws := filepath.Join(home, "work")
+	dataDir := t.TempDir()
+	ws := filepath.Join(dataDir, "work")
 	if err := os.MkdirAll(ws, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(ws, "hello.txt"), []byte("from the host\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	manager, err := Open(context.Background(), Options{Home: home, Driver: liveDriver(home), Log: t.Logf})
+	manager, err := Open(context.Background(), Options{DataDir: dataDir, Driver: liveDriver(dataDir), Log: t.Logf})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if problem := manager.Problem(); problem != nil {
 		t.Fatalf("no sandbox on this machine: %v", problem)
 	}
-	name, err := manager.Produce(context.Background(), Policy{Workspace: ws, Image: "debian:stable-slim", Egress: true}, filepath.Join(home, "state"))
+	name, err := manager.Produce(context.Background(), Policy{Workspace: ws, Image: "debian:stable-slim", Egress: true}, filepath.Join(dataDir, "state"))
 	if err != nil {
 		t.Fatal(err)
 	}

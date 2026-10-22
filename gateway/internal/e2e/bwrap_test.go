@@ -171,7 +171,7 @@ func TestBwrapWorkspaceInstallsIntoItsOwnImage(t *testing.T) {
 	}
 
 	// Nothing of this reached the host: the workspace's root is its own folder.
-	if _, err := os.Stat(filepath.Join(s.Home, "sandboxes", "bwrap")); err != nil {
+	if _, err := os.Stat(filepath.Join(s.DataDir, "sandboxes", "bwrap")); err != nil {
 		t.Fatalf("the engine's folder should hold the image and the workspace's copy: %v", err)
 	}
 }

@@ -40,7 +40,7 @@ credentials, defaults, model bindings, subscribers, and the registry itself.
 
 ## Layout
 
-`--home` is the installation folder, configurable, default `~/.acornfall`. It holds
+`--data-dir` is the installation folder, configurable, default `~/.acornfall`. It holds
 configuration, credentials, and runtime state, and it is hidden.
 
 **Workspaces are created in a separate, visible folder**: `--workspaces-dir`, default

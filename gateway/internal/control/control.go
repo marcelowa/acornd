@@ -33,8 +33,8 @@ var ErrNoProvider = errors.New("no authenticated provider")
 type Options struct {
 	// Workspace is the folder and name this Control serves.
 	Workspace Workspace
-	// Home is the installation folder: global resources and shared credentials.
-	Home string
+	// DataDir is the installation folder: global resources and shared credentials.
+	DataDir string
 	// UserHome is the user's home folder, for `~/.agents`, which a sandbox mounts read-only
 	// beside the install's own resource folders. The entry point resolves it and fails when it
 	// cannot, so a control always has one.
@@ -301,7 +301,7 @@ type Control struct {
 	defaultAgent    string
 	/** Whether the conversations that predate naming an agent have been given the general one. */
 	generalPinned bool
-	// install is the install-wide layer, from <home>/settings.json. Read-only for a
+	// install is the install-wide layer, from <data-dir>/settings.json. Read-only for a
 	// workspace: it is changed through the workspace layer, which writes the file once for
 	// every workspace to see.
 	install Defaults
@@ -533,7 +533,7 @@ func (c *Control) startWorker(ctx context.Context) error {
 		"--workspace", c.opts.Workspace.Path,
 		"--storage", c.opts.StoragePath,
 		"--credentials", c.opts.Credentials,
-		"--home", c.opts.Home,
+		"--data-dir", c.opts.DataDir,
 	)
 	// The sandbox is made first, because the worker is told to use it and refuses to run
 	// anything without it. A failure is a state, not a stop: the workspace opens, the tools
@@ -1026,7 +1026,7 @@ func (c *Control) provisionSandbox(ctx context.Context) SandboxState {
 	}
 	delivery := manager.SecretDelivery()
 	resolved := c.resolveSecrets(delivery)
-	policy := c.opts.Workspace.SandboxPolicy(c.opts.Home, c.opts.UserHome)
+	policy := c.opts.Workspace.SandboxPolicy(c.opts.DataDir, c.opts.UserHome)
 	policy.Secrets = resolved.delivered
 	if _, err := manager.Produce(ctx, policy, filepath.Dir(c.opts.StoragePath)); err != nil {
 		state.Problem = err.Error()
@@ -1228,7 +1228,7 @@ func (c *Control) applyPendingSecretRestart(ctx context.Context) {
 	applied := false
 	delivery := manager.SecretDelivery()
 	if delivery == sandbox.DeliverySubstitute {
-		policy := c.opts.Workspace.SandboxPolicy(c.opts.Home, c.opts.UserHome)
+		policy := c.opts.Workspace.SandboxPolicy(c.opts.DataDir, c.opts.UserHome)
 		policy.Secrets = c.resolveSecrets(delivery).delivered
 		if err := manager.Stop(ctx, c.opts.Workspace.Path); err != nil {
 			workerpool.Log("restart sandbox for secrets: %v", err)
@@ -2197,7 +2197,7 @@ func (c *Control) reapplyInheriting(ctx context.Context) error {
 
 // loadInstallDefaults reads the install-wide layer.
 func (c *Control) loadInstallDefaults() {
-	install, err := LoadDefaults(filepath.Join(c.opts.Home, "settings.json"))
+	install, err := LoadDefaults(filepath.Join(c.opts.DataDir, "settings.json"))
 	if err != nil {
 		workerpool.Log("install defaults unreadable, using this workspace's: %v", err)
 		return

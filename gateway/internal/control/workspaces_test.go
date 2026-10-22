@@ -45,7 +45,7 @@ func TestARegistryFromAnOlderBuildIsRewrittenWithoutOldKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	workspaces := NewWorkspaces(WorkspacesOptions{Home: dir})
+	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: dir})
 	if err := workspaces.loadRegistry(); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestARegistryFromAnOlderBuildIsRewrittenWithoutOldKeys(t *testing.T) {
 // Nesting is allowed unless this workspace refuses it: the install has no say any more, and an
 // unset field means "nest when the machine and the engine can", which is not the same as false.
 func TestNestingIsTheWorkspacesOwnDecision(t *testing.T) {
-	const home, userHome = "/home/me/.acornfall", "/home/me"
+	const dataDir, userHome = "/home/me/.acornfall", "/home/me"
 	on, off := true, false
 	cases := []struct {
 		name      string
@@ -87,7 +87,7 @@ func TestNestingIsTheWorkspacesOwnDecision(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			workspace := Workspace{DisableVMNesting: test.workspace}
-			got := workspace.SandboxPolicy(home, userHome).DisableVMNesting
+			got := workspace.SandboxPolicy(dataDir, userHome).DisableVMNesting
 			if got != test.want {
 				t.Errorf("DisableVMNesting = %t, want %t", got, test.want)
 			}
@@ -109,7 +109,7 @@ func TestAWorkspacesSandboxIsRemovedByItsOwnEngine(t *testing.T) {
 		t.Fatalf("tier: %v", err)
 	}
 	workspaces := NewWorkspaces(WorkspacesOptions{
-		Home:      t.TempDir(),
+		DataDir:   t.TempDir(),
 		Sandbox:   other, // the install's default is something else entirely
 		Sandboxes: tier,
 	})

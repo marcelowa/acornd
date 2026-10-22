@@ -14,12 +14,12 @@ import (
 
 func updateServer(t *testing.T) (*Server, *update.Manager) {
 	t.Helper()
-	home := t.TempDir()
+	dataDir := t.TempDir()
 	bin := filepath.Join(t.TempDir(), "acornfall")
 	if err := os.WriteFile(bin, []byte("old"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manager := update.New(home, bin)
+	manager := update.New(dataDir, bin)
 	if err := manager.SetCurrentVersion("v0.8.0"); err != nil {
 		t.Fatal(err)
 	}

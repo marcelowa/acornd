@@ -8,7 +8,7 @@ import (
 // The workspace command documents flags after its positionals, and the standard flag package
 // stops at the first positional. This is the split that keeps the documented form working.
 func TestSplitFlagsAcceptsFlagsAnywhere(t *testing.T) {
-	value := map[string]bool{"sandbox": true, "image": true, "network": true, "data-dir": true}
+	value := map[string]bool{"sandbox": true, "image": true, "egress": true, "data-dir": true}
 	for _, test := range []struct {
 		name  string
 		argv  []string
@@ -17,8 +17,8 @@ func TestSplitFlagsAcceptsFlagsAnywhere(t *testing.T) {
 	}{
 		{
 			name:  "flags last, as documented",
-			argv:  []string{"add", "demo", "/work/demo", "--sandbox", "bwrap", "--network", "off"},
-			flags: []string{"--sandbox", "bwrap", "--network", "off"},
+			argv:  []string{"add", "demo", "/work/demo", "--sandbox", "bwrap", "--egress", "off"},
+			flags: []string{"--sandbox", "bwrap", "--egress", "off"},
 			args:  []string{"add", "demo", "/work/demo"},
 		},
 		{

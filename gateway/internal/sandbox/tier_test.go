@@ -8,8 +8,8 @@ import (
 // The tier is what makes a workspace's engine its own: one manager per engine, built once, and
 // an unknown name refused rather than answered with a different engine.
 func TestTierGivesEachEngineItsOwnManager(t *testing.T) {
-	home := t.TempDir()
-	tier := NewTier(home, "", nil)
+	dataDir := t.TempDir()
+	tier := NewTier(dataDir, "", nil)
 
 	host, err := tier.For("host")
 	if err != nil {

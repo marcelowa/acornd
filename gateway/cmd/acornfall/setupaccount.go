@@ -22,14 +22,14 @@ type setupAccount struct {
 	Basis string
 	UID   int
 	GID   int
-	// Home is the account's own home: the child gets it so a tool that reads ~/.config reads that
+	// DataDir is the account's own home: the child gets it so a tool that reads ~/.config reads that
 	// account's, not the acornfall folder's.
-	Home string
+	DataDir string
 }
 
 // accountFor decides which account setup is about. The owner of the acornfall folder is the
 // honest default — it is the account the install belongs to — and --for overrides it.
-func accountFor(requested string, root bool, home string) (setupAccount, error) {
+func accountFor(requested string, root bool, dataDir string) (setupAccount, error) {
 	if requested != "" {
 		account, err := lookupAccount(requested)
 		if err != nil {
@@ -57,9 +57,9 @@ func accountFor(requested string, root bool, home string) (setupAccount, error) 
 			return account, nil
 		}
 	}
-	if owner, err := folderOwner(home); err == nil && owner != "" {
+	if owner, err := folderOwner(dataDir); err == nil && owner != "" {
 		if account, err := lookupAccount(owner); err == nil {
-			account.Basis = "owns " + home
+			account.Basis = "owns " + dataDir
 			return account, nil
 		}
 	}
@@ -97,8 +97,8 @@ func serviceUser() string {
 
 // folderOwner is the account the install folder belongs to: the same account that will run the
 // sandbox, because a sandbox is made in that folder.
-func folderOwner(home string) (string, error) {
-	info, err := os.Stat(home)
+func folderOwner(dataDir string) (string, error) {
+	info, err := os.Stat(dataDir)
 	if err != nil {
 		return "", err
 	}
@@ -126,19 +126,19 @@ func lookupAccount(name string) (setupAccount, error) {
 	if err != nil {
 		return setupAccount{}, err
 	}
-	return setupAccount{Name: account.Username, UID: uid, GID: gid, Home: account.HomeDir}, nil
+	return setupAccount{Name: account.Username, UID: uid, GID: gid, DataDir: account.HomeDir}, nil
 }
 
 // probeAs answers the probes for one account. For this process's own account that is a direct
 // question; for another one it is the same binary run with that account's credentials, which is
 // how root can ask without sudo, without a password, and without a shell.
-func probeAs(who setupAccount, home string) (setupReport, error) {
+func probeAs(who setupAccount, dataDir string) (setupReport, error) {
 	current, err := user.Current()
 	if err != nil {
 		return setupReport{}, err
 	}
 	if current.Username == who.Name {
-		return gatherSetup(home), nil
+		return gatherSetup(dataDir), nil
 	}
 	if os.Geteuid() != 0 {
 		return setupReport{}, fmt.Errorf("cannot check %s from this account: run setup as %s", who.Name, who.Name)
@@ -151,7 +151,7 @@ func probeAs(who setupAccount, home string) (setupReport, error) {
 	if err != nil {
 		return setupReport{}, err
 	}
-	command := exec.Command(executable, "setup", "--probe", "--data-dir", home)
+	command := exec.Command(executable, "setup", "--probe", "--data-dir", dataDir)
 	if attr := credentialFor(uint32(who.UID), uint32(who.GID), groupIDs); attr != nil {
 		command.SysProcAttr = attr
 	}
@@ -159,7 +159,7 @@ func probeAs(who setupAccount, home string) (setupReport, error) {
 	// finds, and HOME decides nothing (the folder is passed) but a sessionless root's env would
 	// still be a lie about whose machine this is.
 	command.Env = []string{
-		"HOME=" + who.Home,
+		"HOME=" + who.DataDir,
 		"USER=" + who.Name,
 		"LOGNAME=" + who.Name,
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -217,8 +217,8 @@ type probeWire struct {
 
 // writeProbe is the hidden mode: answer with the checks and nothing else. It is reached only by
 // probeAs, and it never decides anything.
-func writeProbe(home string) {
-	payload, err := json.Marshal(wireOf(gatherSetup(home)))
+func writeProbe(dataDir string) {
+	payload, err := json.Marshal(wireOf(gatherSetup(dataDir)))
 	if err != nil {
 		logf("acornfall setup: %v", err)
 		os.Exit(1)

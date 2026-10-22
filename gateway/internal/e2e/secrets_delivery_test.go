@@ -20,7 +20,7 @@ func TestSecretsReachTheSandboxWithoutTheirValues(t *testing.T) {
 	const rotated = "e2e-rotated-value"
 	s := start(t,
 		withSetup(func(t *testing.T, s *system) {
-			writeVault(t, s.Home, []map[string]any{{
+			writeVault(t, s.DataDir, []map[string]any{{
 				"name":         "SPIKE_TOKEN",
 				"description":  "a test token",
 				"scope":        "global",
@@ -107,7 +107,7 @@ func TestSecretsReachTheSandboxWithoutTheirValues(t *testing.T) {
 	if after.Sandbox.SecretsRestart {
 		t.Error("rotating an existing secret should not need a restart")
 	}
-	payload, err := os.ReadFile(filepath.Join(s.Home, "secrets.json"))
+	payload, err := os.ReadFile(filepath.Join(s.DataDir, "secrets.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,13 +183,13 @@ func TestSecretsReachTheSandboxWithoutTheirValues(t *testing.T) {
 	}
 }
 
-func writeVault(t *testing.T, home string, secrets []map[string]any) {
+func writeVault(t *testing.T, dataDir string, secrets []map[string]any) {
 	t.Helper()
 	payload, err := json.Marshal(map[string]any{"version": 1, "secrets": secrets})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(home, "secrets.json"), append(payload, '\n'), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dataDir, "secrets.json"), append(payload, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

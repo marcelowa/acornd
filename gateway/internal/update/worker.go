@@ -37,9 +37,9 @@ const WorkerTarball = "worker.tar.gz"
 // bunDownloadBase is where bun releases live. A test points elsewhere.
 const bunDownloadBase = "https://github.com/oven-sh/bun/releases/download"
 
-func (m *Manager) toolsDir() string   { return filepath.Join(m.home, "tools") }
+func (m *Manager) toolsDir() string   { return filepath.Join(m.dataDir, "tools") }
 func (m *Manager) bunDir() string     { return filepath.Join(m.toolsDir(), "bun-"+BunVersion) }
-func (m *Manager) workerDir() string  { return filepath.Join(m.home, "worker") }
+func (m *Manager) workerDir() string  { return filepath.Join(m.dataDir, "worker") }
 func (m *Manager) workerBak() string  { return m.workerDir() + ".bak" }
 func (m *Manager) workerBad() string  { return m.workerDir() + ".bad" }
 func (m *Manager) workerTag() string  { return filepath.Join(m.workerDir(), "VERSION") }
@@ -47,7 +47,7 @@ func (m *Manager) workerLock() string { return filepath.Join(m.workerDir(), "bun
 func (m *Manager) workerMark() string {
 	return filepath.Join(m.workerDir(), "node_modules", ".acornfall-installed")
 }
-func (m *Manager) workerPending() string { return filepath.Join(m.home, "worker.pending.tgz") }
+func (m *Manager) workerPending() string { return filepath.Join(m.dataDir, "worker.pending.tgz") }
 
 // BunPath is where the pinned bun lives. It may not exist yet: EnsureBun
 // downloads it, and a missing one with no network is a refusal, not a guess.

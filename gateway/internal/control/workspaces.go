@@ -40,11 +40,11 @@ const GeneralWorkspaceName = "general"
 // would otherwise land wherever the process happened to start, which is not a place anyone
 // chose and is how a folder of them appears in a container's working directory.
 func DefaultWorkspacesDir() (string, error) {
-	home, err := os.UserHomeDir()
+	dataDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("cannot tell where to create workspaces: %w (pass --workspaces-dir)", err)
 	}
-	return filepath.Join(home, "acornfall", "workspaces"), nil
+	return filepath.Join(dataDir, "acornfall", "workspaces"), nil
 }
 
 // Workspace is a folder the agent works in, plus the decisions that belong to it.
@@ -90,12 +90,12 @@ type Workspace struct {
 const NetworkOff = "off"
 
 // SandboxPolicy is what this workspace's sandbox is allowed to be. It is derived rather than
-// stored so that a new field cannot be forgotten in one of the two places. `home` is the
+// stored so that a new field cannot be forgotten in one of the two places. `dataDir` is the
 // installation folder and `userHome` is the user's, because the global resources live in two
 // places and the worker reads both: the sandbox mounts the same paths at the same strings.
 // `disableVMNesting` is the install's own answer, --disable-vm-nesting, and a workspace's
 // own setting wins over it.
-func (w Workspace) SandboxPolicy(home, userHome string) sandbox.Policy {
+func (w Workspace) SandboxPolicy(dataDir, userHome string) sandbox.Policy {
 	disableVMNesting := false
 	if w.DisableVMNesting != nil {
 		disableVMNesting = *w.DisableVMNesting
@@ -106,7 +106,7 @@ func (w Workspace) SandboxPolicy(home, userHome string) sandbox.Policy {
 		Egress:           w.Network != NetworkOff,
 		PrivateEgress:    w.Private,
 		DisableVMNesting: disableVMNesting,
-		Global:           sandbox.GlobalPaths(home, userHome),
+		Global:           sandbox.GlobalPaths(dataDir, userHome),
 	}
 	if w.KeepAlive {
 		// An engine that stops idle sandboxes on its own has to be told not to here: control
@@ -141,8 +141,8 @@ func Views(list []Workspace) []WorkspaceState {
 
 // WorkspacesOptions configures the workspace layer.
 type WorkspacesOptions struct {
-	// Home is the installation folder: global resources, credentials, and state.
-	Home string
+	// DataDir is the installation folder: global resources, credentials, and state.
+	DataDir string
 	// UserHome is the user's home folder, where `~/.agents` lives. It is resolved at the
 	// entry point so that the sandbox mount list and the worker's reads are built from the
 	// same answer.
@@ -454,14 +454,14 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 
 	control = New(Options{
 		Workspace:     workspace,
-		Credentials:   filepath.Join(w.opts.Home, "credentials.json"),
+		Credentials:   filepath.Join(w.opts.DataDir, "credentials.json"),
 		Registry:      w.List,
 		WorkspacesDir: w.Dir(),
-		Home:          w.opts.Home,
+		DataDir:       w.opts.DataDir,
 		UserHome:      w.opts.UserHome,
-		StoragePath:   filepath.Join(w.opts.Home, "state", name, "session.sqlite"),
-		SettingsPath:  filepath.Join(w.opts.Home, "state", name, "settings.json"),
-		DraftsPath:    filepath.Join(w.opts.Home, "state", name, "drafts.json"),
+		StoragePath:   filepath.Join(w.opts.DataDir, "state", name, "session.sqlite"),
+		SettingsPath:  filepath.Join(w.opts.DataDir, "state", name, "settings.json"),
+		DraftsPath:    filepath.Join(w.opts.DataDir, "state", name, "drafts.json"),
 		Sandbox:       w.opts.Sandbox,
 		Sandboxes:     w.opts.Sandboxes,
 		Engines:       w.Engines,
@@ -471,7 +471,7 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 		Update:        w.opts.Update,
 		Model:         w.opts.Model,
 	})
-	if err := os.MkdirAll(filepath.Join(w.opts.Home, "state", name), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(w.opts.DataDir, "state", name), 0o700); err != nil {
 		return nil, err
 	}
 	control.Open(ctx)
@@ -483,10 +483,10 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 	return control, nil
 }
 
-// The install-wide defaults file: <home>/settings.json. The layer that owns the file owns
+// The install-wide defaults file: <data-dir>/settings.json. The layer that owns the file owns
 // writing it, so every workspace sees one value rather than a copy each.
 func (w *Workspaces) installDefaultsPath() string {
-	return filepath.Join(w.opts.Home, "settings.json")
+	return filepath.Join(w.opts.DataDir, "settings.json")
 }
 
 // SetInstallModel changes the model every workspace falls back to, below its own default
@@ -790,7 +790,7 @@ func validateWorkspace(workspace Workspace) error {
 }
 
 func (w *Workspaces) registryPath() string {
-	return filepath.Join(w.opts.Home, registryFile)
+	return filepath.Join(w.opts.DataDir, registryFile)
 }
 
 // RegistryFile is the workspaces registry as it exists on disk. It has one owner so the
@@ -954,14 +954,14 @@ func (w *Workspaces) persist() error {
 // settings file, moved into the general workspace's state directory. Nothing is rewritten
 // inside them, so every conversation appears exactly where it was.
 func (w *Workspaces) migrate() error {
-	state := filepath.Join(w.opts.Home, "state", GeneralWorkspaceName)
+	state := filepath.Join(w.opts.DataDir, "state", GeneralWorkspaceName)
 	// The write-ahead log travels with its database. Moving one without the other loses
 	// every commit that had not been checkpointed and leaves megabytes behind.
 	moves := []struct{ from, to string }{
-		{filepath.Join(w.opts.Home, "session.sqlite"), filepath.Join(state, "session.sqlite")},
-		{filepath.Join(w.opts.Home, "session.sqlite-wal"), filepath.Join(state, "session.sqlite-wal")},
-		{filepath.Join(w.opts.Home, "session.sqlite-shm"), filepath.Join(state, "session.sqlite-shm")},
-		{filepath.Join(w.opts.Home, "settings.json"), filepath.Join(state, "settings.json")},
+		{filepath.Join(w.opts.DataDir, "session.sqlite"), filepath.Join(state, "session.sqlite")},
+		{filepath.Join(w.opts.DataDir, "session.sqlite-wal"), filepath.Join(state, "session.sqlite-wal")},
+		{filepath.Join(w.opts.DataDir, "session.sqlite-shm"), filepath.Join(state, "session.sqlite-shm")},
+		{filepath.Join(w.opts.DataDir, "settings.json"), filepath.Join(state, "settings.json")},
 	}
 	for _, move := range moves {
 		if _, err := os.Stat(move.from); err != nil {
@@ -982,7 +982,7 @@ func (w *Workspaces) migrate() error {
 	// leaving them would both waste space and invite the next reader to use the wrong one.
 	if _, err := os.Stat(filepath.Join(state, "session.sqlite")); err == nil {
 		for _, orphan := range []string{"session.sqlite-wal", "session.sqlite-shm"} {
-			path := filepath.Join(w.opts.Home, orphan)
+			path := filepath.Join(w.opts.DataDir, orphan)
 			if _, err := os.Stat(path); err == nil {
 				workerpool.Log("removing orphaned %s", path)
 				_ = os.Remove(path)

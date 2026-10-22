@@ -31,7 +31,7 @@ type Requirement struct {
 // Input is everything the checks read. The caller gathers it from the
 // managers it already owns; this package decides nothing it cannot see.
 type Input struct {
-	Home string
+	DataDir string
 	// Current is the running tag ("dev" for source builds).
 	Current string
 	// RuntimeTag is the binary's own stamp when it has one: execution
@@ -66,36 +66,36 @@ func Satisfied(requirements []Requirement) bool {
 	return true
 }
 
-// Check builds the list. Filesystem reads stay under Home so tests run
+// Check builds the list. Filesystem reads stay under DataDir so tests run
 // anywhere; /dev/kvm and disk space read the machine, which is the point.
 func Check(input Input) []Requirement {
 	return []Requirement{
-		homeWritable(input.Home),
+		dataDirWritable(input.DataDir),
 		bun(input),
 		worker(input),
 		engine(input),
 		hypervisor(),
 		credentials(input),
-		disk(input.Home),
+		disk(input.DataDir),
 		releases(input),
 	}
 }
 
-func homeWritable(home string) Requirement {
-	dir := home
+func dataDirWritable(dataDir string) Requirement {
+	dir := dataDir
 	created := "is writable"
-	// Doctor must not create anything: a home that does not exist yet is
+	// Doctor must not create anything: a folder that does not exist yet is
 	// judged by its parent, which is where creation would happen.
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		dir = filepath.Dir(home)
+		dir = filepath.Dir(dataDir)
 		created = "will be created inside writable " + dir
 	}
 	probe := dir + "/.acornfall-writable"
 	if err := os.WriteFile(probe, []byte("ok"), 0o600); err != nil {
-		return Requirement{"home", false, "cannot write " + dir + ": " + err.Error(), "run with a writable --home"}
+		return Requirement{"data-dir", false, "cannot write " + dir + ": " + err.Error(), "run with a writable --data-dir"}
 	}
 	_ = os.Remove(probe)
-	return Requirement{"home", true, home + " " + created, ""}
+	return Requirement{"data-dir", true, dataDir + " " + created, ""}
 }
 
 func bun(input Input) Requirement {
@@ -161,10 +161,10 @@ func credentials(input Input) Requirement {
 	return Requirement{"credentials", false, "no provider stored", "acornfall provider add <provider> <key> (the dev provider needs none)"}
 }
 
-func disk(home string) Requirement {
+func disk(dataDir string) Requirement {
 	var stat syscall.Statfs_t
-	if err := syscall.Statfs(home, &stat); err != nil {
-		if err := syscall.Statfs(filepath.Dir(home), &stat); err != nil {
+	if err := syscall.Statfs(dataDir, &stat); err != nil {
+		if err := syscall.Statfs(filepath.Dir(dataDir), &stat); err != nil {
 			return Requirement{"disk", true, "free space unreadable, assuming room", ""}
 		}
 	}
@@ -188,12 +188,12 @@ func releases(input Input) Requirement {
 }
 
 // HasCredential reports whether the credentials file names a provider.
-func HasCredential(home string) bool {
-	return credentialCount(home) > 0
+func HasCredential(dataDir string) bool {
+	return credentialCount(dataDir) > 0
 }
 
-func credentialCount(home string) int {
-	payload, err := os.ReadFile(home + "/credentials.json")
+func credentialCount(dataDir string) int {
+	payload, err := os.ReadFile(dataDir + "/credentials.json")
 	if err != nil {
 		return 0
 	}

@@ -448,7 +448,7 @@ func TestAGlobalSkillsScriptRunsInsideTheWorkspace(t *testing.T) {
 	}
 
 	c.prompt("general", root, fmt.Sprintf("run the script \u2014 RUN: sh %s && cat %s",
-		filepath.Join(directory, "run.sh"), filepath.Join(s.Home, "config.json")))
+		filepath.Join(directory, "run.sh"), filepath.Join(s.DataDir, "config.json")))
 	got := c.waitForText("general", root, "ran the global script")
 
 	ran := got.lastToolResult()

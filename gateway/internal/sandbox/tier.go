@@ -14,9 +14,9 @@ import (
 // probes nothing until a workspace actually needs it. A machine with three engines configured
 // and one in use pays for one.
 type Tier struct {
-	home  string
-	state string
-	log   func(string, ...any)
+	dataDir string
+	state   string
+	log     func(string, ...any)
 
 	mu       sync.Mutex
 	managers map[string]*Manager
@@ -24,8 +24,8 @@ type Tier struct {
 
 // NewTier holds the install's engines. home and state are passed to each driver: state is the
 // engine store override, empty for the default under home.
-func NewTier(home, state string, log func(string, ...any)) *Tier {
-	return &Tier{home: home, state: state, log: log, managers: map[string]*Manager{}}
+func NewTier(dataDir, state string, log func(string, ...any)) *Tier {
+	return &Tier{dataDir: dataDir, state: state, log: log, managers: map[string]*Manager{}}
 }
 
 // For returns the manager for an engine name, building it once. An engine this build does not
@@ -42,11 +42,11 @@ func (t *Tier) For(name string) (*Manager, error) {
 	if manager, ok := t.managers[name]; ok {
 		return manager, nil
 	}
-	driver, err := Engine(t.home, t.state, name)
+	driver, err := Engine(t.dataDir, t.state, name)
 	if err != nil {
 		return nil, err
 	}
-	manager, err := Open(context.Background(), Options{Home: t.home, Driver: driver, Log: t.log})
+	manager, err := Open(context.Background(), Options{DataDir: t.dataDir, Driver: driver, Log: t.log})
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +63,7 @@ func (t *Tier) For(name string) (*Manager, error) {
 // nothing, so it is what is left, not what is preferred.
 func (t *Tier) Default() string {
 	for _, name := range EngineNames() {
-		driver, err := Engine(t.home, t.state, name)
+		driver, err := Engine(t.dataDir, t.state, name)
 		if err != nil {
 			continue
 		}
