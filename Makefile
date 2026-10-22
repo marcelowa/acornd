@@ -7,7 +7,7 @@ HOST ?= 0.0.0.0
 PORT ?= 7777
 URL ?= http://127.0.0.1:7777
 
-.PHONY: help deps build typecheck lint modernize tools commits check test cover test-sandbox test-bwrap sandbox-preflight ui ui-build run dev fmt clean release release-branch
+.PHONY: help deps build typecheck lint modernize analyze tools commits check test cover test-sandbox test-bwrap sandbox-preflight ui ui-build run dev fmt clean release release-branch
 
 # The linters, installed into the Go and bun toolchains rather than vendored. `make lint` runs
 # whichever are present and names the ones that are not, so a missing tool is a message and
@@ -18,6 +18,12 @@ STATICCHECK := $(GOBIN)/staticcheck
 # x/tools v0.52.0 moved it out of gopls and into go/analysis/passes; gopls v0.24.0 no longer
 # carries the old path, which is what stopped the daily workflow installing it.
 MODERNIZE := $(GOBIN)/modernize
+# Complexity, duplication, dead assignments and error shape, named rule by rule in
+# gateway/.golangci.yml. It also runs staticcheck, so it replaced the separate call rather than
+# adding to it.
+GOLANGCI := $(GOBIN)/golangci-lint
+# Unreachable code, which `unused` cannot see across function boundaries.
+DEADCODE := $(GOBIN)/deadcode
 # The language version the gateway is written against, from its own go.mod. The linters must
 # be built with at least it: a staticcheck built by an older Go refuses to read newer sources
 # and reports the toolchain's standard library as broken. `go install pkg@version` ignores
@@ -47,8 +53,10 @@ ui-build: ## build the interface into the embed directory the gateway serves
 	cd ui && bun run build
 	@touch gateway/web/dist/.gitkeep
 
-tools: ## install the linters used by `make lint`
+tools: ## install the linters used by `make lint` and `make analyze`
 	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install honnef.co/go/tools/cmd/staticcheck@latest
+	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install golang.org/x/tools/cmd/deadcode@latest
 	cd worker && bun install
 
 typecheck: ## the compiler's opinion, without running anything
@@ -78,8 +86,7 @@ lint: ui-build typecheck ## the static rules; fails on the first one broken
 	cd ui && bun run check:system
 	cd ui && bun run format:check
 
-cover: ## coverage across both processes, merged; FLOOR=0 reports without failing
-	@# Two halves, one number. `go test -cover` sees only the unit half: the feature suite starts
+cover: ## coverage across both processes, merged; FLOOR=0 reports without failing	@# Two halves, one number. `go test -cover` sees only the unit half: the feature suite starts
 	@# the gateway as its own process, so the binary is built for coverage, writes to GOCOVERDIR,
 	@# and its counters are joined with the unit profile before anything is judged. Without this
 	@# the end-to-end suite counted for nothing, which is not a claim about anyone's diligence.
@@ -92,6 +99,24 @@ cover: ## coverage across both processes, merged; FLOOR=0 reports without failin
 	cd gateway && go tool covdata textfmt -i=$(COVER_DIR)/e2e -o=$(COVER_DIR)/e2e.cover
 	bun scripts/coverage.mjs merge $(COVER_DIR)/merged.cover $(COVER_DIR)/unit.cover $(COVER_DIR)/e2e.cover
 	bun scripts/coverage.mjs report $(COVER_DIR)/merged.cover --floor $(FLOOR) --ignore .coverageignore --root $(CURDIR)
+
+# The complexity and maintainability half of the bar (#102): a report, not a gate. A gate that is
+# red from the day it lands is one nobody runs, so this prints the backlog and leaves the exit
+# code alone; it joins `make lint` when the queue is empty.
+analyze: ## complexity, duplication, dead code, error shape: the backlog as a report
+	@if [ -x "$(GOLANGCI)" ]; then cd gateway && $(GOLANGCI) run ./... || true; \
+	else echo "golangci-lint: not installed (make tools)"; fi
+	@# A symbol is dead only if no platform reaches it: run per GOOS and keep the intersection.
+	@# `nestedFromApple` is unreachable on linux and the only caller on darwin, which is exactly
+	@# the false positive a single-platform run would report as a deletion.
+	@if [ -x "$(DEADCODE)" ]; then cd gateway && tmp=$$(mktemp -d) && \
+		for pair in linux/amd64 darwin/arm64; do \
+			GOOS=$${pair%/*} GOARCH=$${pair#*/} $(DEADCODE) -test ./cmd/acornfall | sort > $$tmp/$${pair%/*}; \
+		done; \
+		printf '\ndead code, unreachable on both linux and darwin:\n'; \
+		comm -12 $$tmp/linux $$tmp/darwin | sed 's/^/  /'; \
+		rm -rf $$tmp; \
+	else echo "deadcode: not installed (make tools)"; fi
 
 # Not part of `make test` or `make lint`, on purpose: this is the one Go check measured in seconds
 # rather than milliseconds, and what it finds is drift rather than a bug — a newer spelling of a

@@ -1,0 +1,73 @@
+# The linters `make analyze` runs, named one by one.
+#
+# Every default is off, for the reason `worker/.oxlintrc.json` gives on the other side of the
+# wire: a recommended set that changes under you is a gate nobody agreed to. Each entry here is
+# a decision with a reason beside it, and removing one is as reviewable as adding one.
+#
+# This is not yet `make lint`. It reports the backlog instead of failing the build, because a
+# gate that is red from the day it lands is a gate that gets switched off; it joins `lint` when
+# the packages have been brought to the bar (#102).
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    # The one that already runs directly. It stays because this config replaced the direct call:
+    # one command that knows every rule beats two that know half each.
+    - staticcheck
+    # Complexity, as a number and not a feeling: a function nobody can hold in their head is
+    # where the bugs that survive review live. Thresholds below.
+    - gocognit
+    - gocyclo
+    # A 432-line function is a file that lost its structure, not a function that is long.
+    - funlen
+    # The index that mixes size, operators and control flow. A low score is "nobody will read
+    # this twice", which is exactly what a god-file is.
+    - maintidx
+    # Two copies of one rule is how they disagree three months later.
+    - dupl
+    # Errors: wrapped so `errors.Is` works, compared with `errors.Is` not `==`, and a switch
+    # over a union that grows breaks.
+    - errorlint
+    - exhaustive
+    # Names that are always the same are a parameter nobody needed.
+    - unparam
+    - unconvert
+    # Dead code and dead assignments, which "lean" means and nothing else checked.
+    - unused
+    - ineffassign
+    - misspell
+
+  settings:
+    gocognit:
+      min-complexity: 15
+    gocyclo:
+      min-complexity: 10
+    funlen:
+      lines: 60
+      statements: 50
+    maintidx:
+      under: 20
+    dupl:
+      threshold: 100
+
+  exclusions:
+    rules:
+      # A test is judged by whether it fails when the code breaks, not by a complexity number:
+      # an end-to-end test that describes one scenario is long because the scenario is. The size
+      # and shape rules apply to the code that ships.
+      - path: _test\.go
+        linters:
+          - dupl
+          - funlen
+          - gocognit
+          - gocyclo
+          - unparam
+
+issues:
+  # A report of the whole backlog is the point: a cap makes the count a lie.
+  max-issues-per-linter: 0
+  max-same-issues: 0

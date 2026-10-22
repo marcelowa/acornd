@@ -24,6 +24,12 @@
 				"typescript/switch-exhaustiveness-check": "error",
 				// Types at the edges: `any` is not allowed; `unknown` plus a check is the way.
 				"typescript/no-explicit-any": "error",
+				// Complexity and size, at the same bar as the Go side (#102). `warn` while the queue is
+				// not empty: a gate that is red from the day it lands is one nobody runs, and `oxlint`
+				// only fails on errors. These become errors when the worker is brought to the bar.
+				"complexity": ["warn", 15],
+				"max-lines": ["warn", { "max": 600, "skipComments": true, "skipBlankLines": true }],
+				"max-lines-per-function": ["warn", { "max": 60, "skipComments": true, "skipBlankLines": true }],
 				"typescript/no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
 				"typescript/consistent-type-imports": ["error", { "prefer": "type-imports" }],
 				// Listed to record the decision: `!` is how this code states what it just checked.
