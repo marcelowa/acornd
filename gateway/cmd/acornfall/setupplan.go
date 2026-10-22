@@ -187,21 +187,29 @@ func runPlanAsRoot(path string) {
 		logf("acornfall setup: the plan is not readable: %v", err)
 		os.Exit(1)
 	}
-	if err := plan.validate(); err != nil {
-		logf("acornfall setup: the plan asks for something this command does not do: %v", err)
+	if err := applyPlan(plan); err != nil {
+		logf("acornfall setup: %v", err)
 		os.Exit(1)
+	}
+}
+
+// applyPlan runs a plan's steps. The validation is here as well as in the privileged half because
+// root mode reaches this without a file in between, and a rule with two doors is a rule with one
+// door.
+func applyPlan(plan rootPlan) error {
+	if err := plan.validate(); err != nil {
+		return fmt.Errorf("the plan asks for something this command does not do: %w", err)
 	}
 	actions := plan.actions()
 	if len(actions) == 0 {
 		fmt.Println("nothing to change")
-		return
+		return nil
 	}
 	for _, action := range actions {
 		fmt.Printf("· %s\n", action.Why)
 		if action.File != "" {
 			if err := os.WriteFile(action.File, []byte(action.Write), 0o644); err != nil {
-				logf("acornfall setup: %s: %v", action.File, err)
-				os.Exit(1)
+				return fmt.Errorf("%s: %w", action.File, err)
 			}
 			continue
 		}
@@ -216,10 +224,10 @@ func runPlanAsRoot(path string) {
 				fmt.Printf("  (%s is not here; continuing)\n", action.Run[0])
 				continue
 			}
-			logf("acornfall setup: %s: %v", action.Run[0], err)
-			os.Exit(1)
+			return fmt.Errorf("%s: %w", action.Run[0], err)
 		}
 	}
+	return nil
 }
 
 // bestEffort names the steps whose absence is a machine without that mechanism, not a failure:

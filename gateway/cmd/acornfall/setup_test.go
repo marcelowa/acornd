@@ -224,3 +224,97 @@ func TestSetupReadsTheDistribution(t *testing.T) {
 		}
 	}
 }
+
+// Who the checks are about is a decision with a wrong answer that looks like a right one: on a
+// machine where root installed acornfall, root can open /dev/kvm and make a user namespace
+// whatever the policy says, so probing as root reports a machine that works while the service's
+// workspaces cannot boot.
+func TestSetupChecksTheAccountThatRunsAcornfall(t *testing.T) {
+	current, err := user.Current()
+	if err != nil {
+		t.Skip("no current user")
+	}
+	for _, test := range []struct {
+		name      string
+		requested string
+		root      bool
+		home      string
+		want      string
+	}{
+		{name: "an ordinary user is the account", root: false, home: t.TempDir(), want: current.Username},
+		{name: "--for wins", requested: current.Username, root: true, home: t.TempDir(), want: current.Username},
+	} {
+		account, err := accountFor(test.requested, test.root, test.home)
+		if err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+		if account.Name != test.want {
+			t.Errorf("%s: got %q, want %q", test.name, account.Name, test.want)
+		}
+	}
+	// An account that does not exist is a typo to refuse, not a name to grant to.
+	if _, err := accountFor("no-such-account-at-all", true, t.TempDir()); err == nil {
+		t.Fatal("an unknown --for should be refused")
+	}
+}
+
+// Root without sudo checks the folder's owner, and says where the name came from so a wrong guess
+// is visible in the output rather than discovered later.
+func TestSetupTakesTheAccountFromTheInstallFolder(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("only root can be told which account to act for")
+	}
+	home := t.TempDir()
+	if err := os.Chown(home, 12345, 12345); err != nil {
+		t.Skipf("cannot change the folder's owner here: %v", err)
+	}
+	account, err := accountFor("", true, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if account.Name != "?" && !strings.Contains(account.Basis, "owns") {
+		t.Fatalf("the basis should say the folder decided it: %+v", account)
+	}
+}
+
+// The checks cross a process boundary as data, and every problem has to come back as the same
+// sentence it was: an empty string is "fine", and the words are the whole value.
+func TestASetupReportSurvivesTheProcessBoundary(t *testing.T) {
+	before := working()
+	before.BwrapErr = errors.New("sandbox unavailable: bubblewrap cannot create a user namespace here")
+	before.KVMErr = errors.New("sandbox unavailable: /dev/kvm is not readable by me")
+	before.Linger = false
+	after := reportOf(wireOf(before))
+	if after.BwrapErr == nil || after.BwrapErr.Error() != before.BwrapErr.Error() {
+		t.Fatalf("the user-namespace problem came back as %v", after.BwrapErr)
+	}
+	if after.KVMErr == nil || after.KVMErr.Error() != before.KVMErr.Error() {
+		t.Fatalf("the hypervisor problem came back as %v", after.KVMErr)
+	}
+	if after.PastaErr != nil || after.TunErr != nil {
+		t.Fatalf("nothing was wrong with pasta or tun, but they came back as %v / %v", after.PastaErr, after.TunErr)
+	}
+	if after.BwrapPath != before.BwrapPath || after.LingerKnown != before.LingerKnown {
+		t.Fatalf("the rest of the report changed: %+v", after)
+	}
+}
+
+// The confirmation is a deliberate word, not a keystroke typed on the way to something else.
+func TestSetupAppliesOnlyOnAYes(t *testing.T) {
+	for input, want := range map[string]bool{
+		"y\n": true, "yes\n": true, "Y\n": true,
+		"\n": false, "n\n": false, "no\n": false, "yeah\n": false,
+	} {
+		reader := strings.NewReader(input)
+		original := stdinForTest
+		stdinForTest = reader
+		got, err := confirm("? ")
+		stdinForTest = original
+		if err != nil {
+			t.Fatalf("%q: %v", input, err)
+		}
+		if got != want {
+			t.Errorf("%q: got %v, want %v", input, got, want)
+		}
+	}
+}

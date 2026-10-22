@@ -39,7 +39,7 @@ another worker, not changing the control plane.
 First, ask the machine what it needs — and let it fix it:
 
 ```bash
-acornfall setup     # probes as you, and asks for your password only for the steps that need root
+acornfall setup     # probes, then asks for your password only for the steps that need root
 ```
 
 It names each step before asking (install `bubblewrap passt`, allow user namespaces, make
@@ -47,6 +47,12 @@ It names each step before asking (install `bubblewrap passt`, allow user namespa
 missing ones through `sudo`, then probes again and tells you what is left — a new group needs a
 new login, and nothing can change that for you. Where a password cannot be asked for (no `sudo`,
 or no terminal), it prints the same steps as copy-pasteable commands instead.
+
+Already root? No password exists, so the plan is what you approve: it shows the steps and asks
+`apply these steps? [y/N]` (`--yes` for a script). Either way it checks the account that runs
+acornfall, not the one typing: the owner of the acornfall folder, `--for USER` to say otherwise.
+Root can open `/dev/kvm` and make a user namespace whatever the policy says, so a check run as
+root would report a machine that works while the service's workspaces cannot boot.
 
 Then:
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/user"
@@ -21,16 +22,22 @@ import (
 const applyIsGone = "acornfall setup: --apply is not needed any more: `acornfall setup` asks for your password when it needs root"
 
 // setupCommand answers "can this machine run a workspace, and if not, what does it need" — and
-// then does it. It runs as the user, because the question is about that user's access, and asks
-// for a password itself when a step needs root (ADR 0026).
+// then does it, in whichever of three ways this machine allows (ADR 0026):
+//
+//	already root        the plan is shown and applied on a yes, with no password to type
+//	an ordinary user     the plan is shown, then sudo asks for the password
+//	neither             the plan is printed as commands to run
 //
 // One command is the whole interface: `acornfall setup`. The privileged half is the same binary
-// with `--privileged --plan FILE`, which this command runs through sudo and nobody types.
+// with `--privileged --plan FILE`, which this command runs itself and nobody types.
 func setupCommand(argv []string) {
 	flags := flag.NewFlagSet("setup", flag.ContinueOnError)
 	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	forUser := flags.String("for", "", "the account that runs acornfall (default: the owner of the acornfall folder)")
+	probe := flags.Bool("probe", false, "internal: print what this account can do, as JSON (setup runs this as the account)")
 	privileged := flags.Bool("privileged", false, "internal: run a plan as root (setup runs this through sudo)")
 	planPath := flags.String("plan", "", "internal: the plan to run with --privileged")
+	assumeYes := flags.Bool("yes", false, "apply the steps without asking first (for a script that already decided)")
 	apply := flags.Bool("apply", false, "no longer needed: acornfall setup asks for a password itself")
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
@@ -43,17 +50,32 @@ func setupCommand(argv []string) {
 		runPlanAsRoot(*planPath)
 		return
 	}
-	if os.Geteuid() == 0 {
-		logf("acornfall setup: run this as the user who will use acornfall, not as root: the checks are about that user's access, and root has all of it")
-		os.Exit(2)
-	}
 	home, err := resolveDataDir(*dataDir)
 	if err != nil {
 		logf("acornfall setup: %v", err)
 		os.Exit(2)
 	}
-	who := currentNodeUser()
-	report := gatherSetup(home)
+	if *probe {
+		// The hidden half of "probe as the account that runs acornfall": root re-executes this
+		// binary with that account's credentials, and all it does is answer with the checks.
+		writeProbe(home)
+		return
+	}
+	root := os.Geteuid() == 0
+	account, err := accountFor(*forUser, root, home)
+	if err != nil {
+		logf("acornfall setup: %v", err)
+		os.Exit(2)
+	}
+	who := account.Name
+	if root {
+		fmt.Printf("checking for the account that runs acornfall: %s (%s)\n\n", who, account.Basis)
+	}
+	report, err := probeAs(account, home)
+	if err != nil {
+		logf("acornfall setup: %v", err)
+		os.Exit(2)
+	}
 	text, ok := renderSetup(report)
 	fmt.Print(text)
 	plan := planFor(report, who)
@@ -66,36 +88,81 @@ func setupCommand(argv []string) {
 	if why := containerAdvice(report); why != "" {
 		fmt.Print("\n" + why + "\n")
 	}
-	fmt.Printf("\n%s root:\n", stepCount(countSteps(plan)))
+	fmt.Printf("\n%s root, for %s:\n", stepCount(countSteps(plan)), who)
 	for _, line := range plan.description() {
 		fmt.Printf("  · %s\n", line)
 	}
-	if err := escalate(plan); err != nil {
-		if errors.Is(err, errNoEscalation) {
-			fmt.Println("\nthis machine cannot ask for a password here (no sudo, or no terminal to type one into). run:")
-			for _, line := range printedFixes(report, who) {
-				fmt.Printf("  %s\n", line)
+	switch {
+	case root:
+		// No password exists to ask for, so the plan is what gets approved.
+		if !*assumeYes {
+			agreed, err := confirm("apply these steps? [y/N] ")
+			if err != nil {
+				logf("acornfall setup: %v", err)
+				os.Exit(1)
 			}
+			if !agreed {
+				fmt.Println("\nnothing was changed. the same steps are:")
+				for _, line := range printedFixes(report, who) {
+					fmt.Printf("  %s\n", line)
+				}
+				os.Exit(1)
+			}
+		}
+		if err := applyPlan(plan); err != nil {
+			logf("acornfall setup: %v", err)
 			os.Exit(1)
 		}
+	default:
+		if err := escalate(plan); err != nil {
+			if errors.Is(err, errNoEscalation) {
+				fmt.Println("\nthis machine cannot ask for a password here (no sudo, or no terminal to type one into). run:")
+				for _, line := range printedFixes(report, who) {
+					fmt.Printf("  %s\n", line)
+				}
+				os.Exit(1)
+			}
+			logf("acornfall setup: %v", err)
+			os.Exit(1)
+		}
+	}
+	// Say what changed, from the same probes that said what was missing, asked of the same
+	// account. A group added to an account is not in any running process's groups, and no command
+	// can add it there: only a new session can.
+	fmt.Println()
+	after, err := probeAs(account, home)
+	if err != nil {
 		logf("acornfall setup: %v", err)
 		os.Exit(1)
 	}
-	// Say what changed, from the same probes that said what was missing. A machine that needed a
-	// group is told that a group needs a new login, which no command can give it.
-	fmt.Println()
-	after := gatherSetup(home)
 	final, ok := renderSetup(after)
 	fmt.Print(final)
 	if plan.KVMUser != "" {
-		// A group added to the account is not in this process's own groups, and no command can
-		// add it there: only a new login can.
-		fmt.Printf("\nthe kvm group is new: log out and back in for it to apply\n")
+		fmt.Printf("\n%s must log out and back in for the kvm group to apply, and the gateway must be\nrestarted so it starts with that group\n", who)
 	}
 	if !ok {
 		fmt.Printf("\nstill not ready: this machine needs something root cannot give it\n")
 		os.Exit(1)
 	}
+}
+
+// stdinForTest is the terminal a person types a confirmation into; a test answers instead.
+var stdinForTest io.Reader = os.Stdin
+
+// confirm reads one answer. Anything but yes is no: a command that changes a machine should need
+// a deliberate word, not a keystroke somebody typed on the way to something else.
+func confirm(prompt string) (bool, error) {
+	fmt.Print(prompt)
+	reader := bufio.NewReader(stdinForTest)
+	answer, err := reader.ReadString('\n')
+	if err != nil && answer == "" {
+		return false, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		return true, nil
+	}
+	return false, nil
 }
 
 // stepCount reads as a sentence for one step and for several: "1 step needs root" is the kind of
@@ -472,18 +539,6 @@ func installFolder() (string, error) {
 	_ = probe.Close()
 	_ = os.Remove(probe.Name())
 	return dir, nil
-}
-
-// currentNodeUser is who to name in a command that takes a user: the one running this.
-func currentNodeUser() string {
-	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
-		return sudoUser
-	}
-	current, err := user.Current()
-	if err != nil {
-		return "you"
-	}
-	return current.Username
 }
 
 // mark is the two-character column that makes a list scannable: yes, no, or not applicable.

@@ -33,10 +33,15 @@ What does need root, once, and can never be vendored:
 
 ## The decision
 
-**1. One command says what the machine needs, and does it** (`acornfall setup`). The probes are
-the user's, run as the user — root can always make a user namespace, so asking as root answers a
-different question — and when a step needs root the command writes that step to a plan, says why,
-and runs the same binary through `sudo`, which is what asks for the password. The privileged half
+**1. One command says what the machine needs, and does it** (`acornfall setup`), in whichever of
+three shapes the machine allows: already root, the plan is shown and applied on a `y`; an ordinary
+user, the plan is shown and `sudo` asks for the password; neither, the plan is printed as commands
+that can be run. The probes belong to the **account that runs acornfall**, never the one typing:
+root can open `/dev/kvm` and make a user namespace whatever the policy says, so a check run as
+root would report a machine that works while the service's workspaces cannot boot. That account is
+the owner of the acornfall folder (`--for` overrides), and when it is not this process's account
+root re-executes the same binary with that account's ids and groups to ask. When a step needs
+root the command writes it to a plan, says why, and runs the same binary through `sudo`. The privileged half
 reads the plan as data and builds the commands itself, refusing anything outside its own short
 vocabulary, so escalation is "these four machine-level steps" rather than "whatever a file said".
 `--apply` no longer exists: a second invocation with a flag teaches the wrong habit. iproute2 is
