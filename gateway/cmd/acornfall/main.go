@@ -488,6 +488,17 @@ func resolveDataDir(flagValue string) (string, error) {
 	if env := os.Getenv("ACORNFALL_DATA_DIR"); env != "" {
 		return filepath.Abs(env)
 	}
+	// The two older names, read only so an update can happen: the updater that stages a new
+	// binary runs it to ask its version, and the updater doing that is the one already on disk.
+	// A v0.14 install therefore points a v0.15 binary at an empty folder with ACORNFALL_HOME,
+	// and without this the binary would answer about the live folder and be refused as the
+	// wrong version. Nothing but an updater should set them; they go when v0.14 is out of
+	// support (ADR 0027).
+	for _, legacy := range []string{"ACORNFALL_HOME", "ACORNFALL_DATA"} {
+		if env := os.Getenv(legacy); env != "" {
+			return filepath.Abs(env)
+		}
+	}
 	// The user's own home, not this install's folder: the two are different answers and the
 	// same word, which is why the install folder is called dataDir everywhere now.
 	home, err := os.UserHomeDir()

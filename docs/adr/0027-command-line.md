@@ -67,6 +67,11 @@ named as future work rather than implied by a switch nobody set.
   `--addr`, `--network`/`--private`, `--sandbox-engine`, `--disable-vm-nesting` (install-wide),
   `--migrate-dir`, `--worker-dir`, `--worker-bin`, `secret rm`, and `secret --workspace <folder>`
   all changed or went away. The release notes name each replacement; this is a pre-1.0 break.
+- **The old folder names are still read, for one purpose.** `ACORNFALL_HOME` and
+  `ACORNFALL_DATA` are honoured after `ACORNFALL_DATA_DIR`, because the updater that stages a new
+  binary is the one already on disk: a v0.14 install points a v0.15 binary at an empty folder to
+  ask its version, and a binary that ignored the old name would answer about the live folder and
+  be refused. The shim goes when v0.14 is out of support; nothing else should set those names.
 - **Two things moved to the environment**: `ACORNFALL_WORKER` (worker sources) and
   `ACORNFALL_SANDBOX_ENGINE` (a whole-install engine, for a test or a machine that must be told).
   `ACORNFALL_MODEL` stays as the last resort.

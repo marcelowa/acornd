@@ -1178,7 +1178,13 @@ func checkExec(ctx context.Context, payload []byte, tag string) error {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, tempPath, "version")
-	command.Env = append(os.Environ(), "ACORNFALL_DATA_DIR="+emptyDataDir)
+	// Every name the folder has had, because the staged binary may be older or newer than this
+	// one: the check exists to learn what the *staged* build is, so it must speak its dialect.
+	command.Env = append(os.Environ(),
+		"ACORNFALL_DATA_DIR="+emptyDataDir,
+		"ACORNFALL_HOME="+emptyDataDir,
+		"ACORNFALL_DATA="+emptyDataDir,
+	)
 	output, err := command.Output()
 	if err != nil {
 		return fmt.Errorf("update: staged %s does not run: %w", tag, err)

@@ -1213,3 +1213,36 @@ func TestApplyRefusesAnInstallFolderItCannotWrite(t *testing.T) {
 		t.Fatalf("the refusal should name the fix: %v", err)
 	}
 }
+
+// The staged-binary check runs a build that may be older or newer than this one, so it names the
+// install folder every way the binary could ask: a v0.15 binary cannot read the v0.14 environment
+// and would otherwise answer about the live folder and be refused as the wrong version.
+func TestTheVersionGateSpeaksEveryFolderName(t *testing.T) {
+	seen := filepath.Join(t.TempDir(), "seen.txt")
+	script := filepath.Join(t.TempDir(), "staged")
+	body := "#!/bin/sh\n" +
+		`printf '%s|%s|%s' "$ACORNFALL_DATA_DIR" "$ACORNFALL_HOME" "$ACORNFALL_DATA" > ` + seen + "\n" +
+		"echo v9.9.9\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkExec(context.Background(), []byte(body), "v9.9.9"); err != nil {
+		t.Fatalf("the gate should accept the tag the staged build printed: %v", err)
+	}
+	payload, err := os.ReadFile(seen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(string(payload), "|")
+	if len(parts) != 3 {
+		t.Fatalf("wanted three folder names, got %q", payload)
+	}
+	for _, part := range parts {
+		if part == "" {
+			t.Fatalf("one of the folder names was empty: %q", payload)
+		}
+		if part != parts[0] {
+			t.Fatalf("the three names should point at one folder: %q", payload)
+		}
+	}
+}
