@@ -39,8 +39,10 @@ user, the plan is shown and `sudo` asks for the password; neither, the plan is p
 that can be run. The probes belong to the **account that runs acornfall**, never the one typing:
 root can open `/dev/kvm` and make a user namespace whatever the policy says, so a check run as
 root would report a machine that works while the service's workspaces cannot boot. That account is
-the owner of the acornfall folder (`--for` overrides), and when it is not this process's account
-root re-executes the same binary with that account's ids and groups to ask. When a step needs
+the owner of the acornfall folder, else the user its systemd unit runs as, else root itself — and
+`--for` overrides all three, because a guess that is wrong should be visible in the output rather
+than discovered later. When the account is not this process's, root re-executes the same binary
+with that account's ids and groups to ask. When a step needs
 root the command writes it to a plan, says why, and runs the same binary through `sudo`. The privileged half
 reads the plan as data and builds the commands itself, refusing anything outside its own short
 vocabulary, so escalation is "these four machine-level steps" rather than "whatever a file said".

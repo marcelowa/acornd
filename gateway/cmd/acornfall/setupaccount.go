@@ -63,9 +63,36 @@ func accountFor(requested string, root bool, home string) (setupAccount, error) 
 			return account, nil
 		}
 	}
+	// A machine where acornfall is a service says so itself, which is the answer when the folder
+	// root would look in does not exist — the common case when acornfall was installed for an
+	// account other than root's.
+	if name := serviceUser(); name != "" {
+		if account, err := lookupAccount(name); err == nil {
+			account.Basis = "the acornfall service runs as " + name
+			return account, nil
+		}
+	}
 	// Nothing to go on: root is the only answer, and the basis says so rather than pretending.
 	self.Basis = "nothing says otherwise; pass --for if another account runs acornfall"
 	return self, nil
+}
+
+// serviceUser is the account the acornfall system service runs as, or empty when there is no such
+// unit or no systemd to ask. It is the machine's own record of who runs this, which beats the
+// guess "root, because nothing said otherwise".
+func serviceUser() string {
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		return ""
+	}
+	out, err := exec.Command("systemctl", "show", "acornfall.service", "--property=User", "--value").Output()
+	if err != nil {
+		return ""
+	}
+	name := strings.TrimSpace(string(out))
+	if name == "" || name == "root" {
+		return ""
+	}
+	return name
 }
 
 // folderOwner is the account the install folder belongs to: the same account that will run the
