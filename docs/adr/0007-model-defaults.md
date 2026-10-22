@@ -157,7 +157,7 @@ workspace on that model" has no answer in the interface.
 ## The last resort
 
 When no layer has chosen a model, control prefers `deepseek-v4.1-flash` among what the
-credentials actually offer, then the `--model` flag, then the first model of the first
+credentials actually offer, then `ACORNFALL_MODEL` (a last resort for a script or a test), then the first model of the first
 authenticated provider. The preference exists because the end of the line used to be
 "whatever is listed first" (alphabetically `minimax-m3`), which is not a decision anyone
 made.

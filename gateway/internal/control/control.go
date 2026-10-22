@@ -2327,7 +2327,7 @@ func (c *Control) conversationInfo(conversationID string) (protocol.Conversation
 }
 
 // parseModelBinding reads the "provider/modelId" form the overlay, the stored configuration,
-// and the --model flag all share.
+// and ACORNFALL_MODEL all share.
 func parseModelBinding(value string) (protocol.ModelBinding, bool) {
 	parts := strings.SplitN(value, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
@@ -3084,7 +3084,7 @@ func (c *Control) applyDescribe(describe protocol.Describe) {
 // preference, not a rule: a model nobody offers is skipped.
 var lastResortModels = []string{"deepseek-v4.1-flash"}
 
-// deriveLastResort picks what runs when no layer chose a model: the --model flag, then the
+// deriveLastResort picks what runs when no layer chose a model: ACORNFALL_MODEL, then the
 // preferred models, then the first authenticated provider's first model. Only the flag and
 // the preference are decisions; the end of the line is a guess, and it is reported as the
 // last resort rather than being stored as though someone had chosen it.
@@ -3092,7 +3092,7 @@ func (c *Control) deriveLastResort(describe protocol.Describe) (protocol.ModelBi
 	if model := strings.TrimSpace(c.opts.Model); model != "" {
 		binding, ok := parseModelBinding(model)
 		if !ok {
-			return protocol.ModelBinding{}, fmt.Errorf("--model must be provider/modelId, got %q", model)
+			return protocol.ModelBinding{}, fmt.Errorf("ACORNFALL_MODEL must be provider/modelId, got %q", model)
 		}
 		return binding, nil
 	}

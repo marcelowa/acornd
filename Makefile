@@ -152,10 +152,10 @@ sandbox-preflight: ## fail, not skip, when there is no hypervisor for the microV
 	fi
 
 run: build ## run against the current directory
-	./$(BIN) --host $(HOST) --port $(PORT) --workspace $(CURDIR)
+	./$(BIN) start --host $(HOST) --port $(PORT)
 
 dev: build ## run with the scripted dev provider (no api key needed)
-	cd worker && ACORNFALL_DEV_PROVIDER=1 ../$(BIN) --host $(HOST) --port $(PORT) --workspace $(CURDIR) --data-dir $(DATA) --model faux/faux-1 --worker-dir $(CURDIR)/worker
+	cd worker && ACORNFALL_DEV_PROVIDER=1 ACORNFALL_MODEL=faux/faux-1 ACORNFALL_WORKER=$(CURDIR)/worker ../$(BIN) start --host $(HOST) --port $(PORT) --data-dir $(DATA)
 
 ui: ## check the interface in a real browser (needs a running gateway)
 	cd tools && bun run check-ui.mjs $(URL)

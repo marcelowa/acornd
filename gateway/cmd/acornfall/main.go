@@ -52,6 +52,8 @@ func main() {
 		secretCommand(args[1:])
 	case "provider":
 		providers(args[1:])
+	case "model":
+		modelCommand(args[1:])
 	case "version":
 		versionCommand(args[1:])
 	case "internal":
@@ -97,6 +99,7 @@ func usage(w io.Writer) {
   workspace  list, add, and remove workspaces
   secret     list, add, show, rotate, and remove secrets
   provider   list, add, and remove model provider keys
+  model      list or choose the default model
   version    print the running version
 
 acornfall <command> -h    explains that command's flags
@@ -111,7 +114,6 @@ func serve(argv []string) error {
 	dataDir := flags.String("data-dir", "", "alias for --home")
 	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornfall/workspaces)")
 	sandboxState := flags.String("sandbox-state", "", "where sandboxes, images, and snapshots are kept (default: <home>/sandboxes); must be a short path")
-	model := flags.String("model", "", "default model as provider/modelId")
 	workerCommand := flags.String("worker", "", `worker command (default: ensured bun over ensured sources)`)
 	if err := flags.Parse(argv); err != nil {
 		return err
@@ -206,7 +208,7 @@ func serve(argv []string) error {
 				RestartRequired: status.RestartRequired,
 			}
 		},
-		Model:     *model,
+		Model:     os.Getenv("ACORNFALL_MODEL"),
 		Sandbox:   engine,
 		Sandboxes: tier,
 		Vault:     secrets,
@@ -322,9 +324,10 @@ func sandboxTier(ctx context.Context, home, state, engineName string) (*sandbox.
 // and scripts check it without starting anything.
 func versionCommand(argv []string) {
 	flags := flag.NewFlagSet("version", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "data directory")
-	if err := flags.Parse(argv); err != nil {
-		return
+	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	flagArgs, _ := splitFlags(argv, map[string]bool{"data-dir": true})
+	if err := flags.Parse(flagArgs); err != nil {
+		os.Exit(2)
 	}
 	dir, err := resolveDataDir(*dataDir)
 	if err != nil {
@@ -347,11 +350,12 @@ func versionString(home string) (string, error) {
 
 func providers(argv []string) {
 	flags := flag.NewFlagSet("provider", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "data directory")
-	if err := flags.Parse(argv); err != nil {
-		return
+	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	flagArgs, positional := splitFlags(argv, map[string]bool{"data-dir": true})
+	if err := flags.Parse(flagArgs); err != nil {
+		os.Exit(2)
 	}
-	args := flags.Args()
+	args := positional
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: acornfall provider <list|add|remove>")
 		os.Exit(2)
@@ -372,12 +376,28 @@ func providers(argv []string) {
 			fmt.Printf("%-24s %s\n", id, credential.Type)
 		}
 	case "add":
-		if len(args) < 3 {
-			fmt.Fprintln(os.Stderr, "usage: acornfall provider add <provider> <api-key>")
+		if len(args) < 2 || len(args) > 3 {
+			fmt.Fprintln(os.Stderr, `usage: acornfall provider add <provider> [<api-key>]
+
+With the key in argv the value is in the shell history and in every process listing; with the
+key left out it is read from stdin, which is what a script should do.`)
 			os.Exit(2)
 		}
+		key := ""
+		if len(args) == 3 {
+			key = args[2]
+		} else {
+			payload, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
+			if err != nil {
+				log.Fatalf("acornfall: %v", err)
+			}
+			key = strings.TrimSpace(string(payload))
+		}
+		if key == "" {
+			log.Fatalf("acornfall: no api key for %s", args[1])
+		}
 		all := readCredentials(path)
-		all[args[1]] = credential{Type: "api_key", Key: args[2]}
+		all[args[1]] = credential{Type: "api_key", Key: key}
 		if err := writeCredentials(path, all); err != nil {
 			log.Fatalf("acornfall: %v", err)
 		}

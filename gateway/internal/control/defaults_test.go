@@ -183,14 +183,14 @@ func TestLastResortPrefersAnExplicitModel(t *testing.T) {
 		t.Errorf("expected the only model offered, got %s/%s", binding.Provider, binding.ModelID)
 	}
 
-	// And --model beats both, because an operator's flag is a decision, not a guess.
+	// And the last resort beats both, because an operator's word is a decision, not a guess.
 	control.opts.Model = "opencode-go/space-bunny-free"
 	binding, err = control.deriveLastResort(control.describe)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if binding.ModelID != "space-bunny-free" {
-		t.Errorf("--model was not honoured, got %s/%s", binding.Provider, binding.ModelID)
+		t.Errorf("the last resort was not honoured, got %s/%s", binding.Provider, binding.ModelID)
 	}
 }
 

@@ -154,7 +154,8 @@ type WorkspacesOptions struct {
 	WorkerDir     string
 	// Update reports the self-update summary for the state stream.
 	Update func() UpdateSummary
-	// Model is the install default, from --model.
+	// Model is the last resort, from ACORNFALL_MODEL: below every workspace and below the
+	// install's own default, which `acornfall model set` writes.
 	Model string
 	// Sandbox is the install's default engine, shared by every workspace that does not name
 	// one of its own.

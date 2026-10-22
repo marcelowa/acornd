@@ -134,7 +134,7 @@ type settings struct {
 	setup  []setup
 	// noDevProvider runs the worker as a fresh production install does: the real
 	// providers, none of which authenticate in the curated test environment, and no
-	// --model flag to guess from.
+	// last resort to guess from.
 	noDevProvider bool
 }
 
@@ -164,7 +164,7 @@ func withSetup(fn setup) func(*settings) {
 }
 
 // withoutDevProvider runs the install as a fresh production one does: the real providers,
-// none of which authenticate in the curated test environment, and no --model flag to guess
+// none of which authenticate in the curated test environment, and no last resort to guess
 // from. Selecting must still land — "no authenticated provider" is a state, not a failure —
 // and only sending says a provider is needed.
 func withoutDevProvider() func(*settings) {
@@ -268,10 +268,11 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 		"--host", "127.0.0.1",
 		"--port", "0",
 	}
-	// A fresh install has no model flag: the last resort is derived, not given. Every other
-	// test runs with one, so a prompt always has something to run without credentials.
+	// A fresh install has no model set: the last resort is derived, not given. Every other test
+	// names one in the environment, so a prompt always has something to run without credentials.
+	lastResort := ""
 	if !s.cfg.noDevProvider {
-		args = append(args, "--model", "faux/faux-1")
+		lastResort = "ACORNFALL_MODEL=faux/faux-1"
 	}
 	// A resource test runs on the host engine: it needs the workspace's files, not a microVM,
 	// and this is the engine that needs no hypervisor and no state directory. Everything else
@@ -298,6 +299,9 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 		// The worker sources are a folder, and a folder is a thing the environment says
 		// (ACORNFALL_WORKER) rather than a flag on the server.
 		"ACORNFALL_WORKER=" + workerDir,
+	}
+	if lastResort != "" {
+		env = append(env, lastResort)
 	}
 	if engineEnv != "" {
 		// The engine for the whole install is an environment decision now, not a flag: a

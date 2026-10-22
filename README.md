@@ -78,7 +78,7 @@ scripts bake into the binary. Nothing lives outside the install folder.
 make deps                      # bun install in worker/
 make build                     # go build -> ./bin/acornfall
 
-./bin/acornfall provider add opencode-go "$OPENCODE_API_KEY"
+echo "$OPENCODE_API_KEY" | ./bin/acornfall provider add opencode-go
 ./bin/acornfall start           # http://<host>:7777
 ```
 
@@ -133,7 +133,7 @@ curl -sL -H "$AUTH" -o acornfall https://github.com/marcelowa/acornfall/releases
 curl -sL -H "$AUTH" -o sha256sums.txt https://github.com/marcelowa/acornfall/releases/download/v0.9.5/sha256sums.txt
 sha256sum -c sha256sums.txt --ignore-missing   # must say OK
 chmod +x acornfall
-./acornfall provider add opencode-go "$OPENCODE_API_KEY"
+echo "$OPENCODE_API_KEY" | ./acornfall provider add opencode-go
 ./acornfall start
 ```
 
@@ -163,6 +163,11 @@ Useful flags: `--data-dir <dir>` (default `~/.acornfall`), `--host` and `--port`
 `--sandbox-state <dir>` (default `<data-dir>/sandboxes`; it has to be a short path, because a
 Unix socket name cannot be long — see [ADR 0023](docs/adr/0023-bwrap-engine.md)), and
 `--worker <command>` (a worker other than the ensured one).
+
+The default model is chosen with `acornfall model set <provider>/<modelId>` and read from
+`<data-dir>/settings.json`, where the interface writes it too. Provider keys are
+`acornfall provider add <provider>` (reads the key from stdin) — or with it in argv, for a
+script that already has it.
 
 The engine is a property of each workspace, recorded when the workspace is created (`acornfall
 workspace add --sandbox …`), and a machine's default is what it can actually run. For a
