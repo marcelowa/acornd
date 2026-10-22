@@ -79,7 +79,7 @@ make deps                      # bun install in worker/
 make build                     # go build -> ./bin/acornfall
 
 ./bin/acornfall provider add opencode-go "$OPENCODE_API_KEY"
-./bin/acornfall                 # http://<host>:7777 in a workspace directory
+./bin/acornfall start           # http://<host>:7777 in a workspace directory
 ```
 
 ### Sandbox engines
@@ -134,7 +134,7 @@ curl -sL -H "$AUTH" -o sha256sums.txt https://github.com/marcelowa/acornfall/rel
 sha256sum -c sha256sums.txt --ignore-missing   # must say OK
 chmod +x acornfall
 ./acornfall provider add opencode-go "$OPENCODE_API_KEY"
-./acornfall --workspace ~/acornfall/workspaces
+./acornfall start --workspace ~/acornfall/workspaces
 ```
 
 ### Token (while the repo is private)
@@ -181,7 +181,7 @@ flag wins over the variable.
 The gateway listens on every interface and needs no token by default:
 
 ```bash
-./bin/acornfall                 # binds 0.0.0.0:7777
+./bin/acornfall start           # binds 0.0.0.0:7777
 ```
 
 Open `http://<machine>:7777` from another device. Anyone who can reach port 7777 gets the
@@ -196,7 +196,7 @@ EventSource cannot set headers, which is why the cookie exists.
 To keep it off the network, bind loopback and use an SSH tunnel:
 
 ```bash
-./bin/acornfall --addr 127.0.0.1:7777
+./bin/acornfall start --addr 127.0.0.1:7777
 ssh -L 7777:127.0.0.1:7777 desktop
 # then browse http://localhost:7777
 ```

@@ -260,6 +260,7 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	}
 
 	args := []string{
+		"start",
 		"--home", s.Home,
 		"--workspaces-dir", s.WorkspacesDir,
 		"--workspace", s.General,

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -29,48 +30,65 @@ func main() {
 	// One place configures logging, and it is the entry point: a package that sets global
 	// logger state when it is imported decides something the program did not ask for.
 	log.SetFlags(log.Ltime)
-	if len(os.Args) > 1 && os.Args[1] == "provider" {
-		providers(os.Args[2:])
-		return
+	args := os.Args[1:]
+	if len(args) == 0 {
+		// Nothing is a guess, and starting a server is too big a guess: a command is named.
+		usage(os.Stderr)
+		os.Exit(2)
 	}
-	if len(os.Args) > 1 && os.Args[1] == "workspace" {
-		workspaceCommand(os.Args[2:])
-		return
-	}
-	if len(os.Args) > 1 && os.Args[1] == "secret" {
-		secretCommand(os.Args[2:])
-		return
-	}
-	if len(os.Args) > 1 && os.Args[1] == "sandbox-supervisor" {
+	switch args[0] {
+	case "start":
+		if err := serve(args[1:]); err != nil {
+			log.Fatalf("acornfall: %v", err)
+		}
+	case "setup":
+		setupCommand(args[1:])
+	case "doctor":
+		doctorCommand(args[1:])
+	case "workspace":
+		workspaceCommand(args[1:])
+	case "secret":
+		secretCommand(args[1:])
+	case "provider":
+		providers(args[1:])
+	case "version":
+		versionCommand(args[1:])
+	case "sandbox-supervisor":
 		// The sandbox's own first process: a sandbox calls this, a person does not.
-		supervisorCommand(os.Args[2:])
-		return
-	}
-	if len(os.Args) > 1 && os.Args[1] == "netns" {
+		supervisorCommand(args[1:])
+	case "netns":
 		// The namespace pasta made, configured before the sandbox's own process starts: a
 		// sandbox calls this, a person does not.
-		netnsCommand(os.Args[2:])
-		return
-	}
-	if len(os.Args) > 1 && os.Args[1] == "setup" {
-		setupCommand(os.Args[2:])
-		return
-	}
-	if len(os.Args) > 1 && os.Args[1] == "doctor" {
-		doctorCommand(os.Args[2:])
-		return
-	}
-	if len(os.Args) > 1 && os.Args[1] == "version" {
-		versionCommand(os.Args[2:])
-		return
-	}
-	if err := serve(os.Args[1:]); err != nil {
-		log.Fatalf("acornfall: %v", err)
+		netnsCommand(args[1:])
+	case "help", "-h", "--help":
+		usage(os.Stdout)
+	default:
+		fmt.Fprintf(os.Stderr, "acornfall: no such command %q\n\n", args[0])
+		usage(os.Stderr)
+		os.Exit(2)
 	}
 }
 
+// usage is the whole command surface on one screen: a verb and what it is for. The flags are
+// per command, because a flag that belongs to one command should not look like it belongs to
+// all of them.
+func usage(w io.Writer) {
+	fmt.Fprint(w, `usage: acornfall <command> [flags]
+
+  start      run the gateway
+  setup      check this machine, and make it able to run sandboxes
+  doctor     report what the sandbox engines can do here; changes nothing
+  workspace  list, add, and remove workspaces
+  secret     list, add, show, rotate, and remove secrets
+  provider   list, add, and remove model provider keys
+  version    print the running version
+
+acornfall <command> -h    explains that command's flags
+`)
+}
+
 func serve(argv []string) error {
-	flags := flag.NewFlagSet("acornfall", flag.ContinueOnError)
+	flags := flag.NewFlagSet("acornfall start", flag.ContinueOnError)
 	addr := flags.String("addr", "0.0.0.0:7777", "listen address (default: every interface)")
 	token := flags.String("token", "", "shared secret guarding every request (default: none)")
 	workspace := flags.String("workspace", "", "the general workspace's folder (default: the folder acornfall is started in)")
