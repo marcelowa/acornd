@@ -65,8 +65,8 @@ make deps    # bun install in worker/, ui/, tools/
 make tools   # the linters make lint runs (staticcheck, worker deps)
 ```
 
-`bun` must stay on `PATH` for development: with `--worker-dir` the gateway
-starts workers with it, and a worker fails to start without it. Releases
+`bun` must stay on `PATH` for development: with `ACORNFALL_WORKER` pointing at the sources the
+gateway starts workers with system bun, and a worker fails to start without it. Releases
 need no bun and no sources: the gateway downloads a pinned bun once and
 the worker tarball per release, both under the install folder
 (`~/.acornfall` by default), and installs dependencies itself. Migrate
@@ -80,6 +80,20 @@ make build                     # go build -> ./bin/acornfall
 
 echo "$OPENCODE_API_KEY" | ./bin/acornfall provider add opencode-go
 ./bin/acornfall start           # http://<host>:7777
+```
+
+Every command answers `-h`, and `acornfall` with no arguments lists them:
+
+```
+start      run the gateway
+setup      check this machine, and make it able to run sandboxes
+doctor     report what the sandbox engines can do here; changes nothing
+workspace  list, add, and remove workspaces
+secret     list, add, show, rotate, and remove secrets
+provider   list, add, and remove model provider keys
+model      list or choose the default model
+update     check for a release, and install it
+version    print the running version
 ```
 
 ### Sandbox engines
