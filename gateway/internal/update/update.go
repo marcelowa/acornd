@@ -1044,6 +1044,13 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 	if pending {
 		return ErrRestartPending{}
 	}
+	// Before anything is downloaded: an update is a write next to the running binary, and a
+	// binary in a folder this user cannot write fails at the swap — after the download, half way
+	// through, as a permission error with no fix in it. Asked here, it is a sentence before any
+	// byte moves.
+	if err := m.checkInstallFolder(); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	release := m.latest
 	m.mu.Unlock()
@@ -1315,6 +1322,23 @@ func matchChecksum(payload []byte, list, tag string) error {
 		}
 	}
 	return fmt.Errorf("releases: checksum mismatch for %s", tag)
+}
+
+// checkInstallFolder proves the running binary can be replaced by writing a temporary file in its
+// folder. It is the same operation the swap does, done while nothing has been downloaded yet.
+func (m *Manager) checkInstallFolder() error {
+	if m.binPath == "" {
+		return nil
+	}
+	dir := filepath.Dir(m.binPath)
+	probe, err := os.CreateTemp(dir, ".acornfall-update-*")
+	if err != nil {
+		return fmt.Errorf("update: %s is not writable by this user, so the update cannot replace the binary: install acornfall into a folder you own (sh scripts/install.sh --dir ~/.acornfall/bin) or run acornfall as the user who owns %s", dir, dir)
+	}
+	name := probe.Name()
+	_ = probe.Close()
+	_ = os.Remove(name)
+	return nil
 }
 
 // swap keeps the last good binary as .bak, writes the new one, records the

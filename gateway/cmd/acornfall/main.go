@@ -52,6 +52,10 @@ func main() {
 		netnsCommand(os.Args[2:])
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "setup" {
+		setupCommand(os.Args[2:])
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "doctor" {
 		doctorCommand(os.Args[2:])
 		return

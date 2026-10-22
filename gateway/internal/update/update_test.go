@@ -1188,3 +1188,28 @@ func TestNotesResolvesSeveralTagsAndCachesThem(t *testing.T) {
 		t.Fatalf("an unread tag must be absent, got %v", tags)
 	}
 }
+
+// An update writes next to the running binary. When that folder belongs to root it refuses
+// before it downloads anything, and the sentence names the fix — a permission error at swap time
+// arrives after the download and explains nothing.
+func TestApplyRefusesAnInstallFolderItCannotWrite(t *testing.T) {
+	manager, _ := testManager(t)
+	dir := filepath.Dir(manager.binPath)
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Skipf("this file system will not take a read-only folder: %v", err)
+	}
+	defer func() { _ = os.Chmod(dir, 0o755) }()
+	if os.Geteuid() == 0 {
+		t.Skip("root writes anywhere, so the refusal cannot be demonstrated as root")
+	}
+	err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"})
+	if err == nil {
+		t.Fatal("an update into a read-only folder should be refused")
+	}
+	if !strings.Contains(err.Error(), "not writable by this user") {
+		t.Fatalf("the refusal should say what is wrong: %v", err)
+	}
+	if !strings.Contains(err.Error(), "install.sh --dir ~/.acornfall/bin") {
+		t.Fatalf("the refusal should name the fix: %v", err)
+	}
+}

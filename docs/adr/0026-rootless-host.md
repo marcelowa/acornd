@@ -33,12 +33,20 @@ What does need root, once, and can never be vendored:
 
 ## The decision
 
-**1. The tools are acornfall's to provide.** `bwrap` and `pasta` are small static binaries, and
-they are fetched into the data folder on first need rather than installed by a package manager.
-A system copy is used when it is present and not older, and the engines panel says which one is
-in use. iproute2 is gone entirely: the sandbox's address and routes are set over netlink by
-`acornfall netns` (a subcommand pasta runs as the sandbox's first process), so a refusal that
-cannot be installed fails the start instead of being swallowed by a shell script.
+**1. One command says what the machine needs** (`acornfall setup`), and the machine-level parts
+of it are one more (`sudo acornfall setup --apply`). The probes are the user's, run as the user:
+root can always make a user namespace, so asking as root answers a different question. iproute2 is
+gone entirely: the sandbox's address and routes are set over netlink by `acornfall netns` (a
+subcommand pasta runs as the sandbox's first process), so a refusal that cannot be installed fails
+the start instead of being swallowed by a shell script.
+
+**Still open: shipping the tools.** `bwrap` and `pasta` should be pinned static binaries fetched
+into the data folder, used when the machine has none, and refreshed with the release. That is not
+built yet, and it is not a small piece of CI: bubblewrap hard-requires libcap, so a static build
+needs a static libcap and a musl cross toolchain for both architectures **built from pinned
+sources in the release workflow**, which we then have to keep patched. Until it exists, the tools
+come from the distribution, `setup` names the package, and this ADR's honesty is that the
+"seamless install" is one command rather than zero.
 
 **2. An engine a machine cannot run is not the default.** The preference order is `bwrap`,
 `microsandbox`, `host`: bubblewrap first because it needs no hypervisor, no root, and no device;

@@ -36,6 +36,17 @@ another worker, not changing the control plane.
 
 ## Setup
 
+First, ask the machine what it needs. This is the same probe a start runs, as your user, and it
+prints one command per missing piece:
+
+```bash
+acornfall setup                 # what works, what does not, and the line that changes it
+sudo acornfall setup --apply    # as root, from your account: installs the packages, the
+                                # user-namespace policy, the kvm group, and lingering
+```
+
+Then:
+
 ```bash
 # Go: https://go.dev/dl — match the version in gateway/go.mod
 curl -fsSL https://bun.sh/install | bash  # bun, into ~/.bun/bin
