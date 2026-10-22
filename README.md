@@ -103,7 +103,7 @@ A bwrap workspace gets its own copy of its image, so `apt install` works inside 
 machine's own tools are never touched. Its network, when on, is a namespace of its own that
 pasta forwards through the host: egress is the public internet, and the machine's own networks —
 its LAN, link-local addresses, its tailnet — are refused inside the sandbox by route unless that
-workspace was granted them (`--private`, or the dialog's *private networks* toggle)
+workspace was granted them (`--egress private`, or the dialog's *private networks* toggle)
 ([ADR 0025](docs/adr/0025-sandbox-egress.md)). The sandbox is one process per workspace with
 acornfall itself as its first process inside, so a daemon a command starts keeps running, and
 every engine has the same create / start / stop / remove lifecycle

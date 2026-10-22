@@ -64,7 +64,7 @@ given the machine's networks is given its resolver too.
 ## What it costs
 
 - **A workspace that needs the machine's LAN must ask.** That is the point, and it is one switch
-  (`--private`, or the dialog's *private networks* toggle) recorded on the workspace, not in an
+  (`--egress private`, or the dialog's *private networks* toggle) recorded on the workspace, not in an
   engine's configuration.
 - **Public IPv6 egress stays.** Only private and link-local IPv6 ranges are refused.
 - **ICMP still does not work through `pasta`**, grant or no grant (ADR 0023).
