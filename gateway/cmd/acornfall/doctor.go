@@ -15,38 +15,30 @@ import (
 )
 
 // doctorCommand reports what this machine can do, and changes nothing: the difference
-// between a diagnosis and a repair is the whole point of running it.
+// between a diagnosis and a repair is the whole point of running it. Every engine is asked,
+// because "which one can run here" is the question, and answering it for one engine at a time
+// is how a machine gets described by whichever flag was remembered.
 func doctorCommand(argv []string) {
 	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "data directory")
-	home := flags.String("home", "", "the acornfall folder (default: ~/.acornfall)")
-	sandboxEngine := flags.String("sandbox-engine", "", "which engine to report: microsandbox (default), bwrap, or host")
+	dataDir := flags.String("data-dir", "", "the acornfall folder (default: ~/.acornfall)")
 	asJSON := flags.Bool("json", false, "print the report as JSON")
-	if err := flags.Parse(argv); err != nil {
+	flagArgs, _ := splitFlags(argv, map[string]bool{"data-dir": true})
+	if err := flags.Parse(flagArgs); err != nil {
 		os.Exit(2)
 	}
-	dir := *home
-	if dir == "" {
-		dir = *dataDir
-	}
-	resolved, err := resolveDataDir(dir)
+	resolved, err := resolveDataDir(*dataDir)
 	if err != nil {
 		log.Fatalf("acornfall doctor: %v", err)
 	}
 
-	engineName := *sandboxEngine
-	if engineName == "" {
-		engineName = os.Getenv("ACORNFALL_SANDBOX_ENGINE")
+	engines := sandboxReports(resolved)
+	defaultEngine := sandbox.NewTier(resolved, "", nil).Default()
+	var chosen sandbox.Report
+	for _, engine := range engines {
+		if engine.Default {
+			chosen = engine.Report
+		}
 	}
-	manager, err := reportManager(resolved, engineName)
-	if err != nil {
-		log.Fatalf("acornfall doctor: %v", err)
-	}
-	// Read the store through the pinned engine, so a catalog migrated forward by a
-	// newer binary shows as a problem instead of a ready tier that refuses work.
-	manager.Verify(context.Background())
-	report := manager.Report()
-	nesting := manager.Nesting(context.Background())
 	updater := update.New(resolved, "")
 	if err := updater.Open(); err != nil {
 		log.Fatalf("acornfall doctor: %v", err)
@@ -56,49 +48,20 @@ func doctorCommand(argv []string) {
 	checkCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	health := updater.Preflight(checkCtx)
-	requirements := ready.Check(readyInput(resolved, updater, health, report, engineName))
+	requirements := ready.Check(readyInput(resolved, updater, health, chosen, defaultEngine))
 	if *asJSON {
-		// The report plus what the engine and the machine say about nesting: two answers,
-		// because either half can refuse and the reason is worth reading.
 		payload, err := json.MarshalIndent(struct {
-			sandbox.Report
-			Nesting sandbox.NestingSupport `json:"nesting"`
-			Update  update.Preflight       `json:"update"`
-			Ready   []ready.Requirement    `json:"readiness"`
-		}{Report: report, Nesting: nesting, Update: health, Ready: requirements}, "", "  ")
+			Engines   []engineReport      `json:"engines"`
+			Default   string              `json:"default"`
+			Update    update.Preflight    `json:"update"`
+			Readiness []ready.Requirement `json:"readiness"`
+		}{Engines: engines, Default: defaultEngine, Update: health, Readiness: requirements}, "", "  ")
 		if err != nil {
 			log.Fatalf("acornfall doctor: %v", err)
 		}
 		fmt.Println(string(payload))
 	} else {
-		fmt.Println("sandbox")
-		engine := report.Engine
-		if report.Version != "" {
-			engine += " " + report.Version
-		}
-		fmt.Printf("  engine    %s\n", engine)
-		if report.Path == "" {
-			fmt.Printf("  installed %s\n", yesNo(report.Installed))
-		} else {
-			fmt.Printf("  installed %s (%s)\n", yesNo(report.Installed), report.Path)
-		}
-		if report.StateDir != "" {
-			fmt.Printf("  state     %s\n", report.StateDir)
-		}
-		fmt.Printf("  isolated  %s\n", yesNo(report.Isolated))
-		if nesting.Available {
-			fmt.Printf("  nesting   yes\n")
-		} else {
-			fmt.Printf("  nesting   no (%s)\n", nesting.Reason)
-		}
-		if report.Problem != "" {
-			fmt.Printf("  problem   %s\n", report.Problem)
-			fmt.Println("\ntools will refuse until this is fixed; they do not run on the host")
-		} else if !report.Isolated {
-			fmt.Println("  ready     commands and file tools run on the host, unconfined")
-		} else {
-			fmt.Println("  ready     commands and file reads run inside the sandbox")
-		}
+		printEngines(engines, defaultEngine)
 		fmt.Println("update")
 		fmt.Printf("  version   %s\n", health.Version)
 		fmt.Printf("  worker    %s\n", health.Worker)
@@ -118,9 +81,92 @@ func doctorCommand(argv []string) {
 			fmt.Printf("  %-11s     fix: %s\n", "", requirement.Fix)
 		}
 	}
-	if report.Problem != "" {
+	// The exit code is about this install, not about an engine it will not use: a machine
+	// without a hypervisor that runs on bwrap is working, and says so. An engine that is not
+	// downloaded yet is not a failure either — the first start fetches it.
+	if chosen.Problem != "" && chosen.Installed {
 		os.Exit(1)
 	}
+}
+
+// engineReport is one engine's answer, with the nesting detail that belongs to it.
+type engineReport struct {
+	sandbox.Report
+	Default  bool                   `json:"default,omitempty"`
+	Default_ bool                   `json:"-"`
+	Nesting  sandbox.NestingSupport `json:"nesting"`
+}
+
+// sandboxReports asks every engine this build knows, in the order a workspace would be given
+// one. Each answer stands alone: an engine that cannot run here says why, and that is the
+// answer, not a failure of the report.
+func sandboxReports(home string) []engineReport {
+	defaultEngine := sandbox.NewTier(home, "", nil).Default()
+	reports := make([]engineReport, 0, len(sandbox.EngineNames()))
+	for _, name := range sandbox.EngineNames() {
+		manager, err := reportManager(home, name)
+		if err != nil {
+			reports = append(reports, engineReport{Report: sandbox.Report{Engine: name, Problem: err.Error()}, Default: name == defaultEngine})
+			continue
+		}
+		// Read the store through the pinned engine, so a catalog migrated forward by a
+		// newer binary shows as a problem instead of a ready tier that refuses work.
+		manager.Verify(context.Background())
+		reports = append(reports, engineReport{
+			Report:  manager.Report(),
+			Default: name == defaultEngine,
+			Nesting: manager.Nesting(context.Background()),
+		})
+	}
+	return reports
+}
+
+// printEngines puts the engines in one block with the default marked: the table is the answer
+// to "what can this machine run", and the mark is the answer to "what will it run".
+func printEngines(engines []engineReport, defaultEngine string) {
+	fmt.Println("sandbox engines")
+	for _, engine := range engines {
+		marker := " "
+		if engine.Default {
+			marker = "*"
+		}
+		version := engine.Version
+		if version != "" {
+			version = " " + version
+		}
+		fmt.Printf("%s %-14s %s%s\n", marker, engine.Engine, stateOf(engine), version)
+		if engine.Path != "" && engine.Installed {
+			fmt.Printf("  %-14s at %s\n", "", engine.Path)
+		}
+		if engine.Default {
+			if engine.Nesting.Available {
+				fmt.Printf("  %-14s nesting yes\n", "")
+			} else if engine.Isolated {
+				fmt.Printf("  %-14s nesting no (%s)\n", "", engine.Nesting.Reason)
+			}
+		}
+		if engine.Problem != "" && engine.Installed {
+			fmt.Printf("  %-14s problem %s\n", "", engine.Problem)
+		}
+	}
+	if defaultEngine == "" {
+		fmt.Println("\nno engine can run here: acornfall setup says what this machine needs")
+		return
+	}
+	fmt.Printf("\n* this machine will use %s\n", defaultEngine)
+}
+
+// stateOf is one word for what an engine can do here, written so the three read as a column.
+func stateOf(engine engineReport) string {
+	switch {
+	case engine.Problem != "" && engine.Installed:
+		return "unavailable"
+	case !engine.Installed:
+		return "not downloaded yet"
+	case !engine.Isolated:
+		return "not isolated"
+	}
+	return "ready"
 }
 
 // readyInput gathers what the readiness list reads from the managers

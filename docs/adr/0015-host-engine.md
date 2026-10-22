@@ -34,7 +34,7 @@ The guardrails are part of the decision, not politeness:
 - **Nothing selects it by itself.** A missing hypervisor, a failed install, or an unknown
   engine name never becomes the host engine. A typo is refused with the list of engines.
 - **Every surface says it is not isolated.** `Driver.Isolated()` is false, the state frame
-  carries `"isolated": false`, `acornfall doctor --sandbox-engine host` prints it, and the
+  carries `"isolated": false`, `acornfall doctor` prints it beside the other engines, and the
   startup log says it in a sentence.
 - **The host engine has no mounts.** Global resources are plain host paths, so there is no
   read-only enforcement: under this engine the agent can edit its own instructions. That is
