@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,23 +10,41 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 )
 
-// setupCommand answers "can this machine run a workspace, and if not, what is the one step that
-// changes that" — and, run as root, takes that step.
+// applyIsGone is the whole of the change in one sentence: the password prompt moved inside the
+// command, so nobody has to learn a second invocation.
+const applyIsGone = "acornfall setup: --apply is not needed any more: `acornfall setup` asks for your password when it needs root"
+
+// setupCommand answers "can this machine run a workspace, and if not, what does it need" — and
+// then does it. It runs as the user, because the question is about that user's access, and asks
+// for a password itself when a step needs root (ADR 0026).
 //
-// It is not a doctor with a licence to change things. The probes are the user's, and they run as
-// the user: root can always make a user namespace, so asking as root answers a different question
-// and would report a machine that works when the person's does not. The only thing root does here
-// is the part only root can do (ADR 0026).
+// One command is the whole interface: `acornfall setup`. The privileged half is the same binary
+// with `--privileged --plan FILE`, which this command runs through sudo and nobody types.
 func setupCommand(argv []string) {
 	flags := flag.NewFlagSet("setup", flag.ContinueOnError)
 	dataDir := flags.String("data-dir", "", "the acornfall folder")
-	apply := flags.Bool("apply", false, "make the machine-level changes that need root (run as root, with sudo)")
+	privileged := flags.Bool("privileged", false, "internal: run a plan as root (setup runs this through sudo)")
+	planPath := flags.String("plan", "", "internal: the plan to run with --privileged")
+	apply := flags.Bool("apply", false, "no longer needed: acornfall setup asks for a password itself")
 	if err := flags.Parse(argv); err != nil {
+		os.Exit(2)
+	}
+	if *apply {
+		logf(applyIsGone)
+		os.Exit(2)
+	}
+	if *privileged {
+		runPlanAsRoot(*planPath)
+		return
+	}
+	if os.Geteuid() == 0 {
+		logf("acornfall setup: run this as the user who will use acornfall, not as root: the checks are about that user's access, and root has all of it")
 		os.Exit(2)
 	}
 	home, err := resolveDataDir(*dataDir)
@@ -33,52 +52,151 @@ func setupCommand(argv []string) {
 		logf("acornfall setup: %v", err)
 		os.Exit(2)
 	}
-	if *apply {
-		applySetup(home)
-		return
-	}
-	if os.Geteuid() == 0 {
-		logf("acornfall setup: run this as the user who will use acornfall, not as root: the checks are about that user's access, and root has all of it")
-		os.Exit(2)
-	}
+	who := currentNodeUser()
 	report := gatherSetup(home)
 	text, ok := renderSetup(report)
 	fmt.Print(text)
+	plan := planFor(report, who)
+	if plan.empty() {
+		if !ok {
+			os.Exit(1)
+		}
+		return
+	}
+	if why := containerAdvice(report); why != "" {
+		fmt.Print("\n" + why + "\n")
+	}
+	fmt.Printf("\n%d step%s need root:\n", countSteps(plan), plural(plan))
+	for _, line := range plan.description() {
+		fmt.Printf("  · %s\n", line)
+	}
+	if err := escalate(plan); err != nil {
+		if errors.Is(err, errNoEscalation) {
+			fmt.Println("\nthis machine cannot ask for a password here (no sudo, or no terminal to type one into). run:")
+			for _, line := range printedFixes(report, who) {
+				fmt.Printf("  %s\n", line)
+			}
+			os.Exit(1)
+		}
+		logf("acornfall setup: %v", err)
+		os.Exit(1)
+	}
+	// Say what changed, from the same probes that said what was missing. A machine that needed a
+	// group is told that a group needs a new login, which no command can give it.
+	fmt.Println()
+	after := gatherSetup(home)
+	final, ok := renderSetup(after)
+	fmt.Print(final)
+	if plan.KVMUser != "" {
+		// A group added to the account is not in this process's own groups, and no command can
+		// add it there: only a new login can.
+		fmt.Printf("\nthe kvm group is new: log out and back in for it to apply\n")
+	}
 	if !ok {
+		fmt.Printf("\nstill not ready: this machine needs something root cannot give it\n")
 		os.Exit(1)
 	}
 }
 
-// applySetup makes the changes that need root: the packages, the user-namespace policy, and the
-// two grants that are per-user. It refuses without a user to apply them to, because "root can run
-// a sandbox" is not the question.
-func applySetup(home string) {
-	userName := os.Getenv("SUDO_USER")
-	if userName == "" {
-		logf("acornfall setup --apply: run it with sudo from your own account (`sudo acornfall setup --apply`), so the grants land on the user who runs workspaces")
-		os.Exit(2)
+func plural(plan rootPlan) string {
+	if countSteps(plan) == 1 {
+		return ""
 	}
-	report := gatherSetup(home)
-	steps := rootSteps(report, userName)
-	if len(steps) == 0 {
-		fmt.Printf("nothing to change: %s can already run a workspace\n", userName)
-		return
-	}
-	for _, step := range steps {
-		fmt.Printf("$ %s\n", step)
-		command := exec.Command(step[0], step[1:]...)
-		command.Stdout = os.Stdout
-		command.Stderr = os.Stderr
-		if err := command.Run(); err != nil {
-			logf("acornfall setup: %s: %v", step[0], err)
-			os.Exit(1)
-		}
-	}
-	fmt.Printf("\nnow run `acornfall setup` as %s to confirm, and restart the gateway so it sees the change\n", userName)
+	return "s"
 }
 
-// setupReport is what the probes found. It is a value so that rendering and the root steps can be
-// tested without a machine that has or lacks these things.
+func countSteps(plan rootPlan) int { return len(plan.actions()) }
+
+// planFor is what the probes imply: which machine-level steps are missing, and for whom. It is
+// the only place that decides, so the description a person reads and the commands root runs
+// cannot disagree.
+func planFor(report setupReport, who string) rootPlan {
+	var plan rootPlan
+	if report.BwrapPath == "" {
+		plan.Packages = append(plan.Packages, "bubblewrap")
+	}
+	if report.PastaPath == "" {
+		plan.Packages = append(plan.Packages, "passt")
+	}
+	if len(plan.Packages) > 0 && slices.Contains(allowedManagers, report.PackageManager) {
+		plan.Manager = report.PackageManager
+	} else {
+		// No package manager this command knows: the plan cannot carry it, and the printed list
+		// says "install bubblewrap passt with your package manager" instead.
+		plan.Packages = nil
+	}
+	// The user-namespace policy is a machine-wide relaxation, so it is only proposed when the
+	// probe actually failed and the machine has the AppArmor restriction that causes it. Inside a
+	// container the sysctl is not the answer: the container's own profile is.
+	if report.BwrapPath != "" && report.BwrapErr != nil && report.UsernsRestricted && !report.Container {
+		plan.Userns = true
+	}
+	// pasta builds its interface through the tun device; a machine whose node is missing or not
+	// usable needs it present and openable, not a changed policy.
+	if report.TunErr != nil && !report.Container {
+		plan.Tun = true
+	}
+	if report.KVMErr != nil {
+		plan.KVMUser = who
+	}
+	if report.LingerKnown && !report.Linger {
+		plan.LingerUser = who
+	}
+	return plan
+}
+
+// containerAdvice explains what no command inside can fix. Empty when this is not a container, or
+// when the container is not the reason anything is missing.
+func containerAdvice(report setupReport) string {
+	if !report.Container || report.BwrapErr == nil && report.TunErr == nil {
+		return ""
+	}
+	return "this looks like a container: a sandbox needs the container started with\n" +
+		"  --security-opt seccomp=unconfined --device /dev/net/tun\n" +
+		"which is a decision for whoever runs the container, not something acornfall can change from inside."
+}
+
+// errNoEscalation is the machine where a password cannot be asked for: no sudo, or no terminal.
+var errNoEscalation = errors.New("no way to ask for a password")
+
+// escalate writes the plan, hands it to this same binary through sudo, and waits. sudo's own
+// prompt is the password prompt: this never reads or passes a password.
+func escalate(plan rootPlan) error {
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	sudo, err := exec.LookPath("sudo")
+	if err != nil {
+		return errNoEscalation
+	}
+	if !isTerminal(os.Stdin) {
+		// sudo would fail with "a terminal is required"; saying so before it tries is kinder.
+		return errNoEscalation
+	}
+	dir, err := os.MkdirTemp("", "acornfall-setup-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	path := filepath.Join(dir, "plan.json")
+	payload, err := json.Marshal(plan)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		return err
+	}
+	fmt.Println()
+	command := exec.Command(sudo, executable, "setup", "--privileged", "--plan", path)
+	command.Stdin = os.Stdin
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+	return command.Run()
+}
+
+// setupReport is what the probes found. It is a value so that deciding, rendering, and the plan
+// can be tested without a machine that has or lacks these things.
 type setupReport struct {
 	PackageManager string
 	BwrapPath      string
@@ -86,7 +204,14 @@ type setupReport struct {
 	BwrapErr       error
 	PastaPath      string
 	PastaErr       error
-	KVMErr         error
+	// TunErr is /dev/net/tun, opened the way pasta opens it.
+	TunErr error
+	// UsernsRestricted is the AppArmor gate that refuses unprivileged user namespaces on
+	// Ubuntu 23.10 and later: the one machine-wide cause worth naming.
+	UsernsRestricted bool
+	// Container is whether this process is in one, which changes who can fix what.
+	Container bool
+	KVMErr    error
 	// LingerKnown is false when this machine has no systemd for the user: not a problem, just a
 	// question that does not apply.
 	LingerKnown bool
@@ -101,12 +226,15 @@ func gatherSetup(home string) setupReport {
 	bwrap := sandbox.NewBwrap(home)
 	hypervisor := sandbox.NewMicrosandbox(home)
 	report := setupReport{
-		PackageManager: packageManager(),
-		BwrapPath:      bwrap.InstallDir(),
-		BwrapVersion:   bwrap.Version(),
-		BwrapErr:       bwrap.Usable(),
-		PastaErr:       bwrap.Egress(),
-		KVMErr:         hypervisor.Usable(),
+		PackageManager:   packageManager(),
+		BwrapPath:        bwrap.InstallDir(),
+		BwrapVersion:     bwrap.Version(),
+		BwrapErr:         bwrap.Usable(),
+		PastaErr:         bwrap.Egress(),
+		TunErr:           tunDevice(),
+		UsernsRestricted: usernsRestricted(),
+		Container:        inContainer(),
+		KVMErr:           hypervisor.Usable(),
 	}
 	if path, err := exec.LookPath("pasta"); err == nil {
 		report.PastaPath = path
@@ -116,8 +244,52 @@ func gatherSetup(home string) setupReport {
 	return report
 }
 
-// renderSetup is the whole answer as a person reads it: what works, what does not, and the
-// command that changes it. ok is whether a workspace can run at all.
+// tunDevice opens /dev/net/tun the way pasta does, without creating an interface: presence and
+// permission are the question, and opening them is how the kernel answers it.
+func tunDevice() error {
+	device, err := os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return errors.New("/dev/net/tun is missing: pasta builds the sandbox's network from it")
+		}
+		if errors.Is(err, os.ErrPermission) {
+			return errors.New("/dev/net/tun is not usable by this user: pasta builds the sandbox's network from it")
+		}
+		return fmt.Errorf("/dev/net/tun: %w", err)
+	}
+	_ = device.Close()
+	return nil
+}
+
+// usernsRestricted reads the switch Ubuntu 23.10 added. A machine without the file is not
+// restricted, which is every other distribution.
+func usernsRestricted() bool {
+	payload, err := os.ReadFile("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
+	return err == nil && strings.TrimSpace(string(payload)) == "1"
+}
+
+// inContainer reports whether this process is in one. It is not an identity check — it is enough
+// to know that the kernel's policy here belongs to somebody else.
+func inContainer() bool {
+	for _, path := range []string{"/run/.containerenv", "/.dockerenv"} {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+	}
+	payload, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return false
+	}
+	text := string(payload)
+	for _, marker := range []string{"docker", "kubepods", "libpod", "lxc", "containerd"} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// renderSetup is the table a person reads: what works, what does not, and what it means.
 func renderSetup(report setupReport) (string, bool) {
 	var out strings.Builder
 	out.WriteString("sandbox engines on this machine\n\n")
@@ -129,7 +301,10 @@ func renderSetup(report setupReport) (string, bool) {
 		usable := report.BwrapErr == nil
 		fmt.Fprintf(&out, "  %s  user namespaces   %s\n", mark(usable), describe(usable, "a sandbox can boot here", report.BwrapErr))
 		pasta := report.PastaErr == nil
-		fmt.Fprintf(&out, "  %s  sandbox network   %s\n", mark(pasta), describe(pasta, describePath(report.PastaPath, ""), report.PastaErr))
+		fmt.Fprintf(&out, "  %s  sandbox network   %s\n", mark(pasta), describe(pasta, describePath(report.PastaPath, ""), pastaProblem(report)))
+		if report.TunErr != nil && !pasta {
+			fmt.Fprintf(&out, "  %s  tun device        %s\n", mark(false), report.TunErr)
+		}
 		if !usable || !pasta {
 			ok = false
 		}
@@ -139,8 +314,7 @@ func renderSetup(report setupReport) (string, bool) {
 
 	// The hypervisor is the other engine, not this one: a machine without /dev/kvm still runs
 	// workspaces, on bubblewrap.
-	kvm := report.KVMErr == nil
-	if kvm {
+	if report.KVMErr == nil {
 		fmt.Fprintf(&out, "  %s  hypervisor        /dev/kvm is readable\n", mark(true))
 	} else {
 		fmt.Fprintf(&out, "  -  hypervisor        not available: only the microVM engine needs it\n")
@@ -155,35 +329,43 @@ func renderSetup(report setupReport) (string, bool) {
 	out.WriteString("\n")
 	if ok {
 		out.WriteString("this machine runs workspaces on bubblewrap")
-		if !kvm {
-			out.WriteString("; the microVM engine needs the step below")
+		if report.KVMErr != nil {
+			out.WriteString("; the microVM engine needs the hypervisor step")
 		}
 		out.WriteString(".\n")
 	}
-	if fixes := printedFixes(report, currentNodeUser()); len(fixes) > 0 {
-		out.WriteString("\nto change any of that, run\n")
-		for _, fix := range fixes {
-			fmt.Fprintf(&out, "  %s\n", fix)
-		}
+	if report.UsernsRestricted && report.BwrapErr != nil && !report.Container {
+		out.WriteString("\nthis machine restricts unprivileged user namespaces (Ubuntu 23.10 and later do).\n" +
+			"allowing them is a machine-wide change; the alternative is an AppArmor profile for the\n" +
+			"bubblewrap binary, which the distribution's own package ships.\n")
 	}
 	return out.String(), ok
 }
 
-// printedFixes are the commands a person runs, with the privilege they need: the machine-level
-// ones through sudo, the user-level ones as the user.
+// pastaProblem prefers the device over the packet: pasta's own message says it could not make a
+// namespace, which is true but not the cause when the tun node is what is missing.
+func pastaProblem(report setupReport) error {
+	if report.PastaErr != nil && report.TunErr != nil {
+		return report.TunErr
+	}
+	return report.PastaErr
+}
+
+// printedFixes are the same steps as copy-pasteable commands, for a machine where nobody can
+// escalate: no sudo, no terminal.
 func printedFixes(report setupReport, userName string) []string {
+	plan := planFor(report, userName)
 	var fixes []string
-	if report.BwrapPath == "" || report.PastaErr != nil && report.PastaPath == "" {
-		fixes = append(fixes, fmt.Sprintf("sudo %s install %s", report.PackageManager, packagesFor(report)))
+	for _, action := range plan.actions() {
+		switch {
+		case action.Run != nil:
+			fixes = append(fixes, "sudo "+strings.Join(action.Run, " "))
+		case action.File != "":
+			fixes = append(fixes, fmt.Sprintf("sudo sh -c 'printf %s > %s'", shellQuote(action.Write), action.File))
+		}
 	}
-	if report.BwrapPath != "" && report.BwrapErr != nil {
-		fixes = append(fixes, "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0")
-	}
-	if report.KVMErr != nil {
-		fixes = append(fixes, fmt.Sprintf("sudo usermod -aG kvm %s   # then log out and back in", userName))
-	}
-	if report.LingerKnown && !report.Linger {
-		fixes = append(fixes, fmt.Sprintf("sudo loginctl enable-linger %s", userName))
+	if len(fixes) == 0 && (report.BwrapPath == "" || report.PastaPath == "") {
+		fixes = append(fixes, fmt.Sprintf("install %s with this distribution's package manager", strings.Join(missingPackages(report), " ")))
 	}
 	if report.InstallErr != nil {
 		fixes = append(fixes, "reinstall into a folder you own: sh scripts/install.sh --dir ~/.acornfall/bin")
@@ -191,9 +373,7 @@ func printedFixes(report setupReport, userName string) []string {
 	return fixes
 }
 
-// packagesFor names the packages this machine is missing, so the command installs what is needed
-// and nothing else.
-func packagesFor(report setupReport) string {
+func missingPackages(report setupReport) []string {
 	var names []string
 	if report.BwrapPath == "" {
 		names = append(names, "bubblewrap")
@@ -201,35 +381,16 @@ func packagesFor(report setupReport) string {
 	if report.PastaPath == "" {
 		names = append(names, "passt")
 	}
-	if len(names) == 0 {
-		names = append(names, "bubblewrap", "passt")
-	}
-	return strings.Join(names, " ")
+	return names
 }
 
-// rootSteps is the same list as commands to run, for `--apply`: the machine-level ones plus the
-// per-user grants, in the order that makes each one meaningful.
-func rootSteps(report setupReport, userName string) [][]string {
-	var steps [][]string
-	if report.BwrapPath == "" || (report.PastaErr != nil && report.PastaPath == "") {
-		step := append([]string{report.PackageManager}, installArgs(report.PackageManager)...)
-		step = append(step, strings.Fields(packagesFor(report))...)
-		steps = append(steps, step)
-	}
-	if report.BwrapPath != "" && report.BwrapErr != nil {
-		steps = append(steps, []string{"sysctl", "-w", "kernel.apparmor_restrict_unprivileged_userns=0"})
-	}
-	if report.KVMErr != nil {
-		steps = append(steps, []string{"usermod", "-aG", "kvm", userName})
-	}
-	if report.LingerKnown && !report.Linger {
-		steps = append(steps, []string{"loginctl", "enable-linger", userName})
-	}
-	return steps
+// shellQuote is what makes a printed heredoc-safe command a command and not a shell surprise.
+func shellQuote(text string) string {
+	return "'" + strings.ReplaceAll(text, "'", `'"'"'`) + "'"
 }
 
 // packageManager is the command that installs a package here, from the distribution's own file.
-// An unknown distribution gets no guess: the printer says so rather than inventing a command.
+// An unknown distribution gets no guess: the caller says so rather than inventing a command.
 func packageManager() string {
 	file, err := os.Open("/etc/os-release")
 	if err == nil {
@@ -242,9 +403,7 @@ func packageManager() string {
 				values[key] = strings.Trim(value, `"`)
 			}
 		}
-		id := values["ID"]
-		like := values["ID_LIKE"]
-		for _, candidate := range []string{id, like} {
+		for _, candidate := range []string{values["ID"], values["ID_LIKE"]} {
 			switch {
 			case strings.Contains(candidate, "debian"), strings.Contains(candidate, "ubuntu"):
 				return "apt-get"
@@ -268,9 +427,7 @@ func packageManager() string {
 // installArgs is how one package manager says "install these, do not ask".
 func installArgs(manager string) []string {
 	switch manager {
-	case "apt-get":
-		return []string{"install", "-y"}
-	case "dnf":
+	case "apt-get", "dnf":
 		return []string{"install", "-y"}
 	case "pacman":
 		return []string{"-S", "--noconfirm"}

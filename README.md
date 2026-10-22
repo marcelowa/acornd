@@ -36,14 +36,17 @@ another worker, not changing the control plane.
 
 ## Setup
 
-First, ask the machine what it needs. This is the same probe a start runs, as your user, and it
-prints one command per missing piece:
+First, ask the machine what it needs — and let it fix it:
 
 ```bash
-acornfall setup                 # what works, what does not, and the line that changes it
-sudo acornfall setup --apply    # as root, from your account: installs the packages, the
-                                # user-namespace policy, the kvm group, and lingering
+acornfall setup     # probes as you, and asks for your password only for the steps that need root
 ```
+
+It names each step before asking (install `bubblewrap passt`, allow user namespaces, make
+`/dev/net/tun` available, add you to `kvm`, keep your services after logout), runs only the
+missing ones through `sudo`, then probes again and tells you what is left — a new group needs a
+new login, and nothing can change that for you. Where a password cannot be asked for (no `sudo`,
+or no terminal), it prints the same steps as copy-pasteable commands instead.
 
 Then:
 

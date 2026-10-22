@@ -33,12 +33,23 @@ What does need root, once, and can never be vendored:
 
 ## The decision
 
-**1. One command says what the machine needs** (`acornfall setup`), and the machine-level parts
-of it are one more (`sudo acornfall setup --apply`). The probes are the user's, run as the user:
-root can always make a user namespace, so asking as root answers a different question. iproute2 is
+**1. One command says what the machine needs, and does it** (`acornfall setup`). The probes are
+the user's, run as the user — root can always make a user namespace, so asking as root answers a
+different question — and when a step needs root the command writes that step to a plan, says why,
+and runs the same binary through `sudo`, which is what asks for the password. The privileged half
+reads the plan as data and builds the commands itself, refusing anything outside its own short
+vocabulary, so escalation is "these four machine-level steps" rather than "whatever a file said".
+`--apply` no longer exists: a second invocation with a flag teaches the wrong habit. iproute2 is
 gone entirely: the sandbox's address and routes are set over netlink by `acornfall netns` (a
 subcommand pasta runs as the sandbox's first process), so a refusal that cannot be installed fails
 the start instead of being swallowed by a shell script.
+
+**What the step changes, and for how long.** The user-namespace policy is written to
+`/etc/sysctl.d/99-acornfall-userns.conf` and not only applied, because a fix that disappears at the
+next reboot is worse than one that was never made; `/dev/net/tun` likewise gets a
+`/etc/tmpfiles.d` rule so the device is there after a boot. In a container neither is the answer:
+the policy and the device belong to whoever started the container, so the command says so and
+stops rather than proposing something that cannot work.
 
 **Still open: shipping the tools.** `bwrap` and `pasta` should be pinned static binaries fetched
 into the data folder, used when the machine has none, and refreshed with the release. That is not
