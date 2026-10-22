@@ -24,6 +24,9 @@ MODERNIZE := $(GOBIN)/modernize
 GOLANGCI := $(GOBIN)/golangci-lint
 # Unreachable code, which `unused` cannot see across function boundaries.
 DEADCODE := $(GOBIN)/deadcode
+# The two that need a vulnerability database, so they cannot live in `lint`.
+GOVULNCHECK := $(GOBIN)/govulncheck
+GOSEC := $(GOBIN)/gosec
 # The language version the gateway is written against, from its own go.mod. The linters must
 # be built with at least it: a staticcheck built by an older Go refuses to read newer sources
 # and reports the toolchain's standard library as broken. `go install pkg@version` ignores
@@ -57,6 +60,8 @@ tools: ## install the linters used by `make lint` and `make analyze`
 	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install honnef.co/go/tools/cmd/staticcheck@latest
 	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install golang.org/x/tools/cmd/deadcode@latest
+	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install golang.org/x/vuln/cmd/govulncheck@latest
+	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install github.com/securego/gosec/v2/cmd/gosec@latest
 	cd worker && bun install
 
 typecheck: ## the compiler's opinion, without running anything
@@ -86,7 +91,8 @@ lint: ui-build typecheck ## the static rules; fails on the first one broken
 	cd ui && bun run check:system
 	cd ui && bun run format:check
 
-cover: ## coverage across both processes, merged; FLOOR=0 reports without failing	@# Two halves, one number. `go test -cover` sees only the unit half: the feature suite starts
+cover: ## coverage across both processes, merged; FLOOR=0 reports without failing
+	@# Two halves, one number. `go test -cover` sees only the unit half: the feature suite starts
 	@# the gateway as its own process, so the binary is built for coverage, writes to GOCOVERDIR,
 	@# and its counters are joined with the unit profile before anything is judged. Without this
 	@# the end-to-end suite counted for nothing, which is not a claim about anyone's diligence.
@@ -118,6 +124,16 @@ analyze: ## complexity, duplication, dead code, error shape: the backlog as a re
 		rm -rf $$tmp; \
 	else echo "deadcode: not installed (make tools)"; fi
 
+# The checks that need a network for their database, so they cannot be in `lint`. The same two run
+# weekly in .github/workflows/security.yml and gate a release tag; here they are reproducible
+# without a runner. gitleaks is absent on purpose: it scans git history, which is the workflow's
+# job — the diff on a laptop is not the history a clone carries.
+security: ## known vulnerabilities, and the security rules staticcheck does not carry
+	@if [ -x "$(GOVULNCHECK)" ]; then cd gateway && $(GOVULNCHECK) ./...; \
+	else echo "govulncheck: not installed (make tools)"; fi
+	@if [ -x "$(GOSEC)" ]; then cd gateway && $(GOSEC) -quiet ./... || true; \
+	else echo "gosec: not installed (make tools)"; fi
+
 # Not part of `make test` or `make lint`, on purpose: this is the one Go check measured in seconds
 # rather than milliseconds, and what it finds is drift rather than a bug — a newer spelling of a
 # loop, not a wrong answer. It is a prompt, not a gate, and a daily workflow prompts with it.
@@ -134,6 +150,9 @@ commits: ## check commit messages (RANGE=origin/main..HEAD by default)
 # engine's runtime sockets (docs/adr/0012-sandbox.md).
 SANDBOX_STATE ?= /tmp/acornfall-e2e-sandboxes
 
+# Every `go test` here runs with -shuffle=on: a suite that only passes in declaration order hides
+# that it shares something, and the seed is printed on failure so a shuffled run is reproducible.
+#
 # How many end-to-end tests the fast tier runs at once: one per core, because each test is a
 # gateway and a worker under -race, and six of those on a two-core CI runner starve the
 # conversations they are waiting for. Override with TEST_PARALLEL.
@@ -160,7 +179,7 @@ check: ui-build typecheck ## fast: the compiler, the bundle, and the unit tests,
 	# Go's test cache cannot see: a cached pass would be a pass for code that has changed.
 	# The end-to-end suite is excluded: it starts a gateway and a worker per test, and that is
 	# its own tier (`make test`). A gate that takes a minute is a gate nobody runs.
-	cd gateway && go test -short -count=1 $$(go list ./... | grep -v /internal/e2e)
+	cd gateway && go test -short -count=1 -shuffle=on $$(go list ./... | grep -v /internal/e2e)
 
 test: lint ## the default tier: units and the feature suite, no hypervisor needed
 	cd worker && bun test
@@ -173,7 +192,7 @@ test: lint ## the default tier: units and the feature suite, no hypervisor neede
 	# tests whose assertions need a sandbox; the rest of the feature suite runs in parallel.
 	# -count=1 because the suite's inputs include worker/src and the built interface, which
 	# Go's test cache cannot see: a cached pass would be a pass for code that has changed.
-	cd gateway && ACORNFALL_NO_SANDBOX=1 go test -short -race -count=1 -parallel $(TEST_PARALLEL) ./...
+	cd gateway && ACORNFALL_NO_SANDBOX=1 go test -short -race -count=1 -shuffle=on -parallel $(TEST_PARALLEL) ./...
 
 test-bwrap: ## the bubblewrap engine end to end: it fetches an image, so it is not part of `make test`	# A bwrap workspace gets its own copy of its image and carries egress with pasta; both are
 	# why this is its own tier, the same way the microVM tier needs /dev/kvm. Needs bubblewrap,
@@ -184,14 +203,14 @@ test-bwrap: ## the bubblewrap engine end to end: it fetches an image, so it is n
 	# ACORNFALL_BWRAP_ONLY makes a machine without them fail instead of skip: this target is the
 	# one place that says the tier ran, so a skip here would be a green run that tested nothing.
 	cd worker && env -u ACORNFALL_NO_SANDBOX ACORNFALL_BWRAP_ONLY=1 bun test test/bwrap.test.ts test/env-conformance.test.ts
-	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_BWRAP_ONLY=1 ACORNFALL_IMAGE_TEST=1 go test -count=1 ./internal/e2e/ -run 'Bwrap|TwoEngines|KeepsTheEngine'
+	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_BWRAP_ONLY=1 ACORNFALL_IMAGE_TEST=1 go test -count=1 -shuffle=on ./internal/e2e/ -run 'Bwrap|TwoEngines|KeepsTheEngine'
 
 test-sandbox: sandbox-preflight ## the engine boundary: live driver, SDK client, and its e2e tests
 	# env -u so a shell that exported the fast tier's switch cannot silently turn this into a
 	# suite of skips. -race stays here: the sandbox's start, attach, and mount path is only
 	# taken in this tier, and the four tests plus the live driver are ~35s instrumented.
 	cd worker && env -u ACORNFALL_NO_SANDBOX ACORNFALL_SANDBOX_INTEGRATION=1 MSB_HOME=$(SANDBOX_STATE) bun test test/sandbox.integration.test.ts
-	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_SANDBOX_ONLY=1 ACORNFALL_LIVE_SANDBOX=1 ACORNFALL_SANDBOX_STATE=$(SANDBOX_STATE) go test -race -count=1 -parallel $(SANDBOX_PARALLEL) ./...
+	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_SANDBOX_ONLY=1 ACORNFALL_LIVE_SANDBOX=1 ACORNFALL_SANDBOX_STATE=$(SANDBOX_STATE) go test -race -count=1 -shuffle=on -parallel $(SANDBOX_PARALLEL) ./...
 
 sandbox-preflight: ## fail, not skip, when there is no hypervisor for the microVM engine
 	@if [ "$$(uname -s)" = "Linux" ] && [ ! -r /dev/kvm ]; then \

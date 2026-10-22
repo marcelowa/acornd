@@ -1,0 +1,48 @@
+# Dependency updates, so "everything at latest" (#24) is a standing property instead of a chore
+# someone remembers once a year.
+#
+# One ecosystem entry per lockfile, not per folder. `bun` rather than `npm` because the lockfile
+# is `bun.lock` and the runtime is bun: if this repository's Dependabot does not know the
+# ecosystem, it says so on its own page — which is a visible failure, and the alternative,
+# updating package.json while leaving bun.lock behind, is a silently broken install.
+version: 2
+
+updates:
+  - package-ecosystem: gomod
+    directory: /gateway
+    schedule:
+      interval: weekly
+    groups:
+      # One pull request a week, not nine: a dependency bump nobody reads is a dependency bump
+      # nobody reviews.
+      go:
+        patterns: ["*"]
+
+  - package-ecosystem: bun
+    directory: /worker
+    schedule:
+      interval: weekly
+    groups:
+      worker:
+        patterns: ["*"]
+
+  - package-ecosystem: bun
+    directory: /ui
+    schedule:
+      interval: weekly
+    groups:
+      interface:
+        patterns: ["*"]
+
+  - package-ecosystem: bun
+    directory: /tools
+    schedule:
+      interval: weekly
+    groups:
+      tools:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

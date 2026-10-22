@@ -1,0 +1,65 @@
+# The checks nobody runs by hand: a dependency with a published vulnerability, a secret in the
+# tree, and the security rules a staticcheck pass does not carry.
+#
+# None of it is in `make lint`: every one of these needs a network for its database, and lint has
+# to work on a train. The Go half runs locally as `make security`, so a finding can be reproduced
+# without waiting for a runner.
+#
+# On the weekly schedule a red run is a report — it says a dependency has a CVE and blocks
+# nothing. On a release tag it is a gate, because adopting a vulnerable dependency is worse than a
+# failing pipeline at exactly that moment.
+name: security
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  vulnerabilities:
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: gateway/go.mod
+          cache-dependency-path: gateway/go.sum
+      - name: govulncheck
+        # Reachable only: the call graph decides, so a CVE in a dependency this build never calls
+        # does not hold a release. It found eleven reachable standard-library vulnerabilities on
+        # `go 1.27.1`, all fixed by 1.27.2 and 1.27.3 — which is why the module pins 1.27.3.
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          cd gateway && govulncheck ./...
+
+  sast:
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: gateway/go.mod
+      - name: gosec
+        # A report, not a gate. This is a sandbox orchestrator: it opens paths and runs processes
+        # named by configuration on purpose, so G304 and G204 fire on the architecture rather than
+        # on a defect, and the rules that matter there are held by the sandbox's own tests. What
+        # gosec still earns is the file-permission and cryptography checks nobody writes by hand.
+        continue-on-error: true
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          cd gateway && gosec -quiet ./...
+
+  secrets:
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The history, not just the diff: a key that was committed once and deleted is still in
+          # every clone, and a secret that is only clean in HEAD is not clean.
+          fetch-depth: 0
+      - name: gitleaks
+        run: |
+          go install github.com/zricethezav/gitleaks/v8@latest
+          gitleaks detect --no-banner --redact

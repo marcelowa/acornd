@@ -1,0 +1,16 @@
+# The things a formatter does not decide.
+#
+# Indentation is deliberately absent: gofmt and oxfmt own it, and an editorconfig that disagreed
+# with either is a fight nobody wins. What is here is what they do not set — one encoding, LF
+# everywhere, a final newline, and no trailing spaces in code.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Two spaces at the end of a line are a markdown line break, and a table's columns are padded.
+[*.md]
+trim_trailing_whitespace = false
