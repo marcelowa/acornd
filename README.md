@@ -159,7 +159,7 @@ the host. After that it self-updates from Settings > Updates: one
 click, it restarts itself.
 
 Useful flags: `--workspace <dir>`, `--data-dir <dir>` (default `~/.acornfall`),
-`--model <provider>/<modelId>` (the last resort's first choice), `--addr <host:port>`
+`--model <provider>/<modelId>` (the last resort's first choice), `--host` and `--port`
 (default `0.0.0.0:7777`), `--token <secret>` (default: none), `--worker-dir <dir>`
 (development: system bun over these
 sources, no ensure), `--worker-bin <path>` (single compiled worker binary,
@@ -196,7 +196,7 @@ EventSource cannot set headers, which is why the cookie exists.
 To keep it off the network, bind loopback and use an SSH tunnel:
 
 ```bash
-./bin/acornfall start --addr 127.0.0.1:7777
+./bin/acornfall start --host 127.0.0.1
 ssh -L 7777:127.0.0.1:7777 desktop
 # then browse http://localhost:7777
 ```

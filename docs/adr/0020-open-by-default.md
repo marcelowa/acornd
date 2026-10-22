@@ -34,7 +34,7 @@ an oversight of this decision.
   token. This is written in the README, not left to be discovered.
 - An install that passed `--token` is no longer guarded after the upgrade, and the flag no
   longer exists to object. The release notes say so.
-- `--addr 127.0.0.1:7777` is the one flag for the old exposure; an SSH tunnel still works.
+- `--host 127.0.0.1` (with `--port`) is the one flag for the old exposure; an SSH tunnel still works.
 - The sandbox boundary is unchanged. A guest can reach the gateway's API, as it could
   before, and the ADR 0012 limit now says the API is open by default.
 

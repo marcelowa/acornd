@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -89,7 +90,8 @@ acornfall <command> -h    explains that command's flags
 
 func serve(argv []string) error {
 	flags := flag.NewFlagSet("acornfall start", flag.ContinueOnError)
-	addr := flags.String("addr", "0.0.0.0:7777", "listen address (default: every interface)")
+	host := flags.String("host", "0.0.0.0", "interface to listen on (default: every interface)")
+	port := flags.Int("port", 7777, "port to listen on")
 	workspace := flags.String("workspace", "", "the general workspace's folder (default: the folder acornfall is started in)")
 	home := flags.String("home", "", "the acornfall folder: config, credentials, state, workspaces (default: ~/.acornfall)")
 	dataDir := flags.String("data-dir", "", "alias for --home")
@@ -254,7 +256,7 @@ func serve(argv []string) error {
 	}
 
 	server := &http.Server{
-		Addr:              *addr,
+		Addr:              net.JoinHostPort(*host, strconv.Itoa(*port)),
 		Handler:           httpapi.New(workspaces, web.Files, updates).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -267,7 +269,7 @@ func serve(argv []string) error {
 
 	// Listen explicitly so the line below reports the address that was actually bound: with
 	// a port of 0 the configured address says nothing about where to reach it.
-	listener, err := net.Listen("tcp", *addr)
+	listener, err := net.Listen("tcp", net.JoinHostPort(*host, strconv.Itoa(*port)))
 	if err != nil {
 		return err
 	}

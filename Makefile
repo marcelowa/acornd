@@ -2,8 +2,9 @@ BIN := bin/acornfall
 DATA ?= $(HOME)/.acornfall
 
 # Listen on every interface so another device can open the console; override
-# ADDR=127.0.0.1:7777 for a loopback-only run.
-ADDR ?= 0.0.0.0:7777
+# HOST=127.0.0.1 for a loopback-only run.
+HOST ?= 0.0.0.0
+PORT ?= 7777
 URL ?= http://127.0.0.1:7777
 
 .PHONY: help deps build typecheck lint modernize tools commits check test test-sandbox test-bwrap sandbox-preflight ui ui-build run dev fmt clean release release-branch
@@ -151,10 +152,10 @@ sandbox-preflight: ## fail, not skip, when there is no hypervisor for the microV
 	fi
 
 run: build ## run against the current directory
-	./$(BIN) --addr $(ADDR) --workspace $(CURDIR)
+	./$(BIN) --host $(HOST) --port $(PORT) --workspace $(CURDIR)
 
 dev: build ## run with the scripted dev provider (no api key needed)
-	cd worker && ACORNFALL_DEV_PROVIDER=1 ../$(BIN) --addr $(ADDR) --workspace $(CURDIR) --data-dir $(DATA) --model faux/faux-1 --worker-dir $(CURDIR)/worker
+	cd worker && ACORNFALL_DEV_PROVIDER=1 ../$(BIN) --host $(HOST) --port $(PORT) --workspace $(CURDIR) --data-dir $(DATA) --model faux/faux-1 --worker-dir $(CURDIR)/worker
 
 ui: ## check the interface in a real browser (needs a running gateway)
 	cd tools && bun run check-ui.mjs $(URL)

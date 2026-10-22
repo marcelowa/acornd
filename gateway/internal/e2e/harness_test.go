@@ -265,7 +265,8 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 		"--workspaces-dir", s.WorkspacesDir,
 		"--workspace", s.General,
 		"--worker-dir", workerDir,
-		"--addr", "127.0.0.1:0",
+		"--host", "127.0.0.1",
+		"--port", "0",
 	}
 	// A fresh install has no model flag: the last resort is derived, not given. Every other
 	// test runs with one, so a prompt always has something to run without credentials.
