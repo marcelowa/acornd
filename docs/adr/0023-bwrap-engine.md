@@ -165,8 +165,8 @@ cgroup and exec plumbing — plumbing that did not work rootless in this environ
 bwrap is an engine a workspace can choose, by name, at creation: `POST /api/workspaces` with
 `engine`, `acornfall workspace add --sandbox bwrap`, or the engine switch on the create form.
 The choice is stored on the workspace record like its image and its network, and it decides
-what `--sandbox-engine` the worker is started with — so one install can hold a microVM
-workspace and a bwrap one.
+which engine the worker is started with (`ACORNFALL_SANDBOX_ENGINE` since ADR 0027) — so one
+install can hold a microVM workspace and a bwrap one.
 
 The shape is the one this ADR predicted, and it is small:
 

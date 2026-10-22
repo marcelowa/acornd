@@ -293,7 +293,7 @@ func sandboxTier(ctx context.Context, dataDir, state, engineName string) (*sandb
 	}
 	_ = ctx
 	// Every engine this build has, one manager each, so a workspace can choose its own. The
-	// default is the one --sandbox-engine names; a workspace that names one wins over it.
+	// default is what this machine can run; a workspace that recorded an engine wins over it.
 	tier := sandbox.NewTier(dataDir, state, log.Printf)
 	engine, err := tier.For(engineName)
 	if err != nil {
@@ -302,7 +302,7 @@ func sandboxTier(ctx context.Context, dataDir, state, engineName string) (*sandb
 	if engineName == "" {
 		// Not a silent choice: which engine a new workspace gets is a security decision, and the
 		// reason is this machine's ability, so it is said rather than discovered in a record.
-		log.Printf("sandbox: no engine named, and this machine can run %s, so that is the default (--sandbox-engine chooses another)", engine.Driver().Name())
+		log.Printf("sandbox: no engine named, and this machine can run %s, so that is the default (each workspace keeps the engine it recorded)", engine.Driver().Name())
 	}
 	report := engine.Report()
 	if problem := engine.Problem(); problem != nil {

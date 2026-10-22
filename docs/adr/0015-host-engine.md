@@ -23,11 +23,12 @@ fallback is still open." This is that decision.
 
 ## Decision
 
-**A second engine, `host`, selected explicitly, never a fallback.** `--sandbox-engine host`
-(or `ACORNFALL_SANDBOX_ENGINE=host`) runs commands and file operations on the host, in the
-workspace, with the user's own permissions and reach. The default stays `microsandbox`: a run
-that does not name an engine gets the microVM engine and, without a hypervisor, the tools
-refuse exactly as before.
+**A second engine, `host`, selected explicitly, never a fallback.** `ACORNFALL_SANDBOX_ENGINE=host`
+runs commands and file operations on the host, in the workspace, with the user's own permissions
+and reach. (It was a flag, `--sandbox-engine host`, until ADR 0027 moved install-wide engine
+choices to the environment.) It is never the default: a machine's default is what it can run
+without giving up isolation (ADR 0026), so a run that named no engine gets a real sandbox and,
+without a hypervisor, the tools refuse exactly as before.
 
 The guardrails are part of the decision, not politeness:
 
