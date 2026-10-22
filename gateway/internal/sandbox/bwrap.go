@@ -582,28 +582,42 @@ func (b *Bwrap) imageBase(image string) (string, error) {
 	}
 	key := slugify(ref.host+"-"+ref.repository) + "-" + slugify(ref.tag)
 	dir := filepath.Join(b.StateDir(), "images", key)
+	base := filepath.Join(dir, "base")
 	complete := filepath.Join(dir, "complete")
-	if info, err := os.Stat(complete); err == nil && !info.IsDir() {
-		return filepath.Join(dir, "base"), nil
+	ready := func() bool {
+		info, err := os.Stat(complete)
+		return err == nil && !info.IsDir()
+	}
+	if ready() {
+		return base, nil
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	staging := filepath.Join(dir, "base.partial")
-	_ = os.RemoveAll(staging)
-	if b.pull == nil {
-		return "", errors.New("sandbox: no image source is configured")
-	}
-	if err := b.pull(context.Background(), image, staging, nil); err != nil {
-		_ = os.RemoveAll(staging)
-		return "", fmt.Errorf("sandbox: fetching the image %s: %w", image, err)
-	}
-	base := filepath.Join(dir, "base")
-	_ = os.RemoveAll(base)
-	if err := os.Rename(staging, base); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(complete, []byte(image+"\n"), 0o644); err != nil {
+	// One pull per image at a time, across processes: a workspace copying a half-written image is
+	// a failure with no cause in it, and two gateways on one machine share this folder. The lock
+	// is re-checked after it is taken, because whoever held it may have finished the job.
+	if err := lockFile(filepath.Join(dir, "lock"), func() error {
+		if ready() {
+			return nil
+		}
+		staging, err := os.MkdirTemp(dir, "base.partial-")
+		if err != nil {
+			return err
+		}
+		defer func() { _ = os.RemoveAll(staging) }()
+		if b.pull == nil {
+			return errors.New("sandbox: no image source is configured")
+		}
+		if err := b.pull(context.Background(), image, staging, nil); err != nil {
+			return fmt.Errorf("sandbox: fetching the image %s: %w", image, err)
+		}
+		_ = os.RemoveAll(base)
+		if err := os.Rename(staging, base); err != nil {
+			return err
+		}
+		return os.WriteFile(complete, []byte(image+"\n"), 0o644)
+	}); err != nil {
 		return "", err
 	}
 	return base, nil
