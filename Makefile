@@ -57,6 +57,12 @@ typecheck: ## the compiler's opinion, without running anything
 lint: ui-build typecheck ## the static rules; fails on the first one broken
 	@out=$$(gofmt -l gateway); if [ -n "$$out" ]; then echo "$$out"; echo "gofmt: not formatted"; exit 1; fi; echo "gofmt: clean"
 	cd gateway && go vet ./...
+	# The release ships four binaries, so a file that only compiles for Linux is a broken release
+	# rather than a broken test. `make lint` is what CI runs on every push; the v0.13.1 and v0.14.2
+	# releases both failed on exactly this, after the suite was green.
+	cd gateway && for pair in darwin/arm64 darwin/amd64 linux/arm64; do \
+		GOOS=$${pair%/*} GOARCH=$${pair#*/} go build ./... || exit 1; \
+	done
 	@if [ -x "$(STATICCHECK)" ]; then cd gateway && $(STATICCHECK) ./... && echo "staticcheck: clean"; \
 	else echo "staticcheck: not installed (make tools)"; fi
 	bun scripts/check-house-rules.mjs
