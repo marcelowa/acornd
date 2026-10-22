@@ -79,7 +79,7 @@ make deps                      # bun install in worker/
 make build                     # go build -> ./bin/acornfall
 
 ./bin/acornfall provider add opencode-go "$OPENCODE_API_KEY"
-./bin/acornfall start           # http://<host>:7777 in a workspace directory
+./bin/acornfall start           # http://<host>:7777
 ```
 
 ### Sandbox engines
@@ -134,7 +134,7 @@ curl -sL -H "$AUTH" -o sha256sums.txt https://github.com/marcelowa/acornfall/rel
 sha256sum -c sha256sums.txt --ignore-missing   # must say OK
 chmod +x acornfall
 ./acornfall provider add opencode-go "$OPENCODE_API_KEY"
-./acornfall start --workspace ~/acornfall/workspaces
+./acornfall start
 ```
 
 ### Token (while the repo is private)
@@ -158,23 +158,20 @@ tag, then installs dependencies — all under `~/.acornfall`, nothing on
 the host. After that it self-updates from Settings > Updates: one
 click, it restarts itself.
 
-Useful flags: `--workspace <dir>`, `--data-dir <dir>` (default `~/.acornfall`),
-`--model <provider>/<modelId>` (the last resort's first choice), `--host` and `--port`
-(default `0.0.0.0:7777`), `--token <secret>` (default: none), `--worker-dir <dir>`
-(development: system bun over these
-sources, no ensure), `--worker-bin <path>` (single compiled worker binary,
-explicit opt-in),
-`--migrate-dir <dir>` (default: scripts baked into the binary), `--workspaces-dir <dir>` (default
-`~/acornfall/workspaces`), `--sandbox-engine <microsandbox|host>` (default: microsandbox;
-`host` runs the tools on this machine with no isolation — see
-[ADR 0015](docs/adr/0015-host-engine.md)), `--disable-vm-nesting` (default: false;
-a workspace's sandbox nests virtual machines when the engine and the machine can unless
-refused — see [ADR 0018](docs/adr/0018-disable-vm-nesting.md)).
+Useful flags: `--data-dir <dir>` (default `~/.acornfall`), `--host` and `--port`
+(default `0.0.0.0:7777`), `--workspaces-dir <dir>` (default `~/acornfall/workspaces`),
+`--sandbox-state <dir>` (default `<data-dir>/sandboxes`; it has to be a short path, because a
+Unix socket name cannot be long — see [ADR 0023](docs/adr/0023-bwrap-engine.md)), and
+`--worker <command>` (a worker other than the ensured one).
 
-Each of those has an environment variable, for a service manager or a container that should
-not carry flags: `ACORNFALL_HOME` or `ACORNFALL_DATA` for the install folder,
-`ACORNFALL_TOKEN` for an optional token, and `ACORNFALL_WORKER` for the worker's directory. A
-flag wins over the variable.
+The engine is a property of each workspace, recorded when the workspace is created (`acornfall
+workspace add --sandbox …`), and a machine's default is what it can actually run. For a
+development loop or a test, `ACORNFALL_SANDBOX_ENGINE` names one for the whole install: `host`
+runs the tools on this machine with no isolation ([ADR 0015](docs/adr/0015-host-engine.md)).
+
+Two environment variables cover what a service manager should not have to pass as flags:
+`ACORNFALL_HOME` for the install folder and `ACORNFALL_WORKER` for the worker's sources. A flag
+wins over the variable.
 
 ### Reaching it from another machine
 
@@ -290,11 +287,12 @@ make dev
   provider key. A skill's script therefore runs where its instructions say it lives, while the
   install's credentials, token, and state are not paths inside the guest. When the engine
   or the hypervisor is missing the tools refuse rather than run on the host; `acornfall doctor`
-  says which it is. `--sandbox-engine host` is the explicit alternative for a machine without a
+  says which it is. `ACORNFALL_SANDBOX_ENGINE=host` is the explicit alternative for a machine without a
   hypervisor or a fast development loop: the tools run on the host, unconfined, and the state
   and doctor say so. A workspace nests virtual machines — runs a hypervisor inside
   its sandbox — when the engine offers it and the machine can grant it, unless nesting is
-  disabled; when it cannot, the sandbox boots without it and doctor and the state say why. See `docs/adr/0012-sandbox.md`,
+  disabled in the workspace; when it cannot, the sandbox boots without it and doctor and the
+  state say why. See `docs/adr/0012-sandbox.md`,
   `docs/adr/0014-global-resources-in-the-sandbox.md`, `docs/adr/0015-host-engine.md`, and
   `docs/adr/0018-disable-vm-nesting.md`.
 - **Slash commands** from `<home>/commands/`, `~/.agents/commands/`, and the workspace's

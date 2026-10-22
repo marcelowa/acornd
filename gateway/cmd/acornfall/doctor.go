@@ -47,7 +47,7 @@ func doctorCommand(argv []string) {
 	manager.Verify(context.Background())
 	report := manager.Report()
 	nesting := manager.Nesting(context.Background())
-	updater := update.New(resolved, "", "")
+	updater := update.New(resolved, "")
 	if err := updater.Open(); err != nil {
 		log.Fatalf("acornfall doctor: %v", err)
 	}

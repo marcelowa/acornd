@@ -90,5 +90,5 @@ install.sh: next
   export ACORNFALL_GITHUB_TOKEN='...'   # while the repo is private
   export PATH="\$PATH:$DIR"
   acornfall provider add opencode-go "\$OPENCODE_API_KEY"
-  acornfall start --workspace ~/acornfall/workspaces
+  acornfall start
 EOF

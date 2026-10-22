@@ -95,7 +95,8 @@ const NetworkOff = "off"
 // places and the worker reads both: the sandbox mounts the same paths at the same strings.
 // `disableVMNesting` is the install's own answer, --disable-vm-nesting, and a workspace's
 // own setting wins over it.
-func (w Workspace) SandboxPolicy(home, userHome string, disableVMNesting bool) sandbox.Policy {
+func (w Workspace) SandboxPolicy(home, userHome string) sandbox.Policy {
+	disableVMNesting := false
 	if w.DisableVMNesting != nil {
 		disableVMNesting = *w.DisableVMNesting
 	}
@@ -146,8 +147,6 @@ type WorkspacesOptions struct {
 	// entry point so that the sandbox mount list and the worker's reads are built from the
 	// same answer.
 	UserHome string
-	// GeneralPath is the general workspace's folder, from --workspace.
-	GeneralPath string
 	// WorkspacesDir is where workspaces are created, from --workspaces-dir. Empty means
 	// the registry's value, and failing that the default.
 	WorkspacesDir string
@@ -453,24 +452,23 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 	}
 
 	control = New(Options{
-		Workspace:        workspace,
-		Credentials:      filepath.Join(w.opts.Home, "credentials.json"),
-		Registry:         w.List,
-		WorkspacesDir:    w.Dir(),
-		Home:             w.opts.Home,
-		UserHome:         w.opts.UserHome,
-		StoragePath:      filepath.Join(w.opts.Home, "state", name, "session.sqlite"),
-		SettingsPath:     filepath.Join(w.opts.Home, "state", name, "settings.json"),
-		DraftsPath:       filepath.Join(w.opts.Home, "state", name, "drafts.json"),
-		Sandbox:          w.opts.Sandbox,
-		Sandboxes:        w.opts.Sandboxes,
-		Engines:          w.Engines,
-		Vault:            w.opts.Vault,
-		WorkerCommand:    w.opts.WorkerCommand,
-		WorkerDir:        w.opts.WorkerDir,
-		Update:           w.opts.Update,
-		Model:            w.opts.Model,
-		DisableVMNesting: w.opts.DisableVMNesting,
+		Workspace:     workspace,
+		Credentials:   filepath.Join(w.opts.Home, "credentials.json"),
+		Registry:      w.List,
+		WorkspacesDir: w.Dir(),
+		Home:          w.opts.Home,
+		UserHome:      w.opts.UserHome,
+		StoragePath:   filepath.Join(w.opts.Home, "state", name, "session.sqlite"),
+		SettingsPath:  filepath.Join(w.opts.Home, "state", name, "settings.json"),
+		DraftsPath:    filepath.Join(w.opts.Home, "state", name, "drafts.json"),
+		Sandbox:       w.opts.Sandbox,
+		Sandboxes:     w.opts.Sandboxes,
+		Engines:       w.Engines,
+		Vault:         w.opts.Vault,
+		WorkerCommand: w.opts.WorkerCommand,
+		WorkerDir:     w.opts.WorkerDir,
+		Update:        w.opts.Update,
+		Model:         w.opts.Model,
 	})
 	if err := os.MkdirAll(filepath.Join(w.opts.Home, "state", name), 0o700); err != nil {
 		return nil, err
@@ -904,14 +902,10 @@ func (w *Workspaces) loadRegistry() error {
 		workerpool.Log("workspaces folder: %s", absolute)
 	}
 	if _, ok := w.registry[GeneralWorkspaceName]; !ok {
-		// First run: the folder the install was started in is the general workspace, which
-		// is what today's single-workspace install already was. Without one, it is created
-		// in the workspaces folder like any other.
-		path := w.opts.GeneralPath
-		if path == "" {
-			path = filepath.Join(w.dir, GeneralWorkspaceName)
-		}
-		absolute, err := filepath.Abs(path)
+		// First run: the general workspace is a workspace like any other, created in the
+		// workspaces folder under its own name. An install that has one already keeps it
+		// where it was, because the registry says where it is.
+		absolute, err := filepath.Abs(filepath.Join(w.dir, GeneralWorkspaceName))
 		if err != nil {
 			return err
 		}

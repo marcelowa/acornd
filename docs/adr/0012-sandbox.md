@@ -101,7 +101,7 @@ naming what is missing — and the state frame says so (`sandbox.tools: false`,
 `sandbox.problem`), which the interface shows. The worker starts anyway, because a workspace
 whose tools refuse is still a workspace: its conversations, its history, and its settings are
 all readable. Running unconfined must be a decision somebody made, never a state the system
-drifted into. The decision is a separate engine, `--sandbox-engine host`: it is chosen by name,
+drifted into. The decision is a separate engine, the `host` engine, chosen by name (`ACORNFALL_SANDBOX_ENGINE=host` for an install-wide run): it is chosen by name,
 never by a missing hypervisor, and every surface reports that it is not isolated
 ([ADR 0015](0015-host-engine.md)).
 
@@ -160,7 +160,7 @@ state path, and the reason it cannot work if it cannot.
   reach. `--sandbox-state` moves the engine's store.
 - The worker: `SandboxClient` and its engine adapter, `SandboxExecutionEnv` for every tool call,
   and resource loading routed through the sandbox. `--sandbox <name>` and
-  `--sandbox-engine <engine>` come from control; without them the tools refuse.
+  `ACORNFALL_SANDBOX_ENGINE` and the workspace's own engine come from control; without them the tools refuse.
 - `acornfall doctor` and the workspace CLI (`--image`, `--network`).
 - Tests: the environment, the routing, and the refusal are unit-tested against a fake sandbox,
   so the ordinary suite needs no hypervisor. The end-to-end tests that exercise a real

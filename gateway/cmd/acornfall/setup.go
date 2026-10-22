@@ -17,10 +17,6 @@ import (
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 )
 
-// applyIsGone is the whole of the change in one sentence: the password prompt moved inside the
-// command, so nobody has to learn a second invocation.
-const applyIsGone = "acornfall setup: --apply is not needed any more: `acornfall setup` asks for your password when it needs root"
-
 // setupCommand answers "can this machine run a workspace, and if not, what does it need" — and
 // then does it, in whichever of three ways this machine allows (ADR 0026):
 //
@@ -38,12 +34,20 @@ func setupCommand(argv []string) {
 	privileged := flags.Bool("privileged", false, "internal: run a plan as root (setup runs this through sudo)")
 	planPath := flags.String("plan", "", "internal: the plan to run with --privileged")
 	assumeYes := flags.Bool("yes", false, "apply the steps without asking first (for a script that already decided)")
-	apply := flags.Bool("apply", false, "no longer needed: acornfall setup asks for a password itself")
-	if err := flags.Parse(argv); err != nil {
-		os.Exit(2)
+	// The three flags above are the interface. The rest of this command's flags are how setup
+	// calls itself, and printing them would offer a person switches that exist to avoid them.
+	flags.Usage = func() {
+		fmt.Fprint(os.Stderr, `usage: acornfall setup [--data-dir DIR] [--for USER] [--yes]
+
+  --data-dir DIR  the acornfall folder (default: ~/.acornfall)
+  --for USER      the account that runs acornfall (default: the owner of that folder)
+  --yes           apply the steps without asking first
+
+It checks this machine, explains each step, and asks for your password only for the steps that
+need root. Run with nothing to see what this machine needs.
+`)
 	}
-	if *apply {
-		logf(applyIsGone)
+	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
 	if *privileged {

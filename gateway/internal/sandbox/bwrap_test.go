@@ -17,7 +17,7 @@ import (
 // The driver binds this executable into the sandbox and runs it with the supervisor's arguments;
 // a test binary that ignored them would start a second test run inside the sandbox instead.
 func TestMain(m *testing.M) {
-	if len(os.Args) > 1 && os.Args[1] == "sandbox-supervisor" {
+	if len(os.Args) > 2 && os.Args[1] == "internal" && os.Args[2] == "sandbox-supervisor" {
 		socket := ""
 		for index, argument := range os.Args {
 			if argument == "--socket" && index+1 < len(os.Args) {
@@ -357,7 +357,7 @@ func TestBwrapSandboxArgvIsOneSandboxPerWorkspace(t *testing.T) {
 		"--ro-bind /home/me/.agents /home/me/.agents",
 		// The supervisor is this binary, bound in, and it is what the sandbox runs.
 		"--ro-bind /install/acornfall /usr/local/bin/acornfall",
-		"-- /usr/local/bin/acornfall sandbox-supervisor --socket /run/acornfall/s.sock",
+		"-- /usr/local/bin/acornfall internal sandbox-supervisor --socket /run/acornfall/s.sock",
 		// The same policy value the microVM engine is given: both engines answer "stop when idle"
 		// the same way, and a kept-alive workspace asks for a timeout that never fires.
 		"--idle-timeout 30m",
@@ -407,7 +407,7 @@ func TestBwrapSandboxArgvSharesPastaForEgress(t *testing.T) {
 		"-a 10.0.2.15 -n 24 -g 10.0.2.2",
 		// pasta configures neither the address nor the route, so the sandbox does it from inside
 		// the namespace pasta made: this binary over netlink, not a shell and not iproute2.
-		"/install/acornfall netns --address 10.0.2.15/24 --gateway 10.0.2.2",
+		"/install/acornfall internal netns --address 10.0.2.15/24 --gateway 10.0.2.2",
 		"/usr/bin/bwrap",
 		"--share-net",
 	} {
@@ -645,7 +645,7 @@ func TestBwrapRefusesPrivateNetworksWithoutAGrant(t *testing.T) {
 	for _, want := range []string{
 		// The flag asks for the routes; the list itself lives where the routes are installed, so
 		// this asserts the request rather than repeating the list in a second place.
-		"acornfall netns --address 10.0.2.15/24 --gateway 10.0.2.2 --refuse-private",
+		"acornfall internal netns --address 10.0.2.15/24 --gateway 10.0.2.2 --refuse-private",
 		"--dns-forward 10.0.2.3",
 	} {
 		if !strings.Contains(joined, want) {

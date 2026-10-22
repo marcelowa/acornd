@@ -28,8 +28,9 @@ and its own sandbox tier (`make test-sandbox`) needs `/dev/kvm` inside that work
 
 ## Decision
 
-`--disable-vm-nesting`, default false, and a per-workspace `disable_vm_nesting` that
-overrides it. Absent or false allows nesting wherever it can be granted; true refuses it.
+A per-workspace `disable_vm_nesting`. Absent or false allows nesting wherever it can be
+granted; true refuses it. There is no install-wide switch: a refusal belongs to a workspace, and
+a machine-wide one only made sense while every workspace was the same decision.
 Nesting is allowed unless refused, and the refusal behaves in three ways:
 
 - **Asked only where it can be granted.** The engine is told `--nested-virt` when it offers
@@ -73,7 +74,9 @@ direction. The engine's own check remains the authority once the flag is passed.
   sandbox there: no off switch exists to honor it with. Moving the pin to the release
   carrying `--nested-virt` arms both directions, and the commit that moves it should say so.
 - `acornfall doctor` grows a nesting line, text and JSON; the state frame grows two fields.
-- The two flags differ on purpose: acornfall's `--disable-vm-nesting` says what it refuses,
+- The install-wide switch is gone (it was `--disable-vm-nesting`): a workspace decides, and
+  a refusal is recorded on the workspace rather than on the machine. The remaining difference
+  is still on purpose: acornfall's setting says what it refuses,
   the engine's `--nested-virt` says what it does with a sandbox.
 - Tests: the machines' answers (Linux KVM parameters, Apple chip and OS version) are pure
   functions, tested on every platform; the create path — the flag, the explicit false, or

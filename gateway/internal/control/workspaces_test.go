@@ -70,27 +70,24 @@ func TestARegistryFromAnOlderBuildIsRewrittenWithoutOldKeys(t *testing.T) {
 	}
 }
 
-// Nesting is allowed unless refused, and whose refusal it is matters: the install's flag
-// is the default, a workspace's own setting wins over it, and nil is not false — it is
-// "follow the install", which is exactly why the field is a pointer.
-func TestNestingFollowsTheInstallUnlessTheWorkspaceChooses(t *testing.T) {
+// Nesting is allowed unless this workspace refuses it: the install has no say any more, and an
+// unset field means "nest when the machine and the engine can", which is not the same as false.
+func TestNestingIsTheWorkspacesOwnDecision(t *testing.T) {
 	const home, userHome = "/home/me/.acornfall", "/home/me"
 	on, off := true, false
 	cases := []struct {
 		name      string
 		workspace *bool
-		install   bool
 		want      bool
 	}{
-		{"no setting follows an install that allows", nil, false, false},
-		{"no setting follows an install that refuses", nil, true, true},
-		{"a workspace can refuse what the install allows", &on, false, true},
-		{"a workspace can allow what the install refuses", &off, true, false},
+		{"unset nests whenever it can", nil, false},
+		{"a workspace can refuse", &on, true},
+		{"a workspace can allow", &off, false},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			workspace := Workspace{DisableVMNesting: test.workspace}
-			got := workspace.SandboxPolicy(home, userHome, test.install).DisableVMNesting
+			got := workspace.SandboxPolicy(home, userHome).DisableVMNesting
 			if got != test.want {
 				t.Errorf("DisableVMNesting = %t, want %t", got, test.want)
 			}
@@ -129,11 +126,11 @@ func TestAWorkspacesSandboxIsRemovedByItsOwnEngine(t *testing.T) {
 // The grant is a workspace's own field and reaches the engine's policy as one.
 func TestAPrivateNetworksGrantReachesThePolicy(t *testing.T) {
 	workspace := Workspace{Name: "w", Path: "/work/w"}
-	if workspace.SandboxPolicy("/home", "/users/u", false).PrivateEgress {
+	if workspace.SandboxPolicy("/home", "/users/u").PrivateEgress {
 		t.Fatal("a workspace that asked for nothing should not reach private networks")
 	}
 	workspace.Private = true
-	if !workspace.SandboxPolicy("/home", "/users/u", false).PrivateEgress {
+	if !workspace.SandboxPolicy("/home", "/users/u").PrivateEgress {
 		t.Fatal("a workspace that asked for private networks should carry the grant")
 	}
 }

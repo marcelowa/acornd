@@ -236,7 +236,9 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	// them, when they end.
 	s.SandboxState = filepath.Join(os.TempDir(), "acornfall-e2e-sandboxes")
 	s.WorkspacesDir = filepath.Join(t.TempDir(), "workspaces")
-	s.General = filepath.Join(t.TempDir(), "general")
+	// The general workspace is created where the product creates one: inside the workspaces
+	// folder, by name. Nothing points the gateway at a folder any more.
+	s.General = filepath.Join(s.WorkspacesDir, "general")
 	for _, dir := range []string{s.Home, s.WorkspacesDir, s.General} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
@@ -263,8 +265,6 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 		"start",
 		"--home", s.Home,
 		"--workspaces-dir", s.WorkspacesDir,
-		"--workspace", s.General,
-		"--worker-dir", workerDir,
 		"--host", "127.0.0.1",
 		"--port", "0",
 	}
@@ -277,12 +277,13 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	// and this is the engine that needs no hypervisor and no state directory. Everything else
 	// runs with the sandbox tier forced off, which is a refusal path and not a host fallback.
 	hostEngine := false
+	engineEnv := ""
 	if value, ok := bwrapEngineTests.Load(t.Name()); ok && value == true {
 		hostEngine = true
-		args = append(args, "--sandbox-engine", "bwrap")
+		engineEnv = "bwrap"
 	} else if value, ok := hostEngineTests.Load(t.Name()); ok && value == true {
 		hostEngine = true
-		args = append(args, "--sandbox-engine", "host")
+		engineEnv = "host"
 	} else {
 		args = append(args, "--sandbox-state", s.SandboxState)
 	}
@@ -290,7 +291,19 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	// A curated environment: the test must not inherit a real install's home, token, or
 	// provider credentials, or it would be testing someone else's configuration. The
 	// switches that decide how this install behaves are forwarded explicitly.
-	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + s.Home, "ACORNFALL_HOME=" + s.Home}
+	env := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + s.Home,
+		"ACORNFALL_HOME=" + s.Home,
+		// The worker sources are a folder, and a folder is a thing the environment says
+		// (ACORNFALL_WORKER) rather than a flag on the server.
+		"ACORNFALL_WORKER=" + workerDir,
+	}
+	if engineEnv != "" {
+		// The engine for the whole install is an environment decision now, not a flag: a
+		// workspace records its own engine, and this is the test telling the install otherwise.
+		env = append(env, "ACORNFALL_SANDBOX_ENGINE="+engineEnv)
+	}
 	if noSandbox := os.Getenv("ACORNFALL_NO_SANDBOX"); noSandbox != "" && !hostEngine {
 		env = append(env, "ACORNFALL_NO_SANDBOX="+noSandbox)
 	}

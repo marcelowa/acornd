@@ -27,7 +27,7 @@ func supervisorCommand(argv []string) {
 		os.Exit(2)
 	}
 	if *socket == "" {
-		fmt.Fprintln(os.Stderr, "usage: acornfall sandbox-supervisor --socket PATH [--idle-timeout 30m]")
+		fmt.Fprintln(os.Stderr, "usage: acornfall internal sandbox-supervisor --socket PATH [--idle-timeout 30m]")
 		os.Exit(2)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

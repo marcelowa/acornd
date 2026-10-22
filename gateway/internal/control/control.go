@@ -72,10 +72,6 @@ type Options struct {
 	// which is what ACORNFALL_NO_SANDBOX asks the gateway for: the workspace still opens and
 	// its tools refuse.
 	Sandbox *sandbox.Manager
-	// DisableVMNesting is the install default for nesting, from --disable-vm-nesting. A
-	// workspace's own setting wins over it, and the engine and the machine have the last
-	// word: see docs/adr/0018-disable-vm-nesting.md.
-	DisableVMNesting bool
 	// Vault is the install-wide tool-secret store. Nil means this workspace has no vault,
 	// and its sandbox receives no secret rather than failing to open.
 	Vault *vault.Store
@@ -147,7 +143,7 @@ type WorkspaceState struct {
 	KeepAlive bool `json:"keep_alive,omitempty"`
 	// Engine is which sandbox engine this workspace runs on; empty means the install default.
 	Engine string `json:"engine,omitempty"`
-	// DisableVMNesting is nil when this workspace follows the install's --disable-vm-nesting,
+	// DisableVMNesting is nil when this workspace nests whenever it can,
 	// and a choice of its own otherwise. True refuses nesting; absent or false allows it
 	// wherever the engine and the machine can.
 	DisableVMNesting *bool `json:"disable_vm_nesting,omitempty"`
@@ -1030,7 +1026,7 @@ func (c *Control) provisionSandbox(ctx context.Context) SandboxState {
 	}
 	delivery := manager.SecretDelivery()
 	resolved := c.resolveSecrets(delivery)
-	policy := c.opts.Workspace.SandboxPolicy(c.opts.Home, c.opts.UserHome, c.opts.DisableVMNesting)
+	policy := c.opts.Workspace.SandboxPolicy(c.opts.Home, c.opts.UserHome)
 	policy.Secrets = resolved.delivered
 	if _, err := manager.Produce(ctx, policy, filepath.Dir(c.opts.StoragePath)); err != nil {
 		state.Problem = err.Error()
@@ -1232,7 +1228,7 @@ func (c *Control) applyPendingSecretRestart(ctx context.Context) {
 	applied := false
 	delivery := manager.SecretDelivery()
 	if delivery == sandbox.DeliverySubstitute {
-		policy := c.opts.Workspace.SandboxPolicy(c.opts.Home, c.opts.UserHome, c.opts.DisableVMNesting)
+		policy := c.opts.Workspace.SandboxPolicy(c.opts.Home, c.opts.UserHome)
 		policy.Secrets = c.resolveSecrets(delivery).delivered
 		if err := manager.Stop(ctx, c.opts.Workspace.Path); err != nil {
 			workerpool.Log("restart sandbox for secrets: %v", err)

@@ -54,13 +54,11 @@ func main() {
 		providers(args[1:])
 	case "version":
 		versionCommand(args[1:])
-	case "sandbox-supervisor":
-		// The sandbox's own first process: a sandbox calls this, a person does not.
-		supervisorCommand(args[1:])
-	case "netns":
-		// The namespace pasta made, configured before the sandbox's own process starts: a
-		// sandbox calls this, a person does not.
-		netnsCommand(args[1:])
+	case "internal":
+		// Called by binaries, never by a person: the updater's staged binary, the sandbox's
+		// own first process, and the namespace pasta made. They live behind one verb so the
+		// help can stay a list of things a person can do.
+		internalCommand(args[1:])
 	case "help", "-h", "--help":
 		usage(os.Stdout)
 	default:
@@ -68,6 +66,23 @@ func main() {
 		usage(os.Stderr)
 		os.Exit(2)
 	}
+}
+
+// internalCommand dispatches the verbs that binaries call. An unknown one is refused like any
+// other unknown command, because a typo in a driver should say so.
+func internalCommand(argv []string) {
+	if len(argv) > 0 {
+		switch argv[0] {
+		case "netns":
+			netnsCommand(argv[1:])
+			return
+		case "sandbox-supervisor":
+			supervisorCommand(argv[1:])
+			return
+		}
+	}
+	fmt.Fprintln(os.Stderr, "usage: acornfall internal <netns|sandbox-supervisor> [flags]")
+	os.Exit(2)
 }
 
 // usage is the whole command surface on one screen: a verb and what it is for. The flags are
@@ -92,18 +107,12 @@ func serve(argv []string) error {
 	flags := flag.NewFlagSet("acornfall start", flag.ContinueOnError)
 	host := flags.String("host", "0.0.0.0", "interface to listen on (default: every interface)")
 	port := flags.Int("port", 7777, "port to listen on")
-	workspace := flags.String("workspace", "", "the general workspace's folder (default: the folder acornfall is started in)")
 	home := flags.String("home", "", "the acornfall folder: config, credentials, state, workspaces (default: ~/.acornfall)")
 	dataDir := flags.String("data-dir", "", "alias for --home")
 	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornfall/workspaces)")
 	sandboxState := flags.String("sandbox-state", "", "where sandboxes, images, and snapshots are kept (default: <home>/sandboxes); must be a short path")
-	sandboxEngine := flags.String("sandbox-engine", "", "the default engine for workspaces that name none: microsandbox (needs a hypervisor), bwrap (needs user namespaces), or host (no isolation)")
-	migrateDir := flags.String("migrate-dir", "", "release migrate scripts directory (default: the scripts baked into the binary)")
-	disableVMNesting := flags.Bool("disable-vm-nesting", false, "keep a workspace's sandbox from nesting virtual machines; by default a sandbox nests when the engine and the machine can, and a workspace's own setting wins")
 	model := flags.String("model", "", "default model as provider/modelId")
 	workerCommand := flags.String("worker", "", `worker command (default: ensured bun over ensured sources)`)
-	workerDir := flags.String("worker-dir", "", "worker directory (development: system bun over these sources, no ensure)")
-	workerBin := flags.String("worker-bin", "", "single compiled worker binary (explicit opt-in; needs no sources)")
 	if err := flags.Parse(argv); err != nil {
 		return err
 	}
@@ -137,20 +146,12 @@ func serve(argv []string) error {
 	if err := sandbox.EnsureGlobal(dir, userHome); err != nil {
 		return err
 	}
-	// The general workspace's folder: the folder the install was started in, unless told
-	// otherwise. An existing single-workspace install therefore keeps working where it was.
-	general := *workspace
-	if general == "" {
-		if cwd, err := os.Getwd(); err == nil {
-			general = cwd
-		}
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	// The self-update tier, owned early: boot readiness (migrate, bun, worker
 	// sources) is decided before anything serves.
-	updates := update.New(dir, "", *migrateDir)
+	updates := update.New(dir, "")
 	if err := updates.Open(); err != nil {
 		return err
 	}
@@ -159,7 +160,7 @@ func serve(argv []string) error {
 	if err := updates.RunPending(ctx); err != nil {
 		return err
 	}
-	command, worker, workerManaged := resolveWorker(*workerCommand, *workerDir, *workerBin, updates)
+	command, worker, workerManaged := resolveWorker(*workerCommand, updates)
 	if workerManaged && updates.Status().Current != "dev" {
 		// Best effort, never fatal: a missing toolchain with no network is
 		// a loud refusal at workspace open, not a bricked boot.
@@ -174,10 +175,11 @@ func serve(argv []string) error {
 	// The sandbox tier. One engine per install, and the worker is told which one, because it
 	// attaches with that engine's client and the two must agree. Nothing here chooses for a
 	// machine: naming the host engine is what makes a run unconfined.
-	engineName := *sandboxEngine
-	if engineName == "" {
-		engineName = os.Getenv("ACORNFALL_SANDBOX_ENGINE")
-	}
+	// The engine is a property of a workspace, recorded when the workspace is created. This
+	// install-wide name exists for tests and for a machine that must be told; the environment is
+	// where it lives now, because a flag on the server is a decision nobody meant to make once
+	// per boot.
+	engineName := os.Getenv("ACORNFALL_SANDBOX_ENGINE")
 	if engineName == "host" && *sandboxState != "" {
 		return errors.New("--sandbox-state belongs to the microsandbox engine; the host engine keeps no state")
 	}
@@ -191,7 +193,6 @@ func serve(argv []string) error {
 	workspaces := control.NewWorkspaces(control.WorkspacesOptions{
 		Home:          dir,
 		UserHome:      userHome,
-		GeneralPath:   general,
 		WorkspacesDir: *workspacesDir,
 		WorkerCommand: command,
 		WorkerDir:     worker,
@@ -209,9 +210,6 @@ func serve(argv []string) error {
 		Sandbox:   engine,
 		Sandboxes: tier,
 		Vault:     secrets,
-		// Nesting is allowed unless refused: a workspace's sandbox nests when the
-		// engine offers it and the machine can grant it, and boots without it otherwise.
-		DisableVMNesting: *disableVMNesting,
 	})
 	if err := workspaces.Open(ctx); err != nil {
 		return err
@@ -340,7 +338,7 @@ func versionCommand(argv []string) {
 }
 
 func versionString(home string) (string, error) {
-	manager := update.New(home, "", "")
+	manager := update.New(home, "")
 	if err := manager.Open(); err != nil {
 		return "", err
 	}
@@ -440,23 +438,16 @@ func writeCredentials(path string, all map[string]credential) error {
 // then an explicit --worker-dir over the system bun (development), then
 // the managed path: ensured bun over ensured sources, both under the
 // install folder, nothing on the host.
-func resolveWorker(explicit, dirFlag, binFlag string, updates *update.Manager) ([]string, string, bool) {
+func resolveWorker(explicit string, updates *update.Manager) ([]string, string, bool) {
 	if explicit != "" {
-		worker, err := resolveWorkerDir(dirFlag)
+		worker, err := resolveWorkerDir("")
 		if err != nil {
 			return strings.Fields(explicit), "", false
 		}
 		return strings.Fields(explicit), worker, false
 	}
-	bin := binFlag
-	if bin == "" {
-		bin = os.Getenv("ACORNFALL_WORKER_BIN")
-	}
-	if bin != "" {
-		return []string{bin}, "", false
-	}
-	if dirFlag != "" {
-		worker, err := resolveWorkerDir(dirFlag)
+	if dir := os.Getenv("ACORNFALL_WORKER"); dir != "" {
+		worker, err := resolveWorkerDir(dir)
 		if err != nil {
 			return []string{"bun", "run", "src/main.ts"}, "", false
 		}
@@ -685,7 +676,7 @@ func resolveDataDir(flagValue string) (string, error) {
 
 // resolveWorkerDir finds the worker package without requiring configuration.
 func resolveWorkerDir(flagValue string) (string, error) {
-	candidates := []string{flagValue, os.Getenv("ACORNFALL_WORKER"), "./worker", "../worker"}
+	candidates := []string{flagValue, "./worker", "../worker"}
 	if executable, err := os.Executable(); err == nil {
 		candidates = append(candidates, filepath.Join(filepath.Dir(executable), "..", "..", "worker"))
 	}

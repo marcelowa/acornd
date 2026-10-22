@@ -237,22 +237,22 @@ type Manager struct {
 }
 
 // New builds a Manager. Empty binPath means the current executable.
-// Empty migrateDir means <repo>/scripts/migrate beside nothing: pass it
+// migrateDir is where a development build keeps release scripts; empty means the ones baked into
+// the binary. Tests set it directly, which is the only caller that wants a directory.
 // explicitly in production; empty disables the migrate step in tests.
-func New(home, binPath, migrateDir string) *Manager {
+func New(home, binPath string) *Manager {
 	if binPath == "" {
 		if executable, err := os.Executable(); err == nil {
 			binPath = executable
 		}
 	}
 	return &Manager{
-		home:       home,
-		binPath:    binPath,
-		migrateDir: migrateDir,
-		latestURL:  LatestURL,
-		client:     &http.Client{Timeout: 30 * time.Second},
-		settings:   DefaultSettings(),
-		IsAdmin:    func(*http.Request) bool { return true },
+		home:      home,
+		binPath:   binPath,
+		latestURL: LatestURL,
+		client:    &http.Client{Timeout: 30 * time.Second},
+		settings:  DefaultSettings(),
+		IsAdmin:   func(*http.Request) bool { return true },
 	}
 }
 

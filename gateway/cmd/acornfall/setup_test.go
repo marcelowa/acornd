@@ -186,14 +186,6 @@ func TestAPlanCanOnlyAskForWhatSetupDoes(t *testing.T) {
 	}
 }
 
-// `acornfall setup --apply` is gone: the command asks for a password itself, and a flag that
-// says otherwise would teach the wrong habit.
-func TestSetupSaysApplyIsNotNeeded(t *testing.T) {
-	if !strings.Contains(applyIsGone, "--apply") {
-		t.Fatalf("the message should name the flag: %q", applyIsGone)
-	}
-}
-
 // The install folder is a warning, not a sandbox problem: a workspace still runs, the update does
 // not.
 func TestSetupReportsAnInstallFolderItCannotUpdate(t *testing.T) {

@@ -10,8 +10,8 @@ import (
 )
 
 func TestResolveWorkerPrefersExplicit(t *testing.T) {
-	manager := update.New(t.TempDir(), "", "")
-	got, _, managed := resolveWorker("bun run --bun src/main.ts", "", "", manager)
+	manager := update.New(t.TempDir(), "")
+	got, _, managed := resolveWorker("bun run --bun src/main.ts", manager)
 	if !slices.Equal(got, []string{"bun", "run", "--bun", "src/main.ts"}) {
 		t.Fatalf("explicit command must win, got %q", got)
 	}
@@ -20,17 +20,9 @@ func TestResolveWorkerPrefersExplicit(t *testing.T) {
 	}
 }
 
-func TestResolveWorkerPrefersBinFlag(t *testing.T) {
-	manager := update.New(t.TempDir(), "", "")
-	got, dir, managed := resolveWorker("", "", "/bin/worker", manager)
-	if !slices.Equal(got, []string{"/bin/worker"}) || dir != "" || managed {
-		t.Fatalf("bin flag must win unmanaged: %q %q %v", got, dir, managed)
-	}
-}
-
-func TestResolveWorkerDirFlagUsesSystemBun(t *testing.T) {
+func TestResolveWorkerEnvDirUsesSystemBun(t *testing.T) {
 	home := t.TempDir()
-	manager := update.New(home, "", "")
+	manager := update.New(home, "")
 	sources := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(sources, "src"), 0o755); err != nil {
 		t.Fatal(err)
@@ -38,7 +30,8 @@ func TestResolveWorkerDirFlagUsesSystemBun(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sources, "src", "main.ts"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, dir, managed := resolveWorker("", sources, "", manager)
+	t.Setenv("ACORNFALL_WORKER", sources)
+	got, dir, managed := resolveWorker("", manager)
 	if !slices.Equal(got, []string{"bun", "run", "src/main.ts"}) {
 		t.Fatalf("worker dir must mean system bun, got %q", got)
 	}
@@ -49,8 +42,8 @@ func TestResolveWorkerDirFlagUsesSystemBun(t *testing.T) {
 
 func TestResolveWorkerDefaultsToManaged(t *testing.T) {
 	home := t.TempDir()
-	manager := update.New(home, "", "")
-	got, dir, managed := resolveWorker("", "", "", manager)
+	manager := update.New(home, "")
+	got, dir, managed := resolveWorker("", manager)
 	if !managed {
 		t.Fatal("default worker must be managed")
 	}

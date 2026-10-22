@@ -721,7 +721,7 @@ func (b *Bwrap) bootArgv(config bwrapConfig) ([]string, error) {
 	// is ours: it sets the address and the default route over netlink, refuses the ranges the
 	// workspace was not granted, then execs bubblewrap. Nothing here needs iproute2.
 	configure := []string{
-		config.Supervisor, "netns",
+		config.Supervisor, "internal", "netns",
 		"--address", config.Network.Address,
 		"--gateway", config.Network.Gateway,
 	}
@@ -788,7 +788,7 @@ func (b *Bwrap) sandboxArgv(config bwrapConfig) ([]string, error) {
 		// Share the network namespace of whoever started bubblewrap: pasta, when there is one.
 		argv = append(argv, "--share-net")
 	}
-	argv = append(argv, "--", guestSupervisor, "sandbox-supervisor", "--socket", config.GuestSocket)
+	argv = append(argv, "--", guestSupervisor, "internal", "sandbox-supervisor", "--socket", config.GuestSocket)
 	if config.IdleTimeout != "" {
 		// A kept-alive workspace is given a timeout that never fires rather than none at all, so
 		// the flag always says what the policy decided.
