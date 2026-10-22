@@ -1,6 +1,6 @@
 # ADR 0026 — A rootless host, and the engine a machine actually gets
 
-Status: accepted (2026-10-26), partly built
+Status: accepted (2026-10-26), built; vendoring rejected (2026-10-26)
 
 ## The problem
 
@@ -58,13 +58,22 @@ next reboot is worse than one that was never made; `/dev/net/tun` likewise gets 
 the policy and the device belong to whoever started the container, so the command says so and
 stops rather than proposing something that cannot work.
 
-**Still open: shipping the tools.** `bwrap` and `pasta` should be pinned static binaries fetched
-into the data folder, used when the machine has none, and refreshed with the release. That is not
-built yet, and it is not a small piece of CI: bubblewrap hard-requires libcap, so a static build
-needs a static libcap and a musl cross toolchain for both architectures **built from pinned
-sources in the release workflow**, which we then have to keep patched. Until it exists, the tools
-come from the distribution, `setup` names the package, and this ADR's honesty is that the
-"seamless install" is one command rather than zero.
+**Vendoring the tools is rejected, not deferred.** The alternative was to ship pinned static
+`bwrap` and `pasta`, fetched into the data folder and used where the machine has none. It was
+considered and dropped for good:
+
+- bubblewrap hard-requires libcap, so a static build needs a static libcap **and** a musl cross
+  toolchain for every architecture, built from pinned sources in the release workflow;
+- what we build, we own: a vendored CVE in bubblewrap, libcap, or pasta becomes ours to track,
+  patch, and re-release, on a project whose whole distribution story is "the distribution's
+  packages";
+- the price it removes is one `apt install` at setup, once, which the command already names and
+  performs.
+
+So the tools come from the distribution, `acornfall setup` installs them, and the seamlessness
+this ADR promised is one command rather than zero — permanently. If a future machine cannot
+install packages at all, that is a different problem (an image to build), not a reason to carry
+three C libraries through our own release pipeline.
 
 **2. An engine a machine cannot run is not the default.** The preference order is `bwrap`,
 `microsandbox`, `host`: bubblewrap first because it needs no hypervisor, no root, and no device;
