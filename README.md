@@ -156,7 +156,9 @@ should be rotated afterwards under the token's own settings.
 First boot downloads a pinned bun once and the worker sources for its
 tag, then installs dependencies — all under `~/.acornfall`, nothing on
 the host. After that it self-updates from Settings > Updates: one
-click, it restarts itself.
+click, it restarts itself. Headless, `acornfall update` does the same thing: it checks, shows the
+new tag and its first lines, and asks `install vX? [Y/n]` — `--yes` skips the question, `--check`
+only reports. With no gateway running it installs to disk and takes effect at the next start.
 
 Useful flags: `--data-dir <dir>` (default `~/.acornfall`), `--host` and `--port`
 (default `0.0.0.0:7777`), `--workspaces-dir <dir>` (default `~/acornfall/workspaces`),

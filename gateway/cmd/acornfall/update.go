@@ -1,0 +1,249 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/acornfall/acornfall/gateway/internal/update"
+)
+
+// updateCommand checks for a release and installs it.
+//
+// Two paths, one behaviour: when a gateway is running, the update goes through its API, so
+// active runs are drained and the process replaces itself with the new build. When nothing is
+// listening there is nothing to drain and nothing to replace, so the same apply happens on disk
+// and takes effect at the next start — the pending marker the update tier already uses.
+func updateCommand(argv []string) {
+	flags := flag.NewFlagSet("update", flag.ContinueOnError)
+	dataDir := flags.String("data-dir", "", "the acornfall folder (default: ~/.acornfall)")
+	host := flags.String("host", "127.0.0.1", "the running gateway's interface")
+	port := flags.Int("port", 7777, "the running gateway's port")
+	assumeYes := flags.Bool("yes", false, "install without asking")
+	checkOnly := flags.Bool("check", false, "check only; install nothing")
+	stopRuns := flags.Bool("stop-runs", false, "stop active runs instead of waiting for them to finish")
+	flags.Usage = func() {
+		fmt.Fprint(os.Stderr, `usage: acornfall update [flags]
+
+  --check       report what is available and stop
+  --yes         install without asking
+  --stop-runs   stop active runs instead of waiting for them
+  --host HOST   where a running gateway listens (default 127.0.0.1)
+  --port PORT   its port (default 7777)
+  --data-dir DIR
+
+With nothing running, the update is written to disk and takes effect at the next start.
+`)
+	}
+	flagArgs, positional := splitFlags(argv, map[string]bool{"data-dir": true, "host": true, "port": true})
+	if err := flags.Parse(flagArgs); err != nil {
+		os.Exit(2)
+	}
+	if len(positional) > 0 {
+		flags.Usage()
+		os.Exit(2)
+	}
+	dir, err := resolveDataDir(*dataDir)
+	if err != nil {
+		logFatal(err)
+	}
+	address := net.JoinHostPort(*host, strconv.Itoa(*port))
+	if gatewayAnswers(address) {
+		runUpdateThroughGateway(address, *checkOnly, *assumeYes, *stopRuns)
+		return
+	}
+	runUpdateOffline(dir, *checkOnly, *assumeYes)
+}
+
+// gatewayAnswers is the shortest question that says whether the update can be drained and
+// restarted for real: the status endpoint answers without doing anything.
+func gatewayAnswers(address string) bool {
+	client := &http.Client{Timeout: 2 * time.Second}
+	response, err := client.Get("http://" + address + "/api/update/status")
+	if err != nil {
+		return false
+	}
+	defer response.Body.Close()
+	return response.StatusCode == http.StatusOK
+}
+
+type updateStatus struct {
+	Current   string `json:"current"`
+	Latest    string `json:"latest"`
+	Notes     string `json:"notes"`
+	Available bool   `json:"available"`
+}
+
+func runUpdateThroughGateway(address string, checkOnly, assumeYes, stopRuns bool) {
+	status, err := gatewayUpdate(address, http.MethodPost, "/api/update/check", nil)
+	if err != nil {
+		logFatal(err)
+	}
+	if !status.Available {
+		fmt.Printf("acornfall is up to date (%s)\n", status.Current)
+		return
+	}
+	printUpdateOffer(status)
+	if checkOnly {
+		return
+	}
+	if !assumeYes {
+		agreed, err := confirmYes(fmt.Sprintf("install %s? [Y/n] ", status.Latest))
+		if err != nil {
+			logFatal(err)
+		}
+		if !agreed {
+			fmt.Println("nothing was changed")
+			return
+		}
+	}
+	drain := "wait"
+	if stopRuns {
+		drain = "stop"
+	}
+	_, err = gatewayUpdate(address, http.MethodPost, "/api/update/apply", map[string]string{"tag": status.Latest, "drain": drain})
+	if err != nil {
+		if errors.Is(err, errRunsActive) && !stopRuns {
+			logFatal(fmt.Errorf("%w (rerun with --stop-runs to stop them)", err))
+		}
+		logFatal(err)
+	}
+	fmt.Printf("installed %s; the gateway is restarting into it\n", status.Latest)
+}
+
+// errRunsActive is the gateway's 409: work is in flight and the default is to wait for it.
+var errRunsActive = errors.New("runs are active")
+
+// gatewayUpdate is one JSON call to the running gateway, with the answer decoded into the same
+// status the interface reads.
+func gatewayUpdate(address, method, path string, body any) (updateStatus, error) {
+	var payload io.Reader
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			return updateStatus{}, err
+		}
+		payload = strings.NewReader(string(encoded))
+	}
+	request, err := http.NewRequest(method, "http://"+address+path, payload)
+	if err != nil {
+		return updateStatus{}, err
+	}
+	if body != nil {
+		request.Header.Set("content-type", "application/json")
+	}
+	// A check reaches the network, so it waits longer than a status call would.
+	client := &http.Client{Timeout: 60 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		return updateStatus{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusConflict {
+		message, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		return updateStatus{}, fmt.Errorf("%w: %s", errRunsActive, strings.TrimSpace(string(message)))
+	}
+	if response.StatusCode != http.StatusOK {
+		message, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		return updateStatus{}, fmt.Errorf("%s: %s", path, strings.TrimSpace(string(message)))
+	}
+	var status updateStatus
+	if err := json.NewDecoder(response.Body).Decode(&status); err != nil {
+		return updateStatus{}, err
+	}
+	return status, nil
+}
+
+// runUpdateOffline is the same decision with nobody to restart: the apply writes the new build
+// and the pending marker, and the next start runs the migrate that goes with it.
+func runUpdateOffline(dir string, checkOnly, assumeYes bool) {
+	manager := update.New(dir, "")
+	if err := manager.Open(); err != nil {
+		logFatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if _, err := manager.Check(ctx); err != nil {
+		logFatal(err)
+	}
+	status := manager.Status()
+	if !status.Available {
+		fmt.Printf("acornfall is up to date (%s)\n", status.Current)
+		return
+	}
+	printUpdateOffer(updateStatus{Current: status.Current, Latest: status.Latest, Notes: status.Notes, Available: true})
+	if checkOnly {
+		return
+	}
+	if !assumeYes {
+		agreed, err := confirmYes(fmt.Sprintf("install %s? [Y/n] ", status.Latest))
+		if err != nil {
+			logFatal(err)
+		}
+		if !agreed {
+			fmt.Println("nothing was changed")
+			return
+		}
+	}
+	if err := manager.Apply(ctx, update.ApplyOptions{Tag: status.Latest, Drain: "stop"}); err != nil {
+		logFatal(err)
+	}
+	fmt.Printf("installed %s; it takes effect the next time acornfall starts\n", status.Latest)
+}
+
+// printUpdateOffer is the same three lines on both paths: what you have, what is there, and the
+// first of what changed.
+func printUpdateOffer(status updateStatus) {
+	fmt.Printf("acornfall %s → %s\n", status.Current, status.Latest)
+	for _, line := range firstLines(status.Notes, 5) {
+		fmt.Printf("  %s\n", line)
+	}
+}
+
+// firstLines keeps the offer readable: the notes are a release's whole story, and the answer to
+// this prompt needs a headline, not a changelog. Each line is cut to one screen width, because a
+// paragraph wrapped by the terminal is worse than a sentence and an ellipsis.
+func firstLines(notes string, limit int) []string {
+	var lines []string
+	scanner := bufio.NewScanner(strings.NewReader(notes))
+	for scanner.Scan() && len(lines) < limit {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "- ")
+		if runes := []rune(line); len(runes) > 110 {
+			line = strings.TrimSpace(string(runes[:109])) + "…"
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// confirmYes is the other prompt in this program: it defaults to yes, because someone who ran
+// `acornfall update` already asked for the update.
+func confirmYes(prompt string) (bool, error) {
+	fmt.Print(prompt)
+	reader := bufio.NewReader(stdinForTest)
+	line, err := reader.ReadString('\n')
+	if err != nil && line == "" {
+		return false, err
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "", "y", "yes":
+		return true, nil
+	case "n", "no":
+		return false, nil
+	}
+	return false, nil
+}

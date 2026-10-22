@@ -54,6 +54,8 @@ func main() {
 		providers(args[1:])
 	case "model":
 		modelCommand(args[1:])
+	case "update":
+		updateCommand(args[1:])
 	case "version":
 		versionCommand(args[1:])
 	case "internal":
@@ -100,6 +102,7 @@ func usage(w io.Writer) {
   secret     list, add, show, rotate, and remove secrets
   provider   list, add, and remove model provider keys
   model      list or choose the default model
+  update     check for a release, and install it
   version    print the running version
 
 acornfall <command> -h    explains that command's flags
