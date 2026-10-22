@@ -1,0 +1,61 @@
+// Package arch holds the gateway's import boundary as data, so an import that crosses a layer
+// fails the build instead of waiting for a reviewer to notice it.
+//
+// The rows are ADR 0002's table, not this file's opinion: control owns workspaces and the
+// worker, the edge translates HTTP into domain calls, and the engine package supervises the
+// processes it owns. A package that needs a new edge adds a row and says why — that edit is the
+// review, and it is the only way the boundary is allowed to move.
+package arch
+
+// Allowed is what each package may import from inside this module, and nothing else. Every
+// directory holding Go files needs a row, including test-only ones: an unlisted package fails,
+// so adding one is a decision rather than an accident. A row that lists an import the package
+// no longer uses fails too, because a permissive row silently outlives the reason for it.
+var Allowed = map[string][]string{
+	// The entry point constructs every layer; it is the one place allowed to know them all.
+	"cmd/acornfall": {
+		"internal/control",
+		"internal/httpapi",
+		"internal/netns",
+		"internal/protocol",
+		"internal/ready",
+		"internal/sandbox",
+		"internal/supervise",
+		"internal/update",
+		"internal/vault",
+		"web",
+	},
+
+	// The domain: it provisions the resources it owns and supervises the worker that uses them.
+	"internal/control": {
+		"internal/protocol",
+		"internal/sandbox",
+		"internal/vault",
+		"internal/workerpool",
+	},
+
+	// The feature suite drives a real gateway binary; it reaches the engine only to install one.
+	"internal/e2e": {
+		"internal/sandbox",
+	},
+
+	// The edge translates HTTP into domain calls. It must not learn what an engine is: asking
+	// control is the rule, and a second copy of "which engines exist" is how the two drift apart.
+	"internal/httpapi": {
+		"internal/control",
+		"internal/protocol",
+		"internal/update",
+		"internal/vault",
+	},
+
+	"internal/arch":       {},
+	"internal/netns":      {},
+	"internal/protocol":   {},
+	"internal/ready":      {"internal/update"},
+	"internal/sandbox":    {"internal/supervise"},
+	"internal/supervise":  {},
+	"internal/update":     {},
+	"internal/vault":      {},
+	"internal/workerpool": {"internal/protocol"},
+	"web":                 {},
+}

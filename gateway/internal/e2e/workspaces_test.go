@@ -297,3 +297,26 @@ func TestAnOpeningWorkspaceSaysWhichStepItIsOn(t *testing.T) {
 		}
 	}
 }
+
+// A workspace that asks for an engine this build does not implement is refused at the edge,
+// and the refusal names the choices. The name is never defaulted: a workspace that asked for a
+// sandbox and silently got another engine would be a security change nobody chose.
+func TestAnUnknownEngineIsRefusedAndNamed(t *testing.T) {
+	t.Parallel()
+	notSandbox(t)
+	s := start(t)
+	c := s.client()
+
+	status, body := c.postStatus("/api/workspaces", map[string]any{"name": "refused", "engine": "firecracker"})
+	if status != http.StatusBadRequest {
+		t.Fatalf("an unknown engine: status %d, want 400; body %s", status, body)
+	}
+	for _, engine := range []string{"bwrap", "microsandbox", "host"} {
+		if !strings.Contains(body, engine) {
+			t.Errorf("the refusal should name %q so the caller learns the choices, got %q", engine, body)
+		}
+	}
+	if got := c.state("general"); len(got.Workspaces) != 1 {
+		t.Errorf("a refused create must leave the listing alone, got %d workspaces", len(got.Workspaces))
+	}
+}

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/control"
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 	"github.com/acornfall/acornfall/gateway/internal/vault"
 )
 
@@ -251,7 +250,7 @@ func (s *Server) secretRequestAnswer(w http.ResponseWriter, r *http.Request) {
 	if body.Hosts != nil {
 		hosts = *body.Hosts
 	}
-	if ctl.SecretDelivery() == sandbox.DeliverySubstitute && len(hosts) == 0 {
+	if ctl.SecretNeedsHost() && len(hosts) == 0 {
 		http.Error(w, "this engine needs at least one allowed host for a secret: name the host the value may reach", http.StatusBadRequest)
 		return
 	}

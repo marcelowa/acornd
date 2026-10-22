@@ -13,7 +13,6 @@ import (
 
 	"github.com/acornfall/acornfall/gateway/internal/control"
 	"github.com/acornfall/acornfall/gateway/internal/protocol"
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 	"github.com/acornfall/acornfall/gateway/internal/update"
 )
 
@@ -187,10 +186,10 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `network is "on" or "off"`, http.StatusBadRequest)
 		return
 	}
-	if body.Engine != nil && !sandbox.ValidEngine(*body.Engine) {
+	if body.Engine != nil && !control.ValidEngine(*body.Engine) {
 		// Named, never defaulted: a workspace that asked for a sandbox and got another engine
 		// would be a security change nobody chose.
-		http.Error(w, "sandbox engine is one of "+strings.Join(sandbox.EngineNames(), ", "), http.StatusBadRequest)
+		http.Error(w, "sandbox engine is one of "+strings.Join(control.EngineNames(), ", "), http.StatusBadRequest)
 		return
 	}
 	if body.Path != nil {
@@ -272,8 +271,8 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Engine != nil {
-		if !sandbox.ValidEngine(*body.Engine) {
-			http.Error(w, "sandbox engine is one of "+strings.Join(sandbox.EngineNames(), ", "), http.StatusBadRequest)
+		if !control.ValidEngine(*body.Engine) {
+			http.Error(w, "sandbox engine is one of "+strings.Join(control.EngineNames(), ", "), http.StatusBadRequest)
 			return
 		}
 		existing.Engine = *body.Engine

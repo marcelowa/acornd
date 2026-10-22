@@ -58,6 +58,9 @@ typecheck: ## the compiler's opinion, without running anything
 lint: ui-build typecheck ## the static rules; fails on the first one broken
 	@out=$$(gofmt -l gateway); if [ -n "$$out" ]; then echo "$$out"; echo "gofmt: not formatted"; exit 1; fi; echo "gofmt: clean"
 	cd gateway && go vet ./...
+	# The layer boundary from ADR 0002, as a test. It belongs in lint because the cost is a parser
+	# and the failure is a package that learned something the layer table says it must not know.
+	cd gateway && go test -count=1 ./internal/arch
 	# The release ships four binaries, so a file that only compiles for Linux is a broken release
 	# rather than a broken test. `make lint` is what CI runs on every push; the v0.13.1 and v0.14.2
 	# releases both failed on exactly this, after the suite was green.

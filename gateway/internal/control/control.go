@@ -1126,6 +1126,13 @@ func (c *Control) SecretDelivery() sandbox.Delivery {
 	return sandbox.DeliverySubstitute
 }
 
+// SecretNeedsHost reports whether this engine can only reach a secret's host when the secret
+// names one. It states the rule in the domain's words so the transport does not have to know
+// how an engine delivers a value.
+func (c *Control) SecretNeedsHost() bool {
+	return c.SecretDelivery() == sandbox.DeliverySubstitute
+}
+
 // resolveSecrets reads the workspace's effective set and asks what this engine can do with
 // each entry. A substitute engine needs an allowed host; an environment engine needs the
 // owner to have allowed the value inside. A blocked entry stays visible with its reason.

@@ -123,6 +123,15 @@ func ValidNetwork(value string) bool {
 	return value == "" || value == "on" || value == NetworkOff
 }
 
+// ValidEngine reports whether a workspace may name an engine. The transport asks, because a bad
+// name is a bad request rather than a failed workspace; the rule lives here because control is
+// what provisions the engine, and a second copy of "which engines exist" in the HTTP layer is
+// how the two drift apart.
+func ValidEngine(name string) bool { return sandbox.ValidEngine(name) }
+
+// EngineNames is the list a refusal quotes, in the order the interface offers the choices.
+func EngineNames() []string { return sandbox.EngineNames() }
+
 // ValidKeepAlive is a bool on the wire; nothing to validate. It is here so that a caller reading
 // the create and update handlers sees the same shape for every workspace setting.
 
