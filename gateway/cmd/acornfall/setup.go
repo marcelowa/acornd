@@ -66,7 +66,7 @@ func setupCommand(argv []string) {
 	if why := containerAdvice(report); why != "" {
 		fmt.Print("\n" + why + "\n")
 	}
-	fmt.Printf("\n%d step%s need root:\n", countSteps(plan), plural(plan))
+	fmt.Printf("\n%s root:\n", stepCount(countSteps(plan)))
 	for _, line := range plan.description() {
 		fmt.Printf("  · %s\n", line)
 	}
@@ -98,11 +98,13 @@ func setupCommand(argv []string) {
 	}
 }
 
-func plural(plan rootPlan) string {
-	if countSteps(plan) == 1 {
-		return ""
+// stepCount reads as a sentence for one step and for several: "1 step needs root" is the kind of
+// sentence that makes a careful reader trust the rest less.
+func stepCount(count int) string {
+	if count == 1 {
+		return "1 step needs"
 	}
-	return "s"
+	return fmt.Sprintf("%d steps need", count)
 }
 
 func countSteps(plan rootPlan) int { return len(plan.actions()) }
