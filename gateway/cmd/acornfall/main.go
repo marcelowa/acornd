@@ -90,7 +90,6 @@ acornfall <command> -h    explains that command's flags
 func serve(argv []string) error {
 	flags := flag.NewFlagSet("acornfall start", flag.ContinueOnError)
 	addr := flags.String("addr", "0.0.0.0:7777", "listen address (default: every interface)")
-	token := flags.String("token", "", "shared secret guarding every request (default: none)")
 	workspace := flags.String("workspace", "", "the general workspace's folder (default: the folder acornfall is started in)")
 	home := flags.String("home", "", "the acornfall folder: config, credentials, state, workspaces (default: ~/.acornfall)")
 	dataDir := flags.String("data-dir", "", "alias for --home")
@@ -169,7 +168,6 @@ func serve(argv []string) error {
 			log.Printf("worker: %v", err)
 		}
 	}
-	guard := httpapi.ResolveToken(*token, os.Getenv("ACORNFALL_TOKEN"))
 
 	// The sandbox tier. One engine per install, and the worker is told which one, because it
 	// attaches with that engine's client and the two must agree. Nothing here chooses for a
@@ -257,7 +255,7 @@ func serve(argv []string) error {
 
 	server := &http.Server{
 		Addr:              *addr,
-		Handler:           httpapi.RequireToken(httpapi.New(workspaces, web.Files, updates).Handler(), guard),
+		Handler:           httpapi.New(workspaces, web.Files, updates).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
@@ -275,11 +273,6 @@ func serve(argv []string) error {
 	}
 	bound := listener.Addr().String()
 	log.Printf("acornfall listening on http://%s  home=%s", displayAddr(bound), dir)
-	if guard != "" {
-		log.Printf("auth: token required; open http://%s/?token=%s", prettyAddr(bound), guard)
-	} else {
-		log.Printf("auth: off (no token)")
-	}
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 		return err
 	}
@@ -476,22 +469,6 @@ func displayAddr(addr string) string {
 		return "0.0.0.0" + addr
 	}
 	return addr
-}
-
-// prettyAddr prefers the machine's own hostname over a wildcard address, so the
-// printed URL is the one a remote browser can actually use.
-func prettyAddr(addr string) string {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return addr
-	}
-	if host == "" || host == "0.0.0.0" || host == "::" {
-		if name, err := os.Hostname(); err == nil && name != "" {
-			return net.JoinHostPort(name, port)
-		}
-		return net.JoinHostPort("localhost", port)
-	}
-	return net.JoinHostPort(host, port)
 }
 
 /*

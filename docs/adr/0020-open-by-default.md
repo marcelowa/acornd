@@ -19,17 +19,21 @@ every first open.
 ## Decision
 
 The default listen address is `0.0.0.0:7777`. No token is generated, stored, or required.
-`--token <secret>` and `ACORNFALL_TOKEN` still guard every request when given; the flag wins
-over the environment. `--insecure` is removed, because it was the old way to ask for what is
-now the default.
+`--insecure` is removed, because it was the old way to ask for what is now the default.
+
+The token itself is gone, not merely switched off: `--token`, `ACORNFALL_TOKEN`, and the
+middleware behind them were removed rather than left as an option nobody has to take. A
+guard that exists is a guard someone believes in, and the honest state of authentication here
+is "absent" until it is designed. Security for an exposed port is future work on purpose, not
+an oversight of this decision.
 
 ## Consequences
 
 - Anyone who can reach port 7777 gets the console, its workspaces, and the provider key it
   spends. The port belongs on a network the owner trusts, behind a firewall, or behind a
   token. This is written in the README, not left to be discovered.
-- An install that used the generated `<data-dir>/token` is no longer guarded after the
-  upgrade. Pass `--token` or set `ACORNFALL_TOKEN` to keep it. The release notes say so.
+- An install that passed `--token` is no longer guarded after the upgrade, and the flag no
+  longer exists to object. The release notes say so.
 - `--addr 127.0.0.1:7777` is the one flag for the old exposure; an SSH tunnel still works.
 - The sandbox boundary is unchanged. A guest can reach the gateway's API, as it could
   before, and the ADR 0012 limit now says the API is open by default.
