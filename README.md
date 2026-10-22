@@ -176,9 +176,12 @@ only reports. With no gateway running it installs to disk and takes effect at th
 
 Useful flags: `--data-dir <dir>` (default `~/.acornfall`), `--host` and `--port`
 (default `0.0.0.0:7777`), `--workspaces-dir <dir>` (default `~/acornfall/workspaces`),
-`--sandbox-state <dir>` (default `<data-dir>/sandboxes`; it has to be a short path, because a
-Unix socket name cannot be long — see [ADR 0023](docs/adr/0023-bwrap-engine.md)), and
 `--worker <command>` (a worker other than the ensured one).
+
+The engine's store — images, workspace disks, snapshots — is `<data-dir>/sandboxes`, and a
+sandbox's Unix socket lives in the session's runtime folder (`$XDG_RUNTIME_DIR/acornfall`, or a
+folder of this user's under the system temp directory). Sockets are not state and not
+configuration, so neither has a flag; a machine that wants the store elsewhere can symlink it.
 
 The default model is chosen with `acornfall model set <provider>/<modelId>` and read from
 `<data-dir>/settings.json`, where the interface writes it too. Provider keys are

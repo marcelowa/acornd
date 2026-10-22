@@ -182,7 +182,9 @@ type system struct {
 	Addr          string
 	// SandboxState is shared by every test in this package: the image the sandboxes boot from
 	// is fetched once, so the suite does not pull it thirty times and hit a registry's
-	// anonymous rate limit.
+	// anonymous rate limit. It is reached through a symlink inside the test's data folder,
+	// because a sandbox's store is `<data-dir>/sandboxes` and a temp data folder per test would
+	// otherwise mean one image pull per test.
 	SandboxState string
 
 	cmd  *exec.Cmd
@@ -239,10 +241,15 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	// The general workspace is created where the product creates one: inside the workspaces
 	// folder, by name. Nothing points the gateway at a folder any more.
 	s.General = filepath.Join(s.WorkspacesDir, "general")
-	for _, dir := range []string{s.DataDir, s.WorkspacesDir, s.General} {
+	for _, dir := range []string{s.DataDir, s.WorkspacesDir, s.General, s.SandboxState} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// The store is a folder inside the install, so sharing it across tests is a symlink rather
+	// than a flag.
+	if err := os.Symlink(s.SandboxState, filepath.Join(s.DataDir, "sandboxes")); err != nil {
+		t.Fatal(err)
 	}
 	// The shared engine, linked where a driver looks for it, so the first workspace to start
 	// does not pay for a download per test. A host-engine test never touches this driver.
@@ -285,8 +292,6 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	} else if value, ok := hostEngineTests.Load(t.Name()); ok && value == true {
 		hostEngine = true
 		engineEnv = "host"
-	} else {
-		args = append(args, "--sandbox-state", s.SandboxState)
 	}
 	cmd := exec.Command(gatewayBin, args...)
 	// A curated environment: the test must not inherit a real install's home, token, or

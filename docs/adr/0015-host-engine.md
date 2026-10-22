@@ -40,7 +40,7 @@ The guardrails are part of the decision, not politeness:
 - **The host engine has no mounts.** Global resources are plain host paths, so there is no
   read-only enforcement: under this engine the agent can edit its own instructions. That is
   part of what "unconfined" means, and the reason it is not the default.
-- **`--sandbox-state` is refused with it**, because there is no engine store to point at.
+- **It keeps no state at all**: no engine store, no sockets, no sandbox to remove.
 
 Command execution uses a detached process group so a timeout or an abort kills what the shell
 started, not only the shell.

@@ -363,16 +363,17 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 	if err != nil {
 		return bwrapConfig{}, fmt.Errorf("%w: bubblewrap is not installed (install it: apt install bubblewrap)", ErrUnavailable)
 	}
-	// A short folder for the socket: a Unix socket path has a hard length, and the sandbox's own
-	// name (a readable slug plus a hash) is longer than that leaves room for.
-	run := filepath.Join(b.StateDir(), "run", shortHash(policy.Workspace))
-	if err := os.MkdirAll(run, 0o700); err != nil {
+	// The socket lives in the session's runtime folder, not in the store: a Unix socket path has a
+	// hard length, and this way the length is the same wherever the install lives. The folder is
+	// per install and per workspace, so two installs never answer on one socket.
+	run, err := b.socketDir(policy.Workspace)
+	if err != nil {
 		return bwrapConfig{}, err
 	}
 	socket := filepath.Join(run, "s.sock")
 	for _, path := range []string{socket, guestSocketPath} {
 		if len(path) > socketLimit {
-			return bwrapConfig{}, fmt.Errorf("sandbox: the supervisor's socket path is too long for a Unix socket: %s is %d characters and %d is the limit (move the installation folder with --state, or shorten the workspace name)", path, len(path), socketLimit)
+			return bwrapConfig{}, fmt.Errorf("sandbox: the supervisor's socket path is too long for a Unix socket: %s is %d characters and %d is the limit (shorten XDG_RUNTIME_DIR, or the workspace name)", path, len(path), socketLimit)
 		}
 	}
 	config := bwrapConfig{

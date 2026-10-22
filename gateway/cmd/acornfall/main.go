@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -115,7 +114,6 @@ func serve(argv []string) error {
 	port := flags.Int("port", 7777, "port to listen on")
 	dataDir := flags.String("data-dir", "", "the acornfall folder: config, credentials, state, workspaces (default: ~/.acornfall)")
 	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornfall/workspaces)")
-	sandboxState := flags.String("sandbox-state", "", "where sandboxes, images, and snapshots are kept (default: <data-dir>/sandboxes); must be a short path")
 	workerCommand := flags.String("worker", "", `worker command (default: ensured bun over ensured sources)`)
 	if err := flags.Parse(argv); err != nil {
 		return err
@@ -179,10 +177,7 @@ func serve(argv []string) error {
 	// where it lives now, because a flag on the server is a decision nobody meant to make once
 	// per boot.
 	engineName := os.Getenv("ACORNFALL_SANDBOX_ENGINE")
-	if engineName == "host" && *sandboxState != "" {
-		return errors.New("--sandbox-state belongs to the microsandbox engine; the host engine keeps no state")
-	}
-	engine, tier, err := sandboxTier(ctx, dir, *sandboxState, engineName)
+	engine, tier, err := sandboxTier(ctx, dir, engineName)
 	if err != nil {
 		return err
 	}
@@ -286,7 +281,7 @@ func serve(argv []string) error {
 // ACORNFALL_NO_SANDBOX is that refusal on purpose, not a fallback: no engine is configured,
 // nothing is installed or booted, and the worker's tools refuse. Tests use it so one command
 // behaves the same on a machine with /dev/kvm and in CI, which auto-detecting did not.
-func sandboxTier(ctx context.Context, dataDir, state, engineName string) (*sandbox.Manager, *sandbox.Tier, error) {
+func sandboxTier(ctx context.Context, dataDir, engineName string) (*sandbox.Manager, *sandbox.Tier, error) {
 	if os.Getenv("ACORNFALL_NO_SANDBOX") != "" {
 		log.Printf("sandbox: disabled by ACORNFALL_NO_SANDBOX; commands and file tools will refuse")
 		return nil, nil, nil
@@ -294,7 +289,7 @@ func sandboxTier(ctx context.Context, dataDir, state, engineName string) (*sandb
 	_ = ctx
 	// Every engine this build has, one manager each, so a workspace can choose its own. The
 	// default is what this machine can run; a workspace that recorded an engine wins over it.
-	tier := sandbox.NewTier(dataDir, state, log.Printf)
+	tier := sandbox.NewTier(dataDir, "", log.Printf)
 	engine, err := tier.For(engineName)
 	if err != nil {
 		return nil, nil, err

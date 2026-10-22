@@ -122,11 +122,12 @@ state path, and the reason it cannot work if it cannot.
   do not happen. Node, Python, Go, Rust, Ruby work normally, installing their own Linux
   dependencies inside the guest. **Unverified on Apple Silicon**: the engine publishes
   `darwin-arm64`; nobody has run it here.
-- **The state folder has to be short.** The engine's runtime sockets live under its state
-  directory and a Unix socket path is limited to 108 bytes, most of which the engine's own
-  layout eats: measured, 46 characters works and 56 does not, whatever the sandbox is called.
-  `--sandbox-state` exists for this, and the driver refuses with a sentence naming the limit
-  rather than passing the engine's error through. The default `<home>/sandboxes` is 33 here.
+- **The socket folder has to be short.** The engine's runtime sockets used to live under its
+  state directory, and a Unix socket path is limited to 108 bytes, most of which the engine's
+  own layout eats: measured, 46 characters works and 56 does not. That is why the store had a
+  flag. Since ADR 0027 the socket lives in the session's runtime folder instead, which is short
+  by construction, and the driver still refuses with a sentence naming the limit rather than
+  passing the engine's error through.
 - **The first image comes from a registry.** Anonymous Docker Hub pulls are rate limited per
   address, and a fresh state directory means a fresh pull. `msb save` / `load` move an image
   between state directories, which is how a machine without a registry (or with a spent limit)
@@ -157,7 +158,8 @@ state path, and the reason it cannot work if it cannot.
   checksum, unpacked beside its final name), the lifecycle, and the refusal.
 - `internal/control`: a workspace's sandbox is created before its worker starts, stopped when
   the workspace is evicted, removed with the workspace. `state.sandbox` says what the tools can
-  reach. `--sandbox-state` moves the engine's store.
+  reach. The engine's store is `<data-dir>/sandboxes`; a sandbox's socket is in the session's
+  runtime folder (ADR 0027).
 - The worker: `SandboxClient` and its engine adapter, `SandboxExecutionEnv` for every tool call,
   and resource loading routed through the sandbox. `--sandbox <name>` and
   `ACORNFALL_SANDBOX_ENGINE` and the workspace's own engine come from control; without them the tools refuse.

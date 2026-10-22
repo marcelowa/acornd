@@ -42,8 +42,8 @@ drift from the flags — the hand-written lines had already forgotten two.
 **A flag on the server is an install decision, not a per-boot one.** The engine is recorded on
 the workspace at creation; the worker's sources and the last-resort model are environment
 variables; the migrate scripts are baked into the binary. What is left on `start` is where it
-listens (`--host`, `--port`), where it keeps things (`--data-dir`, `--workspaces-dir`,
-`--sandbox-state`), and `--worker`.
+listens (`--host`, `--port`), where it keeps things (`--data-dir`, `--workspaces-dir`), and
+`--worker`.
 
 **One folder has one name.** The install folder is `--data-dir`, `ACORNFALL_DATA_DIR`, and
 `dataDir` in the code. `home` means the user's own home, which the sandbox mounts, and nothing
@@ -56,6 +56,14 @@ print its value, because a stored value has exactly one direction.
 **Two prompts, and each says which way it defaults.** `setup` asks `apply these steps? [y/N]`
 because it is about to change the machine; `update` asks `install vX? [Y/n]` because running it
 was already the request. `--yes` answers both; `--check` refuses to apply.
+
+**The socket is not a setting.** A Unix socket path has a hard length, which is why the store
+carried a flag whose only real job was to be short. The socket moved to the session's runtime
+folder instead (`$XDG_RUNTIME_DIR/acornfall`, else this user's folder under the temp directory),
+per install and per workspace, so the length no longer depends on where the install lives. The
+store is `<data-dir>/sandboxes`; `--sandbox-state` and its environment variable are gone, and a
+machine that wants the store elsewhere can symlink it — the same answer the e2e suite uses to
+share one image between tests.
 
 **No token.** `--token`, `ACORNFALL_TOKEN`, and the middleware that read them are gone, and the
 default listen address stays `0.0.0.0:7777`: open on purpose (ADR 0020), with authentication
