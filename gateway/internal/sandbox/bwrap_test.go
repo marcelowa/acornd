@@ -294,8 +294,12 @@ func TestBwrapCreateIsIdempotent(t *testing.T) {
 func TestBwrapRemoveDeletesTheHomeAndNotTheWorkspace(t *testing.T) {
 	dataDir := t.TempDir()
 	workspace := t.TempDir()
+	// The socket's folder is outside the store, so the test picks where it goes rather than
+	// writing into the machine's own runtime folder.
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(t.TempDir(), "run"))
 	driver, _ := testBwrap(t, dataDir)
-	if _, err := driver.writeConfig(Policy{Workspace: workspace}, t.TempDir()); err != nil {
+	config, err := driver.writeConfig(Policy{Workspace: workspace}, t.TempDir())
+	if err != nil {
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(driver.StateDir(), Name(workspace)+".json")
@@ -304,6 +308,11 @@ func TestBwrapRemoveDeletesTheHomeAndNotTheWorkspace(t *testing.T) {
 	}
 	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
 		t.Fatalf("config survived remove: %v", err)
+	}
+	// The socket's folder is named only by the config, so it has to be read before the config
+	// goes: this is the leftover that removal showed on a real install.
+	if _, err := os.Stat(config.Run); !os.IsNotExist(err) {
+		t.Fatalf("remove left the socket folder behind: %v", err)
 	}
 	if _, err := os.Stat(workspace); err != nil {
 		t.Fatalf("remove took the workspace with it: %v", err)

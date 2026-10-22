@@ -167,8 +167,8 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 		// KeepAlive keeps this workspace's sandbox running when nobody is watching it, which is
 		// what a workspace that runs a daemon or a cron job needs.
 		KeepAlive *bool `json:"keep_alive"`
-		// DisableVMNesting, when true, keeps this workspace's sandbox from nesting;
-		// absent or false follows the install's --disable-vm-nesting.
+		// DisableVMNesting, when true, keeps this workspace's sandbox from nesting; absent or
+		// false nests whenever the engine and the machine can.
 		DisableVMNesting *bool `json:"disable_vm_nesting"`
 		Trusted          *bool `json:"trusted"`
 	}

@@ -526,16 +526,20 @@ func (b *Bwrap) List(context.Context) ([]Instance, error) {
 }
 
 // Remove deletes the config and the workspace's private home — the things a bwrap sandbox
-// accumulates. The workspace folder is the user's and is not touched.
+// accumulates — and the socket's folder, which is not in the workspace's folder any more. The
+// workspace folder is the user's and is not touched.
 func (b *Bwrap) Remove(_ context.Context, name string) error {
+	// Read before removing: the config is what names the socket's folder, and it lives outside
+	// everything else this deletes.
+	run := ""
+	if config, err := b.readConfig(name); err == nil {
+		run = config.Run
+	}
 	if err := os.Remove(b.configPath(name)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	// The whole folder: the root, the private home, and whatever a command left in either. The
-	// socket's own folder is shared with the other sandboxes and is removed separately, by the
-	// path the config names.
-	if config, err := b.readConfig(name); err == nil && config.Run != "" {
-		_ = os.RemoveAll(config.Run)
+	if run != "" {
+		_ = os.RemoveAll(run)
 	}
 	return os.RemoveAll(b.workspaceDir(name))
 }
