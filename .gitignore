@@ -14,3 +14,6 @@ credentials.json.lock
 .acornfall/*.sqlite
 .acornfall/*.sqlite-*
 tools/node_modules/
+
+# `make cover` writes a run's profiles here; a coverage number is not source.
+.cover/

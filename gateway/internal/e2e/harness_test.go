@@ -39,6 +39,11 @@ var (
 	gatewayBin string
 	workerDir  string
 	skipReason string
+	// coverDir is where this suite's gateway binaries write their profile counters, set by
+	// `make cover`. Empty means the ordinary build: instrumentation costs time, and nobody
+	// pays for it unless they asked for the number. `go test -cover` cannot see the gateway
+	// at all — it is a separate process — so this is the only way the feature suite counts.
+	coverDir = os.Getenv("ACORNFALL_COVER_DIR")
 	// engineHome is a shared installation of the sandbox engine for the whole run. Every test
 	// gets a fresh home, and a fresh home installs 26MB on first use; on a CI runner that
 	// download took 28 seconds, and four tests doing it at once raced the 30-second startup
@@ -80,6 +85,12 @@ func TestMain(m *testing.M) {
 		args := []string{"build"}
 		if raceEnabled {
 			args = append(args, "-race")
+		}
+		if coverDir != "" {
+			// The whole module, not just the packages main imports: the profile is merged with
+			// the unit tests', and a different denominator on each side would be a number that
+			// means nothing.
+			args = append(args, "-cover", "-coverpkg=./...")
 		}
 		args = append(args, "-o", gatewayBin, "./cmd/acornfall")
 		build := exec.Command("go", args...)
@@ -333,6 +344,11 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	} else if !s.cfg.noDevProvider {
 		env = append(env, "ACORNFALL_DEV_PROVIDER=1")
 	}
+	if coverDir != "" {
+		// Not inherited from os.Environ on purpose: the environment here is curated, and a
+		// stray GOCOVERDIR from someone's shell would silently swallow the run's counters.
+		env = append(env, "GOCOVERDIR="+coverDir)
+	}
 	cmd.Env = env
 	cmd.Stdout = s.logs
 	cmd.Stderr = s.logs
@@ -391,6 +407,11 @@ func (s *system) stop() {
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
+		// A kill loses this process's coverage counters: Go writes them on exit, and SIGKILL is
+		// not an exit. Say so — a silent undercount reads exactly like untested code.
+		if coverDir != "" {
+			s.t.Logf("gateway did not stop within 10s and was killed: its coverage is not counted")
+		}
 		_ = s.cmd.Process.Kill()
 		<-done
 	}

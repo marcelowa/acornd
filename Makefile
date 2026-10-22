@@ -7,7 +7,7 @@ HOST ?= 0.0.0.0
 PORT ?= 7777
 URL ?= http://127.0.0.1:7777
 
-.PHONY: help deps build typecheck lint modernize tools commits check test test-sandbox test-bwrap sandbox-preflight ui ui-build run dev fmt clean release release-branch
+.PHONY: help deps build typecheck lint modernize tools commits check test cover test-sandbox test-bwrap sandbox-preflight ui ui-build run dev fmt clean release release-branch
 
 # The linters, installed into the Go and bun toolchains rather than vendored. `make lint` runs
 # whichever are present and names the ones that are not, so a missing tool is a message and
@@ -78,8 +78,23 @@ lint: ui-build typecheck ## the static rules; fails on the first one broken
 	cd ui && bun run check:system
 	cd ui && bun run format:check
 
-# Not part of `make lint`, on purpose: this is the one Go check measured in seconds rather
-# than milliseconds, and what it finds is drift rather than a bug — a newer spelling of a
+cover: ## coverage across both processes, merged; FLOOR=0 reports without failing
+	@# Two halves, one number. `go test -cover` sees only the unit half: the feature suite starts
+	@# the gateway as its own process, so the binary is built for coverage, writes to GOCOVERDIR,
+	@# and its counters are joined with the unit profile before anything is judged. Without this
+	@# the end-to-end suite counted for nothing, which is not a claim about anyone's diligence.
+	rm -rf $(COVER_DIR) && mkdir -p $(COVER_DIR)/e2e
+	cd gateway && go test -short -count=1 -parallel $(TEST_PARALLEL) \
+		-covermode=atomic -coverpkg=./... -coverprofile=$(COVER_DIR)/unit.cover \
+		$$(go list ./... | grep -v /internal/e2e)
+	cd gateway && ACORNFALL_NO_SANDBOX=1 ACORNFALL_COVER_DIR=$(COVER_DIR)/e2e \
+		go test -short -count=1 -parallel $(TEST_PARALLEL) ./internal/e2e
+	cd gateway && go tool covdata textfmt -i=$(COVER_DIR)/e2e -o=$(COVER_DIR)/e2e.cover
+	bun scripts/coverage.mjs merge $(COVER_DIR)/merged.cover $(COVER_DIR)/unit.cover $(COVER_DIR)/e2e.cover
+	bun scripts/coverage.mjs report $(COVER_DIR)/merged.cover --floor $(FLOOR) --ignore .coverageignore --root $(CURDIR)
+
+# Not part of `make test` or `make lint`, on purpose: this is the one Go check measured in seconds
+# rather than milliseconds, and what it finds is drift rather than a bug — a newer spelling of a
 # loop, not a wrong answer. It is a prompt, not a gate, and a daily workflow prompts with it.
 modernize: ## the idiom analyzer; a daily workflow runs it, `make lint` does not
 	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@latest
@@ -105,6 +120,14 @@ TEST_PARALLEL ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 # "serial-ish" for a reason any more — the per-test cleanup made parallel VMs safe.
 SANDBOX_PARALLEL ?= 6
 
+# Where `make cover` writes the two halves and the joined profile. Kept out of the tree by
+# .gitignore: a coverage profile is a run's artefact, not a source.
+COVER_DIR ?= $(CURDIR)/.cover
+
+# The floor `make cover` enforces, per package and across both processes. `FLOOR=0` makes it a
+# pure report, which is what a checkout that has not been brought to the bar yet wants.
+FLOOR ?= 95
+
 check: ui-build typecheck ## fast: the compiler, the bundle, and the unit tests, no processes
 	cd worker && bun test
 	cd ui && bun test
@@ -127,8 +150,7 @@ test: lint ## the default tier: units and the feature suite, no hypervisor neede
 	# Go's test cache cannot see: a cached pass would be a pass for code that has changed.
 	cd gateway && ACORNFALL_NO_SANDBOX=1 go test -short -race -count=1 -parallel $(TEST_PARALLEL) ./...
 
-test-bwrap: ## the bubblewrap engine end to end: it fetches an image, so it is not part of `make test`
-	# A bwrap workspace gets its own copy of its image and carries egress with pasta; both are
+test-bwrap: ## the bubblewrap engine end to end: it fetches an image, so it is not part of `make test`	# A bwrap workspace gets its own copy of its image and carries egress with pasta; both are
 	# why this is its own tier, the same way the microVM tier needs /dev/kvm. Needs bubblewrap,
 	# passt installed: the namespace's address and routes are set over netlink by the gateway
 	# itself, so there is nothing else to install. The client and driver tests run in the fast
