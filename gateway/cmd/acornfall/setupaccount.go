@@ -92,6 +92,12 @@ func serviceUser() string {
 	if _, err := exec.LookPath("systemctl"); err != nil {
 		return ""
 	}
+	return serviceUserLookup()
+}
+
+// serviceUserLookup is the machine's answer, as a variable: a test can say there is a unit without
+// installing one.
+var serviceUserLookup = func() string {
 	out, err := exec.Command("systemctl", "show", "acornfall.service", "--property=User", "--value").Output()
 	if err != nil {
 		return ""

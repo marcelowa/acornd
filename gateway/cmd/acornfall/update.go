@@ -85,7 +85,7 @@ type updateStatus struct {
 }
 
 func runUpdateThroughGateway(address string, checkOnly, assumeYes, stopRuns bool) {
-	status, err := gatewayUpdate(address, http.MethodPost, "/api/update/check", nil)
+	status, err := gatewayUpdate(address, "/api/update/check", nil)
 	if err != nil {
 		logFatal(err)
 	}
@@ -121,7 +121,7 @@ func applyUpdate(address, tag string, stopRuns bool) {
 	if stopRuns {
 		drain = "stop"
 	}
-	_, err := gatewayUpdate(address, http.MethodPost, "/api/update/apply", map[string]string{"tag": tag, "drain": drain})
+	_, err := gatewayUpdate(address, "/api/update/apply", map[string]string{"tag": tag, "drain": drain})
 	if err != nil {
 		if errors.Is(err, errRunsActive) && !stopRuns {
 			logFatal(fmt.Errorf("%w (rerun with --stop-runs to stop them)", err))
@@ -136,7 +136,7 @@ var errRunsActive = errors.New("runs are active")
 
 // gatewayUpdate is one JSON call to the running gateway, with the answer decoded into the same
 // status the interface reads.
-func gatewayUpdate(address, method, path string, body any) (updateStatus, error) {
+func gatewayUpdate(address, path string, body any) (updateStatus, error) {
 	var payload io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -145,7 +145,7 @@ func gatewayUpdate(address, method, path string, body any) (updateStatus, error)
 		}
 		payload = strings.NewReader(string(encoded))
 	}
-	request, err := http.NewRequest(method, "http://"+address+path, payload)
+	request, err := http.NewRequest(http.MethodPost, "http://"+address+path, payload)
 	if err != nil {
 		return updateStatus{}, err
 	}

@@ -208,15 +208,12 @@ func applyPlan(plan rootPlan) error {
 	for _, action := range actions {
 		fmt.Printf("· %s\n", action.Why)
 		if action.File != "" {
-			if err := os.WriteFile(action.File, []byte(action.Write), 0o644); err != nil {
+			if err := writeStep(action.File, []byte(action.Write), 0o644); err != nil {
 				return fmt.Errorf("%s: %w", action.File, err)
 			}
 			continue
 		}
-		command := exec.Command(action.Run[0], action.Run[1:]...)
-		command.Stdout = os.Stdout
-		command.Stderr = os.Stderr
-		if err := command.Run(); err != nil {
+		if err := runStep(action.Run[0], action.Run[1:]...); err != nil {
 			// A missing program is not always a failure: a kernel with tun built in has no
 			// module to load, and a machine without systemd has no tmpfiles to run. Those steps
 			// are best-effort, and what comes after them still proves the result.
@@ -229,6 +226,21 @@ func applyPlan(plan rootPlan) error {
 	}
 	return nil
 }
+
+// The two ways a plan touches the machine, as variables. A test replaces them to see what a plan
+// would do: the argv and the file contents are the decision worth checking, and running apt-get
+// for real proves less while changing the machine it ran on.
+var (
+	runStep = func(name string, args ...string) error {
+		command := exec.Command(name, args...)
+		command.Stdout = os.Stdout
+		command.Stderr = os.Stderr
+		return command.Run()
+	}
+	writeStep = func(path string, content []byte, mode os.FileMode) error {
+		return os.WriteFile(path, content, mode)
+	}
+)
 
 // bestEffort names the steps whose absence is a machine without that mechanism, not a failure:
 // after them, the probe is the judge.

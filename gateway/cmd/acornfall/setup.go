@@ -238,11 +238,11 @@ func escalate(plan rootPlan) error {
 	if err != nil {
 		return err
 	}
-	sudo, err := exec.LookPath("sudo")
+	sudo, err := findSudo()
 	if err != nil {
 		return errNoEscalation
 	}
-	if !isTerminal(os.Stdin) {
+	if !terminalFor(os.Stdin) {
 		// sudo would fail with "a terminal is required"; saying so before it tries is kinder.
 		return errNoEscalation
 	}
@@ -260,12 +260,22 @@ func escalate(plan rootPlan) error {
 		return err
 	}
 	fmt.Println()
-	command := exec.Command(sudo, executable, "setup", "--privileged", "--plan", path)
-	command.Stdin = os.Stdin
-	command.Stdout = os.Stdout
-	command.Stderr = os.Stderr
-	return command.Run()
+	return runSudo(sudo, executable, "setup", "--privileged", "--plan", path)
 }
+
+// The three questions an escalation asks the machine, as variables: does sudo exist, is there a
+// terminal to type a password into, and did the privileged half work. A test answers them, because
+// the contract — a plan file at 0600, and the argv that hands it to root — is worth pinning and
+// cannot be exercised for real without a password.
+var (
+	findSudo    = func() (string, error) { return exec.LookPath("sudo") }
+	terminalFor = isTerminal
+	runSudo     = func(name string, args ...string) error {
+		command := exec.Command(name, args...)
+		command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
+		return command.Run()
+	}
+)
 
 // setupReport is what the probes found. It is a value so that deciding, rendering, and the plan
 // can be tested without a machine that has or lacks these things.
