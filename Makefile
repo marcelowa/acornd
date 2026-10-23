@@ -56,12 +56,21 @@ ui-build: ## build the interface into the embed directory the gateway serves
 	cd ui && bun run build
 	@touch gateway/web/dist/.gitkeep
 
-tools: ## install the linters used by `make lint` and `make analyze`
-	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install honnef.co/go/tools/cmd/staticcheck@latest
-	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
-	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install golang.org/x/tools/cmd/deadcode@latest
-	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install golang.org/x/vuln/cmd/govulncheck@latest
-	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install github.com/securego/gosec/v2/cmd/gosec@latest
+# Idempotent on purpose. `go install pkg@latest` recompiles whether or not the binary is already
+# there, which is nothing on a workstation and four minutes on a fresh CI runner — five linters,
+# from source. The install is skipped when the binary exists, so a cached ~/go/bin is worth
+# something and the pipeline stays inside two minutes. `make tools TOOLS_FORCE=1` installs again,
+# and the daily modernize workflow asks for the current release on its own.
+define install_if_missing
+	@[ -n "$(TOOLS_FORCE)" ] || [ -x "$(1)" ] || { echo "installing $(2)"; GOTOOLCHAIN=$(GO_TOOLCHAIN) go install $(2)@latest; }
+endef
+
+tools: ## install the linters used by `make lint` and `make analyze`, if they are missing
+	$(call install_if_missing,$(STATICCHECK),honnef.co/go/tools/cmd/staticcheck)
+	$(call install_if_missing,$(GOLANGCI),github.com/golangci/golangci-lint/v2/cmd/golangci-lint)
+	$(call install_if_missing,$(DEADCODE),golang.org/x/tools/cmd/deadcode)
+	$(call install_if_missing,$(GOVULNCHECK),golang.org/x/vuln/cmd/govulncheck)
+	$(call install_if_missing,$(GOSEC),github.com/securego/gosec/v2/cmd/gosec)
 	cd worker && bun install
 
 typecheck: ## the compiler's opinion, without running anything
