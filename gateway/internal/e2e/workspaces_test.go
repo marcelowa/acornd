@@ -1,6 +1,8 @@
 package e2e
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -318,5 +320,91 @@ func TestAnUnknownEngineIsRefusedAndNamed(t *testing.T) {
 	}
 	if got := c.state("general"); len(got.Workspaces) != 1 {
 		t.Errorf("a refused create must leave the listing alone, got %d workspaces", len(got.Workspaces))
+	}
+}
+
+// The routes the interface reads and the two defaults it writes, driven once each. They are not
+// interesting one at a time, and that is the point: a route that answers nothing is a screen that
+// goes blank, and the only way to know is to ask it.
+func TestTheRoutesTheInterfaceReadsAnswer(t *testing.T) {
+	t.Parallel()
+	notSandbox(t)
+	s := start(t)
+	c := s.client()
+	root := c.waitForConversation("general")
+
+	reads := map[string]func(json.RawMessage) error{
+		"/api/workspaces": func(payload json.RawMessage) error {
+			var listing struct {
+				WorkspacesDir string            `json:"workspacesDir"`
+				Workspaces    []json.RawMessage `json:"workspaces"`
+				Engines       []json.RawMessage `json:"engines"`
+			}
+			if err := json.Unmarshal(payload, &listing); err != nil {
+				return err
+			}
+			if listing.WorkspacesDir == "" || len(listing.Workspaces) == 0 {
+				return fmt.Errorf("the listing should carry the folder and the workspaces: %s", payload)
+			}
+			return nil
+		},
+		"/api/agents": func(payload json.RawMessage) error {
+			var agents struct {
+				Agents []json.RawMessage `json:"agents"`
+			}
+			if err := json.Unmarshal(payload, &agents); err != nil {
+				return err
+			}
+			if len(agents.Agents) == 0 {
+				return fmt.Errorf("a described harness has agents: %s", payload)
+			}
+			return nil
+		},
+		"/api/commands": func(payload json.RawMessage) error {
+			if len(payload) < 2 {
+				return fmt.Errorf("commands should be a list: %s", payload)
+			}
+			return nil
+		},
+		"/api/usage": func(payload json.RawMessage) error {
+			if len(payload) < 2 {
+				return fmt.Errorf("usage should be an object: %s", payload)
+			}
+			return nil
+		},
+		"/api/conversations/" + root + "/policy": func(payload json.RawMessage) error {
+			if len(payload) < 2 {
+				return fmt.Errorf("a policy should be an object: %s", payload)
+			}
+			return nil
+		},
+		"/api/conversations/" + root + "/messages": func(payload json.RawMessage) error {
+			if len(payload) < 2 {
+				return fmt.Errorf("the messages document should be an object: %s", payload)
+			}
+			return nil
+		},
+	}
+	for path, check := range reads {
+		var payload json.RawMessage
+		c.get(path, &payload)
+		if err := check(payload); err != nil {
+			t.Errorf("GET %s: %v", path, err)
+		}
+	}
+
+	// The two defaults the interface writes. Both answer with the state, and both are undoable:
+	// the test leaves them as it found them.
+	for _, route := range []struct {
+		path string
+		body map[string]any
+	}{
+		{"/api/defaults/thinking", map[string]any{"level": "low"}},
+		{"/api/defaults/agent", map[string]any{"definition": "general"}},
+	} {
+		status, body := c.postStatus(route.path, route.body)
+		if status != http.StatusOK {
+			t.Errorf("POST %s: %d %s", route.path, status, body)
+		}
 	}
 }
