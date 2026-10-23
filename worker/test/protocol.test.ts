@@ -86,6 +86,11 @@ class Worker {
 		}
 	}
 
+	/** A line exactly as given: the inputs JSON.stringify cannot produce from an object. */
+	raw(line: string): void {
+		this.#stdin.write(`${line}\n`);
+	}
+
 	send(command: Record<string, unknown>): string {
 		const id = `c${++this.#nextId}`;
 		this.#stdin.write(`${JSON.stringify({ id, ...command })}\n`);
@@ -339,6 +344,17 @@ describe("the worker protocol", () => {
 			type: "agents",
 		});
 		expect(Array.isArray(agents.agents)).toBe(true);
+	});
+
+	test("a line that is not a command is dropped, and the worker keeps answering", async () => {
+		// JSON.parse returns unknown, and the envelope is where that stops: `null`, a number, an
+		// array. Reading `.type` off one of those threw outside every handler, which is a crash
+		// that takes every conversation in the process with it (T8).
+		for (const line of ["null", "[]", "1", "true", `{"type":1,"id":"x"}`, "{", ""]) {
+			worker.raw(line);
+		}
+		const described = await worker.call<{ provider: string }>({ type: "describe" });
+		expect(described.provider).toBe("pi-durable");
 	});
 
 	test("an unknown command fails as a response, and does not end the stream", async () => {

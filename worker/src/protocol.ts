@@ -236,6 +236,42 @@ export function log(...parts: unknown[]): void {
 	process.stderr.write(`${parts.map(String).join(" ")}\n`);
 }
 
+/** The result of reading one stdin line: a command, or the reason it is not one. */
+export type ParsedCommand = { ok: true; command: Command } | { ok: false; reason: string };
+
+/**
+ * parseCommand turns one line of stdin into a command.
+ *
+ * `JSON.parse` returns `unknown`, and casting that to `Command` is the one place a value that is
+ * not a command would be treated as one: the switch over `command.type` is exhaustive over the
+ * union, not over what a line can contain. So `null` and `[]` reached `.type` outside every
+ * handler, and the throw that followed ended the process — taking every conversation in it (T8).
+ * The envelope is checked here, because an object with a string type and a string id is what every
+ * member of the union has.
+ */
+export function parseCommand(line: string): ParsedCommand {
+	let value: unknown;
+	try {
+		value = JSON.parse(line);
+	} catch (error) {
+		return { ok: false, reason: `not JSON: ${String(error)}` };
+	}
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		return { ok: false, reason: "not an object" };
+	}
+	const fields = value as Record<string, unknown>;
+	if (typeof fields.type !== "string" || fields.type === "") {
+		return { ok: false, reason: "no type" };
+	}
+	if (typeof fields.id !== "string") {
+		return { ok: false, reason: "no id" };
+	}
+	// The cast is the boundary this function exists to hold: the envelope is checked above, and
+	// each command's own fields are read by the handler that owns them, which answers an error
+	// rather than throwing.
+	return { ok: true, command: value as Command };
+}
+
 /** Serializes command handling so a long command cannot reorder the stream. */
 export class CommandQueue {
 	#tail: Promise<unknown> = Promise.resolve();

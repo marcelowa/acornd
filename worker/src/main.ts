@@ -73,6 +73,7 @@ import { MessagesDoc } from "./delegation-tasks.ts";
 import {
 	CommandQueue,
 	type Command,
+	parseCommand,
 	type ConversationInfo,
 	type DescribeData,
 	emit,
@@ -786,13 +787,14 @@ async function main(): Promise<void> {
 	lines.on("line", (line) => {
 		const trimmed = line.trim();
 		if (trimmed.length === 0) return;
-		let command: Command;
-		try {
-			command = JSON.parse(trimmed) as Command;
-		} catch (error) {
-			log("dropped unparseable command", error);
+		const parsed = parseCommand(trimmed);
+		if (!parsed.ok) {
+			// Dropped with the reason: a line the worker cannot read is a bug in whoever wrote it,
+			// and the one thing it must not do is take the live conversations down with it (T8).
+			log("dropped a line that is not a command", parsed.reason);
 			return;
 		}
+		const command = parsed.command;
 		// Login answers arrive while a login is in flight, so they bypass the queue:
 		// queueing them behind the login they answer would deadlock.
 		if (command.type === "auth_answer") {
