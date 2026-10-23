@@ -173,8 +173,9 @@ func engineHosts(raw []json.RawMessage) []string {
 	for _, item := range raw {
 		var pattern map[string]string
 		if err := json.Unmarshal(item, &pattern); err != nil {
-			// A pattern this build cannot read is not one it wrote, and pretending it matches
-			// would hide a change.
+			// Marked, not skipped: skipped, it compares equal to an empty vault, and a secret
+			// this build cannot read would stay in the sandbox for good.
+			have = append(have, "unknown:"+string(item))
 			continue
 		}
 		switch {
@@ -184,6 +185,8 @@ func engineHosts(raw []json.RawMessage) []string {
 			have = append(have, "wildcard:"+strings.ToLower(pattern["wildcard"]))
 		case pattern["any"] != "":
 			have = append(have, "any")
+		default:
+			have = append(have, "unknown:"+string(item))
 		}
 	}
 	slices.Sort(have)
