@@ -56,8 +56,7 @@ need root. Run with nothing to see what this machine needs.
 	}
 	folder, err := resolveDataDir(*dataDir)
 	if err != nil {
-		logf("acornfall setup: %v", err)
-		os.Exit(2)
+		fail(2, err)
 	}
 	if *probe {
 		// The hidden half of "probe as the account that runs acornfall": root re-executes this
@@ -68,83 +67,89 @@ need root. Run with nothing to see what this machine needs.
 	root := os.Geteuid() == 0
 	account, err := accountFor(*forUser, root, folder)
 	if err != nil {
-		logf("acornfall setup: %v", err)
-		os.Exit(2)
+		fail(2, err)
 	}
-	who := account.Name
 	if root {
-		fmt.Printf("checking for the account that runs acornfall: %s (%s)\n\n", who, account.Basis)
+		fmt.Printf("checking for the account that runs acornfall: %s (%s)\n\n", account.Name, account.Basis)
 	}
 	report, err := probeAs(account, folder)
 	if err != nil {
-		logf("acornfall setup: %v", err)
-		os.Exit(2)
+		fail(2, err)
 	}
 	text, ok := renderSetup(report)
 	fmt.Print(text)
-	plan := planFor(report, who)
+	plan := planFor(report, account.Name)
 	if plan.empty() {
 		if !ok {
 			os.Exit(1)
 		}
 		return
 	}
+	runPlan(report, plan, account, root, *assumeYes)
+	reportAfter(account, folder, plan)
+}
+
+// fail reports a setup failure and exits with the code that failure deserves: 2 is "this could
+// not be asked", 1 is "this was asked and the answer is no".
+func fail(code int, err error) {
+	logf("acornfall setup: %v", err)
+	os.Exit(code)
+}
+
+// runPlan shows what root would do, then has it done the way this account can: by applying it
+// (already root), by asking for a password, or by printing the commands when it cannot ask.
+func runPlan(report setupReport, plan rootPlan, account setupAccount, root, assumeYes bool) {
 	if why := containerAdvice(report); why != "" {
 		fmt.Print("\n" + why + "\n")
 	}
-	fmt.Printf("\n%s root, for %s:\n", stepCount(countSteps(plan)), who)
+	fmt.Printf("\n%s root, for %s:\n", stepCount(countSteps(plan)), account.Name)
 	for _, line := range plan.description() {
 		fmt.Printf("  · %s\n", line)
 	}
-	switch {
-	case root:
+	if root {
 		// No password exists to ask for, so the plan is what gets approved.
-		if !*assumeYes {
-			agreed, err := confirm("apply these steps? [y/N] ")
-			if err != nil {
-				logf("acornfall setup: %v", err)
-				os.Exit(1)
-			}
-			if !agreed {
-				fmt.Println("\nnothing was changed. the same steps are:")
-				for _, line := range printedFixes(report, who) {
-					fmt.Printf("  %s\n", line)
-				}
-				os.Exit(1)
-			}
+		if !assumeYes && !confirm("apply these steps? [y/N] ") {
+			fmt.Println("\nnothing was changed. the same steps are:")
+			printFixes(report, account.Name)
+			os.Exit(1)
 		}
 		if err := applyPlan(plan); err != nil {
-			logf("acornfall setup: %v", err)
-			os.Exit(1)
+			fail(1, err)
 		}
-	default:
-		if err := escalate(plan); err != nil {
-			if errors.Is(err, errNoEscalation) {
-				fmt.Println("\nthis machine cannot ask for a password here (no sudo, or no terminal to type one into). run:")
-				for _, line := range printedFixes(report, who) {
-					fmt.Printf("  %s\n", line)
-				}
-				os.Exit(1)
-			}
-			logf("acornfall setup: %v", err)
-			os.Exit(1)
-		}
+		return
 	}
-	// Say what changed, from the same probes that said what was missing, asked of the same
-	// account. A group added to an account is not in any running process's groups, and no command
-	// can add it there: only a new session can.
+	if err := escalate(plan); err != nil {
+		if errors.Is(err, errNoEscalation) {
+			fmt.Println("\nthis machine cannot ask for a password here (no sudo, or no terminal to type one into). run:")
+			printFixes(report, account.Name)
+			os.Exit(1)
+		}
+		fail(1, err)
+	}
+}
+
+// printFixes is the plan as commands someone can paste.
+func printFixes(report setupReport, who string) {
+	for _, line := range printedFixes(report, who) {
+		fmt.Printf("  %s\n", line)
+	}
+}
+
+// reportAfter says what changed, from the same probes that said what was missing, asked of the
+// same account. A group added to an account is in no running process's groups, and no command can
+// put it there: only a new session can.
+func reportAfter(account setupAccount, folder string, plan rootPlan) {
 	fmt.Println()
 	after, err := probeAs(account, folder)
 	if err != nil {
-		logf("acornfall setup: %v", err)
-		os.Exit(1)
+		fail(1, err)
 	}
-	final, ok := renderSetup(after)
+	final, ready := renderSetup(after)
 	fmt.Print(final)
 	if plan.KVMUser != "" {
-		fmt.Printf("\n%s must log out and back in for the kvm group to apply, and the gateway must be\nrestarted so it starts with that group\n", who)
+		fmt.Printf("\n%s must log out and back in for the kvm group to apply, and the gateway must be\nrestarted so it starts with that group\n", account.Name)
 	}
-	if !ok {
+	if !ready {
 		fmt.Printf("\nstill not ready: this machine needs something root cannot give it\n")
 		os.Exit(1)
 	}
@@ -155,18 +160,18 @@ var stdinForTest io.Reader = os.Stdin
 
 // confirm reads one answer. Anything but yes is no: a command that changes a machine should need
 // a deliberate word, not a keystroke somebody typed on the way to something else.
-func confirm(prompt string) (bool, error) {
+func confirm(prompt string) bool {
 	fmt.Print(prompt)
 	reader := bufio.NewReader(stdinForTest)
 	answer, err := reader.ReadString('\n')
 	if err != nil && answer == "" {
-		return false, nil
+		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(answer)) {
 	case "y", "yes":
-		return true, nil
+		return true
 	}
-	return false, nil
+	return false
 }
 
 // stepCount reads as a sentence for one step and for several: "1 step needs root" is the kind of

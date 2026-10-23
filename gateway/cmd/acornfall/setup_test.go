@@ -300,11 +300,8 @@ func TestSetupAppliesOnlyOnAYes(t *testing.T) {
 		reader := strings.NewReader(input)
 		original := stdinForTest
 		stdinForTest = reader
-		got, err := confirm("? ")
+		got := confirm("? ")
 		stdinForTest = original
-		if err != nil {
-			t.Fatalf("%q: %v", input, err)
-		}
 		if got != want {
 			t.Errorf("%q: got %v, want %v", input, got, want)
 		}
