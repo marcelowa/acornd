@@ -213,27 +213,39 @@ func request(frame []byte) error {
 	if err := syscall.Sendto(fd, frame, 0, &syscall.SockaddrNetlink{Family: syscall.AF_NETLINK}); err != nil {
 		return fmt.Errorf("netns: %w", err)
 	}
+	// Netlink answers in messages that may share a datagram, and an ACK can arrive after other
+	// notifications: read until one of them is the ACK, and refuse only what the kernel refused.
 	buffer := make([]byte, 4096)
 	for {
 		n, _, err := syscall.Recvfrom(fd, buffer, 0)
 		if err != nil {
 			return fmt.Errorf("netns: %w", err)
 		}
-		for offset := 0; offset+16 <= n; {
-			length := int(native.Uint32(buffer[offset:]))
-			kind := native.Uint16(buffer[offset+4:])
-			if length < 16 || offset+length > n {
-				return errors.New("netns: the kernel's answer is not a netlink message")
-			}
-			if kind == nlmsgError && length >= 20 {
-				if code := int32(native.Uint32(buffer[offset+16:])); code != 0 {
-					return syscall.Errno(-code)
-				}
-				return nil
-			}
-			offset += align4(length)
+		acked, err := readMessages(buffer[:n])
+		if err != nil || acked {
+			return err
 		}
 	}
+}
+
+// readMessages walks one datagram's messages. It answers whether one of them was the ACK: a
+// datagram of notifications only is not the end of the wait.
+func readMessages(payload []byte) (acked bool, err error) {
+	for offset := 0; offset+16 <= len(payload); {
+		length := int(native.Uint32(payload[offset:]))
+		kind := native.Uint16(payload[offset+4:])
+		if length < 16 || offset+length > len(payload) {
+			return false, errors.New("netns: the kernel's answer is not a netlink message")
+		}
+		if kind == nlmsgError && length >= 20 {
+			if code := int32(native.Uint32(payload[offset+16:])); code != 0 {
+				return false, syscall.Errno(-code)
+			}
+			return true, nil
+		}
+		offset += align4(length)
+	}
+	return false, nil
 }
 
 func interfaceIndex(name string) (int, error) {

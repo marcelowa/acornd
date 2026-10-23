@@ -28,8 +28,12 @@ import (
 type Scope string
 
 const (
-	Global    Scope = "global"
-	Workspace Scope = "workspace"
+	// maxHostBytes is the longest name a DNS name may be, which is what a host entry can be.
+	maxHostBytes = 253
+	// maxLabelBytes is the longest one dot-separated label may be.
+	maxLabelBytes       = 63
+	Global        Scope = "global"
+	Workspace     Scope = "workspace"
 )
 
 // Substitution says where in an HTTP request a placeholder may be replaced. Headers are
@@ -207,22 +211,40 @@ func (s *Store) ForWorkspace(workspace string) (Resolved, error) {
 	if err != nil {
 		return Resolved{}, err
 	}
-	global := []Meta{}
-	own := []Meta{}
-	globalNames := map[string]bool{}
-	ownNames := map[string]bool{}
-	for _, entry := range doc.Secrets {
-		meta := entry.Meta()
+	global, own := splitScopes(doc.Secrets, workspace)
+	markOverrides(global, own)
+	return Resolved{
+		Global:    sorted(global),
+		Workspace: sorted(own),
+		Effective: combine(global, own),
+	}, nil
+}
+
+// splitScopes is the two lists ForWorkspace works with: every global entry, and this folder's own.
+func splitScopes(entries []Entry, workspace string) (global, own []Meta) {
+	for _, entry := range entries {
 		switch entry.Scope {
 		case Global:
-			globalNames[meta.Name] = true
-			global = append(global, meta)
+			global = append(global, entry.Meta())
 		case Workspace:
 			if entry.Workspace == workspace {
-				ownNames[meta.Name] = true
-				own = append(own, meta)
+				own = append(own, entry.Meta())
 			}
 		}
+	}
+	return global, own
+}
+
+// markOverrides says which of each list the other one hides: a workspace entry with a global name
+// wins, and the global one is still listed so a person can see what it is being hidden by.
+func markOverrides(global, own []Meta) {
+	globalNames := map[string]bool{}
+	for _, meta := range global {
+		globalNames[meta.Name] = true
+	}
+	ownNames := map[string]bool{}
+	for _, meta := range own {
+		ownNames[meta.Name] = true
 	}
 	for i := range global {
 		global[i].Overridden = ownNames[global[i].Name]
@@ -230,6 +252,10 @@ func (s *Store) ForWorkspace(workspace string) (Resolved, error) {
 	for i := range own {
 		own[i].Overrides = globalNames[own[i].Name]
 	}
+}
+
+// combine is the effective list: the globals nothing hides, then every workspace entry.
+func combine(global, own []Meta) []Meta {
 	effective := make([]Meta, 0, len(global)+len(own))
 	for _, meta := range global {
 		if meta.Overridden {
@@ -242,10 +268,12 @@ func (s *Store) ForWorkspace(workspace string) (Resolved, error) {
 		meta.Source = Workspace
 		effective = append(effective, meta)
 	}
-	sortByName(global)
-	sortByName(own)
-	sortByName(effective)
-	return Resolved{Global: global, Workspace: own, Effective: effective}, nil
+	return effective
+}
+
+func sorted(metas []Meta) []Meta {
+	sortByName(metas)
+	return metas
 }
 
 // Resolve returns the entries a sandbox for this workspace receives, values included. It is
@@ -281,89 +309,26 @@ func (s *Store) Resolve(workspace string) ([]Entry, error) {
 
 // Upsert creates or changes an entry and returns its metadata.
 func (s *Store) Upsert(in Upsert) (Meta, error) {
-	in.Name = strings.TrimSpace(in.Name)
-	in.Description = strings.TrimSpace(in.Description)
-	workspace, err := normalizeWorkspace(in.Scope, in.Workspace)
+	in, hosts, err := normalizeUpsert(in)
 	if err != nil {
 		return Meta{}, err
-	}
-	in.Workspace = workspace
-	if err := validateName(in.Name); err != nil {
-		return Meta{}, err
-	}
-	if err := validateScope(in.Scope, in.Workspace); err != nil {
-		return Meta{}, err
-	}
-	if in.Description != "" && len(in.Description) > maxDescBytes {
-		return Meta{}, invalidf("description is longer than %d bytes", maxDescBytes)
-	}
-	if len(in.Value) > maxValueBytes {
-		return Meta{}, invalidf("value is longer than %d bytes", maxValueBytes)
-	}
-	var hosts []string
-	if in.Hosts != nil {
-		hosts, err = normalizeHosts(*in.Hosts)
-		if err != nil {
-			return Meta{}, err
-		}
 	}
 	var meta Meta
 	err = s.update(func(doc *document) error {
 		index := find(doc.Secrets, in.Scope, in.Workspace, in.Name)
-		now := time.Now().UTC()
 		if index < 0 {
-			if in.Description == "" {
-				return invalid("a new secret needs a description")
-			}
-			if in.Value == "" {
-				return invalid("a new secret needs a value")
-			}
-			entry := Entry{
-				Name:        in.Name,
-				Description: in.Description,
-				Scope:       in.Scope,
-				Workspace:   in.Workspace,
-				Value:       in.Value,
-				Hosts:       hosts,
-				RotatedAt:   now,
-			}
-			if in.Substitution == nil {
-				entry.Substitution = Substitution{Headers: true}
-			} else {
-				entry.Substitution = *in.Substitution
-				if entry.Substitution.empty() {
-					return invalid("a secret needs at least one substitution location")
-				}
-			}
-			if in.AllowEnv == nil {
-				entry.AllowEnv = true
-			} else {
-				entry.AllowEnv = *in.AllowEnv
+			entry, err := newEntry(in, hosts)
+			if err != nil {
+				return err
 			}
 			doc.Secrets = append(doc.Secrets, entry)
 			meta = entry.Meta()
 			markOverride(doc.Secrets, &meta)
 			return nil
 		}
-		entry := doc.Secrets[index]
-		if in.Description != "" {
-			entry.Description = in.Description
-		}
-		if in.Value != "" {
-			entry.Value = in.Value
-			entry.RotatedAt = now
-		}
-		if in.Hosts != nil {
-			entry.Hosts = hosts
-		}
-		if in.Substitution != nil {
-			if in.Substitution.empty() {
-				return invalid("a secret needs at least one substitution location")
-			}
-			entry.Substitution = *in.Substitution
-		}
-		if in.AllowEnv != nil {
-			entry.AllowEnv = *in.AllowEnv
+		entry, err := patchedEntry(doc.Secrets[index], in, hosts)
+		if err != nil {
+			return err
 		}
 		doc.Secrets[index] = entry
 		meta = entry.Meta()
@@ -374,6 +339,99 @@ func (s *Store) Upsert(in Upsert) (Meta, error) {
 		return Meta{}, err
 	}
 	return meta, nil
+}
+
+// normalizeUpsert trims and checks what can be checked before the file is opened: a request that
+// cannot be stored should not take the lock, and a host that is not a host should not reach the
+// document at all.
+func normalizeUpsert(in Upsert) (Upsert, []string, error) {
+	in.Name = strings.TrimSpace(in.Name)
+	in.Description = strings.TrimSpace(in.Description)
+	workspace, err := normalizeWorkspace(in.Scope, in.Workspace)
+	if err != nil {
+		return in, nil, err
+	}
+	in.Workspace = workspace
+	if err := validateName(in.Name); err != nil {
+		return in, nil, err
+	}
+	if err := validateScope(in.Scope, in.Workspace); err != nil {
+		return in, nil, err
+	}
+	if in.Description != "" && len(in.Description) > maxDescBytes {
+		return in, nil, invalidf("description is longer than %d bytes", maxDescBytes)
+	}
+	if len(in.Value) > maxValueBytes {
+		return in, nil, invalidf("value is longer than %d bytes", maxValueBytes)
+	}
+	if in.Hosts == nil {
+		return in, nil, nil
+	}
+	hosts, err := normalizeHosts(*in.Hosts)
+	if err != nil {
+		return in, nil, err
+	}
+	return in, hosts, nil
+}
+
+// newEntry is the entry a first save creates, and the two things it has to have that a later save
+// may leave alone: what it is for, and a value.
+func newEntry(in Upsert, hosts []string) (Entry, error) {
+	if in.Description == "" {
+		return Entry{}, invalid("a new secret needs a description")
+	}
+	if in.Value == "" {
+		return Entry{}, invalid("a new secret needs a value")
+	}
+	entry := Entry{
+		Name:        in.Name,
+		Description: in.Description,
+		Scope:       in.Scope,
+		Workspace:   in.Workspace,
+		Value:       in.Value,
+		Hosts:       hosts,
+		RotatedAt:   time.Now().UTC(),
+		// A value that goes everywhere is the useful default for a new secret; refusing every
+		// place is the one answer that cannot work.
+		Substitution: Substitution{Headers: true},
+		AllowEnv:     true,
+	}
+	if in.Substitution != nil {
+		if in.Substitution.empty() {
+			return Entry{}, invalid("a secret needs at least one substitution location")
+		}
+		entry.Substitution = *in.Substitution
+	}
+	if in.AllowEnv != nil {
+		entry.AllowEnv = *in.AllowEnv
+	}
+	return entry, nil
+}
+
+// patchedEntry applies a change to an entry that is already there. A field the caller did not give
+// is left as it is, which is what makes a rotate a rotate rather than a replace — and a value that
+// does change is a rotation, so its timestamp moves with it.
+func patchedEntry(entry Entry, in Upsert, hosts []string) (Entry, error) {
+	if in.Description != "" {
+		entry.Description = in.Description
+	}
+	if in.Value != "" {
+		entry.Value = in.Value
+		entry.RotatedAt = time.Now().UTC()
+	}
+	if in.Hosts != nil {
+		entry.Hosts = hosts
+	}
+	if in.Substitution != nil {
+		if in.Substitution.empty() {
+			return entry, invalid("a secret needs at least one substitution location")
+		}
+		entry.Substitution = *in.Substitution
+	}
+	if in.AllowEnv != nil {
+		entry.AllowEnv = *in.AllowEnv
+	}
+	return entry, nil
 }
 
 // Rotate replaces a value and its timestamp.
@@ -683,37 +741,63 @@ func normalizeHosts(hosts []string) ([]string, error) {
 	return out, nil
 }
 
+// validateHost is the shape a host may take. A secret's host list is what keeps a value from
+// reaching anywhere else, so the check is strict about the form and generous about the wildcard:
+// a leading "*." is the one wildcard allowed, because it is the one a person means.
 func validateHost(host string) error {
 	if host == "*" {
 		return invalid("a secret cannot allow every host; name the hosts it may reach")
 	}
-	if len(host) > 253 {
+	if len(host) > maxHostBytes {
 		return invalidf("host %q is too long", host)
 	}
 	if strings.Contains(host, "..") {
 		return invalidf("host %q has an empty label", host)
 	}
-	label := host
-	if strings.HasPrefix(label, "*.") {
-		label = strings.TrimPrefix(label, "*.")
-		if label == "" {
-			return invalid("a wildcard needs a domain after *.")
-		}
-	} else if strings.Contains(label, "*") {
-		return invalidf("host %q may use a wildcard only as a leading *.", host)
+	label, err := hostLabel(host)
+	if err != nil {
+		return err
 	}
 	for _, part := range strings.Split(label, ".") {
-		if part == "" || len(part) > 63 {
-			return invalidf("host %q has an invalid label", host)
-		}
-		if strings.HasPrefix(part, "-") || strings.HasSuffix(part, "-") {
-			return invalidf("host %q has a label starting or ending with -", host)
-		}
-		for _, char := range part {
-			if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' {
-				return invalidf("host %q has a character a hostname cannot have", host)
-			}
+		if err := validateLabel(host, part); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// hostLabel drops the one allowed wildcard, and refuses every other use of one: "*" anywhere but
+// the leading place is a pattern the engine would read as a different thing than the person meant.
+func hostLabel(host string) (string, error) {
+	if !strings.HasPrefix(host, "*.") {
+		if strings.Contains(host, "*") {
+			return "", invalidf("host %q may use a wildcard only as a leading *.", host)
+		}
+		return host, nil
+	}
+	label := strings.TrimPrefix(host, "*.")
+	if label == "" {
+		return "", invalid("a wildcard needs a domain after *.")
+	}
+	return label, nil
+}
+
+// validateLabel is one dot-separated part: what a hostname label may contain, and nothing else.
+func validateLabel(host, part string) error {
+	if part == "" || len(part) > maxLabelBytes {
+		return invalidf("host %q has an invalid label", host)
+	}
+	if strings.HasPrefix(part, "-") || strings.HasSuffix(part, "-") {
+		return invalidf("host %q has a label starting or ending with -", host)
+	}
+	if strings.IndexFunc(part, func(char rune) bool { return !hostChar(char) }) >= 0 {
+		return invalidf("host %q has a character a hostname cannot have", host)
+	}
+	return nil
+}
+
+// hostChar is the alphabet a hostname label has: lower-case ASCII, digits and the hyphen. Anything
+// else is either a homograph or a mistake, and both are refused.
+func hostChar(char rune) bool {
+	return (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '-'
 }

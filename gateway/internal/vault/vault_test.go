@@ -2,6 +2,7 @@ package vault
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -285,10 +286,10 @@ func TestValidation(t *testing.T) {
 
 func TestRotateAndDeleteMissing(t *testing.T) {
 	store, _ := openTemp(t)
-	if _, err := store.Rotate(Global, "", "MISSING", "v"); err != ErrNotFound {
+	if _, err := store.Rotate(Global, "", "MISSING", "v"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("rotate should say not found, got %v", err)
 	}
-	if err := store.Delete(Global, "", "MISSING"); err != ErrNotFound {
+	if err := store.Delete(Global, "", "MISSING"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("delete should say not found, got %v", err)
 	}
 	mustUpsert(t, store, Upsert{Name: "TOKEN", Description: "d", Scope: Global, Value: "v", Substitution: headersOnly()})

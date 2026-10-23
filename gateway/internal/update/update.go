@@ -933,6 +933,8 @@ func (m *Manager) pruneBackups() error {
 	return nil
 }
 
+// copyDir copies the resources a workspace keeps: absent or empty is nothing to do, because a
+// folder nobody has written to is a workspace that has none yet.
 func copyDir(source, target string) error {
 	info, err := os.Stat(source)
 	if err != nil {
@@ -955,23 +957,26 @@ func copyDir(source, target string) error {
 		return err
 	}
 	for _, entry := range entries {
-		from := filepath.Join(source, entry.Name())
-		to := filepath.Join(target, entry.Name())
-		if entry.IsDir() {
-			if err := copyDir(from, to); err != nil {
-				return err
-			}
-			continue
-		}
-		payload, err := os.ReadFile(from)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(to, payload, 0o600); err != nil {
+		if err := copyEntry(source, target, entry); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// copyEntry is one member: a folder is the same walk again, and a file is read and written whole.
+// These are configuration files, not a database, so a whole file is the right unit.
+func copyEntry(source, target string, entry os.DirEntry) error {
+	from := filepath.Join(source, entry.Name())
+	to := filepath.Join(target, entry.Name())
+	if entry.IsDir() {
+		return copyDir(from, to)
+	}
+	payload, err := os.ReadFile(from)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(to, payload, 0o600)
 }
 
 // Migrate runs the <tag>.sh release script: from --migrate-dir when set,
@@ -1019,7 +1024,7 @@ func runScript(ctx context.Context, script, dataDir, tag string) error {
 	command := exec.CommandContext(ctx, "sh", script, dataDir)
 	output, err := command.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("migrate %s: %v: %s", tag, err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("migrate %s: %w: %s", tag, err, strings.TrimSpace(string(output)))
 	}
 	return nil
 }
@@ -1032,118 +1037,145 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 	if options.Drain == "" {
 		options.Drain = "wait"
 	}
-	active := m.RunsActive != nil && m.RunsActive()
-	if active && options.Drain != "stop" {
+	if err := m.applyGate(options); err != nil {
+		return err
+	}
+	release, err := m.pickRelease(ctx, options)
+	if err != nil {
+		return err
+	}
+	payload, err := m.stage(ctx, release)
+	if err != nil {
+		return err
+	}
+	if err := m.drainRuns(ctx, options); err != nil {
+		return err
+	}
+	if err := m.cleanVMs(ctx, options); err != nil {
+		return err
+	}
+	return m.swap(payload, release.Tag)
+}
+
+// applyGate refuses an update that cannot start: runs in flight it has not been told to stop, a
+// restart already pending, and a folder this user cannot write. The folder is asked before any byte
+// moves, because the swap is where an unwritable install fails otherwise — after the download, half
+// way through, as a permission error with no fix in it.
+func (m *Manager) applyGate(options ApplyOptions) error {
+	if m.RunsActive != nil && m.RunsActive() && options.Drain != "stop" {
 		return ErrRunsActive{}
 	}
 	m.mu.Lock()
 	pending := m.restart
 	m.mu.Unlock()
-	// A second apply would move the new build aside as .bak and strand
-	// the rollback: one update per restart.
+	// A second apply would move the new build aside as .bak and strand the rollback: one update
+	// per restart.
 	if pending {
 		return ErrRestartPending{}
 	}
-	// Before anything is downloaded: an update is a write next to the running binary, and a
-	// binary in a folder this user cannot write fails at the swap — after the download, half way
-	// through, as a permission error with no fix in it. Asked here, it is a sentence before any
-	// byte moves.
-	if err := m.checkInstallFolder(); err != nil {
-		return err
-	}
+	return m.checkInstallFolder()
+}
+
+// pickRelease is which release this update installs: the tag that was asked for, else the cached
+// latest, else a fresh check.
+func (m *Manager) pickRelease(ctx context.Context, options ApplyOptions) (Release, error) {
 	m.mu.Lock()
 	release := m.latest
 	m.mu.Unlock()
-	switch {
-	case options.Tag != "":
-		// The picker's path: install the tag that was chosen, which need
-		// not be latest. releaseFor reuses the cached latest when it
-		// already answers.
-		picked, err := m.releaseFor(ctx, options.Tag)
-		if err != nil {
-			return err
-		}
-		release = picked
-	case release.Tag == "":
-		fetched, err := m.Check(ctx)
-		if err != nil {
-			return err
-		}
-		release = fetched
+	if options.Tag != "" {
+		// The picker's path: install the tag that was chosen, which need not be latest.
+		// releaseFor reuses the cached latest when it already answers.
+		return m.releaseFor(ctx, options.Tag)
 	}
+	if release.Tag == "" {
+		return m.Check(ctx)
+	}
+	return release, nil
+}
+
+// stage downloads and proves the new build, and stages the worker's tarball beside it. Nothing is
+// moved: every failure in here leaves the running gateway and its backup exactly as they were.
+func (m *Manager) stage(ctx context.Context, release Release) ([]byte, error) {
 	asset := AssetFor(release)
 	if asset.URL == "" {
-		return fmt.Errorf("releases: no binary for %s/%s in %s", runtime.GOOS, runtime.GOARCH, release.Tag)
+		return nil, fmt.Errorf("releases: no binary for %s/%s in %s", runtime.GOOS, runtime.GOARCH, release.Tag)
 	}
 	worker := WorkerTarballAsset(release)
 	if _, err := m.Backup(); err != nil {
-		return fmt.Errorf("backup failed, update stopped: %w", err)
+		return nil, fmt.Errorf("backup failed, update stopped: %w", err)
 	}
 	payload, err := m.download(ctx, asset)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	// The worker tarball downloads and verifies before anything is staged:
-	// a failure here leaves the gateway and the live sources untouched.
-	// It stages, not activates: the new gateway unpacks and installs at
-	// boot, when bun is ensured and failures refuse loudly instead of
-	// bricking.
 	list, err := m.checksumList(ctx, release)
+	if err != nil {
+		return nil, err
+	}
+	if err := verify(list, payload, release.Tag); err != nil {
+		return nil, err
+	}
+	// The staged binary must execute and name its tag before it may replace the running one:
+	// checksums prove intact, execution proves runnable.
+	if err := checkExec(ctx, payload, release.Tag); err != nil {
+		return nil, err
+	}
+	if err := m.stageWorkerTarball(ctx, release, worker, list); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
+// stageWorkerTarball downloads and verifies the worker's tarball. It stages rather than activates: the new
+// gateway unpacks and installs it at boot, when bun is ensured and a failure refuses loudly instead
+// of bricking.
+func (m *Manager) stageWorkerTarball(ctx context.Context, release Release, worker Asset, list string) error {
+	if worker.URL == "" {
+		return nil
+	}
+	tarball, err := m.download(ctx, worker)
 	if err != nil {
 		return err
 	}
-	if err := verify(list, payload, release.Tag); err != nil {
+	if err := verify(list, tarball, release.Tag); err != nil {
 		return err
 	}
-	// The staged binary must execute and name its tag before it may
-	// replace the running one: checksums prove intact, execution proves
-	// runnable. A failure aborts with everything untouched.
-	if err := checkExec(ctx, payload, release.Tag); err != nil {
-		return err
+	return writeData(m.workerPending(), tarball)
+}
+
+// drainRuns stops what is running, at the moment it matters rather than when Apply was asked: a
+// failed download must not cost runs, and a run that started during the download must not be
+// swapped under.
+func (m *Manager) drainRuns(ctx context.Context, options ApplyOptions) error {
+	if m.RunsActive == nil || !m.RunsActive() {
+		return nil
 	}
-	if worker.URL != "" {
-		tarball, err := m.download(ctx, worker)
-		if err != nil {
-			return err
-		}
-		if err := verify(list, tarball, release.Tag); err != nil {
-			return err
-		}
-		if err := writeData(m.workerPending(), tarball); err != nil {
-			return err
-		}
+	if options.Drain != "stop" {
+		return ErrRunsActive{}
 	}
-	// Runs end here: after everything verified, and before anything moves.
-	// A failed download must not cost runs, and a run that started while the
-	// download was in flight must not be swapped under — so the gate is read
-	// again, at the moment it matters, not only when Apply was asked.
-	if m.RunsActive != nil && m.RunsActive() {
-		if options.Drain != "stop" {
-			return ErrRunsActive{}
-		}
-		if m.StopRuns == nil {
-			return fmt.Errorf("update: runs are active and nothing can stop them")
-		}
-		if err := m.StopRuns(ctx); err != nil {
-			return fmt.Errorf("update: cannot stop runs: %w", err)
-		}
+	if m.StopRuns == nil {
+		return fmt.Errorf("update: runs are active and nothing can stop them")
 	}
-	// Start-clean wipes last, after everything verified: a failed download
-	// must never cost the sandboxes. The screen warns that images and the
-	// engine reinstall on next use.
-	if options.CleanVMs {
-		if m.CleanVMs == nil {
-			return fmt.Errorf("update: clean VMs asked and nothing can wipe them")
-		}
-		if m.StopWorkers != nil {
-			m.StopWorkers()
-		}
-		if err := m.CleanVMs(ctx); err != nil {
-			return fmt.Errorf("update: cannot wipe sandboxes: %w", err)
-		}
+	if err := m.StopRuns(ctx); err != nil {
+		return fmt.Errorf("update: cannot stop runs: %w", err)
 	}
-	if err := m.swap(payload, release.Tag); err != nil {
-		return err
+	return nil
+}
+
+// cleanVMs wipes the sandboxes last, after everything verified: a failed download must never cost
+// them. The screen warns that images and the engine reinstall on next use.
+func (m *Manager) cleanVMs(ctx context.Context, options ApplyOptions) error {
+	if !options.CleanVMs {
+		return nil
+	}
+	if m.CleanVMs == nil {
+		return fmt.Errorf("update: clean VMs asked and nothing can wipe them")
+	}
+	if m.StopWorkers != nil {
+		m.StopWorkers()
+	}
+	if err := m.CleanVMs(ctx); err != nil {
+		return fmt.Errorf("update: cannot wipe sandboxes: %w", err)
 	}
 	return nil
 }
@@ -1268,22 +1300,14 @@ func (m *Manager) download(ctx context.Context, asset Asset) ([]byte, error) {
 // every file: the gateway and the worker are both checked against it.
 // Without one it passes: the transport is TLS to github — see ADR 0019.
 func (m *Manager) checksumList(ctx context.Context, release Release) (string, error) {
-	var checksum Asset
-	for _, asset := range release.Assets {
-		if asset.Name == "sha256sums.txt" || asset.Name == "checksums.txt" {
-			checksum = asset
-			break
-		}
-	}
-	if checksum.URL == "" {
+	checksum, found := checksumAsset(release)
+	if !found {
+		// A release without a checksum list is one this build cannot verify, and an unverified
+		// update is not an update: the caller decides what that means, here it is "nothing to
+		// check against".
 		return "", nil
 	}
-	checksumURL := checksum.URL
-	accept := ""
-	if checksum.ID != 0 {
-		checksumURL = m.apiBase() + fmt.Sprintf("/releases/assets/%d", checksum.ID)
-		accept = "application/octet-stream"
-	}
+	checksumURL, accept := m.checksumSource(checksum)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, checksumURL, nil)
 	if err != nil {
 		return "", err
@@ -1291,6 +1315,8 @@ func (m *Manager) checksumList(ctx context.Context, release Release) (string, er
 	if accept != "" {
 		request.Header.Set("Accept", accept)
 	}
+	// A token is for a private mirror or a rate-limited API, and comes from the environment so it
+	// never sits in a file this install writes.
 	if token := os.Getenv("ACORNFALL_GITHUB_TOKEN"); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -1307,6 +1333,25 @@ func (m *Manager) checksumList(ctx context.Context, release Release) (string, er
 		return "", err
 	}
 	return string(list), nil
+}
+
+// checksumAsset is the release's list of sums, under either name the tooling has used.
+func checksumAsset(release Release) (Asset, bool) {
+	for _, asset := range release.Assets {
+		if asset.Name == "sha256sums.txt" || asset.Name == "checksums.txt" {
+			return asset, true
+		}
+	}
+	return Asset{}, false
+}
+
+// checksumSource is where the list actually lives: an asset with an ID comes through the API with
+// the accept header that asks for its bytes, and one without is a plain download.
+func (m *Manager) checksumSource(checksum Asset) (address, accept string) {
+	if checksum.ID == 0 {
+		return checksum.URL, ""
+	}
+	return m.apiBase() + fmt.Sprintf("/releases/assets/%d", checksum.ID), "application/octet-stream"
 }
 
 // verify checks one payload against a fetched checksum list. An empty list
@@ -1472,7 +1517,7 @@ func (m *Manager) RunPending(ctx context.Context) error {
 	if err := m.Migrate(ctx, tag); err != nil {
 		rollbackErr := m.Rollback(err)
 		if rollbackErr != nil {
-			return fmt.Errorf("migrate failed and rollback failed: %v (rollback: %v)", err, rollbackErr)
+			return fmt.Errorf("migrate failed and rollback failed: %w (rollback: %w)", err, rollbackErr)
 		}
 		return fmt.Errorf("migrate failed, rolled back: %w", err)
 	}

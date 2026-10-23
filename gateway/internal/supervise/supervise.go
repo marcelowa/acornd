@@ -169,12 +169,8 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err := os.MkdirAll(dirOf(s.socket), 0o700); err != nil {
 		return err
 	}
-	listener, err := net.Listen("unix", s.socket)
+	listener, err := listenSocket(s.socket)
 	if err != nil {
-		return fmt.Errorf("supervisor: cannot listen on %s: %w", s.socket, err)
-	}
-	if err := os.Chmod(s.socket, 0o600); err != nil {
-		listener.Close()
 		return err
 	}
 	s.mu.Lock()
@@ -201,13 +197,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	for {
 		connection, err := listener.Accept()
 		if err != nil {
-			s.mu.Lock()
-			done := s.shuttingDown
-			s.mu.Unlock()
-			if done || ctx.Err() != nil {
-				return nil
-			}
-			if errors.Is(err, net.ErrClosed) {
+			if s.done(ctx) {
 				return nil
 			}
 			return err
@@ -315,40 +305,11 @@ func (s *Server) serveConn(connection *conn) {
 
 // start begins one command and reports its output to the client that asked for it.
 func (s *Server) start(connection *conn, request Request) {
-	s.mu.Lock()
-	shuttingDown := s.shuttingDown
-	_, exists := s.runs[request.ID]
-	s.mu.Unlock()
-	if shuttingDown {
-		connection.send(Event{Type: "error", ID: request.ID, Error: "the sandbox is stopping"})
+	if !s.validateStart(connection, request) {
 		return
 	}
-	if request.ID == "" || exists {
-		connection.send(Event{Type: "error", ID: request.ID, Error: "a run needs a unique id"})
-		return
-	}
-	if len(request.Argv) == 0 || strings.TrimSpace(request.Argv[0]) == "" {
-		connection.send(Event{Type: "error", ID: request.ID, Error: "empty argv: no program to run"})
-		return
-	}
-
-	command := exec.Command(request.Argv[0], request.Argv[1:]...)
-	command.Env = environment(request.Env)
-	command.Dir = request.Dir
-	// Its own process group, so a kill takes what the command started and not only the
-	// command. The sandbox's own first process stays out of it.
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	stdout, err := command.StdoutPipe()
+	command, stdout, stderr, err := startProcess(request)
 	if err != nil {
-		connection.send(Event{Type: "error", ID: request.ID, Error: err.Error()})
-		return
-	}
-	stderr, err := command.StderrPipe()
-	if err != nil {
-		connection.send(Event{Type: "error", ID: request.ID, Error: err.Error()})
-		return
-	}
-	if err := command.Start(); err != nil {
 		connection.send(Event{Type: "error", ID: request.ID, Error: err.Error()})
 		return
 	}
@@ -400,6 +361,70 @@ func (s *Server) start(connection *conn, request Request) {
 		}
 		s.emit(current, event)
 	}()
+}
+
+// validateStart refuses what cannot be run, and says which: the sandbox stopping, an id that is not
+// new, an argv with no program. Each is the caller's mistake, so each is an answer rather than a
+// dropped request.
+func (s *Server) validateStart(connection *conn, request Request) bool {
+	s.mu.Lock()
+	shuttingDown := s.shuttingDown
+	_, exists := s.runs[request.ID]
+	s.mu.Unlock()
+	switch {
+	case shuttingDown:
+		connection.send(Event{Type: "error", ID: request.ID, Error: "the sandbox is stopping"})
+	case request.ID == "" || exists:
+		connection.send(Event{Type: "error", ID: request.ID, Error: "a run needs a unique id"})
+	case len(request.Argv) == 0 || strings.TrimSpace(request.Argv[0]) == "":
+		connection.send(Event{Type: "error", ID: request.ID, Error: "empty argv: no program to run"})
+	default:
+		return true
+	}
+	return false
+}
+
+// startProcess builds the command and its two pipes, and starts it. Its own process group, so a
+// kill takes what the command started and not only the command: the sandbox's own first process
+// stays out of it.
+func startProcess(request Request) (command *exec.Cmd, stdout, stderr io.ReadCloser, err error) {
+	command = exec.Command(request.Argv[0], request.Argv[1:]...)
+	command.Env = environment(request.Env)
+	command.Dir = request.Dir
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if stdout, err = command.StdoutPipe(); err != nil {
+		return nil, nil, nil, err
+	}
+	if stderr, err = command.StderrPipe(); err != nil {
+		return nil, nil, nil, err
+	}
+	if err := command.Start(); err != nil {
+		return nil, nil, nil, err
+	}
+	return command, stdout, stderr, nil
+}
+
+// listenSocket is the supervisor's socket: only its owner may talk to it, which is why the mode is
+// set before anything is accepted.
+func listenSocket(path string) (net.Listener, error) {
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, fmt.Errorf("supervisor: cannot listen on %s: %w", path, err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		listener.Close()
+		return nil, err
+	}
+	return listener, nil
+}
+
+// done is whether an accept failure is the end of the server rather than an error: a shutdown of
+// its own, a cancelled owner, or the listener closed under it.
+func (s *Server) done(ctx context.Context) bool {
+	s.mu.Lock()
+	shuttingDown := s.shuttingDown
+	s.mu.Unlock()
+	return shuttingDown || ctx.Err() != nil
 }
 
 // emit sends an event to every client waiting on this command.

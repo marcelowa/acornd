@@ -14,6 +14,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -122,42 +123,51 @@ func bunPlatform() (string, error) {
 }
 
 func (m *Manager) downloadBun(ctx context.Context) error {
-	platform, err := bunPlatform()
+	binary, err := m.fetchBun(ctx)
 	if err != nil {
 		return err
+	}
+	return m.installBun(binary)
+}
+
+// fetchBun is the download and the unzip: what comes back is the one file to write.
+func (m *Manager) fetchBun(ctx context.Context) ([]byte, error) {
+	platform, err := bunPlatform()
+	if err != nil {
+		return nil, err
 	}
 	url := fmt.Sprintf("%s/bun-v%s/%s.zip", m.bunBase(), BunVersion, platform)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	response, err := m.client.Do(request)
 	if err != nil {
-		return fmt.Errorf("update: cannot download bun %s: %w", BunVersion, err)
+		return nil, fmt.Errorf("update: cannot download bun %s: %w", BunVersion, err)
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("update: bun download answered %s", response.Status)
+		return nil, fmt.Errorf("update: bun download answered %s", response.Status)
 	}
 	payload, err := io.ReadAll(io.LimitReader(response.Body, 256<<20))
 	if err != nil {
-		return err
+		return nil, err
 	}
-	binary, err := unzipBun(payload)
-	if err != nil {
-		return err
-	}
+	return unzipBun(payload)
+}
+
+// installBun writes the runtime atomically, like the binary swaps: a half-written runtime is worse
+// than none.
+func (m *Manager) installBun(binary []byte) error {
 	if err := os.MkdirAll(m.bunDir(), 0o755); err != nil {
 		return err
 	}
-	// Atomic like the binary swaps: a half-written runtime is worse than none.
 	temp, err := os.CreateTemp(m.toolsDir(), ".bun-*")
 	if err != nil {
 		if err := os.MkdirAll(m.toolsDir(), 0o755); err != nil {
 			return err
 		}
-		temp, err = os.CreateTemp(m.toolsDir(), ".bun-*")
-		if err != nil {
+		if temp, err = os.CreateTemp(m.toolsDir(), ".bun-*"); err != nil {
 			return err
 		}
 	}
@@ -360,7 +370,7 @@ func (m *Manager) installWorker(ctx context.Context) error {
 	command.Dir = m.workerDir()
 	output, err := command.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("update: bun install failed: %v: %s", err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("update: bun install failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	if err := os.MkdirAll(filepath.Dir(m.workerMark()), 0o755); err != nil {
 		return err
@@ -374,7 +384,7 @@ func untarWorker(tarball []byte, dir string) error {
 	reader := tar.NewReader(bytes.NewReader(tarball))
 	for {
 		header, err := reader.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return nil
 		}
 		if err != nil {
@@ -383,25 +393,33 @@ func untarWorker(tarball []byte, dir string) error {
 		if header.Typeflag != tar.TypeReg {
 			continue
 		}
-		clean := filepath.Clean("/" + header.Name)
-		target := filepath.Join(dir, clean)
-		if !strings.HasPrefix(target, filepath.Clean(dir)+string(os.PathSeparator)) && target != filepath.Clean(dir) {
-			return fmt.Errorf("update: worker tarball escapes: %q", header.Name)
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		if err := writeWorkerFile(reader, header, dir); err != nil {
 			return err
-		}
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-		if err != nil {
-			return err
-		}
-		_, err = io.Copy(out, io.LimitReader(reader, 64<<20))
-		closeErr := out.Close()
-		if err != nil {
-			return err
-		}
-		if closeErr != nil {
-			return closeErr
 		}
 	}
+}
+
+// writeWorkerFile is one member of the worker tarball, kept inside dir: a tarball is a download,
+// and a download that names ../../.bashrc is not a file to write.
+func writeWorkerFile(reader *tar.Reader, header *tar.Header, dir string) error {
+	clean := filepath.Clean("/" + header.Name)
+	target := filepath.Join(dir, clean)
+	if !strings.HasPrefix(target, filepath.Clean(dir)+string(os.PathSeparator)) && target != filepath.Clean(dir) {
+		return fmt.Errorf("update: worker tarball escapes: %q", header.Name)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	// The limit is a size the worker's sources cannot reach: a tarball that claims more than this
+	// per file is not one this install wrote.
+	_, copyErr := io.Copy(out, io.LimitReader(reader, 64<<20))
+	closeErr := out.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }

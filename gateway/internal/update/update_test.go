@@ -572,7 +572,7 @@ func TestApplyRefusesWhileRunsActive(t *testing.T) {
 
 	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "wait"}); err == nil {
 		t.Fatal("active runs with drain=wait must refuse")
-	} else if _, ok := err.(ErrRunsActive); !ok {
+	} else if !errors.As(err, new(ErrRunsActive)) {
 		t.Fatalf("want ErrRunsActive, got %T %v", err, err)
 	}
 }
@@ -878,7 +878,7 @@ func TestApplyRefusesWhileRestartPending(t *testing.T) {
 	}
 	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err == nil {
 		t.Fatal("a second apply before restart must refuse")
-	} else if _, ok := err.(ErrRestartPending); !ok {
+	} else if !errors.As(err, new(ErrRestartPending)) {
 		t.Fatalf("want ErrRestartPending, got %T %v", err, err)
 	}
 }

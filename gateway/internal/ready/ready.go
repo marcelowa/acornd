@@ -168,7 +168,7 @@ func disk(dataDir string) Requirement {
 			return Requirement{"disk", true, "free space unreadable, assuming room", ""}
 		}
 	}
-	free := uint64(stat.Bavail) * uint64(stat.Bsize)
+	free := stat.Bavail * uint64(stat.Bsize)
 	detail := fmt.Sprintf("%dM free", free>>20)
 	const want = 100 << 20
 	if free < want {
