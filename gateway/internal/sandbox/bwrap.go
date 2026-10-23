@@ -310,29 +310,59 @@ func (b *Bwrap) Create(ctx context.Context, policy Policy, dir string) error {
 
 // writeConfig is Create without the boot: what the workspace runs under, written where a person
 // can read it and the sandbox can be started from it later.
-func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
+// validatePolicy refuses a policy before anything is created for it.
+func (b *Bwrap) validatePolicy(policy Policy) error {
 	if strings.TrimSpace(policy.Workspace) == "" {
-		return bwrapConfig{}, errors.New("sandbox: policy has no workspace")
+		return errors.New("sandbox: policy has no workspace")
 	}
 	info, err := os.Stat(policy.Workspace)
 	if err != nil || !info.IsDir() {
-		return bwrapConfig{}, fmt.Errorf("sandbox: no workspace folder at %s", policy.Workspace)
+		return fmt.Errorf("sandbox: no workspace folder at %s", policy.Workspace)
 	}
-	image := policy.Image
-	if strings.TrimSpace(image) == "" {
-		image = DefaultImage
+	return nil
+}
+
+// supervisorPaths is everything the supervisor needs to exist before it can run: this binary to
+// be, bubblewrap on the machine, and sockets short enough for a Unix path.
+type supervisorPaths struct {
+	executable string
+	bwrap      string
+	run        string
+	socket     string
+}
+
+func (b *Bwrap) supervisor(policy Policy) (supervisorPaths, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return supervisorPaths{}, fmt.Errorf("sandbox: cannot find this binary to run the sandbox's supervisor: %w", err)
 	}
+	bwrapPath, err := b.look("bwrap")
+	if err != nil {
+		return supervisorPaths{}, fmt.Errorf("%w: bubblewrap is not installed (install it: apt install bubblewrap)", ErrUnavailable)
+	}
+	run, socket, err := b.socketPaths(policy)
+	if err != nil {
+		return supervisorPaths{}, err
+	}
+	return supervisorPaths{executable: executable, bwrap: bwrapPath, run: run, socket: socket}, nil
+}
+
+// stateDirs makes the two folders every bwrap sandbox needs: the store, and this workspace's
+// home inside it.
+func (b *Bwrap) stateDirs(policy Policy) (string, error) {
 	if err := os.MkdirAll(b.state, 0o700); err != nil {
-		return bwrapConfig{}, err
+		return "", err
 	}
 	dataDir := b.workspaceHome(Name(policy.Workspace))
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
-		return bwrapConfig{}, err
+		return "", err
 	}
-	rootfs, err := b.workspaceRootfs(policy, Name(policy.Workspace), image)
-	if err != nil {
-		return bwrapConfig{}, err
-	}
+	return dataDir, nil
+}
+
+// readonlyGlobals is the machine's global resources that exist: a path the policy names but this
+// machine does not have is a mount that would fail, not a resource to mount.
+func readonlyGlobals(policy Policy) []string {
 	var readonly []string
 	for _, path := range policy.Global {
 		if _, err := os.Stat(path); err == nil {
@@ -340,41 +370,71 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 		}
 	}
 	sort.Strings(readonly)
-	network := bwrapNetwork{Mode: NetworkOffName}
-	if policy.Egress {
-		pasta, err := b.look("pasta")
-		if err != nil {
-			return bwrapConfig{}, fmt.Errorf("%w: egress in a bwrap workspace is carried by pasta (install it: apt install passt)", ErrUnavailable)
+	return readonly
+}
+
+// networkFor is the namespace's networking: off, or pasta carrying it. Egress without pasta is an
+// install that needs one `apt install passt` and would otherwise be a sandbox that cannot reach
+// anything while claiming it can.
+func (b *Bwrap) networkFor(policy Policy) (bwrapNetwork, error) {
+	if !policy.Egress {
+		return bwrapNetwork{Mode: NetworkOffName}, nil
+	}
+	pasta, err := b.look("pasta")
+	if err != nil {
+		return bwrapNetwork{}, fmt.Errorf("%w: egress in a bwrap workspace is carried by pasta (install it: apt install passt)", ErrUnavailable)
+	}
+	return bwrapNetwork{
+		Mode: "pasta", Address: sandboxAddress, Gateway: sandboxGateway, Pasta: pasta,
+		Private: policy.PrivateEgress,
+	}, nil
+}
+
+// socketPaths is the session's runtime folder and the two sockets in it. The socket lives there
+// rather than in the store because a Unix socket path has a hard length and this way the length
+// is the same wherever the install lives; the limit is checked here because the failure without
+// it is a supervisor that never answers.
+func (b *Bwrap) socketPaths(policy Policy) (run, socket string, err error) {
+	run, err = b.socketDir(policy.Workspace)
+	if err != nil {
+		return "", "", err
+	}
+	socket = filepath.Join(run, "s.sock")
+	for _, path := range []string{socket, guestSocketPath} {
+		if len(path) > socketLimit {
+			return "", "", fmt.Errorf("sandbox: the supervisor's socket path is too long for a Unix socket: %s is %d characters and %d is the limit (shorten XDG_RUNTIME_DIR, or the workspace name)", path, len(path), socketLimit)
 		}
-		network = bwrapNetwork{
-			Mode: "pasta", Address: sandboxAddress, Gateway: sandboxGateway, Pasta: pasta,
-			Private: policy.PrivateEgress,
-		}
+	}
+	return run, socket, nil
+}
+
+func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
+	if err := b.validatePolicy(policy); err != nil {
+		return bwrapConfig{}, err
+	}
+	image := policy.Image
+	if strings.TrimSpace(image) == "" {
+		image = DefaultImage
+	}
+	dataDir, err := b.stateDirs(policy)
+	if err != nil {
+		return bwrapConfig{}, err
+	}
+	rootfs, err := b.workspaceRootfs(policy, Name(policy.Workspace), image)
+	if err != nil {
+		return bwrapConfig{}, err
+	}
+	network, err := b.networkFor(policy)
+	if err != nil {
+		return bwrapConfig{}, err
 	}
 	resolvConf, err := b.resolveResolv(Name(policy.Workspace), network)
 	if err != nil {
 		return bwrapConfig{}, err
 	}
-	executable, err := os.Executable()
-	if err != nil {
-		return bwrapConfig{}, fmt.Errorf("sandbox: cannot find this binary to run the sandbox's supervisor: %w", err)
-	}
-	bwrapPath, err := b.look("bwrap")
-	if err != nil {
-		return bwrapConfig{}, fmt.Errorf("%w: bubblewrap is not installed (install it: apt install bubblewrap)", ErrUnavailable)
-	}
-	// The socket lives in the session's runtime folder, not in the store: a Unix socket path has a
-	// hard length, and this way the length is the same wherever the install lives. The folder is
-	// per install and per workspace, so two installs never answer on one socket.
-	run, err := b.socketDir(policy.Workspace)
+	supervisor, err := b.supervisor(policy)
 	if err != nil {
 		return bwrapConfig{}, err
-	}
-	socket := filepath.Join(run, "s.sock")
-	for _, path := range []string{socket, guestSocketPath} {
-		if len(path) > socketLimit {
-			return bwrapConfig{}, fmt.Errorf("sandbox: the supervisor's socket path is too long for a Unix socket: %s is %d characters and %d is the limit (shorten XDG_RUNTIME_DIR, or the workspace name)", path, len(path), socketLimit)
-		}
 	}
 	config := bwrapConfig{
 		Engine:      b.Name(),
@@ -384,13 +444,13 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 		Rootfs:      rootfs,
 		DataDir:     dataDir,
 		Hidden:      b.dataDir,
-		ReadOnly:    readonly,
+		ReadOnly:    readonlyGlobals(policy),
 		ResolvConf:  resolvConf,
-		Supervisor:  executable,
-		Socket:      socket,
+		Supervisor:  supervisor.executable,
+		Socket:      supervisor.socket,
 		GuestSocket: guestSocketPath,
-		Bwrap:       bwrapPath,
-		Run:         run,
+		Bwrap:       supervisor.bwrap,
+		Run:         supervisor.run,
 		GuestRun:    guestRunDir,
 		IdleTimeout: idleTimeoutOrDefault(policy.IdleTimeout),
 		Beta:        "one sandbox per workspace, held by this binary as its first process",
@@ -477,23 +537,33 @@ func (b *Bwrap) Stop(ctx context.Context, name string) error {
 		b.shutdown(config.Socket)
 	}
 	// Whatever it answered, nothing of it may be left running.
-	if pid := b.pid(name); pid > 0 {
-		if process, err := os.FindProcess(pid); err == nil {
-			_ = process.Signal(syscall.SIGTERM)
-			for waited := 0; waited < 100; waited++ {
-				if !alive(pid) {
-					break
-				}
-				time.Sleep(20 * time.Millisecond)
-			}
-			if alive(pid) {
-				_ = process.Kill()
-			}
-		}
-	}
+	b.stopProcess(name)
 	_ = os.Remove(b.pidPath(name))
 	_ = os.Remove(config.Socket)
 	return nil
+}
+
+// stopProcess ends whatever is still running, asking first: the supervisor has sandboxes and
+// sockets to close, and a kill leaves them behind.
+func (b *Bwrap) stopProcess(name string) {
+	pid := b.pid(name)
+	if pid <= 0 {
+		return
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+	_ = process.Signal(syscall.SIGTERM)
+	for waited := 0; waited < 100; waited++ {
+		if !alive(pid) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if alive(pid) {
+		_ = process.Kill()
+	}
 }
 
 // List reports the sandboxes this engine knows, running or stopped: one per workspace that has
@@ -592,31 +662,42 @@ func (b *Bwrap) imageBase(image string) (string, error) {
 	dir := filepath.Join(b.StateDir(), "images", key)
 	base := filepath.Join(dir, "base")
 	complete := filepath.Join(dir, "complete")
-	ready := func() bool {
-		info, err := os.Stat(complete)
-		return err == nil && !info.IsDir()
-	}
-	if ready() {
+	if imageReady(complete) {
 		return base, nil
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := b.pullToDir(dir, base, complete, image); err != nil {
 		return "", err
 	}
-	// One pull per image at a time, across processes: a workspace copying a half-written image is
-	// a failure with no cause in it, and two gateways on one machine share this folder. The lock
-	// is re-checked after it is taken, because whoever held it may have finished the job.
-	if err := lockFile(filepath.Join(dir, "lock"), func() error {
-		if ready() {
+	return base, nil
+}
+
+// imageReady is the marker the pull writes last: a base folder without it is a pull that did not
+// finish, and one that was interrupted.
+func imageReady(complete string) bool {
+	info, err := os.Stat(complete)
+	return err == nil && !info.IsDir()
+}
+
+// pullToDir unpacks an image under the image lock. One pull per image at a time, across
+// processes: a workspace copying a half-written image is a failure with no cause in it, and two
+// gateways on one machine share this folder. The marker is re-checked after the lock is taken,
+// because whoever held it may have finished the job.
+func (b *Bwrap) pullToDir(dir, base, complete, image string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return lockFile(filepath.Join(dir, "lock"), func() error {
+		if imageReady(complete) {
 			return nil
+		}
+		if b.pull == nil {
+			return errors.New("sandbox: no image source is configured")
 		}
 		staging, err := os.MkdirTemp(dir, "base.partial-")
 		if err != nil {
 			return err
 		}
 		defer func() { _ = os.RemoveAll(staging) }()
-		if b.pull == nil {
-			return errors.New("sandbox: no image source is configured")
-		}
 		if err := b.pull(context.Background(), image, staging, nil); err != nil {
 			return fmt.Errorf("sandbox: fetching the image %s: %w", image, err)
 		}
@@ -625,10 +706,7 @@ func (b *Bwrap) imageBase(image string) (string, error) {
 			return err
 		}
 		return os.WriteFile(complete, []byte(image+"\n"), 0o644)
-	}); err != nil {
-		return "", err
-	}
-	return base, nil
+	})
 }
 
 // workspaceDir is a path inside this workspace's sandbox folder.

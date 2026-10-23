@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -163,10 +163,18 @@ func sameSecretPolicy(current []engineSecret, desired []Secret) bool {
 }
 
 func sameHosts(raw []json.RawMessage, hosts []string) bool {
+	return slices.Equal(engineHosts(raw), wantedHosts(hosts))
+}
+
+// engineHosts reads the patterns the engine reported, in the same spelling wantedHosts uses so
+// the two can be compared as lists.
+func engineHosts(raw []json.RawMessage) []string {
 	have := make([]string, 0, len(raw))
 	for _, item := range raw {
 		var pattern map[string]string
 		if err := json.Unmarshal(item, &pattern); err != nil {
+			// A pattern this build cannot read is not one it wrote, and pretending it matches
+			// would hide a change.
 			continue
 		}
 		switch {
@@ -178,26 +186,24 @@ func sameHosts(raw []json.RawMessage, hosts []string) bool {
 			have = append(have, "any")
 		}
 	}
+	slices.Sort(have)
+	return have
+}
+
+// wantedHosts is the vault's list in the engine's vocabulary: a leading *. is a wildcard, and
+// everything else is exact. Case is folded because DNS is.
+func wantedHosts(hosts []string) []string {
 	want := make([]string, 0, len(hosts))
 	for _, host := range hosts {
 		host = strings.ToLower(host)
 		if strings.HasPrefix(host, "*.") {
 			want = append(want, "wildcard:"+host)
-		} else {
-			want = append(want, "exact:"+host)
+			continue
 		}
+		want = append(want, "exact:"+host)
 	}
-	sort.Strings(have)
-	sort.Strings(want)
-	if len(have) != len(want) {
-		return false
-	}
-	for i := range have {
-		if have[i] != want[i] {
-			return false
-		}
-	}
-	return true
+	slices.Sort(want)
+	return want
 }
 
 // SecretsChanged reconciles a running sandbox with the vault. The engine can rotate the
@@ -206,20 +212,12 @@ func sameHosts(raw []json.RawMessage, hosts []string) bool {
 // config is updated for the next start and RestartRequired says so. A sandbox that does not
 // exist yet gets the set when it is created.
 func (m *Microsandbox) SecretsChanged(ctx context.Context, name string, secrets []Secret) (SecretChange, error) {
-	instances, err := m.List(ctx)
+	running, found, err := m.runningState(ctx, name)
 	if err != nil {
 		return SecretChange{}, err
 	}
-	found := false
-	running := false
-	for _, instance := range instances {
-		if instance.Name == name {
-			found = true
-			running = instance.Running()
-			break
-		}
-	}
 	if !found {
+		// A sandbox that does not exist yet gets the set when it is created.
 		return SecretChange{}, nil
 	}
 	inspect, err := m.inspect(ctx, name)
@@ -230,48 +228,76 @@ func (m *Microsandbox) SecretsChanged(ctx context.Context, name string, secrets 
 	persisted := inspect.Config.secrets()
 	desired := substitutedSecrets(secrets)
 
-	if !running {
-		if err := m.applySecretSet(ctx, name, persisted, desired, true); err != nil {
-			return SecretChange{}, err
-		}
-		return SecretChange{RestartRequired: true}, nil
+	// Not running, or a stored config that does not have the set, is a restart requirement: keep
+	// the stored config current and say so.
+	if !running || !sameSecretPolicy(active, desired) || !sameSecretPolicy(persisted, desired) {
+		return m.restartForSecrets(ctx, name, persisted, desired)
 	}
-	// A stored change waiting for a start, or a set the stored config does not have, is a
-	// restart requirement. Keep the stored config current and say so.
-	if !sameSecretPolicy(active, desired) || !sameSecretPolicy(persisted, desired) {
-		if err := m.applySecretSet(ctx, name, persisted, desired, true); err != nil {
-			return SecretChange{}, err
-		}
-		return SecretChange{RestartRequired: true}, nil
-	}
+	// The name set and the policy are already in the running sandbox: this is a rotation, or a
+	// metadata change the engine can take live.
+	return m.applyLive(ctx, name, active, persisted, desired)
+}
 
-	// The name set and the policy are already in the running sandbox: this is a rotation, or
-	// a metadata change the engine can take live. Apply and then read back what it did.
+// applyLive applies the set to the running sandbox and reads back what the engine did. A refusal
+// that says "restart", and a set that did not land, both become a restart; anything else is an
+// answer worth returning as it is.
+func (m *Microsandbox) applyLive(
+	ctx context.Context,
+	name string,
+	active, persisted []engineSecret,
+	desired []Secret,
+) (SecretChange, error) {
 	if err := m.applySecretSet(ctx, name, active, desired, false); err != nil {
-		if restartHint(err) {
-			if retry := m.applySecretSet(ctx, name, persisted, desired, true); retry != nil {
-				return SecretChange{}, retry
-			}
-			return SecretChange{RestartRequired: true}, nil
+		if !restartHint(err) {
+			return SecretChange{}, err
 		}
-		return SecretChange{}, err
+		return m.restartForSecrets(ctx, name, persisted, desired)
 	}
 	after, err := m.inspect(ctx, name)
 	if err != nil {
 		return SecretChange{}, err
 	}
-	if !sameSecretPolicy(after.ActiveConfig.secrets(), desired) {
-		if err := m.applySecretSet(ctx, name, persisted, desired, true); err != nil {
-			return SecretChange{}, err
-		}
-		return SecretChange{RestartRequired: true}, nil
+	if sameSecretPolicy(after.ActiveConfig.secrets(), desired) {
+		return SecretChange{}, nil
 	}
-	return SecretChange{}, nil
+	return m.restartForSecrets(ctx, name, persisted, desired)
+}
+
+// runningState says whether this sandbox exists and whether it is up.
+func (m *Microsandbox) runningState(ctx context.Context, name string) (running, found bool, err error) {
+	instances, err := m.List(ctx)
+	if err != nil {
+		return false, false, err
+	}
+	for _, instance := range instances {
+		if instance.Name == name {
+			return instance.Running(), true, nil
+		}
+	}
+	return false, false, nil
+}
+
+// restartForSecrets stores the set for the next start and reports that one is owed. It is the
+// answer to every "this cannot be applied live", which is most changes.
+func (m *Microsandbox) restartForSecrets(ctx context.Context, name string, persisted []engineSecret, desired []Secret) (SecretChange, error) {
+	if err := m.applySecretSet(ctx, name, persisted, desired, true); err != nil {
+		return SecretChange{}, err
+	}
+	return SecretChange{RestartRequired: true}, nil
 }
 
 // applySecretSet makes the engine's stored or running set match desired. nextStart writes the
 // config for the next boot; otherwise it applies to the running sandbox.
 func (m *Microsandbox) applySecretSet(ctx context.Context, name string, current []engineSecret, desired []Secret, nextStart bool) error {
+	if err := m.removeSecrets(ctx, name, current, desired, nextStart); err != nil {
+		return err
+	}
+	return m.addSecrets(ctx, name, desired, nextStart)
+}
+
+// removeSecrets drops the names the vault no longer has. A removal is a modify like any other,
+// and it goes to the same target the addition below will.
+func (m *Microsandbox) removeSecrets(ctx context.Context, name string, current []engineSecret, desired []Secret, nextStart bool) error {
 	wanted := map[string]bool{}
 	for _, secret := range substitutedSecrets(desired) {
 		wanted[secret.Name] = true
@@ -288,13 +314,17 @@ func (m *Microsandbox) applySecretSet(ctx context.Context, name string, current 
 			return err
 		}
 	}
+	return nil
+}
+
+// addSecrets writes the set the vault has. The engine reads each value from the host environment
+// variable named by the secret, never from argv.
+func (m *Microsandbox) addSecrets(ctx context.Context, name string, desired []Secret, nextStart bool) error {
 	for _, secret := range substitutedSecrets(desired) {
 		args := []string{"modify", name, "--secret", secretSpec(secret)}
 		if nextStart {
 			args = append(args, "--next-start")
 		}
-		// The engine reads the value from the host environment variable named by the secret,
-		// and never from argv.
 		env := []string{secret.Name + "=" + secret.Value}
 		if _, err := m.runEnv(ctx, env, args...); err != nil {
 			if restartHint(err) {

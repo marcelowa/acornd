@@ -155,18 +155,7 @@ func (r *registry) token(ctx context.Context, repository, scope string) (string,
 	if r.realm == "" {
 		return "", nil
 	}
-	query := url.Values{}
-	if r.service != "" {
-		query.Set("service", r.service)
-	}
-	if scope != "" {
-		query.Set("scope", scope)
-	}
-	address := r.realm
-	if encoded := query.Encode(); encoded != "" {
-		address += "?" + encoded
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, r.tokenAddress(scope), nil)
 	if err != nil {
 		return "", err
 	}
@@ -189,6 +178,22 @@ func (r *registry) token(ctx context.Context, repository, scope string) (string,
 		return payload.Token, nil
 	}
 	return payload.AccessToken, nil
+}
+
+// tokenAddress is the token service with the scope this pull needs. A registry that names no
+// service gets no parameter rather than an empty one.
+func (r *registry) tokenAddress(scope string) string {
+	query := url.Values{}
+	if r.service != "" {
+		query.Set("service", r.service)
+	}
+	if scope != "" {
+		query.Set("scope", scope)
+	}
+	if encoded := query.Encode(); encoded != "" {
+		return r.realm + "?" + encoded
+	}
+	return r.realm
 }
 
 // get is an authorized request against the distribution API.
@@ -223,33 +228,15 @@ func pullImage(ctx context.Context, reference, dest string, log func(string, ...
 	if err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: 5 * time.Minute}
-	registry := &registry{host: ref.host, client: client}
+	registry := &registry{host: ref.host, client: &http.Client{Timeout: 5 * time.Minute}}
 	scope := "repository:" + ref.repository + ":pull"
 	token, err := registry.token(ctx, ref.repository, scope)
 	if err != nil {
 		return err
 	}
-
-	// The manifest: an index on a multi-platform image, a manifest on a single-platform one.
-	manifestURL := fmt.Sprintf("%s/v2/%s/manifests/%s", registry.apiBase(), ref.repository, ref.tag)
-	response, err := registry.get(ctx, manifestURL, token, acceptManifests)
-	if err != nil {
-		return fmt.Errorf("cannot reach %s: %w", ref.host, err)
-	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
-	response.Body.Close()
+	body, err := fetchManifest(ctx, registry, token, ref)
 	if err != nil {
 		return err
-	}
-	if response.StatusCode != http.StatusOK {
-		if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
-			return fmt.Errorf("%s refused the image %s: it may be private (%s)", ref.host, ref, response.Status)
-		}
-		if response.StatusCode == http.StatusNotFound {
-			return fmt.Errorf("no image %s on %s", ref, ref.host)
-		}
-		return fmt.Errorf("%s answered %s for %s", ref.host, response.Status, ref)
 	}
 	manifestDigest := sha256.Sum256(body)
 	manifest, err := chooseManifest(ctx, registry, token, ref, body)
@@ -259,10 +246,52 @@ func pullImage(ctx context.Context, reference, dest string, log func(string, ...
 	if log != nil {
 		log("image %s: %d layer(s), digest %s", ref, len(manifest.Layers), shortDigest(manifestDigest[:]))
 	}
+	return unpackLayers(ctx, registry, token, ref, manifest.Layers, dest, log)
+}
+
+// fetchManifest is the one request whose status codes carry meaning to a person: private,
+// absent, or something else. Each answer is a sentence rather than a status number.
+func fetchManifest(ctx context.Context, registry *registry, token string, ref imageReference) ([]byte, error) {
+	address := fmt.Sprintf("%s/v2/%s/manifests/%s", registry.apiBase(), ref.repository, ref.tag)
+	response, err := registry.get(ctx, address, token, acceptManifests)
+	if err != nil {
+		return nil, fmt.Errorf("cannot reach %s: %w", ref.host, err)
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
+	response.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode == http.StatusOK {
+		return body, nil
+	}
+	switch response.StatusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return nil, fmt.Errorf("%s refused the image %s: it may be private (%s)", ref.host, ref, response.Status)
+	case http.StatusNotFound:
+		return nil, fmt.Errorf("no image %s on %s", ref, ref.host)
+	}
+	return nil, fmt.Errorf("%s answered %s for %s", ref.host, response.Status, ref)
+}
+
+// unpackLayers unpacks them in order: layers stack, so the later one wins.
+func unpackLayers(
+	ctx context.Context,
+	registry *registry,
+	token string,
+	ref imageReference,
+	layers []struct {
+		MediaType string `json:"mediaType"`
+		Digest    string `json:"digest"`
+		Size      int64  `json:"size"`
+	},
+	dest string,
+	log func(string, ...any),
+) error {
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return err
 	}
-	for _, layer := range manifest.Layers {
+	for _, layer := range layers {
 		if err := applyLayer(ctx, registry, token, ref, layer, dest, log); err != nil {
 			return err
 		}
@@ -307,26 +336,31 @@ func chooseManifest(ctx context.Context, registry *registry, token string, ref i
 		if entry.Platform.OS != osName || entry.Platform.Architecture != arch {
 			continue
 		}
-		url := fmt.Sprintf("%s/v2/%s/manifests/%s", registry.apiBase(), ref.repository, entry.Digest)
-		response, err := registry.get(ctx, url, token, acceptManifests)
-		if err != nil {
-			return manifest, err
-		}
-		payload, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
-		response.Body.Close()
-		if err != nil {
-			return manifest, err
-		}
-		if response.StatusCode != http.StatusOK {
-			return manifest, fmt.Errorf("%s answered %s for %s on %s/%s", ref.host, response.Status, ref, osName, arch)
-		}
-		var chosen imageManifest
-		if err := json.Unmarshal(payload, &chosen); err != nil {
-			return manifest, fmt.Errorf("the manifest for %s is not JSON this build can read: %w", ref, err)
-		}
-		return chosen, nil
+		return registry.platformManifest(ctx, token, ref, entry.Digest, osName, arch)
 	}
 	return manifest, fmt.Errorf("the image %s publishes no %s/%s build", ref, osName, arch)
+}
+
+// platformManifest fetches one entry of an index: the manifest for the platform asked for.
+func (r *registry) platformManifest(ctx context.Context, token string, ref imageReference, digest, osName, arch string) (imageManifest, error) {
+	address := fmt.Sprintf("%s/v2/%s/manifests/%s", r.apiBase(), ref.repository, digest)
+	response, err := r.get(ctx, address, token, acceptManifests)
+	if err != nil {
+		return imageManifest{}, err
+	}
+	payload, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
+	response.Body.Close()
+	if err != nil {
+		return imageManifest{}, err
+	}
+	if response.StatusCode != http.StatusOK {
+		return imageManifest{}, fmt.Errorf("%s answered %s for %s on %s/%s", ref.host, response.Status, ref, osName, arch)
+	}
+	var chosen imageManifest
+	if err := json.Unmarshal(payload, &chosen); err != nil {
+		return imageManifest{}, fmt.Errorf("the manifest for %s is not JSON this build can read: %w", ref, err)
+	}
+	return chosen, nil
 }
 
 // applyLayer downloads one layer, checks its digest, and unpacks it in order. The digest is
@@ -374,7 +408,7 @@ func applyLayer(ctx context.Context, registry *registry, token string, ref image
 // unpackLayer writes one layer's entries into dest. Layers stack, so a later one replaces an
 // earlier one; a whiteout removes what a later layer deleted.
 func unpackLayer(source io.Reader, mediaType, dest string) error {
-	var reader io.Reader = source
+	reader := source
 	// A layer is gzip unless the manifest says otherwise; zstd is refused rather than
 	// half-read, because silently unpacking nothing would look like a broken image.
 	switch {
@@ -410,31 +444,19 @@ func applyEntry(dest string, header *tar.Header, content io.Reader) error {
 	if name == "." || name == "" {
 		return nil
 	}
+	// Containment is checked before anything acts on the name: a whiteout removes a path just as
+	// surely as a file entry writes one.
 	if strings.HasPrefix(name, "..") {
-		return fmt.Errorf("a layer names a path outside the root: %q", header.Name)
+		return outsideRoot(header.Name)
 	}
 	target := filepath.Join(dest, filepath.FromSlash(name))
 	if !strings.HasPrefix(target+string(os.PathSeparator), dest+string(os.PathSeparator)) {
-		return fmt.Errorf("a layer names a path outside the root: %q", header.Name)
+		return outsideRoot(header.Name)
 	}
-	base := path.Base(name)
-	directory := path.Dir(name)
-	switch {
-	case base == ".wh..wh..opq":
-		// An opaque directory: everything the earlier layers put here is gone.
-		inside := filepath.Join(dest, filepath.FromSlash(directory))
-		entries, err := os.ReadDir(inside)
-		if err != nil {
-			return nil
-		}
-		for _, entry := range entries {
-			_ = os.RemoveAll(filepath.Join(inside, entry.Name()))
-		}
-		return nil
-	case strings.HasPrefix(base, ".wh."):
-		// A whiteout: the file or folder was deleted between layers.
-		return os.RemoveAll(filepath.Join(dest, filepath.FromSlash(directory), strings.TrimPrefix(base, ".wh.")))
+	if handled, err := applyWhiteout(dest, name); handled {
+		return err
 	}
+	// A later layer replaces what an earlier one wrote, so a link is removed before it is made.
 	switch header.Typeflag {
 	case tar.TypeDir:
 		return os.MkdirAll(target, os.FileMode(header.Mode)&os.ModePerm|0o700)
@@ -446,22 +468,53 @@ func applyEntry(dest string, header *tar.Header, content io.Reader) error {
 		source := filepath.Join(dest, filepath.FromSlash(path.Clean(strings.TrimPrefix(header.Linkname, "/"))))
 		return os.Link(source, target)
 	case tar.TypeReg:
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
-		}
-		file, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(header.Mode)&os.ModePerm)
-		if err != nil {
-			return err
-		}
-		if _, err := io.Copy(file, content); err != nil {
-			file.Close()
-			return err
-		}
-		return file.Close()
+		return writeEntry(target, header, content)
 	}
 	// Devices, fifos, and the rest are the runtime's business, not a rootfs's: skipping them
 	// leaves a tree that works, where refusing would leave a tree that does not exist.
 	return nil
+}
+
+// writeEntry creates one file. A later layer replaces an earlier one, which O_TRUNC does.
+func writeEntry(target string, header *tar.Header, content io.Reader) error {
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(header.Mode)&os.ModePerm)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(file, content); err != nil {
+		file.Close()
+		return err
+	}
+	return file.Close()
+}
+
+func outsideRoot(name string) error {
+	return fmt.Errorf("a layer names a path outside the root: %q", name)
+}
+
+// applyWhiteout handles the two entries that delete rather than write: an opaque directory
+// clears everything an earlier layer put there, and .wh.<name> removes one entry.
+func applyWhiteout(dest, name string) (bool, error) {
+	base := path.Base(name)
+	directory := filepath.Join(dest, filepath.FromSlash(path.Dir(name)))
+	switch {
+	case base == ".wh..wh..opq":
+		entries, err := os.ReadDir(directory)
+		if err != nil {
+			// A whiteout for a directory no earlier layer made is nothing to do.
+			return true, nil
+		}
+		for _, entry := range entries {
+			_ = os.RemoveAll(filepath.Join(directory, entry.Name()))
+		}
+		return true, nil
+	case strings.HasPrefix(base, ".wh."):
+		return true, os.RemoveAll(filepath.Join(directory, strings.TrimPrefix(base, ".wh.")))
+	}
+	return false, nil
 }
 
 // shortDigest keeps a log line readable: the first twelve characters of the hex.

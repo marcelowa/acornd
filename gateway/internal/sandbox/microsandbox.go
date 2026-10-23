@@ -139,25 +139,42 @@ func (m *Microsandbox) Install(ctx context.Context, log func(string, ...any)) er
 	if artifact == "" {
 		return fmt.Errorf("%w: no engine release for %s/%s", ErrUnavailable, runtime.GOOS, runtime.GOARCH)
 	}
+	if log != nil {
+		log("installing the sandbox engine %s (%s)", Version, artifact)
+	}
+	staging := m.InstallDir() + ".partial"
+	// Scratch whether this works or not: a half-unpacked engine beside the install is a
+	// download nobody can resume.
+	defer os.RemoveAll(staging)
+	if err := m.stage(ctx, artifact, staging); err != nil {
+		return err
+	}
+	if err := m.replaceWith(staging); err != nil {
+		return err
+	}
+	if log != nil {
+		log("sandbox engine installed at %s", m.InstallDir())
+	}
+	return nil
+}
+
+// stage downloads one release into scratch, verifies it, and lays it out. Everything that can
+// refuse the bundle happens here, before the install is touched.
+func (m *Microsandbox) stage(ctx context.Context, artifact, staging string) error {
 	client := m.client
 	if client == nil {
 		client = http.DefaultClient
-	}
-	if log != nil {
-		log("installing the sandbox engine %s (%s)", Version, artifact)
 	}
 	want, err := fetchChecksum(ctx, client, m.base+"/checksums.sha256", artifact)
 	if err != nil {
 		return err
 	}
-	staging := m.InstallDir() + ".partial"
 	if err := os.RemoveAll(staging); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(staging, 0o755); err != nil {
 		return err
 	}
-	defer os.RemoveAll(staging)
 	body, err := fetch(ctx, client, m.base+"/"+artifact)
 	if err != nil {
 		return err
@@ -172,19 +189,19 @@ func (m *Microsandbox) Install(ctx context.Context, log func(string, ...any)) er
 	if _, err := os.Stat(filepath.Join(staging, "bin", "msb")); err != nil {
 		return fmt.Errorf("%w: %s did not contain bin/msb", ErrUnavailable, artifact)
 	}
+	return nil
+}
+
+// replaceWith swaps the install for the staged copy. The old one goes first, so a half-moved
+// install is never the thing that runs.
+func (m *Microsandbox) replaceWith(staging string) error {
 	if err := os.MkdirAll(filepath.Dir(m.InstallDir()), 0o755); err != nil {
 		return err
 	}
 	if err := os.RemoveAll(m.InstallDir()); err != nil {
 		return err
 	}
-	if err := os.Rename(staging, m.InstallDir()); err != nil {
-		return err
-	}
-	if log != nil {
-		log("sandbox engine installed at %s", m.InstallDir())
-	}
-	return nil
+	return os.Rename(staging, m.InstallDir())
 }
 
 // Usable checks that a sandbox can boot here. The engine would report this itself, but only
@@ -508,6 +525,24 @@ func layOut(dir string) error {
 	if err != nil {
 		return err
 	}
+	library, err := bundleParts(entries)
+	if err != nil {
+		return err
+	}
+	if err := installBinary(dir); err != nil {
+		return err
+	}
+	if err := installLibrary(dir, library); err != nil {
+		return err
+	}
+	pruneBundle(dir, entries)
+	return nil
+}
+
+// bundleParts is what a release bundle has to contain: the CLI, and exactly one guest kernel
+// library. The release ships one per platform, so two means this is not a bundle this build
+// knows how to lay out.
+func bundleParts(entries []os.DirEntry) (string, error) {
 	var library string
 	binarySeen := false
 	for _, entry := range entries {
@@ -517,21 +552,24 @@ func layOut(dir string) error {
 			binarySeen = true
 		case libraryName(name):
 			if library != "" {
-				return fmt.Errorf("%w: the release bundle holds more than one libkrunfw", ErrUnavailable)
+				return "", fmt.Errorf("%w: the release bundle holds more than one libkrunfw", ErrUnavailable)
 			}
 			library = name
 		}
 	}
 	if !binarySeen {
-		return fmt.Errorf("%w: the release bundle has no msb", ErrUnavailable)
+		return "", fmt.Errorf("%w: the release bundle has no msb", ErrUnavailable)
 	}
 	if library == "" {
-		return fmt.Errorf("%w: the release bundle has no libkrunfw for %s", ErrUnavailable, runtime.GOOS)
+		return "", fmt.Errorf("%w: the release bundle has no libkrunfw for %s", ErrUnavailable, runtime.GOOS)
 	}
+	return library, nil
+}
+
+// installBinary puts the CLI where the engine expects it, and makes the SDK's entry point an
+// alias: the SDK and the CLI are the same program.
+func installBinary(dir string) error {
 	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Join(dir, "lib"), 0o755); err != nil {
 		return err
 	}
 	binary := filepath.Join(dir, "bin", "msb")
@@ -541,8 +579,13 @@ func layOut(dir string) error {
 	if err := os.Chmod(binary, 0o755); err != nil {
 		return err
 	}
-	// The SDK's entry point and the CLI are the same program.
-	if err := os.Symlink("msb", filepath.Join(dir, "bin", "microsandbox")); err != nil {
+	return os.Symlink("msb", filepath.Join(dir, "bin", "microsandbox"))
+}
+
+// installLibrary puts the guest kernel library in lib/, with the names the dynamic loader looks
+// for pointing at the real file.
+func installLibrary(dir, library string) error {
+	if err := os.MkdirAll(filepath.Join(dir, "lib"), 0o755); err != nil {
 		return err
 	}
 	if err := os.Rename(filepath.Join(dir, library), filepath.Join(dir, "lib", library)); err != nil {
@@ -553,7 +596,11 @@ func layOut(dir string) error {
 			return err
 		}
 	}
-	// Everything else in the bundle belongs to other platforms.
+	return nil
+}
+
+// pruneBundle removes what is left: the other platforms' copies.
+func pruneBundle(dir string, entries []os.DirEntry) {
 	for _, entry := range entries {
 		name := entry.Name()
 		if name == "bin" || name == "lib" {
@@ -561,7 +608,6 @@ func layOut(dir string) error {
 		}
 		os.RemoveAll(filepath.Join(dir, name))
 	}
-	return nil
 }
 
 // libraryName reports whether a bundle member is the guest kernel library. The release
