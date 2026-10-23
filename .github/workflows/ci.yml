@@ -2,14 +2,29 @@
 #
 # `make lint` is static analysis and `make test` adds the unit tests, the worker protocol
 # against a real worker process, -race, and the end-to-end suite against a real gateway.
-# `make test-sandbox` boots real microVMs, which need /dev/kvm. Every job here runs on the
-# self-hosted runner: one Linux container with the hypervisor passed through, and with the
-# toolchains installed once instead of once per job. The label sets are what the job needs,
-# not a machine name, so a second runner can join without an edit here. The dispatch input is
-# the way to send the microVM suite somewhere else — a runner with another hypervisor, or an
-# ARM image that has KVM — and its default is this runner's own label, so that a plain
-# dispatch lands where the rest of the CI does.
+# `make test-sandbox` boots real microVMs, which need /dev/kvm.
+#
+# Everything else runs on GitHub's runners: this is a public repository, so they cost nothing,
+# and each job gets its own machine instead of queueing behind the others on one. The only thing
+# self-hosted bought was the hypervisor. Side benefit: a hosted runner is a fresh machine every
+# run, so the kind of poisoned state directory that took the sandbox tier down on 2026-10-26
+# cannot survive a job.
+#
+# That includes the microVM tier: GitHub's hosted runners expose /dev/kvm once the udev rule
+# below makes it readable by the runner user, which was measured rather than assumed — the whole
+# tier passes there in 65 seconds, on the same machine as the three fast jobs. The dispatch
+# input stays, for sending it to a runner with another hypervisor or another architecture.
+#
+# The one cost is that the tools are installed per run, which is why the two Go jobs restore
+# `~/go/bin` from the cache: five linters compiled from source is minutes, not seconds.
 name: ci
+
+# Two pushes in a row: the older run is answering a question nobody is asking any more. The
+# group is per ref and event, so a pull request is never cancelled by another branch, and a
+# manual dispatch never cancels the push it was dispatched to investigate.
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
 
 # Branches only: a pull request is tested on its branch, and a rebase-merge
 # keeps that tree, so testing main again after merge repeats the same run.
@@ -24,14 +39,14 @@ on:
   workflow_dispatch:
     inputs:
       runner:
-        description: "Runner for the microVM suite (default: the self-hosted runner, which has /dev/kvm)"
+        description: "Runner for the microVM suite (default: ubuntu-24.04, which has /dev/kvm)"
         required: false
         default: kvm
         type: string
 
 jobs:
   verify:
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -41,6 +56,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      # staticcheck, golangci-lint, deadcode, govulncheck and gosec are compiled from source and
+      # that is minutes, not seconds. A hosted runner starts empty, so the built binaries are
+      # cached: keyed on go.mod, because that is what changes their inputs.
+      - uses: actions/cache@v4
+        with:
+          path: ~/go/bin
+          key: go-tools-${{ runner.os }}-${{ hashFiles('gateway/go.mod') }}
+          restore-keys: go-tools-${{ runner.os }}-
 
       # The end-to-end suite skips itself without bun and the worker's dependencies, so a
       # missing install would look like a pass.
@@ -51,7 +74,7 @@ jobs:
   commits:
     # The commit format is a standard (`.pi/skills/conventional-commits`), so it is checked
     # rather than trusted — over the commits a push adds, not all of history.
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -80,13 +103,13 @@ jobs:
         run: echo "the first push to a branch has no range behind it; skipping"
 
   sandbox:
-    # `make test-sandbox` boots real microVMs. The runner passes /dev/kvm through, owned by
-    # root:kvm at mode 0660, and the runner user is in the `kvm` group that owns it. A
-    # GitHub-hosted runner has the same device and needs the udev rule below to reach it; the
-    # rule is skipped where it cannot work (no udev, no sudo for it) rather than failed. The
-    # tier itself still fails rather than skips when /dev/kvm is missing or unreadable,
-    # because a slow tier that silently does nothing is how this bug class survives.
-    runs-on: ${{ inputs.runner || 'kvm' }}
+    # `make test-sandbox` boots real microVMs. A hosted runner has /dev/kvm owned by root:kvm at
+    # mode 0660, so the runner user cannot open it until the udev rule below runs; with it, the
+    # tier passes on the same machine as the fast jobs. The rule is skipped where it cannot work
+    # (no udev, no sudo for it) rather than failed, and the tier itself still fails rather than
+    # skips when /dev/kvm is missing or unreadable — a slow tier that silently does nothing is
+    # how this bug class survives.
+    runs-on: ${{ inputs.runner || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
