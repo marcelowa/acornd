@@ -49,18 +49,28 @@ func accountFor(requested string, root bool, dataDir string) (setupAccount, erro
 	if !root {
 		return self, nil
 	}
-	// root is acting for somebody: sudo says who, and without sudo the folder's owner says who.
+	// root is acting for somebody, and three things can say who.
+	if account, found := actingFor(dataDir); found {
+		return account, nil
+	}
+	// Nothing to go on: root is the only answer, and the basis says so rather than pretending.
+	self.Basis = "nothing says otherwise; pass --for if another account runs acornfall"
+	return self, nil
+}
+
+// actingFor is who root is acting for, in the order of how strongly each says it: sudo knows, the
+// folder's owner is the next best evidence, and a service unit says outright.
+func actingFor(dataDir string) (setupAccount, bool) {
 	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
-		account, err := lookupAccount(sudoUser)
-		if err == nil {
+		if account, err := lookupAccount(sudoUser); err == nil {
 			account.Basis = "the account that ran sudo"
-			return account, nil
+			return account, true
 		}
 	}
 	if owner, err := folderOwner(dataDir); err == nil && owner != "" {
 		if account, err := lookupAccount(owner); err == nil {
 			account.Basis = "owns " + dataDir
-			return account, nil
+			return account, true
 		}
 	}
 	// A machine where acornfall is a service says so itself, which is the answer when the folder
@@ -69,12 +79,10 @@ func accountFor(requested string, root bool, dataDir string) (setupAccount, erro
 	if name := serviceUser(); name != "" {
 		if account, err := lookupAccount(name); err == nil {
 			account.Basis = "the acornfall service runs as " + name
-			return account, nil
+			return account, true
 		}
 	}
-	// Nothing to go on: root is the only answer, and the basis says so rather than pretending.
-	self.Basis = "nothing says otherwise; pass --for if another account runs acornfall"
-	return self, nil
+	return setupAccount{}, false
 }
 
 // serviceUser is the account the acornfall system service runs as, or empty when there is no such

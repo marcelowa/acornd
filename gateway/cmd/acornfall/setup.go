@@ -189,12 +189,10 @@ func countSteps(plan rootPlan) int { return len(plan.actions()) }
 // the only place that decides, so the description a person reads and the commands root runs
 // cannot disagree.
 func planFor(report setupReport, who string) rootPlan {
-	var plan rootPlan
-	if report.BwrapPath == "" {
-		plan.Packages = append(plan.Packages, "bubblewrap")
-	}
-	if report.PastaPath == "" {
-		plan.Packages = append(plan.Packages, "passt")
+	plan := rootPlan{
+		Packages: missingPackages(report),
+		Userns:   needsUserns(report),
+		Tun:      report.TunErr != nil && !report.Container,
 	}
 	if len(plan.Packages) > 0 && slices.Contains(allowedManagers, report.PackageManager) {
 		plan.Manager = report.PackageManager
@@ -203,17 +201,6 @@ func planFor(report setupReport, who string) rootPlan {
 		// says "install bubblewrap passt with your package manager" instead.
 		plan.Packages = nil
 	}
-	// The user-namespace policy is a machine-wide relaxation, so it is only proposed when the
-	// probe actually failed and the machine has the AppArmor restriction that causes it. Inside a
-	// container the sysctl is not the answer: the container's own profile is.
-	if report.BwrapPath != "" && report.BwrapErr != nil && report.UsernsRestricted && !report.Container {
-		plan.Userns = true
-	}
-	// pasta builds its interface through the tun device; a machine whose node is missing or not
-	// usable needs it present and openable, not a changed policy.
-	if report.TunErr != nil && !report.Container {
-		plan.Tun = true
-	}
 	if report.KVMErr != nil {
 		plan.KVMUser = who
 	}
@@ -221,6 +208,13 @@ func planFor(report setupReport, who string) rootPlan {
 		plan.LingerUser = who
 	}
 	return plan
+}
+
+// needsUserns is the one machine-wide relaxation worth proposing. Only when the probe actually
+// failed, and only on the machine that has the AppArmor restriction that causes it: inside a
+// container the sysctl is not the answer, the container's own profile is.
+func needsUserns(report setupReport) bool {
+	return report.BwrapPath != "" && report.BwrapErr != nil && report.UsernsRestricted && !report.Container
 }
 
 // containerAdvice explains what no command inside can fix. Empty when this is not a container, or
@@ -371,40 +365,58 @@ func inContainer() bool {
 func renderSetup(report setupReport) (string, bool) {
 	var out strings.Builder
 	out.WriteString("sandbox engines on this machine\n\n")
-	ok := true
-
-	bwrap := report.BwrapPath != ""
-	fmt.Fprintf(&out, "  %s  bubblewrap        %s\n", mark(bwrap), describePath(report.BwrapPath, report.BwrapVersion))
-	if bwrap {
-		usable := report.BwrapErr == nil
-		fmt.Fprintf(&out, "  %s  user namespaces   %s\n", mark(usable), describe(usable, "a sandbox can boot here", report.BwrapErr))
-		pasta := report.PastaErr == nil
-		fmt.Fprintf(&out, "  %s  sandbox network   %s\n", mark(pasta), describe(pasta, describePath(report.PastaPath, ""), pastaProblem(report)))
-		if report.TunErr != nil && !pasta {
-			fmt.Fprintf(&out, "  %s  tun device        %s\n", mark(false), report.TunErr)
-		}
-		if !usable || !pasta {
-			ok = false
-		}
-	} else {
-		ok = false
-	}
-
-	// The hypervisor is the other engine, not this one: a machine without /dev/kvm still runs
-	// workspaces, on bubblewrap.
-	if report.KVMErr == nil {
-		fmt.Fprintf(&out, "  %s  hypervisor        /dev/kvm is readable\n", mark(true))
-	} else {
-		fmt.Fprintf(&out, "  -  hypervisor        not available: only the microVM engine needs it\n")
-	}
-
-	if report.LingerKnown {
-		fmt.Fprintf(&out, "  %s  autostart         %s\n", mark(report.Linger), describe(report.Linger, "this user's services survive logout", errors.New("this user's services stop when the session ends")))
-	}
-	updatable := report.InstallErr == nil
-	fmt.Fprintf(&out, "  %s  install folder    %s\n", mark(updatable), describe(updatable, report.InstallDir+" is writable, so self-update works", report.InstallErr))
-
+	ok := renderBwrap(&out, report)
+	renderHypervisor(&out, report)
+	renderLinger(&out, report)
+	renderInstall(&out, report)
 	out.WriteString("\n")
+	writeVerdict(&out, report, ok)
+	return out.String(), ok
+}
+
+// renderBwrap is the engine this install runs on, and the two things it needs that a distribution
+// does not always provide. False means a sandbox cannot boot here.
+func renderBwrap(out *strings.Builder, report setupReport) bool {
+	if report.BwrapPath == "" {
+		fmt.Fprintf(out, "  %s  bubblewrap        %s\n", mark(false), describePath(report.BwrapPath, report.BwrapVersion))
+		return false
+	}
+	fmt.Fprintf(out, "  %s  bubblewrap        %s\n", mark(true), describePath(report.BwrapPath, report.BwrapVersion))
+	usable := report.BwrapErr == nil
+	fmt.Fprintf(out, "  %s  user namespaces   %s\n", mark(usable), describe(usable, "a sandbox can boot here", report.BwrapErr))
+	pasta := report.PastaErr == nil
+	fmt.Fprintf(out, "  %s  sandbox network   %s\n", mark(pasta), describe(pasta, describePath(report.PastaPath, ""), pastaProblem(report)))
+	if report.TunErr != nil && !pasta {
+		fmt.Fprintf(out, "  %s  tun device        %s\n", mark(false), report.TunErr)
+	}
+	return usable && pasta
+}
+
+// renderHypervisor is the other engine: a machine without /dev/kvm still runs workspaces, on
+// bubblewrap, which is why this is a note rather than a failure.
+func renderHypervisor(out *strings.Builder, report setupReport) {
+	if report.KVMErr == nil {
+		fmt.Fprintf(out, "  %s  hypervisor        /dev/kvm is readable\n", mark(true))
+		return
+	}
+	fmt.Fprintf(out, "  -  hypervisor        not available: only the microVM engine needs it\n")
+}
+
+func renderLinger(out *strings.Builder, report setupReport) {
+	if !report.LingerKnown {
+		return
+	}
+	fmt.Fprintf(out, "  %s  autostart         %s\n", mark(report.Linger), describe(report.Linger, "this user's services survive logout", errors.New("this user's services stop when the session ends")))
+}
+
+func renderInstall(out *strings.Builder, report setupReport) {
+	updatable := report.InstallErr == nil
+	fmt.Fprintf(out, "  %s  install folder    %s\n", mark(updatable), describe(updatable, report.InstallDir+" is writable, so self-update works", report.InstallErr))
+}
+
+// writeVerdict is the sentence at the end: what this machine will run, and the two things that no
+// command can fix when they are what is missing.
+func writeVerdict(out *strings.Builder, report setupReport, ok bool) {
 	if ok {
 		out.WriteString("this machine runs workspaces on bubblewrap")
 		if report.KVMErr != nil {
@@ -417,7 +429,6 @@ func renderSetup(report setupReport) (string, bool) {
 			"allowing them is a machine-wide change; the alternative is an AppArmor profile for the\n" +
 			"bubblewrap binary, which the distribution's own package ships.\n")
 	}
-	return out.String(), ok
 }
 
 // pastaProblem prefers the device over the packet: pasta's own message says it could not make a
@@ -470,29 +481,8 @@ func shellQuote(text string) string {
 // packageManager is the command that installs a package here, from the distribution's own file.
 // An unknown distribution gets no guess: the caller says so rather than inventing a command.
 func packageManager() string {
-	file, err := os.Open("/etc/os-release")
-	if err == nil {
-		defer func() { _ = file.Close() }()
-		values := map[string]string{}
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			key, value, found := strings.Cut(scanner.Text(), "=")
-			if found {
-				values[key] = strings.Trim(value, `"`)
-			}
-		}
-		for _, candidate := range []string{values["ID"], values["ID_LIKE"]} {
-			switch {
-			case strings.Contains(candidate, "debian"), strings.Contains(candidate, "ubuntu"):
-				return "apt-get"
-			case strings.Contains(candidate, "fedora"), strings.Contains(candidate, "rhel"), strings.Contains(candidate, "centos"):
-				return "dnf"
-			case strings.Contains(candidate, "arch"):
-				return "pacman"
-			case strings.Contains(candidate, "alpine"):
-				return "apk"
-			}
-		}
+	if manager := managerFromRelease(); manager != "" {
+		return manager
 	}
 	for _, manager := range []string{"apt-get", "dnf", "pacman", "apk"} {
 		if _, err := exec.LookPath(manager); err == nil {
@@ -500,6 +490,44 @@ func packageManager() string {
 		}
 	}
 	return "install-with-your-package-manager"
+}
+
+// managerFromRelease reads the distribution's own file: the family it names decides between apt
+// and dnf on a machine where both are installed.
+func managerFromRelease() string {
+	file, err := os.Open("/etc/os-release")
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = file.Close() }()
+	values := map[string]string{}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		key, value, found := strings.Cut(scanner.Text(), "=")
+		if found {
+			values[key] = strings.Trim(value, `"`)
+		}
+	}
+	for _, candidate := range []string{values["ID"], values["ID_LIKE"]} {
+		if manager := managerForFamily(candidate); manager != "" {
+			return manager
+		}
+	}
+	return ""
+}
+
+func managerForFamily(family string) string {
+	switch {
+	case strings.Contains(family, "debian"), strings.Contains(family, "ubuntu"):
+		return "apt-get"
+	case strings.Contains(family, "fedora"), strings.Contains(family, "rhel"), strings.Contains(family, "centos"):
+		return "dnf"
+	case strings.Contains(family, "arch"):
+		return "pacman"
+	case strings.Contains(family, "alpine"):
+		return "apk"
+	}
+	return ""
 }
 
 // installArgs is how one package manager says "install these, do not ask".

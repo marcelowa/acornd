@@ -61,21 +61,7 @@ func workspaceAdd(argv []string) {
 	engine := flags.String("sandbox", "", "sandbox engine: microsandbox, bwrap, or host (default: what this machine can run)")
 	keepAlive := flags.Bool("keep-alive", false, "keep this workspace's sandbox running when nobody is watching it (for daemons and cron jobs)")
 	noNesting := flags.Bool("no-vm-nesting", false, "refuse a hypervisor inside this workspace's sandbox")
-	flags.Usage = func() {
-		fmt.Fprint(os.Stderr, `usage: acornfall workspace add <name> [folder] [flags]
-
-  --sandbox ENGINE   microsandbox (needs a hypervisor), bwrap (needs user namespaces), or
-                     host (no isolation); default: what this machine can run
-  --image IMAGE      the sandbox image (default: `+sandbox.DefaultImage+`)
-  --egress WHERE     public (default), private (this machine's LAN and tailnet too), or off
-  --keep-alive       keep the sandbox running when nobody is watching it
-  --no-vm-nesting    refuse a hypervisor inside the sandbox
-  --data-dir DIR     the acornfall folder (default: ~/.acornfall)
-
-The folder defaults to ./<name>. The engine is recorded here, once: a workspace keeps the
-engine it was created with.
-`)
-	}
+	flags.Usage = func() { fmt.Fprint(os.Stderr, addUsage) }
 	// Flags after the name and the folder are documented above, and the standard flag package
 	// stops at the first positional. Splitting them is what makes
 	// `workspace add demo ~/work/demo --sandbox bwrap` mean what it says.
@@ -90,13 +76,8 @@ engine it was created with.
 		flags.Usage()
 		os.Exit(2)
 	}
-	network, private, err := parseEgress(*egress)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "acornfall: %v\n", err)
-		os.Exit(2)
-	}
-	if !sandbox.ValidEngine(*engine) {
-		fmt.Fprintf(os.Stderr, "acornfall: --sandbox is one of %s\n", strings.Join(sandbox.EngineNames(), ", "))
+	network, private, chosen, ok := addChoices(*egress, *engine)
+	if !ok {
 		os.Exit(2)
 	}
 	dir, err := resolveDataDir(*dataDir)
@@ -108,45 +89,114 @@ engine it was created with.
 	if err != nil {
 		log.Fatalf("acornfall: %v", err)
 	}
-	name := args[0]
-	folder := name
-	if len(args) > 1 {
-		folder = args[1]
-	}
-	absolute, err := filepath.Abs(folder)
+	name, absolute, err := addTarget(args, registry)
 	if err != nil {
 		log.Fatalf("acornfall: %v", err)
 	}
-	if info, err := os.Stat(absolute); err != nil || !info.IsDir() {
-		log.Fatalf("acornfall: no folder at %s", absolute)
+	chosen = recordWorkspace(dir, registry, addRecord{
+		name:      name,
+		absolute:  absolute,
+		image:     *image,
+		engine:    chosen,
+		network:   network,
+		private:   private,
+		keepAlive: *keepAlive,
+		noNesting: *noNesting,
+	})
+	fmt.Printf("added %s at %s\n", name, absolute)
+	fmt.Printf("sandbox: %s, engine %s, egress %s\n", imageLabel(*image), engineLabel(chosen), egressLabel(network, private))
+}
+
+// addUsage is the flags a person may pass, and the one decision this command makes for them.
+const addUsage = `usage: acornfall workspace add <name> [folder] [flags]
+
+  --sandbox ENGINE   microsandbox (needs a hypervisor), bwrap (needs user namespaces), or
+                     host (no isolation); default: what this machine can run
+  --image IMAGE      the sandbox image (default: ` + sandbox.DefaultImage + `)
+  --egress WHERE     public (default), private (this machine's LAN and tailnet too), or off
+  --keep-alive       keep the sandbox running when nobody is watching it
+  --no-vm-nesting    refuse a hypervisor inside the sandbox
+  --data-dir DIR     the acornfall folder (default: ~/.acornfall)
+
+The folder defaults to ./<name>. The engine is recorded here, once: a workspace keeps the
+engine it was created with.
+`
+
+// addTarget is the name and the folder the name goes with, refused when the folder is not there
+// or the name is taken: both are things the person can fix, so both say what is wrong.
+func addTarget(positional []string, registry control.RegistryFile) (name, absolute string, err error) {
+	name = positional[0]
+	folder := name
+	if len(positional) > 1 {
+		folder = positional[1]
+	}
+	absolute, err = filepath.Abs(folder)
+	if err != nil {
+		return "", "", err
+	}
+	if info, statErr := os.Stat(absolute); statErr != nil || !info.IsDir() {
+		return "", "", fmt.Errorf("no folder at %s", absolute)
 	}
 	for _, workspace := range registry.Workspaces {
 		if workspace.Name == name {
-			log.Fatalf("acornfall: workspace %q already exists", name)
+			return "", "", fmt.Errorf("workspace %q already exists", name)
 		}
 	}
-	// A workspace records its engine: left blank it would mean "whatever this machine prefers",
-	// and an unrecorded choice is one that changes if the workspace moves. The question is
-	// asked here the same way the gateway asks it — what can this machine actually run.
-	chosen := *engine
+	return name, absolute, nil
+}
+
+// addChoices validates the two flags that can be wrong before anything is created, and answers
+// with the engine that was asked for: blank means "whatever this machine can run", which is
+// decided later, where the machine is known.
+func addChoices(egress, engine string) (network string, private bool, chosen string, ok bool) {
+	network, private, err := parseEgress(egress)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "acornfall: %v\n", err)
+		return "", false, "", false
+	}
+	if !sandbox.ValidEngine(engine) {
+		fmt.Fprintf(os.Stderr, "acornfall: --sandbox is one of %s\n", strings.Join(sandbox.EngineNames(), ", "))
+		return "", false, "", false
+	}
+	return network, private, engine, true
+}
+
+// addRecord is one workspace as `workspace add` decided it: the flags, and what this machine can
+// run, which is the last decision made here.
+type addRecord struct {
+	name      string
+	absolute  string
+	image     string
+	engine    string
+	network   string
+	private   bool
+	keepAlive bool
+	noNesting bool
+}
+
+// recordWorkspace appends the workspace and writes the registry, and answers with the engine it
+// recorded. Left blank, an engine would mean "whatever this machine prefers", and an unrecorded
+// choice is one that changes if the workspace moves.
+func recordWorkspace(dir string, registry control.RegistryFile, record addRecord) string {
+	chosen := record.engine
 	if chosen == "" {
 		chosen = sandbox.NewTier(dir, "", nil).Default()
 	}
 	// A pointer with a false or true value is a decision; nil is "nest when it can".
 	var nesting *bool
-	if *noNesting {
+	if record.noNesting {
 		decision := true
 		nesting = &decision
 	}
 	registry.Workspaces = append(registry.Workspaces, control.Workspace{
-		Name: name, Path: absolute, Title: name, Image: *image, Network: network, Engine: chosen,
-		KeepAlive: *keepAlive, Private: private, DisableVMNesting: nesting,
+		Name: record.name, Path: record.absolute, Title: record.name, Image: record.image,
+		Network: record.network, Engine: chosen, KeepAlive: record.keepAlive,
+		Private: record.private, DisableVMNesting: nesting,
 	})
 	if err := control.SaveRegistryFile(registry); err != nil {
 		log.Fatalf("acornfall: %v", err)
 	}
-	fmt.Printf("added %s at %s\n", name, absolute)
-	fmt.Printf("sandbox: %s, engine %s, egress %s\n", imageLabel(*image), engineLabel(chosen), egressLabel(network, private))
+	return chosen
 }
 
 func workspaceList(argv []string) {

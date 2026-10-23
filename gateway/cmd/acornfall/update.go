@@ -94,31 +94,41 @@ func runUpdateThroughGateway(address string, checkOnly, assumeYes, stopRuns bool
 		return
 	}
 	printUpdateOffer(status)
-	if checkOnly {
+	if checkOnly || !approved(status.Latest, assumeYes) {
 		return
 	}
-	if !assumeYes {
-		agreed, err := confirmYes(fmt.Sprintf("install %s? [Y/n] ", status.Latest))
-		if err != nil {
-			logFatal(err)
-		}
-		if !agreed {
-			fmt.Println("nothing was changed")
-			return
-		}
+	applyUpdate(address, status.Latest, stopRuns)
+}
+
+// approved is the question, and the answer. An unattended run says yes by asking for --yes.
+func approved(latest string, assumeYes bool) bool {
+	if assumeYes {
+		return true
 	}
+	agreed, err := confirmYes(fmt.Sprintf("install %s? [Y/n] ", latest))
+	if err != nil {
+		logFatal(err)
+	}
+	if !agreed {
+		fmt.Println("nothing was changed")
+	}
+	return agreed
+}
+
+// applyUpdate asks the gateway to install one release, with what to do about work in flight.
+func applyUpdate(address, tag string, stopRuns bool) {
 	drain := "wait"
 	if stopRuns {
 		drain = "stop"
 	}
-	_, err = gatewayUpdate(address, http.MethodPost, "/api/update/apply", map[string]string{"tag": status.Latest, "drain": drain})
+	_, err := gatewayUpdate(address, http.MethodPost, "/api/update/apply", map[string]string{"tag": tag, "drain": drain})
 	if err != nil {
 		if errors.Is(err, errRunsActive) && !stopRuns {
 			logFatal(fmt.Errorf("%w (rerun with --stop-runs to stop them)", err))
 		}
 		logFatal(err)
 	}
-	fmt.Printf("installed %s; the gateway is restarting into it\n", status.Latest)
+	fmt.Printf("installed %s; the gateway is restarting into it\n", tag)
 }
 
 // errRunsActive is the gateway's 409: work is in flight and the default is to wait for it.

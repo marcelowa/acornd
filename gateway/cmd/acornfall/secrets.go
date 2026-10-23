@@ -114,17 +114,30 @@ func workspacePath(dir, name string) (string, error) {
 
 // secretAdd stores a value. The description is required because a list of names with no
 // sentence beside them is a list nobody can choose from.
+// addFlags is what `secret add` accepts, after parsing: the flags a person typed, still as
+// pointers because "not mentioned" is a value the defaults depend on.
+type addFlags struct {
+	dataDir     string
+	description string
+	hosts       string
+	query       bool
+	body        bool
+	noHeaders   bool
+	noEnv       bool
+}
+
 func secretAdd(argv []string) {
 	flags := flag.NewFlagSet("secret add", flag.ContinueOnError)
 	scope := secretScope{}
 	scope.register(flags)
+	values := addFlags{}
 	dataDir := flags.String("data-dir", "", "the acornfall folder")
-	description := flags.String("description", "", "what the secret is for, shown in lists")
-	hosts := flags.String("hosts", "", "comma-separated hosts the secret may reach")
-	query := flags.Bool("query", false, "allow substitution in the URL query")
-	body := flags.Bool("body", false, "allow substitution in the request body")
-	noHeaders := flags.Bool("no-headers", false, "refuse substitution in request headers")
-	noEnv := flags.Bool("no-env", false, "keep the value out of a container sandbox")
+	flags.StringVar(&values.description, "description", "", "what the secret is for, shown in lists")
+	flags.StringVar(&values.hosts, "hosts", "", "comma-separated hosts the secret may reach")
+	flags.BoolVar(&values.query, "query", false, "allow substitution in the URL query")
+	flags.BoolVar(&values.body, "body", false, "allow substitution in the request body")
+	flags.BoolVar(&values.noHeaders, "no-headers", false, "refuse substitution in request headers")
+	flags.BoolVar(&values.noEnv, "no-env", false, "keep the value out of a container sandbox")
 	flags.Usage = func() {
 		fmt.Fprint(os.Stderr, `usage: acornfall secret add <NAME> < value [flags]
 
@@ -147,38 +160,50 @@ func secretAdd(argv []string) {
 		flags.Usage()
 		os.Exit(2)
 	}
-	dir, store := openVault(*dataDir)
+	values.dataDir = *dataDir
+
+	dir, store := openVault(values.dataDir)
 	kind, folder, err := scope.resolve(dir)
 	if err != nil {
 		secretFail(err)
 	}
-	if strings.TrimSpace(*description) == "" {
-		secretFail(errors.New("--description is required: what is this secret for?"))
-	}
-	value, err := readSecretValue()
+	request, err := values.request(name, kind, folder)
 	if err != nil {
 		secretFail(err)
 	}
-	substitution := vault.Substitution{Headers: !*noHeaders, Query: *query, Body: *body}
-	if substitution == (vault.Substitution{}) {
-		secretFail(errors.New("allow at least one substitution location: headers, --query, or --body"))
-	}
-	hostList := splitHosts(*hosts)
-	envAllowed := !*noEnv
-	meta, err := store.Upsert(vault.Upsert{
-		Name:         name,
-		Description:  *description,
-		Scope:        kind,
-		Workspace:    folder,
-		Value:        value,
-		Hosts:        &hostList,
-		Substitution: &substitution,
-		AllowEnv:     &envAllowed,
-	})
+	meta, err := store.Upsert(request)
 	if err != nil {
 		secretFail(err)
 	}
 	fmt.Printf("stored %s (%s)\n", meta.Name, describeScope(meta))
+}
+
+// request turns the flags into the vault's own shape, refusing what the vault would refuse later
+// with a worse message: no description, no substitution location, no value.
+func (f addFlags) request(name string, kind vault.Scope, folder string) (vault.Upsert, error) {
+	if strings.TrimSpace(f.description) == "" {
+		return vault.Upsert{}, errors.New("--description is required: what is this secret for?")
+	}
+	substitution := vault.Substitution{Headers: !f.noHeaders, Query: f.query, Body: f.body}
+	if substitution == (vault.Substitution{}) {
+		return vault.Upsert{}, errors.New("allow at least one substitution location: headers, --query, or --body")
+	}
+	value, err := readSecretValue()
+	if err != nil {
+		return vault.Upsert{}, err
+	}
+	hosts := splitHosts(f.hosts)
+	envAllowed := !f.noEnv
+	return vault.Upsert{
+		Name:         name,
+		Description:  f.description,
+		Scope:        kind,
+		Workspace:    folder,
+		Value:        value,
+		Hosts:        &hosts,
+		Substitution: &substitution,
+		AllowEnv:     &envAllowed,
+	}, nil
 }
 
 func secretRotate(argv []string) {

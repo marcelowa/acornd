@@ -36,39 +36,36 @@ func main() {
 		usage(os.Stderr)
 		os.Exit(2)
 	}
-	switch args[0] {
-	case "start":
-		if err := serve(args[1:]); err != nil {
-			log.Fatalf("acornfall: %v", err)
-		}
-	case "setup":
-		setupCommand(args[1:])
-	case "doctor":
-		doctorCommand(args[1:])
-	case "workspace":
-		workspaceCommand(args[1:])
-	case "secret":
-		secretCommand(args[1:])
-	case "provider":
-		providers(args[1:])
-	case "model":
-		modelCommand(args[1:])
-	case "update":
-		updateCommand(args[1:])
-	case "version":
-		versionCommand(args[1:])
-	case "internal":
-		// Called by binaries, never by a person: the updater's staged binary, the sandbox's
-		// own first process, and the namespace pasta made. They live behind one verb so the
-		// help can stay a list of things a person can do.
-		internalCommand(args[1:])
-	case "help", "-h", "--help":
-		usage(os.Stdout)
-	default:
+	command, known := commands[args[0]]
+	if !known {
 		fmt.Fprintf(os.Stderr, "acornfall: no such command %q\n\n", args[0])
 		usage(os.Stderr)
 		os.Exit(2)
 	}
+	command(args[1:])
+}
+
+// commands is the whole surface: a name and what it does. A table rather than a switch because
+// the list is the interface, and side by side with `usage` below, a command that exists in one and
+// not the other is visible.
+var commands = map[string]func([]string){
+	"start": func(args []string) {
+		if err := serve(args); err != nil {
+			log.Fatalf("acornfall: %v", err)
+		}
+	},
+	"setup":     setupCommand,
+	"doctor":    doctorCommand,
+	"workspace": workspaceCommand,
+	"secret":    secretCommand,
+	"provider":  providers,
+	"model":     modelCommand,
+	"update":    updateCommand,
+	"version":   versionCommand,
+	"internal":  internalCommand,
+	"help":      func([]string) { usage(os.Stdout) },
+	"-h":        func([]string) { usage(os.Stdout) },
+	"--help":    func([]string) { usage(os.Stdout) },
 }
 
 // internalCommand dispatches the verbs that binaries call. An unknown one is refused like any
@@ -119,30 +116,11 @@ func serve(argv []string) error {
 		return err
 	}
 
-	dir, err := resolveDataDir(*dataDir)
+	install, err := openInstall(*dataDir)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	// The vault is install-wide: one file beside credentials.json, never inside a
-	// workspace and never mounted into a sandbox.
-	secrets, err := vault.Open(filepath.Join(dir, "secrets.json"))
-	if err != nil {
-		return err
-	}
-	// The user's home is resolved here rather than inside control: the sandbox mounts `~/.agents`
-	// at the same path the worker reads it from, and both have to be answering about the same
-	// folder. The resource folders are created now so a sandbox always has somewhere to mount
-	// from, even before anything has been written to them.
-	userHome, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("cannot tell where the user's home is: %w", err)
-	}
-	if err := sandbox.EnsureGlobal(dir, userHome); err != nil {
-		return err
-	}
+	dir, userHome, secrets := install.dir, install.userHome, install.vault
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -170,10 +148,33 @@ func serve(argv []string) error {
 
 	go updates.StartLoop(ctx)
 
-	workspaces := control.NewWorkspaces(control.WorkspacesOptions{
+	workspaces := newWorkspaces(dir, userHome, *workspacesDir, command, worker, updates, secrets, engine, tier)
+	if err := workspaces.Open(ctx); err != nil {
+		return err
+	}
+	defer workspaces.Close()
+
+	wireUpdates(updates, workspaces, engine)
+
+	logReadiness(ready.Check(readyInputForBoot(dir, updates, engine)))
+
+	return listen(ctx, *host, *port, httpapi.New(workspaces, web.Files, updates).Handler(), dir)
+}
+
+// newWorkspaces is the workspace layer as this boot configured it: where its folders are, what
+// it starts workers with, and the two tiers it may reach.
+func newWorkspaces(
+	dir, userHome, workspacesDir string,
+	command []string, worker string,
+	updates *update.Manager,
+	secrets *vault.Store,
+	engine *sandbox.Manager,
+	tier *sandbox.Tier,
+) *control.Workspaces {
+	return control.NewWorkspaces(control.WorkspacesOptions{
 		DataDir:       dir,
 		UserHome:      userHome,
-		WorkspacesDir: *workspacesDir,
+		WorkspacesDir: workspacesDir,
 		WorkerCommand: command,
 		WorkerDir:     worker,
 		Update: func() control.UpdateSummary {
@@ -191,23 +192,41 @@ func serve(argv []string) error {
 		Sandboxes: tier,
 		Vault:     secrets,
 	})
-	if err := workspaces.Open(ctx); err != nil {
-		return err
+}
+
+// install is where this install lives, opened: its folder, the user's home the sandbox mounts
+// from, and the vault.
+type install struct {
+	dir      string
+	userHome string
+	vault    *vault.Store
+}
+
+// openInstall resolves the install once, and creates the folders a sandbox will mount from. The
+// user's home is resolved here rather than inside control: the sandbox mounts `~/.agents` at the
+// same path the worker reads it from, and both have to be answering about the same folder.
+func openInstall(dataDir string) (install, error) {
+	dir, err := resolveDataDir(dataDir)
+	if err != nil {
+		return install{}, err
 	}
-	defer workspaces.Close()
-
-	wireUpdates(updates, workspaces, engine)
-
-	// Readiness, plainly: every unsatisfied requirement is one log line
-	// with its fix. Auto-installable pieces were ensured above; what is
-	// still missing refuses loudly at use, never silently.
-	for _, requirement := range ready.Check(readyInputForBoot(dir, updates, engine)) {
-		if !requirement.OK {
-			log.Printf("ready: %s not satisfied: %s (fix: %s)", requirement.Name, requirement.Detail, requirement.Fix)
-		}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return install{}, err
 	}
-
-	return listen(ctx, *host, *port, httpapi.New(workspaces, web.Files, updates).Handler(), dir)
+	// The vault is install-wide: one file beside credentials.json, never inside a workspace and
+	// never mounted into a sandbox.
+	store, err := vault.Open(filepath.Join(dir, "secrets.json"))
+	if err != nil {
+		return install{}, err
+	}
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return install{}, fmt.Errorf("cannot tell where the user's home is: %w", err)
+	}
+	if err := sandbox.EnsureGlobal(dir, userHome); err != nil {
+		return install{}, err
+	}
+	return install{dir: dir, userHome: userHome, vault: store}, nil
 }
 
 // bootUpdates opens the self-update tier and runs whatever migrate is pending. A failing migrate
@@ -235,6 +254,18 @@ func ensureWorkerSources(ctx context.Context, updates *update.Manager, managed b
 	}
 	if err := updates.EnsureWorker(ctx, updates.RuntimeTag()); err != nil {
 		log.Printf("worker: %v", err)
+	}
+}
+
+// logReadiness is readiness, plainly: every unsatisfied requirement is one log line with its fix.
+// Auto-installable pieces were ensured above; what is still missing refuses loudly at use, never
+// silently.
+func logReadiness(requirements []ready.Requirement) {
+	for _, requirement := range requirements {
+		if requirement.OK {
+			continue
+		}
+		log.Printf("ready: %s not satisfied: %s (fix: %s)", requirement.Name, requirement.Detail, requirement.Fix)
 	}
 }
 
