@@ -144,11 +144,20 @@ modernize: ## the idiom analyzer; a daily workflow runs it, `make lint` does not
 commits: ## check commit messages (RANGE=origin/main..HEAD by default)
 	bun scripts/check-commits.mjs $(RANGE)
 
+# The engine release both suites run, read from the Go source the pin lives in (the house-rules
+# check keeps the worker's copy equal to it).
+ENGINE_VERSION := $(shell awk -F'"' '/const Version = /{print $$2; exit}' gateway/internal/sandbox/microsandbox.go)
+
 # The slow tier's image cache, shared across runs and across both the Go and worker suites so
 # an image is pulled once per machine. Nothing may delete it: a fresh state directory per run
 # is how a suite meets a registry's anonymous rate limit. /tmp keeps it short enough for the
 # engine's runtime sockets (docs/adr/0012-sandbox.md).
-SANDBOX_STATE ?= /tmp/acornfall-e2e-sandboxes
+#
+# Keyed by the engine version, because the store carries its own schema and migrates forward:
+# a run on a newer engine leaves a catalog an older one refuses to read ("database schema is
+# newer than this msb binary"), which is a poisoned cache that never heals. The 0.7.7 incident
+# in scripts/check-house-rules.mjs is the same failure from the other side.
+SANDBOX_STATE ?= /tmp/acornfall-e2e-sandboxes-$(ENGINE_VERSION)
 
 # Every `go test` here runs with -shuffle=on: a suite that only passes in declaration order hides
 # that it shares something, and the seed is printed on failure so a shuffled run is reproducible.

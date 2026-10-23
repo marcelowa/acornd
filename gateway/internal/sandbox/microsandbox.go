@@ -59,6 +59,12 @@ type Runner interface {
 // #823, `msb create --nested-virt`) is in no release yet. 0.7.6 predates the mask, so a
 // guest nests whenever the machine can. Move this forward when the release carrying #823
 // exists: nesting then becomes a choice per workspace instead of an engine default.
+// EngineVersion is the release this build runs. The store the engine keeps carries its own
+// schema and migrates itself forward, so anything that shares that store — an image cache, a
+// suite's state directory — is keyed by this: a directory shared across versions is one an
+// older build refuses to read, and one a newer build silently migrates.
+func EngineVersion() string { return Version }
+
 const Version = "0.7.6"
 
 const releaseBase = "https://github.com/microsandbox/microsandbox/releases/download"

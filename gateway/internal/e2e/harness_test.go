@@ -116,6 +116,17 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// sandboxStateDir is the image cache every sandbox boot shares, so an image is pulled once per
+// machine instead of once per test — which is how a suite meets a registry's anonymous rate
+// limit. It is keyed by the engine version because the store carries its own schema: a run on a
+// newer engine migrates it forward, and the older one then refuses to read it.
+func sandboxStateDir() string {
+	if state := os.Getenv("ACORNFALL_SANDBOX_STATE"); state != "" {
+		return state
+	}
+	return filepath.Join(os.TempDir(), "acornfall-e2e-sandboxes-"+sandbox.EngineVersion())
+}
+
 func which(name string) string {
 	path, err := exec.LookPath(name)
 	if err != nil {
@@ -247,7 +258,7 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	// fresh directory per run means a registry pull per run — which is how a suite runs into
 	// an anonymous pull limit. The sandboxes themselves are removed by the tests that made
 	// them, when they end.
-	s.SandboxState = filepath.Join(os.TempDir(), "acornfall-e2e-sandboxes")
+	s.SandboxState = sandboxStateDir()
 	s.WorkspacesDir = filepath.Join(t.TempDir(), "workspaces")
 	// The general workspace is created where the product creates one: inside the workspaces
 	// folder, by name. Nothing points the gateway at a folder any more.
