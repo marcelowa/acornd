@@ -142,7 +142,7 @@ func secretAdd(argv []string) {
 	if err := flags.Parse(flagArgs); err != nil {
 		os.Exit(2)
 	}
-	name, ok := oneName(positional, "add")
+	name, ok := oneName(positional)
 	if !ok {
 		flags.Usage()
 		os.Exit(2)
@@ -193,7 +193,7 @@ func secretRotate(argv []string) {
 	if err := flags.Parse(flagArgs); err != nil {
 		os.Exit(2)
 	}
-	name, ok := oneName(positional, "rotate")
+	name, ok := oneName(positional)
 	if !ok {
 		flags.Usage()
 		os.Exit(2)
@@ -226,7 +226,7 @@ func secretRemove(argv []string) {
 	if err := flags.Parse(flagArgs); err != nil {
 		os.Exit(2)
 	}
-	name, ok := oneName(positional, "remove")
+	name, ok := oneName(positional)
 	if !ok {
 		flags.Usage()
 		os.Exit(2)
@@ -255,7 +255,7 @@ func secretShow(argv []string) {
 	if err := flags.Parse(flagArgs); err != nil {
 		os.Exit(2)
 	}
-	name, ok := oneName(positional, "show")
+	name, ok := oneName(positional)
 	if !ok {
 		flags.Usage()
 		os.Exit(2)
@@ -391,7 +391,7 @@ func openVault(dataDirFlag string) (string, *vault.Store) {
 }
 
 // oneName is the single positional every verb but list takes.
-func oneName(positional []string, verb string) (string, bool) {
+func oneName(positional []string) (string, bool) {
 	if len(positional) != 1 {
 		return "", false
 	}

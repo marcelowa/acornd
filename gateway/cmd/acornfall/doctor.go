@@ -48,7 +48,7 @@ func doctorCommand(argv []string) {
 	checkCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	health := updater.Preflight(checkCtx)
-	requirements := ready.Check(readyInput(resolved, updater, health, chosen, defaultEngine))
+	requirements := ready.Check(readyInput(resolved, updater, health, chosen))
 	if *asJSON {
 		payload, err := json.MarshalIndent(struct {
 			Engines   []engineReport      `json:"engines"`
@@ -171,7 +171,7 @@ func stateOf(engine engineReport) string {
 
 // readyInput gathers what the readiness list reads from the managers
 // doctor already owns. Report-only where possible: doctor changes nothing.
-func readyInput(dataDir string, updater *update.Manager, health update.Preflight, report sandbox.Report, engineName string) ready.Input {
+func readyInput(dataDir string, updater *update.Manager, health update.Preflight, report sandbox.Report) ready.Input {
 	_, bunOK := updater.BunInstalled()
 	return ready.Input{
 		DataDir:         dataDir,

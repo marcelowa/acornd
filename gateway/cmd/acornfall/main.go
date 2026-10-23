@@ -148,26 +148,12 @@ func serve(argv []string) error {
 
 	// The self-update tier, owned early: boot readiness (migrate, bun, worker
 	// sources) is decided before anything serves.
-	updates := update.New(dir, "")
-	if err := updates.Open(); err != nil {
-		return err
-	}
-	// A failing migrate stops boot and rolls back: the supervisor restarts
-	// the last good build instead of a dead UI.
-	if err := updates.RunPending(ctx); err != nil {
+	updates, err := bootUpdates(ctx, dir)
+	if err != nil {
 		return err
 	}
 	command, worker, workerManaged := resolveWorker(*workerCommand, updates)
-	if workerManaged && updates.Status().Current != "dev" {
-		// Best effort, never fatal: a missing toolchain with no network is
-		// a loud refusal at workspace open, not a bricked boot.
-		if _, err := updates.EnsureBun(ctx); err != nil {
-			log.Printf("worker: %v", err)
-		}
-		if err := updates.EnsureWorker(ctx, updates.RuntimeTag()); err != nil {
-			log.Printf("worker: %v", err)
-		}
-	}
+	ensureWorkerSources(ctx, updates, workerManaged)
 
 	// The sandbox tier. One engine per install, and the worker is told which one, because it
 	// attaches with that engine's client and the two must agree. Nothing here chooses for a
@@ -210,6 +196,52 @@ func serve(argv []string) error {
 	}
 	defer workspaces.Close()
 
+	wireUpdates(updates, workspaces, engine)
+
+	// Readiness, plainly: every unsatisfied requirement is one log line
+	// with its fix. Auto-installable pieces were ensured above; what is
+	// still missing refuses loudly at use, never silently.
+	for _, requirement := range ready.Check(readyInputForBoot(dir, updates, engine)) {
+		if !requirement.OK {
+			log.Printf("ready: %s not satisfied: %s (fix: %s)", requirement.Name, requirement.Detail, requirement.Fix)
+		}
+	}
+
+	return listen(ctx, *host, *port, httpapi.New(workspaces, web.Files, updates).Handler(), dir)
+}
+
+// bootUpdates opens the self-update tier and runs whatever migrate is pending. A failing migrate
+// stops boot and rolls back: the supervisor restarts the last good build instead of a dead UI.
+func bootUpdates(ctx context.Context, dir string) (*update.Manager, error) {
+	updates := update.New(dir, "")
+	if err := updates.Open(); err != nil {
+		return nil, err
+	}
+	if err := updates.RunPending(ctx); err != nil {
+		return nil, err
+	}
+	return updates, nil
+}
+
+// ensureWorkerSources fetches bun and the worker's sources when this install manages them. Best
+// effort, never fatal: a missing toolchain with no network is a loud refusal at workspace open,
+// not a bricked boot.
+func ensureWorkerSources(ctx context.Context, updates *update.Manager, managed bool) {
+	if !managed || updates.Status().Current == "dev" {
+		return
+	}
+	if _, err := updates.EnsureBun(ctx); err != nil {
+		log.Printf("worker: %v", err)
+	}
+	if err := updates.EnsureWorker(ctx, updates.RuntimeTag()); err != nil {
+		log.Printf("worker: %v", err)
+	}
+}
+
+// wireUpdates is what the update tier may do to this install: it may ask what is running, stop
+// it, and clean the sandboxes a rollback orphaned. The shapes cross the layer boundary as this
+// tier's own, so neither side learns the other's types.
+func wireUpdates(updates *update.Manager, workspaces *control.Workspaces, engine *sandbox.Manager) {
 	updates.RunsActive = workspaces.AnyRunning
 	updates.StopRuns = workspaces.AbortAll
 	updates.StopWorkers = workspaces.StopWorkers
@@ -225,7 +257,7 @@ func serve(argv []string) error {
 	}
 	updates.CleanVMs = func(ctx context.Context) error {
 		// Paths, not names: engine sandbox names derive from the folder.
-		var names []string
+		names := make([]string, 0, len(workspaces.List()))
 		for _, workspace := range workspaces.List() {
 			names = append(names, workspace.Path)
 		}
@@ -237,19 +269,13 @@ func serve(argv []string) error {
 		}
 		return update.CleanSandboxes(ctx, names, remove, stateDir)
 	}
+}
 
-	// Readiness, plainly: every unsatisfied requirement is one log line
-	// with its fix. Auto-installable pieces were ensured above; what is
-	// still missing refuses loudly at use, never silently.
-	for _, requirement := range ready.Check(readyInputForBoot(dir, updates, engine)) {
-		if !requirement.OK {
-			log.Printf("ready: %s not satisfied: %s (fix: %s)", requirement.Name, requirement.Detail, requirement.Fix)
-		}
-	}
-
+// listen serves until the owner stops, shutting down within five seconds and no later.
+func listen(ctx context.Context, host string, port int, handler http.Handler, dir string) error {
 	server := &http.Server{
-		Addr:              net.JoinHostPort(*host, strconv.Itoa(*port)),
-		Handler:           httpapi.New(workspaces, web.Files, updates).Handler(),
+		Addr:              net.JoinHostPort(host, strconv.Itoa(port)),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
@@ -261,7 +287,7 @@ func serve(argv []string) error {
 
 	// Listen explicitly so the line below reports the address that was actually bound: with
 	// a port of 0 the configured address says nothing about where to reach it.
-	listener, err := net.Listen("tcp", net.JoinHostPort(*host, strconv.Itoa(*port)))
+	listener, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
 	if err != nil {
 		return err
 	}
@@ -359,56 +385,76 @@ func providers(argv []string) {
 	path := filepath.Join(dir, "credentials.json")
 	switch args[0] {
 	case "list":
-		all := readCredentials(path)
-		if len(all) == 0 {
-			fmt.Println("no providers configured")
-			return
-		}
-		for id, credential := range all {
-			fmt.Printf("%-24s %s\n", id, credential.Type)
-		}
+		providerList(path)
 	case "add":
-		if len(args) < 2 || len(args) > 3 {
-			fmt.Fprintln(os.Stderr, `usage: acornfall provider add <provider> [<api-key>]
-
-With the key in argv the value is in the shell history and in every process listing; with the
-key left out it is read from stdin, which is what a script should do.`)
-			os.Exit(2)
-		}
-		key := ""
-		if len(args) == 3 {
-			key = args[2]
-		} else {
-			payload, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
-			if err != nil {
-				log.Fatalf("acornfall: %v", err)
-			}
-			key = strings.TrimSpace(string(payload))
-		}
-		if key == "" {
-			log.Fatalf("acornfall: no api key for %s", args[1])
-		}
-		all := readCredentials(path)
-		all[args[1]] = credential{Type: "api_key", Key: key}
-		if err := writeCredentials(path, all); err != nil {
-			log.Fatalf("acornfall: %v", err)
-		}
-		fmt.Printf("stored api key for %s\n", args[1])
+		providerAdd(path, args[1:])
 	case "remove":
-		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: acornfall provider remove <provider>")
-			os.Exit(2)
-		}
-		all := readCredentials(path)
-		delete(all, args[1])
-		if err := writeCredentials(path, all); err != nil {
-			log.Fatalf("acornfall: %v", err)
-		}
-		fmt.Printf("removed %s\n", args[1])
+		providerRemove(path, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown provider command %q\n", args[0])
 		os.Exit(2)
 	}
+}
+
+// providerList is one line per provider: the id, and how this install holds it. Never the key.
+func providerList(path string) {
+	all := readCredentials(path)
+	if len(all) == 0 {
+		fmt.Println("no providers configured")
+		return
+	}
+	for id, credential := range all {
+		fmt.Printf("%-24s %s\n", id, credential.Type)
+	}
+}
+
+func providerAdd(path string, args []string) {
+	if len(args) < 1 || len(args) > 2 {
+		fmt.Fprintln(os.Stderr, `usage: acornfall provider add <provider> [<api-key>]
+
+With the key in argv the value is in the shell history and in every process listing; with the
+key left out it is read from stdin, which is what a script should do.`)
+		os.Exit(2)
+	}
+	key, err := apiKey(args)
+	if err != nil {
+		log.Fatalf("acornfall: %v", err)
+	}
+	if key == "" {
+		log.Fatalf("acornfall: no api key for %s", args[0])
+	}
+	all := readCredentials(path)
+	all[args[0]] = credential{Type: "api_key", Key: key}
+	if err := writeCredentials(path, all); err != nil {
+		log.Fatalf("acornfall: %v", err)
+	}
+	fmt.Printf("stored api key for %s\n", args[0])
+}
+
+// apiKey is argv when it was given there, and stdin when it was not: a key on a command line is
+// in the shell history and in every process listing on the machine.
+func apiKey(args []string) (string, error) {
+	if len(args) == 2 {
+		return args[1], nil
+	}
+	payload, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(payload)), nil
+}
+
+func providerRemove(path string, args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: acornfall provider remove <provider>")
+		os.Exit(2)
+	}
+	all := readCredentials(path)
+	delete(all, args[0])
+	if err := writeCredentials(path, all); err != nil {
+		log.Fatalf("acornfall: %v", err)
+	}
+	fmt.Printf("removed %s\n", args[0])
 }
 
 // credential is the pi-ai api-key credential shape. Go never interprets other
