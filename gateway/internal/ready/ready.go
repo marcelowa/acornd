@@ -56,16 +56,6 @@ type Input struct {
 	HasCredential bool
 }
 
-// Satisfied reports whether every requirement holds.
-func Satisfied(requirements []Requirement) bool {
-	for _, requirement := range requirements {
-		if !requirement.OK {
-			return false
-		}
-	}
-	return true
-}
-
 // Check builds the list. Filesystem reads stay under DataDir so tests run
 // anywhere; /dev/kvm and disk space read the machine, which is the point.
 func Check(input Input) []Requirement {

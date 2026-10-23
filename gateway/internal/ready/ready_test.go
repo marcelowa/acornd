@@ -31,10 +31,21 @@ func byName(requirements []Requirement, name string) Requirement {
 	return Requirement{}
 }
 
+// allOK is the question the tests ask of a list: it lives here because nothing in the package
+// needs it, and a helper nobody calls is the thing this pass was looking for.
+func allOK(requirements []Requirement) bool {
+	for _, requirement := range requirements {
+		if !requirement.OK {
+			return false
+		}
+	}
+	return true
+}
+
 func TestSatisfiedInstallIsQuiet(t *testing.T) {
 	dataDir := t.TempDir()
 	requirements := Check(testInput(dataDir))
-	if !Satisfied(requirements) {
+	if !allOK(requirements) {
 		for _, requirement := range requirements {
 			if !requirement.OK {
 				t.Errorf("%s: %s (fix: %s)", requirement.Name, requirement.Detail, requirement.Fix)
@@ -52,7 +63,7 @@ func TestMissingPiecesNameFixes(t *testing.T) {
 	input.Latest = ""
 	input.ReleasesNote = "unreachable: refused"
 	requirements := Check(input)
-	if Satisfied(requirements) {
+	if allOK(requirements) {
 		t.Fatal("missing pieces must not satisfy")
 	}
 	for _, name := range []string{"worker", "bun", "credentials", "releases"} {

@@ -163,9 +163,6 @@ func Open(path string) (*Store, error) {
 	return &Store{path: abs}, nil
 }
 
-// Path is where the store keeps its file, for doctor and tests.
-func (s *Store) Path() string { return s.path }
-
 // List returns every entry's metadata, global and workspace, sorted by name.
 func (s *Store) List() ([]Meta, error) {
 	doc, err := s.read()

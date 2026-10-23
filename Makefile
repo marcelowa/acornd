@@ -124,9 +124,11 @@ analyze: ## complexity, duplication, dead code, error shape: the backlog as a re
 	@# A symbol is dead only if no platform reaches it: run per GOOS and keep the intersection.
 	@# `nestedFromApple` is unreachable on linux and the only caller on darwin, which is exactly
 	@# the false positive a single-platform run would report as a deletion.
+	@# The feature suite is a second root: a package made only of tests is invisible to a run that
+	# starts from the commands, and `sandbox.EngineVersion` is used there and nowhere else.
 	@if [ -x "$(DEADCODE)" ]; then cd gateway && tmp=$$(mktemp -d) && \
 		for pair in linux/amd64 darwin/arm64; do \
-			GOOS=$${pair%/*} GOARCH=$${pair#*/} $(DEADCODE) -test ./cmd/acornfall | sort > $$tmp/$${pair%/*}; \
+			GOOS=$${pair%/*} GOARCH=$${pair#*/} $(DEADCODE) -test ./cmd/acornfall ./internal/e2e | sort > $$tmp/$${pair%/*}; \
 		done; \
 		printf '\ndead code, unreachable on both linux and darwin:\n'; \
 		comm -12 $$tmp/linux $$tmp/darwin | sed 's/^/  /'; \
