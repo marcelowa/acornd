@@ -204,11 +204,11 @@ func (m *Microsandbox) Usable() error {
 		if errors.Is(err, os.ErrPermission) {
 			return fmt.Errorf("%w: /dev/kvm is not readable by %s%s", ErrUnavailable, os.Getenv("USER"), kvmHint())
 		}
-		return fmt.Errorf("%w: /dev/kvm: %v", ErrUnavailable, err)
+		return fmt.Errorf("%w: /dev/kvm: %w", ErrUnavailable, err)
 	case "darwin":
 		out, err := exec.Command("sysctl", "-n", "kern.hv_support").Output()
 		if err != nil {
-			return fmt.Errorf("%w: cannot ask macOS whether it supports a hypervisor: %v", ErrUnavailable, err)
+			return fmt.Errorf("%w: cannot ask macOS whether it supports a hypervisor: %w", ErrUnavailable, err)
 		}
 		if strings.TrimSpace(string(out)) != "1" {
 			return fmt.Errorf("%w: macOS reports no hypervisor support (kern.hv_support)", ErrUnavailable)
@@ -438,7 +438,7 @@ func (m *Microsandbox) List(ctx context.Context) ([]Instance, error) {
 	}
 	var instances []Instance
 	if err := json.Unmarshal([]byte(trimmed), &instances); err != nil {
-		return nil, fmt.Errorf("%w: cannot read the engine's sandbox list: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: cannot read the engine's sandbox list: %w", ErrUnavailable, err)
 	}
 	return instances, nil
 }
@@ -613,7 +613,7 @@ func fetch(ctx context.Context, client *http.Client, url string) (io.ReadCloser,
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %v", ErrUnavailable, url, err)
+		return nil, fmt.Errorf("%w: %s: %w", ErrUnavailable, url, err)
 	}
 	if response.StatusCode != http.StatusOK {
 		response.Body.Close()
@@ -629,7 +629,7 @@ func unpackVerified(body io.Reader, want, dest string) error {
 	digest := sha256.New()
 	reader, err := gzip.NewReader(io.TeeReader(body, digest))
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	defer reader.Close()
 	archive := tar.NewReader(reader)
@@ -639,50 +639,65 @@ func unpackVerified(body io.Reader, want, dest string) error {
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("%w: %v", ErrUnavailable, err)
+			return fmt.Errorf("%w: %w", ErrUnavailable, err)
 		}
-		target, err := safeJoin(dest, header.Name)
-		if err != nil {
+		if err := extractEntry(archive, header, dest); err != nil {
 			return err
-		}
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			mode := header.FileInfo().Mode().Perm() | 0o200
-			file, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
-			if err != nil {
-				return err
-			}
-			if _, err := io.Copy(file, archive); err != nil {
-				file.Close()
-				return err
-			}
-			if err := file.Close(); err != nil {
-				return err
-			}
-		case tar.TypeSymlink:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			if _, err := safeJoin(filepath.Dir(target), header.Linkname); err != nil {
-				return err
-			}
-			os.Remove(target)
-			if err := os.Symlink(header.Linkname, target); err != nil {
-				return err
-			}
 		}
 	}
 	if got := hex.EncodeToString(digest.Sum(nil)); want != "" && got != want {
 		return fmt.Errorf("%w: checksum mismatch: got %s, want %s", ErrUnavailable, got, want)
 	}
 	return nil
+}
+
+// extractEntry writes one archive member. Directories, files and symlinks are the three shapes a
+// release takes; anything else is skipped rather than guessed at.
+func extractEntry(archive *tar.Reader, header *tar.Header, dest string) error {
+	target, err := safeJoin(dest, header.Name)
+	if err != nil {
+		return err
+	}
+	switch header.Typeflag {
+	case tar.TypeDir:
+		return os.MkdirAll(target, 0o755)
+	case tar.TypeReg:
+		return extractFile(archive, header, target)
+	case tar.TypeSymlink:
+		return extractSymlink(header, target)
+	}
+	return nil
+}
+
+func extractFile(archive *tar.Reader, header *tar.Header, target string) error {
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	// The owner-write bit is added because an archive member read-only in the release would
+	// otherwise leave a file this install cannot replace on the next upgrade.
+	mode := header.FileInfo().Mode().Perm() | 0o200
+	file, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(file, archive); err != nil {
+		file.Close()
+		return err
+	}
+	return file.Close()
+}
+
+func extractSymlink(header *tar.Header, target string) error {
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	// The link's own destination has to stay inside the tree too: a symlink to /etc is how an
+	// archive reaches a path that the file entries cannot.
+	if _, err := safeJoin(filepath.Dir(target), header.Linkname); err != nil {
+		return err
+	}
+	os.Remove(target)
+	return os.Symlink(header.Linkname, target)
 }
 
 // safeJoin resolves an archive member inside a destination, refusing absolute paths and

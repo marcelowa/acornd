@@ -298,7 +298,7 @@ func (m *Microsandbox) applySecretSet(ctx context.Context, name string, current 
 		env := []string{secret.Name + "=" + secret.Value}
 		if _, err := m.runEnv(ctx, env, args...); err != nil {
 			if restartHint(err) {
-				return fmt.Errorf("%w: %v", errRestartRequired, err)
+				return fmt.Errorf("%w: %w", errRestartRequired, err)
 			}
 			return err
 		}

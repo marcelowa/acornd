@@ -456,9 +456,9 @@ func (b *Bwrap) Start(ctx context.Context, name string, _ []Secret) error {
 		detail := b.logTail(name)
 		_ = b.Stop(context.Background(), name)
 		if detail != "" {
-			return fmt.Errorf("%w: %v: %s", ErrUnavailable, err, detail)
+			return fmt.Errorf("%w: %w: %s", ErrUnavailable, err, detail)
 		}
-		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	return nil
 }
