@@ -7,11 +7,12 @@ package control
 import (
 	"context"
 	"errors"
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
-	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 	"maps"
 	"strings"
 	"time"
+
+	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 )
 
 // Conversation is one transcript, as the UI lists it.

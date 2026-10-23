@@ -9,10 +9,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
+
 	"github.com/acornfall/acornfall/gateway/internal/protocol"
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 	"github.com/acornfall/acornfall/gateway/internal/workerpool"
-	"time"
 )
 
 // attachToWorker is everything that needs a live harness: start it, ask what it can do, read
@@ -95,68 +96,28 @@ func (c *Control) startWorker(ctx context.Context) error {
 	if c.WorkerUp() {
 		return errors.New("a worker is already running")
 	}
-	base := c.opts.WorkerCommand
-	if len(base) == 0 {
-		base = []string{"bun", "run", "src/main.ts"}
+	command := c.opts.WorkerCommand
+	if len(command) == 0 {
+		command = defaultWorkerCommand
 	}
-	args := append([]string(nil), base[1:]...)
-	args = append(args,
-		"--workspace", c.opts.Workspace.Path,
-		"--storage", c.opts.StoragePath,
-		"--credentials", c.opts.Credentials,
-		"--data-dir", c.opts.DataDir,
-	)
 	// The sandbox is made first, because the worker is told to use it and refuses to run
 	// anything without it. A failure is a state, not a stop: the workspace opens, the tools
 	// say what is missing, and the rest of the product works.
 	c.stage("preparing the sandbox")
 	sandboxState := c.provisionSandbox(ctx)
-	if sandboxState.Tools {
-		args = append(args, "--sandbox", sandbox.Name(c.opts.Workspace.Path))
-		if driver := c.sandboxDriver(); driver != nil {
-			// The worker attaches with this engine's SDK: naming it here is how the two sides
-			// of one install cannot disagree about which engine is in use.
-			args = append(args, "--sandbox-engine", driver.Name())
-		}
-	}
+	args := append(c.workerArgs(command[1:]), c.sandboxArgs(sandboxState)...)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	delivery := c.SecretDelivery()
 	delivered := c.resolveSecrets(delivery).delivered
-	if len(delivered) > 0 {
-		// The prompt carries names and descriptions only; a substitute engine never gives the
-		// worker a value, and an environment engine gives it through the process environment.
-		metadata := make([]map[string]any, 0, len(delivered))
-		for _, secret := range delivered {
-			metadata = append(metadata, map[string]any{
-				"name":        secret.Name,
-				"description": secret.Description,
-				"hosts":       secret.Hosts,
-				"delivery":    delivery.String(),
-				"placeholder": secretPlaceholder(delivery, secret.Name),
-			})
-		}
-		if encoded, err := json.Marshal(metadata); err == nil {
-			args = append(args, "--secrets", string(encoded))
-		}
-	}
+	args = append(args, secretArgs(delivery, delivered)...)
 	manager := c.sandboxManager()
-	env := sandboxEnv(manager)
-	if manager != nil && manager.SecretEnvInWorker() {
-		for _, secret := range delivered {
-			env = append(env, secret.Name+"="+secret.Value)
-		}
-	}
 	worker := workerpool.New(workerpool.Config{
-		Command: base[0],
+		Command: command[0],
 		Args:    args,
 		Dir:     c.opts.WorkerDir,
-		// The worker attaches to the sandbox with the engine's SDK, so it needs the engine's
-		// own environment to find it. One engine per install, so this is the same for every
-		// workspace. A secret an environment engine delivers into the worker's own process is
-		// appended here too, last so it cannot be shadowed by the shell's variable.
-		Env: env,
+		Env:     workerEnv(manager, delivered),
 	})
 	worker.OnFrame(c.onFrame)
 	if err := worker.Start(ctx); err != nil {
@@ -182,58 +143,159 @@ func (c *Control) startWorker(ctx context.Context) error {
 	return nil
 }
 
+// defaultWorkerCommand is the harness this gateway ships. A release needs no bun and no
+// sources; the development install runs the worker's own entry point.
+var defaultWorkerCommand = []string{"bun", "run", "src/main.ts"}
+
+// workerArgs is what every worker is told about its workspace, before anything conditional.
+func (c *Control) workerArgs(base []string) []string {
+	args := append([]string(nil), base...)
+	return append(args,
+		"--workspace", c.opts.Workspace.Path,
+		"--storage", c.opts.StoragePath,
+		"--credentials", c.opts.Credentials,
+		"--data-dir", c.opts.DataDir,
+	)
+}
+
+// sandboxArgs names the sandbox the worker must use, and the engine it is on: the worker
+// attaches with that engine's SDK, so naming it is how two sides of one install cannot
+// disagree about which engine is in use.
+func (c *Control) sandboxArgs(state SandboxState) []string {
+	if !state.Tools {
+		return nil
+	}
+	args := []string{"--sandbox", sandbox.Name(c.opts.Workspace.Path)}
+	if driver := c.sandboxDriver(); driver != nil {
+		args = append(args, "--sandbox-engine", driver.Name())
+	}
+	return args
+}
+
+// secretArgs is the prompt's view of the vault: names, descriptions, hosts and a placeholder.
+// A value never travels here — a substitute engine keeps it, and an environment engine hands
+// it over in the process environment instead.
+func secretArgs(delivery sandbox.Delivery, delivered []sandbox.Secret) []string {
+	if len(delivered) == 0 {
+		return nil
+	}
+	metadata := make([]map[string]any, 0, len(delivered))
+	for _, secret := range delivered {
+		metadata = append(metadata, map[string]any{
+			"name":        secret.Name,
+			"description": secret.Description,
+			"hosts":       secret.Hosts,
+			"delivery":    delivery.String(),
+			"placeholder": secretPlaceholder(delivery, secret.Name),
+		})
+	}
+	// A secret list that cannot be encoded is better absent than half-sent: the worker then
+	// reports the vault empty, which is the same answer it gives when it is.
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return nil
+	}
+	return []string{"--secrets", string(encoded)}
+}
+
+// workerEnv is the engine's environment, plus the secrets an environment engine delivers into
+// the worker's own process. They go last so the shell cannot shadow them.
+func workerEnv(manager *sandbox.Manager, delivered []sandbox.Secret) []string {
+	env := sandboxEnv(manager)
+	if manager != nil && manager.SecretEnvInWorker() {
+		for _, secret := range delivered {
+			env = append(env, secret.Name+"="+secret.Value)
+		}
+	}
+	return env
+}
+
 // supervise owns the worker's lifecycle so restarts cannot multiply. It is the only
 // reader of workerExited, so there is exactly one backoff loop however often the
 // process dies.
 func (c *Control) supervise(ctx context.Context) {
 	failures := 0
 	for {
-		select {
-		case <-ctx.Done():
+		if !c.waitForExit(ctx) {
 			return
-		case <-c.workerExited:
 		}
 		// Nothing to restart: the announcement was a duplicate, not a death.
 		if c.WorkerUp() {
 			continue
 		}
 		failures += 1
-		if failures > 5 {
+		if failures > maxRestarts {
 			// Give up rather than burn the machine on a crash loop. The state still says
 			// the harness is down, so the interface is honest about it.
-			c.mu.Lock()
-			c.workerError = "the harness process could not be restarted"
-			c.mu.Unlock()
-			c.publish(protocol.Frame{Type: "state"})
-			select {
-			case <-ctx.Done():
+			c.markWorkerLost("the harness process could not be restarted")
+			if !c.wait(ctx, restartCooldown) {
 				return
-			case <-time.After(60 * time.Second):
-				failures = 0
-				continue
 			}
+			failures = 0
+			continue
 		}
-		select {
-		case <-ctx.Done():
+		if !c.wait(ctx, time.Duration(failures)*time.Second) {
 			return
-		case <-time.After(time.Duration(failures) * time.Second):
 		}
-		if err := c.startWorker(ctx); err != nil {
-			workerpool.Log("worker restart %d failed: %v", failures, err)
-			// The failed process never started, so nothing will announce it.
-			select {
-			case c.workerExited <- struct{}{}:
-			default:
-			}
-			continue
+		if c.restart(ctx, failures) {
+			failures = 0
 		}
-		if err := c.recoverWithWorker(ctx); err != nil {
-			workerpool.Log("worker restart %d could not be resumed: %v", failures, err)
-			continue
-		}
-		workerpool.Log("worker restarted and resumed")
-		failures = 0
 	}
+}
+
+const (
+	// maxRestarts is how many deaths in a row the supervisor treats as a transient failure
+	// before it stops trying and says so.
+	maxRestarts = 5
+	// restartCooldown is how long a crash loop is left alone before one more attempt.
+	restartCooldown = 60 * time.Second
+)
+
+// waitForExit blocks until the current worker announces its end, or the owner stops.
+func (c *Control) waitForExit(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-c.workerExited:
+		return true
+	}
+}
+
+// wait is the one place a deadline is slept on, so the owner's cancellation always wins.
+func (c *Control) wait(ctx context.Context, delay time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(delay):
+		return true
+	}
+}
+
+// restart tries once. A process that never started announces nothing, so the loop is told
+// here rather than waiting for an exit that will not come.
+func (c *Control) restart(ctx context.Context, failures int) bool {
+	if err := c.startWorker(ctx); err != nil {
+		workerpool.Log("worker restart %d failed: %v", failures, err)
+		select {
+		case c.workerExited <- struct{}{}:
+		default:
+		}
+		return false
+	}
+	if err := c.recoverWithWorker(ctx); err != nil {
+		workerpool.Log("worker restart %d could not be resumed: %v", failures, err)
+		return false
+	}
+	workerpool.Log("worker restarted and resumed")
+	return true
+}
+
+// markWorkerLost is the state a supervisor that gave up leaves behind.
+func (c *Control) markWorkerLost(reason string) {
+	c.mu.Lock()
+	c.workerError = reason
+	c.mu.Unlock()
+	c.publish(protocol.Frame{Type: "state"})
 }
 
 // workerDied is the difference between a quiet conversation and a dead backend. Without

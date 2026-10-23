@@ -2,9 +2,9 @@ package control
 
 import (
 	"testing"
+	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/protocol"
-	"time"
 )
 
 // StateFor must describe the conversation it was asked about, not the one the worker

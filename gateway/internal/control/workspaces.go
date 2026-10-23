@@ -8,9 +8,6 @@
 package control
 
 import (
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
-	"github.com/acornfall/acornfall/gateway/internal/vault"
-
 	"context"
 	"encoding/json"
 	"errors"
@@ -24,7 +21,8 @@ import (
 	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/protocol"
-
+	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+	"github.com/acornfall/acornfall/gateway/internal/vault"
 	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 )
 
@@ -448,12 +446,7 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 	if name == "" {
 		name = GeneralWorkspaceName
 	}
-	w.mu.RLock()
-	workspace, known := w.registry[name]
-	control := w.controls[name]
-	closed := w.closed
-	starter := w.starting[name]
-	w.mu.RUnlock()
+	workspace, control, starter, known, closed := w.lookup(name)
 	if closed {
 		return nil, errors.New("the workspace layer is closed")
 	}
@@ -465,29 +458,50 @@ func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) 
 		return control, nil
 	}
 
-	// One starter per workspace, so two concurrent requests cannot spawn two workers over
-	// one storage: the second would find it locked, or worse, write to it.
+	starter.Lock()
+	defer starter.Unlock()
+	// One starter per workspace, so two concurrent requests cannot spawn two workers over one
+	// storage: the second would find it locked, or worse, write to it. The check is repeated
+	// under that lock because the other request may have finished while this one waited.
+	if control := w.controlFor(name); control != nil {
+		w.markUsed(name)
+		return control, nil
+	}
+	return w.open(ctx, name, workspace)
+}
+
+// lookup reads the registry once, and hands back the starter this workspace's open will use.
+func (w *Workspaces) lookup(name string) (Workspace, *Control, *sync.Mutex, bool, bool) {
+	w.mu.RLock()
+	workspace, known := w.registry[name]
+	control := w.controls[name]
+	closed := w.closed
+	starter := w.starting[name]
+	w.mu.RUnlock()
+	if starter != nil {
+		return workspace, control, starter, known, closed
+	}
 	w.mu.Lock()
-	if starter == nil {
+	if starter = w.starting[name]; starter == nil {
 		starter = &sync.Mutex{}
 		w.starting[name] = starter
 	}
 	w.mu.Unlock()
-	starter.Lock()
-	defer starter.Unlock()
+	return workspace, control, starter, known, closed
+}
 
+func (w *Workspaces) controlFor(name string) *Control {
 	w.mu.RLock()
-	control = w.controls[name]
-	w.mu.RUnlock()
-	if control != nil {
-		w.markUsed(name)
-		return control, nil
-	}
+	defer w.mu.RUnlock()
+	return w.controls[name]
+}
 
-	// From here the workspace is opening, and a second client asks what it is doing rather than
-	// waiting for it: the stage comes from the code that is doing the work.
+// open builds the control, opens it, and records what it became. From here the workspace is
+// opening, and a second client asks what it is doing rather than waiting for it: the stage comes
+// from the code that is doing the work.
+func (w *Workspaces) open(ctx context.Context, name string, workspace Workspace) (*Control, error) {
 	w.setProgress(name, Progress{Status: StatusOpening, Stage: "starting", Since: time.Now()})
-	control = New(Options{
+	control := New(Options{
 		OnStage:       w.stage(name),
 		Progress:      w.Progress,
 		Workspace:     workspace,
@@ -994,21 +1008,29 @@ func (w *Workspaces) loadRegistry() error {
 			}
 		}
 	}()
-	recorded := file.WorkspacesDir
 	for _, workspace := range file.Workspaces {
 		w.registry[workspace.Name] = workspace
 	}
-	// The flag wins for this run and is recorded, so where workspaces live is a decision
-	// that sticks rather than one that has to be repeated.
+	if err := w.resolveDir(file.WorkspacesDir); err != nil {
+		return err
+	}
+	return w.ensureGeneral()
+}
+
+// resolveDir decides where workspaces live: the flag for this run, then what the file recorded,
+// then the platform default. The flag is recorded, so where workspaces live is a decision that
+// sticks rather than one that has to be repeated.
+func (w *Workspaces) resolveDir(recorded string) error {
 	dir := w.opts.WorkspacesDir
 	if dir == "" {
 		dir = recorded
 	}
 	if dir == "" {
-		dir, err = DefaultWorkspacesDir()
+		defaultDir, err := DefaultWorkspacesDir()
 		if err != nil {
 			return err
 		}
+		dir = defaultDir
 	}
 	absolute, err := filepath.Abs(dir)
 	if err != nil {
@@ -1018,10 +1040,16 @@ func (w *Workspaces) loadRegistry() error {
 	if w.opts.WorkspacesDir != "" && w.opts.WorkspacesDir != recorded {
 		workerpool.Log("workspaces folder: %s", absolute)
 	}
+	return nil
+}
+
+// ensureGeneral makes the general workspace on a first run, then repairs a registry that was
+// hand-edited into two: exactly one workspace is general.
+func (w *Workspaces) ensureGeneral() error {
 	if _, ok := w.registry[GeneralWorkspaceName]; !ok {
 		// First run: the general workspace is a workspace like any other, created in the
-		// workspaces folder under its own name. An install that has one already keeps it
-		// where it was, because the registry says where it is.
+		// workspaces folder under its own name. An install that has one already keeps it where
+		// it was, because the registry says where it is.
 		absolute, err := filepath.Abs(filepath.Join(w.dir, GeneralWorkspaceName))
 		if err != nil {
 			return err
@@ -1039,8 +1067,8 @@ func (w *Workspaces) loadRegistry() error {
 			return err
 		}
 	}
-	// Exactly one general workspace: a registry hand-edited into two is repaired by
-	// keeping the first and clearing the rest.
+	// Exactly one general workspace: a registry hand-edited into two is repaired by keeping the
+	// first and clearing the rest.
 	seenGeneral := false
 	for name, workspace := range w.registry {
 		if !workspace.General {
@@ -1140,29 +1168,37 @@ func (w *Workspaces) Engines() []EngineInfo {
 		def := w.DefaultEngine()
 		infos := make([]EngineInfo, 0, len(sandbox.EngineNames()))
 		for _, name := range sandbox.EngineNames() {
-			info := EngineInfo{Name: name, Default: name == def}
-			manager := w.engineManager(name)
-			if manager != nil {
-				report := manager.Report()
-				info.Installed = report.Installed
-				info.Version = report.Version
-				info.Isolated = report.Isolated
-				if problem := report.Problem; problem != "" {
-					info.Problem = problem
-				}
-				// A probe this machine answers, not a claim from a table: bubblewrap checks a
-				// user namespace, the microVM engine checks its hypervisor.
-				if info.Problem == "" {
-					if err := manager.Driver().Usable(); err != nil {
-						info.Problem = err.Error()
-					}
-				}
-			}
-			infos = append(infos, info)
+			infos = append(infos, w.engineInfo(name, name == def))
 		}
 		w.engines = infos
 	})
 	return w.engines
+}
+
+// engineInfo is what this machine can say about one engine without starting it: whether it is
+// installed, what version, and — a probe the machine answers rather than a claim from a table —
+// whether it is usable here. Bubblewrap checks a user namespace; the microVM engine checks its
+// hypervisor.
+func (w *Workspaces) engineInfo(name string, isDefault bool) EngineInfo {
+	info := EngineInfo{Name: name, Default: isDefault}
+	manager := w.engineManager(name)
+	if manager == nil {
+		return info
+	}
+	report := manager.Report()
+	info.Installed = report.Installed
+	info.Version = report.Version
+	info.Isolated = report.Isolated
+	if report.Problem != "" {
+		info.Problem = report.Problem
+		return info
+	}
+	if info.Installed {
+		if err := manager.Driver().Usable(); err != nil {
+			info.Problem = err.Error()
+		}
+	}
+	return info
 }
 
 // sandboxManagerFor is the manager that owns a workspace's sandbox: the workspace's own engine

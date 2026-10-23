@@ -6,12 +6,13 @@ package control
 
 import (
 	"context"
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
-	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 )
 
 // SandboxSecret is one secret's delivery state, without its value.
@@ -136,51 +137,22 @@ func (c *Control) resolveSecrets(delivery sandbox.Delivery) sandboxSecrets {
 // cannot change a running process's environment, so its worker is restarted. A stopped
 // workspace has nothing to apply: its next start reads the vault.
 func (c *Control) ApplySecrets(ctx context.Context, deferRestart bool) error {
-	if !c.WorkerUp() {
-		return nil
+	manager, resolved, delivery, ok, err := c.secretsTarget()
+	if err != nil || !ok {
+		return err
 	}
-	manager := c.sandboxManager()
-	if manager == nil {
-		return nil
-	}
-	if problem := manager.Problem(); problem != nil {
-		return problem
-	}
-	delivery := manager.SecretDelivery()
-	resolved := c.resolveSecrets(delivery)
 	if resolved.problem != "" {
-		c.mu.Lock()
-		c.sandbox.Secrets = resolved.state
-		c.sandbox.SecretsProblem = resolved.problem
-		c.mu.Unlock()
-		c.publish(protocol.Frame{Type: "state"})
+		c.recordSecrets(resolved.state, resolved.problem, nil)
 		return nil
 	}
 	if delivery == sandbox.DeliveryEnvironment && manager.SecretEnvInWorker() {
-		// A value set from a card must not kill the turn that asked for it. If the caller
-		// says to defer, or a run is in flight, the worker keeps its old environment, the
-		// state says a restart is needed, and the restart happens when the run settles.
-		if !deferRestart && !c.AnyRunning() {
-			return c.RestartWorker(ctx)
-		}
-		c.mu.Lock()
-		c.sandbox.Secrets = resolved.state
-		c.sandbox.SecretsProblem = ""
-		c.sandbox.SecretsRestart = true
-		c.mu.Unlock()
-		c.publish(protocol.Frame{Type: "state"})
-		return nil
+		return c.applyWorkerSecrets(ctx, resolved, deferRestart)
 	}
 	change, err := manager.SecretsChanged(ctx, c.opts.Workspace.Path, resolved.delivered)
 	if err != nil {
 		return err
 	}
-	c.mu.Lock()
-	c.sandbox.Secrets = resolved.state
-	c.sandbox.SecretsProblem = ""
-	c.sandbox.SecretsRestart = change.RestartRequired
-	c.mu.Unlock()
-	c.publish(protocol.Frame{Type: "state"})
+	c.recordSecrets(resolved.state, "", &change.RestartRequired)
 	if change.RestartRequired && !deferRestart && !c.AnyRunning() {
 		// Nobody is running: apply it now instead of waiting for a submission that may be
 		// hours away. A run in flight, or a card answered during one, waits for that run.
@@ -189,16 +161,56 @@ func (c *Control) ApplySecrets(ctx context.Context, deferRestart bool) error {
 	return nil
 }
 
+// applyWorkerSecrets is the environment engine's answer: a value in the worker's own process
+// cannot change under a running turn, so it either restarts now or says a restart is owed.
+func (c *Control) applyWorkerSecrets(ctx context.Context, resolved sandboxSecrets, deferRestart bool) error {
+	if !deferRestart && !c.AnyRunning() {
+		return c.RestartWorker(ctx)
+	}
+	restart := true
+	c.recordSecrets(resolved.state, "", &restart)
+	return nil
+}
+
+// secretsTarget is what a change applies to. Not ok means there is nothing to apply it to — no
+// worker, or no engine — which is a state and not a failure. An err means the engine is there
+// and cannot be used.
+func (c *Control) secretsTarget() (*sandbox.Manager, sandboxSecrets, sandbox.Delivery, bool, error) {
+	if !c.WorkerUp() {
+		return nil, sandboxSecrets{}, sandbox.DeliveryEnvironment, false, nil
+	}
+	manager := c.sandboxManager()
+	if manager == nil {
+		return nil, sandboxSecrets{}, sandbox.DeliveryEnvironment, false, nil
+	}
+	if problem := manager.Problem(); problem != nil {
+		return nil, sandboxSecrets{}, sandbox.DeliveryEnvironment, false, problem
+	}
+	delivery := manager.SecretDelivery()
+	return manager, c.resolveSecrets(delivery), delivery, true, nil
+}
+
+// recordSecrets writes what the vault resolved and tells whoever is watching. A nil restart
+// leaves the pending flag alone: a resolution problem says nothing about one, and clearing it
+// would cancel a restart that is still owed.
+func (c *Control) recordSecrets(secrets []SandboxSecret, problem string, restart *bool) {
+	c.mu.Lock()
+	c.sandbox.Secrets = secrets
+	c.sandbox.SecretsProblem = problem
+	if restart != nil {
+		c.sandbox.SecretsRestart = *restart
+	}
+	c.mu.Unlock()
+	c.publish(protocol.Frame{Type: "state"})
+}
+
 // applyPendingSecretRestart finishes a change the engine deferred while a run was active.
 // It runs after a submission has settled every run. A substitute engine is stopped and
 // started so it reads the next-start config (the worker's next tool call wakes it); an
 // environment engine gets a fresh worker, whose environment is the delivery.
 func (c *Control) applyPendingSecretRestart(ctx context.Context) {
 	c.lifecycle.Lock()
-	c.mu.RLock()
-	restart := c.sandbox.SecretsRestart
-	c.mu.RUnlock()
-	if !restart || c.AnyRunning() {
+	if !c.restartPending() {
 		c.lifecycle.Unlock()
 		return
 	}
@@ -207,45 +219,77 @@ func (c *Control) applyPendingSecretRestart(ctx context.Context) {
 		c.lifecycle.Unlock()
 		return
 	}
-	applied := false
-	delivery := manager.SecretDelivery()
-	if delivery == sandbox.DeliverySubstitute {
-		policy := c.opts.Workspace.SandboxPolicy(c.opts.DataDir, c.opts.UserHome)
-		policy.Secrets = c.resolveSecrets(delivery).delivered
-		if err := manager.Stop(ctx, c.opts.Workspace.Path); err != nil {
-			workerpool.Log("restart sandbox for secrets: %v", err)
-		} else if _, err := manager.Produce(ctx, policy, filepath.Dir(c.opts.StoragePath)); err != nil {
-			workerpool.Log("restart sandbox for secrets: %v", err)
-		} else {
-			applied = true
-			c.mu.Lock()
-			c.sandbox.SecretsRestart = false
-			if status, err := manager.Status(ctx, c.opts.Workspace.Path); err == nil {
-				c.sandbox.Status = status
-			}
-			c.mu.Unlock()
-		}
-	} else if manager.SecretEnvInWorker() {
-		if err := c.RestartWorker(ctx); err != nil {
-			workerpool.Log("restart worker for secrets: %v", err)
-		} else {
-			applied = true
-		}
-	} else {
-		resolved := c.resolveSecrets(delivery)
-		if _, err := manager.SecretsChanged(ctx, c.opts.Workspace.Path, resolved.delivered); err != nil {
-			workerpool.Log("apply secrets for %s: %v", c.opts.Workspace.Name, err)
-		} else {
-			applied = true
-			c.mu.Lock()
-			c.sandbox.SecretsRestart = false
-			c.mu.Unlock()
-		}
-	}
+	applied := c.applyRestart(ctx, manager)
 	c.lifecycle.Unlock()
 	if applied {
 		c.resumeAfterSecrets(ctx)
 	}
+}
+
+// restartPending is whether a change is waiting, and nothing is running that has to finish
+// first.
+func (c *Control) restartPending() bool {
+	c.mu.RLock()
+	restart := c.sandbox.SecretsRestart
+	c.mu.RUnlock()
+	return restart && !c.AnyRunning()
+}
+
+// applyRestart does the kind of restart this engine needs. Three deliveries, three answers:
+// a substitute engine rereads its config on the next start, an environment engine needs a
+// new worker, and everything else applies in place.
+func (c *Control) applyRestart(ctx context.Context, manager *sandbox.Manager) bool {
+	delivery := manager.SecretDelivery()
+	switch {
+	case delivery == sandbox.DeliverySubstitute:
+		return c.restartSandboxForSecrets(ctx, manager, delivery)
+	case manager.SecretEnvInWorker():
+		return c.restartWorkerForSecrets(ctx)
+	default:
+		return c.reapplySecrets(ctx, manager, delivery)
+	}
+}
+
+func (c *Control) restartSandboxForSecrets(ctx context.Context, manager *sandbox.Manager, delivery sandbox.Delivery) bool {
+	policy := c.opts.Workspace.SandboxPolicy(c.opts.DataDir, c.opts.UserHome)
+	policy.Secrets = c.resolveSecrets(delivery).delivered
+	if err := manager.Stop(ctx, c.opts.Workspace.Path); err != nil {
+		workerpool.Log("restart sandbox for secrets: %v", err)
+		return false
+	}
+	if _, err := manager.Produce(ctx, policy, filepath.Dir(c.opts.StoragePath)); err != nil {
+		workerpool.Log("restart sandbox for secrets: %v", err)
+		return false
+	}
+	c.mu.Lock()
+	c.sandbox.SecretsRestart = false
+	if status, err := manager.Status(ctx, c.opts.Workspace.Path); err == nil {
+		c.sandbox.Status = status
+	}
+	c.mu.Unlock()
+	return true
+}
+
+func (c *Control) restartWorkerForSecrets(ctx context.Context) bool {
+	if err := c.RestartWorker(ctx); err != nil {
+		workerpool.Log("restart worker for secrets: %v", err)
+		return false
+	}
+	// The flag stays set: a fresh worker reads the vault on its way up, and that is what
+	// clears it.
+	return true
+}
+
+func (c *Control) reapplySecrets(ctx context.Context, manager *sandbox.Manager, delivery sandbox.Delivery) bool {
+	resolved := c.resolveSecrets(delivery)
+	if _, err := manager.SecretsChanged(ctx, c.opts.Workspace.Path, resolved.delivered); err != nil {
+		workerpool.Log("apply secrets for %s: %v", c.opts.Workspace.Name, err)
+		return false
+	}
+	c.mu.Lock()
+	c.sandbox.SecretsRestart = false
+	c.mu.Unlock()
+	return true
 }
 
 // QueueSecretContinuation remembers that a conversation's turn ended because a secret

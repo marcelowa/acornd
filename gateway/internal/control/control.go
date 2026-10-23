@@ -9,14 +9,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
-	"github.com/acornfall/acornfall/gateway/internal/vault"
-	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+	"github.com/acornfall/acornfall/gateway/internal/vault"
+	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 )
 
 // ErrNoProvider means the install has no usable credential yet. It is a state,
@@ -447,38 +448,70 @@ func (c *Control) State() State {
 // StateFor is everything a client needs for one conversation. Each tab asks for its own,
 // so two tabs can show two conversations without agreeing on an "active" one.
 func (c *Control) StateFor(conversationID string) State {
-	// The effective binding is computed before the snapshot lock, because
-	// inputsFor takes its own and nested read locks are not re-entrant here.
-	active := conversationID
-	if active == "" {
-		c.mu.RLock()
-		active = c.active
-		c.mu.RUnlock()
-	}
-	inputs := c.inputsFor(active)
-	isChild := c.isSubagent(active)
-	if isChild {
-		// The stored configuration wins for a conversation control does not own.
-		if info, found := c.conversationInfo(active); found {
-			if binding, ok := parseModelBinding(info.Model); ok {
-				inputs.explicit.Provider, inputs.explicit.ModelID = binding.Provider, binding.ModelID
-			}
-			if info.Thinking != "" {
-				inputs.explicit.ThinkingLevel = info.Thinking
-			}
-		}
-	}
-
-	// The registry lock is taken before this snapshot's, never inside it. The eviction sweep
-	// takes the registry lock and then reads a control, so a state build that read the
-	// registry from inside this lock would close the cycle and hang every request behind
-	// it. Read it first, and the two orders agree. The defaults are resolved here for the
-	// same reason: they take the lock themselves.
-	workspaces := c.workspaceList()
-	fallback, origins := c.effectiveDefaults()
-
+	parts := c.stateParts(conversationID)
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	return c.stateLocked(parts)
+}
+
+// stateParts is what a state needs and cannot read under the snapshot lock. The effective
+// binding is computed here because inputsFor takes its own read locks and they are not
+// re-entrant.
+//
+// The registry lock is also taken here, before the snapshot's, never inside it. The eviction
+// sweep takes the registry lock and then reads a control, so a state build that read the
+// registry from inside this lock would close the cycle and hang every request behind it. Read
+// it first, and the two orders agree. The defaults are resolved here for the same reason: they
+// take the lock themselves.
+type stateParts struct {
+	active     string
+	inputs     resolveInputs
+	subagent   bool
+	workspaces []WorkspaceState
+	fallback   Defaults
+	origins    DefaultOrigins
+}
+
+func (c *Control) stateParts(conversationID string) stateParts {
+	active := conversationID
+	if active == "" {
+		active = c.activeConversation()
+	}
+	inputs, child := c.conversationInputs(active)
+	workspaces := c.workspaceList()
+	fallback, origins := c.effectiveDefaults()
+	return stateParts{
+		active:     active,
+		inputs:     inputs,
+		subagent:   child,
+		workspaces: workspaces,
+		fallback:   fallback,
+		origins:    origins,
+	}
+}
+
+// conversationInputs is the binding resolution, plus whether control owns this conversation. A
+// child belongs to the harness, so what it stored wins over what this control would resolve.
+func (c *Control) conversationInputs(active string) (resolveInputs, bool) {
+	inputs := c.inputsFor(active)
+	child := c.isSubagent(active)
+	if !child {
+		return inputs, false
+	}
+	if info, found := c.conversationInfo(active); found {
+		if binding, ok := parseModelBinding(info.Model); ok {
+			inputs.explicit.Provider, inputs.explicit.ModelID = binding.Provider, binding.ModelID
+		}
+		if info.Thinking != "" {
+			inputs.explicit.ThinkingLevel = info.Thinking
+		}
+	}
+	return inputs, true
+}
+
+// stateLocked assembles the snapshot. The caller holds the read lock.
+func (c *Control) stateLocked(parts stateParts) State {
+	active := parts.active
 	state := State{
 		Workspace: WorkspaceState{
 			Name:    c.opts.Workspace.Name,
@@ -487,7 +520,7 @@ func (c *Control) StateFor(conversationID string) State {
 			General: c.opts.Workspace.General,
 			Running: c.workerUp,
 		},
-		Workspaces:    workspaces,
+		Workspaces:    parts.workspaces,
 		WorkspacesDir: c.opts.WorkspacesDir,
 		Engines:       c.engineList(),
 		Harness:       c.describe.Provider,
@@ -495,13 +528,13 @@ func (c *Control) StateFor(conversationID string) State {
 		Conversations: c.toConversations(c.conversations),
 		// Agent is the effective binding, so pickers show what will actually run;
 		// Inherited says which parts of it this conversation chose itself.
-		Agent:           inputs.effective(),
-		Subagent:        isChild,
+		Agent:           parts.inputs.effective(),
+		Subagent:        parts.subagent,
 		Resolved:        c.resolved[active],
-		DefaultModel:    fallback.Model,
-		DefaultThinking: fallback.Thinking,
-		DefaultAgent:    fallback.Agent,
-		DefaultsOrigin:  origins,
+		DefaultModel:    parts.fallback.Model,
+		DefaultThinking: parts.fallback.Thinking,
+		DefaultAgent:    parts.fallback.Agent,
+		DefaultsOrigin:  parts.origins,
 		WorkspaceDefaults: ScopeDefaults{
 			Model:    c.defaultModel,
 			Thinking: c.defaultThinking,
@@ -590,41 +623,51 @@ func (c *Control) loadSettings() string {
 	// The install layer first, and whatever this workspace's own file says: a workspace that
 	// has never saved settings has no file, and it still follows the install's defaults.
 	c.loadInstallDefaults()
-	if c.opts.SettingsPath == "" {
+	settings, ok := c.readSettings()
+	if !ok {
 		return ""
+	}
+	c.applySettings(settings)
+	return settings.Active
+}
+
+// readSettings reads this workspace's own file. No file, and a file nobody can read, are the
+// same answer: the install's defaults stand.
+func (c *Control) readSettings() (persistedSettings, bool) {
+	if c.opts.SettingsPath == "" {
+		return persistedSettings{}, false
 	}
 	payload, err := os.ReadFile(c.opts.SettingsPath)
 	if err != nil {
-		return ""
+		return persistedSettings{}, false
 	}
 	var settings persistedSettings
 	if err := json.Unmarshal(payload, &settings); err != nil {
-		return ""
+		return persistedSettings{}, false
 	}
+	return settings, true
+}
+
+// applySettings writes the file's layers into memory under one lock: half-applied settings are
+// a state nobody chose, and none of it does I/O.
+func (c *Control) applySettings(settings persistedSettings) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if settings.DefaultModel.Provider != "" && settings.DefaultModel.ModelID != "" {
-		c.mu.Lock()
 		c.defaultModel = protocol.ModelBinding{
 			Provider: settings.DefaultModel.Provider,
 			ModelID:  settings.DefaultModel.ModelID,
 		}
-		c.mu.Unlock()
 	}
-	c.mu.Lock()
 	c.defaultThinking = settings.DefaultThinking
 	c.defaultAgent = settings.DefaultAgent
 	c.generalPinned = settings.GeneralPinned
-	c.mu.Unlock()
-	if settings.Agents != nil {
-		c.mu.Lock()
-		for id, binding := range settings.Agents {
-			if binding.Provider == "" && binding.ModelID == "" && binding.Definition == "" {
-				continue
-			}
-			c.bindings[id] = binding
+	for id, binding := range settings.Agents {
+		if binding.Provider == "" && binding.ModelID == "" && binding.Definition == "" {
+			continue
 		}
-		c.mu.Unlock()
+		c.bindings[id] = binding
 	}
-	return settings.Active
 }
 
 func (c *Control) persist() {

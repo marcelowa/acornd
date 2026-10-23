@@ -6,10 +6,11 @@ package control
 
 import (
 	"context"
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
-	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 	"path/filepath"
 	"strings"
+
+	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 )
 
 // SandboxState says what the agent's tools can reach here. When Tools is false the tools
@@ -114,10 +115,7 @@ func (c *Control) stage(step string) {
 func (c *Control) provisionSandbox(ctx context.Context) SandboxState {
 	manager := c.sandboxManager()
 	if manager == nil {
-		if problem := c.sandboxProblem(); problem != nil {
-			return SandboxState{Problem: problem.Error()}
-		}
-		return SandboxState{Problem: "no sandbox is configured: tool execution is disabled"}
+		return c.sandboxRefusal()
 	}
 	report := manager.Report()
 	state := SandboxState{Engine: report.Engine, Version: report.Version, Isolated: report.Isolated}
@@ -138,38 +136,67 @@ func (c *Control) provisionSandbox(ctx context.Context) SandboxState {
 	state.Secrets = resolved.state
 	state.SecretsProblem = resolved.problem
 	if delivery == sandbox.DeliverySubstitute && resolved.problem == "" {
-		// A sandbox that was already here may have been created before a secret changed; the
-		// engine is reconciled on the way up, so a stopped workspace does not start with an
-		// old set.
-		change, err := manager.SecretsChanged(ctx, policy.Workspace, resolved.delivered)
-		if err != nil {
-			state.SecretsProblem = err.Error()
-		} else if change.RestartRequired {
-			// No worker is attached yet, so this is the safe moment to start the sandbox
-			// with the stored set: the first turn should not begin with an old environment.
-			if err := manager.Stop(ctx, policy.Workspace); err != nil {
-				state.SecretsRestart = true
-			} else if _, err := manager.Produce(ctx, policy, filepath.Dir(c.opts.StoragePath)); err != nil {
-				state.SecretsRestart = true
-				workerpool.Log("apply stored secrets to %s: %v", c.opts.Workspace.Name, err)
-			} else if status, err := manager.Status(ctx, policy.Workspace); err == nil {
-				state.Status = status
-			}
-		}
+		c.reconcileStoredSecrets(ctx, manager, policy, resolved, &state)
 	}
 	// Whether the sandbox that is running nests is what it was created with; this says what
-	// the next one gets, and why it cannot when it cannot. A workspace that disables
-	// nesting carries neither: its own setting, visible beside this state, is the reason.
+	// the next one gets, and why it cannot when it cannot. A workspace that disables nesting
+	// carries neither: its own setting, visible beside this state, is the reason.
 	if !policy.DisableVMNesting {
-		if support := manager.Nesting(ctx); support.Available {
-			state.Nested = true
-		} else {
-			state.NestedReason = support.Reason
-		}
+		state.Nested, state.NestedReason = nestingFor(ctx, manager)
 	}
 	if status, err := manager.Status(ctx, c.opts.Workspace.Path); err == nil {
 		state.Status = status
 	}
 	state.Tools = true
 	return state
+}
+
+// sandboxRefusal is why there is no sandbox, when there is not one: an engine this build has
+// and cannot use is a different answer from one it was never given.
+func (c *Control) sandboxRefusal() SandboxState {
+	if problem := c.sandboxProblem(); problem != nil {
+		return SandboxState{Problem: problem.Error()}
+	}
+	return SandboxState{Problem: "no sandbox is configured: tool execution is disabled"}
+}
+
+// reconcileStoredSecrets brings a sandbox that was here before a secret changed up to date. No
+// worker is attached yet, so this is the safe moment to restart it: the first turn should not
+// begin with an environment that predates the vault.
+func (c *Control) reconcileStoredSecrets(
+	ctx context.Context,
+	manager *sandbox.Manager,
+	policy sandbox.Policy,
+	resolved sandboxSecrets,
+	state *SandboxState,
+) {
+	change, err := manager.SecretsChanged(ctx, policy.Workspace, resolved.delivered)
+	if err != nil {
+		state.SecretsProblem = err.Error()
+		return
+	}
+	if !change.RestartRequired {
+		return
+	}
+	if err := manager.Stop(ctx, policy.Workspace); err != nil {
+		state.SecretsRestart = true
+		return
+	}
+	if _, err := manager.Produce(ctx, policy, filepath.Dir(c.opts.StoragePath)); err != nil {
+		state.SecretsRestart = true
+		workerpool.Log("apply stored secrets to %s: %v", c.opts.Workspace.Name, err)
+		return
+	}
+	if status, err := manager.Status(ctx, policy.Workspace); err == nil {
+		state.Status = status
+	}
+}
+
+// nestingFor is what the next sandbox gets, and the reason when the machine cannot do it.
+func nestingFor(ctx context.Context, manager *sandbox.Manager) (nested bool, reason string) {
+	support := manager.Nesting(ctx)
+	if support.Available {
+		return true, ""
+	}
+	return false, support.Reason
 }

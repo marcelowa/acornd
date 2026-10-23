@@ -9,12 +9,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
-	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 )
 
 // Defaults are one layer's answer to "what runs when nothing more specific does". The
@@ -105,35 +106,51 @@ func (c *Control) pinOne(conversationID string) bool {
 // clears its definition afterwards is asking to follow the default, and that has to keep
 // working, which is why this part happens once rather than on every listing.
 func (c *Control) pinMissing(conversations []protocol.ConversationInfo) {
-	changed := false
+	changed := c.pinGeneralDefinition(conversations)
+	if c.pinUnsetBindings(conversations) {
+		changed = true
+	}
+	if changed {
+		c.persist()
+	}
+}
 
+// pinGeneralDefinition gives, once, the general agent to every conversation whose binding
+// never named one. It is once because a conversation that clears its definition afterwards is
+// asking to follow the default, and that has to keep working.
+func (c *Control) pinGeneralDefinition(conversations []protocol.ConversationInfo) bool {
 	c.mu.RLock()
 	named := c.generalPinned
 	c.mu.RUnlock()
-	if !named && c.hasAgentDefinition(GeneralAgent) {
-		for _, conversation := range conversations {
-			if conversation.Parent != "" {
-				continue
-			}
-			c.mu.RLock()
-			existing := c.bindings[conversation.ID]
-			c.mu.RUnlock()
-			chose := existing.Provider != "" || existing.ModelID != "" || existing.Definition != ""
-			if !chose || existing.Definition != "" {
-				continue
-			}
-			existing.Definition = GeneralAgent
-			c.mu.Lock()
-			c.bindings[conversation.ID] = existing
-			c.mu.Unlock()
-			changed = true
-		}
-		c.mu.Lock()
-		c.generalPinned = true
-		c.mu.Unlock()
-		changed = true
+	if named || !c.hasAgentDefinition(GeneralAgent) {
+		return false
 	}
+	for _, conversation := range conversations {
+		if conversation.Parent != "" {
+			continue
+		}
+		c.mu.RLock()
+		existing := c.bindings[conversation.ID]
+		c.mu.RUnlock()
+		chose := existing.Provider != "" || existing.ModelID != "" || existing.Definition != ""
+		if !chose || existing.Definition != "" {
+			continue
+		}
+		existing.Definition = GeneralAgent
+		c.mu.Lock()
+		c.bindings[conversation.ID] = existing
+		c.mu.Unlock()
+	}
+	c.mu.Lock()
+	c.generalPinned = true
+	c.mu.Unlock()
+	return true
+}
 
+// pinUnsetBindings pins the conversations that never chose, from what resolves at that
+// moment. A conversation with a binding made a choice and is left alone, and so is a subagent.
+func (c *Control) pinUnsetBindings(conversations []protocol.ConversationInfo) bool {
+	changed := false
 	for _, conversation := range conversations {
 		c.mu.RLock()
 		existing := c.bindings[conversation.ID]
@@ -150,9 +167,7 @@ func (c *Control) pinMissing(conversations []protocol.ConversationInfo) {
 		c.mu.Unlock()
 		changed = true
 	}
-	if changed {
-		c.persist()
-	}
+	return changed
 }
 
 // hasAgentDefinition shares definitionExists' leniency: an empty catalog means the
@@ -179,52 +194,15 @@ func (c *Control) SetAgent(ctx context.Context, conversationID string, change Ag
 	explicit := c.bindings[conversationID]
 	c.mu.RUnlock()
 
-	if change.Provider != nil || change.ModelID != nil {
-		provider, modelID := explicit.Provider, explicit.ModelID
-		if change.Provider != nil {
-			provider = *change.Provider
-		}
-		if change.ModelID != nil {
-			modelID = *change.ModelID
-		}
-		if (provider == "") != (modelID == "") {
-			return errors.New("provider and modelId must be given together")
-		}
-		// Refused rather than stored: a conversation bound to a model the credentials do not
-		// reach cannot run, and the failure would arrive later as a provider error on its next
-		// prompt instead of here, where the choice was made. The picker can only offer models
-		// of authenticated providers, so this refuses what the interface cannot ask for.
-		if provider != "" && !c.isAvailable(c.Describe(), protocol.ModelBinding{Provider: provider, ModelID: modelID}) {
-			return unavailableModel(provider, modelID)
-		}
-		explicit.Provider, explicit.ModelID = provider, modelID
+	var err error
+	if explicit, err = c.modelChoice(explicit, change); err != nil {
+		return err
 	}
-	if change.Definition != nil && *change.Definition != "" {
-		// Strictly, unlike resolution: choosing a definition is a request that it exists, and
-		// the catalog here is what the worker reported. Resolution stays lenient because it
-		// also runs before the worker has described itself.
-		c.mu.RLock()
-		agents := c.catalog.Agents
-		c.mu.RUnlock()
-		known := false
-		for _, agent := range agents {
-			if agent.Name == *change.Definition {
-				known = true
-				break
-			}
-		}
-		if !known {
-			return fmt.Errorf("no agent definition named %q", *change.Definition)
-		}
-		explicit.Definition = *change.Definition
-	} else if change.Definition != nil {
-		explicit.Definition = ""
+	if explicit, err = c.definitionChoice(explicit, change); err != nil {
+		return err
 	}
-	if change.ThinkingLevel != nil {
-		if err := validateThinkingLevel(*change.ThinkingLevel); err != nil {
-			return err
-		}
-		explicit.ThinkingLevel = *change.ThinkingLevel
+	if explicit, err = c.thinkingChoice(explicit, change); err != nil {
+		return err
 	}
 
 	effective, err := c.effective(conversationID, explicit)
@@ -249,6 +227,75 @@ func (c *Control) SetAgent(ctx context.Context, conversationID string, change Ag
 	c.mu.Unlock()
 	c.persist()
 	return nil
+}
+
+// modelChoice folds a provider and model change into the explicit binding. Both are given
+// together or neither, and a model the credentials cannot reach is refused rather than stored:
+// bound to one, the conversation fails on its next prompt, where the reason for the choice is
+// gone. The picker only offers models of authenticated providers, so this refuses what the
+// interface cannot ask for.
+func (c *Control) modelChoice(explicit protocol.ModelBinding, change AgentChange) (protocol.ModelBinding, error) {
+	if change.Provider == nil && change.ModelID == nil {
+		return explicit, nil
+	}
+	provider, modelID := explicit.Provider, explicit.ModelID
+	if change.Provider != nil {
+		provider = *change.Provider
+	}
+	if change.ModelID != nil {
+		modelID = *change.ModelID
+	}
+	if (provider == "") != (modelID == "") {
+		return explicit, errors.New("provider and modelId must be given together")
+	}
+	if provider != "" && !c.isAvailable(c.Describe(), protocol.ModelBinding{Provider: provider, ModelID: modelID}) {
+		return explicit, unavailableModel(provider, modelID)
+	}
+	explicit.Provider, explicit.ModelID = provider, modelID
+	return explicit, nil
+}
+
+// definitionChoice is strict, unlike resolution: choosing a definition is a request that it
+// exist, and the catalog here is what the worker reported. Resolution stays lenient because it
+// also runs before the worker has described itself.
+func (c *Control) definitionChoice(explicit protocol.ModelBinding, change AgentChange) (protocol.ModelBinding, error) {
+	if change.Definition == nil {
+		return explicit, nil
+	}
+	if *change.Definition == "" {
+		explicit.Definition = ""
+		return explicit, nil
+	}
+	c.mu.RLock()
+	agents := c.catalog.Agents
+	c.mu.RUnlock()
+	if !agentExists(agents, *change.Definition) {
+		return explicit, fmt.Errorf("no agent definition named %q", *change.Definition)
+	}
+	explicit.Definition = *change.Definition
+	return explicit, nil
+}
+
+func (c *Control) thinkingChoice(explicit protocol.ModelBinding, change AgentChange) (protocol.ModelBinding, error) {
+	if change.ThinkingLevel == nil {
+		return explicit, nil
+	}
+	if err := validateThinkingLevel(*change.ThinkingLevel); err != nil {
+		return explicit, err
+	}
+	explicit.ThinkingLevel = *change.ThinkingLevel
+	return explicit, nil
+}
+
+// agentExists is the strict answer, and deliberately not definitionExists: an empty catalog
+// means the worker has not described itself yet, which resolution forgives and a choice does not.
+func agentExists(agents []protocol.AgentSummary, name string) bool {
+	for _, agent := range agents {
+		if agent.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // effective resolves what a conversation actually runs: an explicit choice, then
@@ -459,13 +506,7 @@ var thinkingLevels = []string{"off", "minimal", "low", "medium", "high", "xhigh"
 // not a setting that silently does nothing. An empty result means no preference
 // was expressed, and the model's own default stands.
 func resolveThinking(levels []string, preferred ...string) string {
-	reference := ""
-	for _, candidate := range preferred {
-		if candidate != "" {
-			reference = candidate
-			break
-		}
-	}
+	reference := firstPreference(preferred)
 	if reference == "" {
 		return ""
 	}
@@ -473,10 +514,7 @@ func resolveThinking(levels []string, preferred ...string) string {
 		// An unknown model has no declared levels, so nothing to resolve against.
 		return reference
 	}
-	supported := make(map[string]bool, len(levels))
-	for _, level := range levels {
-		supported[level] = true
-	}
+	supported := levelSet(levels)
 	for _, candidate := range preferred {
 		if candidate != "" && supported[candidate] {
 			return candidate
@@ -484,6 +522,34 @@ func resolveThinking(levels []string, preferred ...string) string {
 	}
 	// Nothing preferred is available: the closest level below the most specific
 	// preference, then the lowest the model has.
+	if closest := closestBelow(reference, supported); closest != "" {
+		return closest
+	}
+	return lowestThinking(levels)
+}
+
+// firstPreference is the most specific level anyone expressed: the conversation's, then the
+// definition's, then the install default.
+func firstPreference(preferred []string) string {
+	for _, candidate := range preferred {
+		if candidate != "" {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func levelSet(levels []string) map[string]bool {
+	supported := make(map[string]bool, len(levels))
+	for _, level := range levels {
+		supported[level] = true
+	}
+	return supported
+}
+
+// closestBelow is the most specific level the model has, below the one asked for. Empty means
+// the model offers nothing lower, and the caller falls back to its lowest.
+func closestBelow(reference string, supported map[string]bool) string {
 	best := ""
 	for _, level := range thinkingLevels {
 		if level == reference {
@@ -493,10 +559,7 @@ func resolveThinking(levels []string, preferred ...string) string {
 			best = level
 		}
 	}
-	if best != "" {
-		return best
-	}
-	return lowestThinking(levels)
+	return best
 }
 
 // lowestThinking returns the weakest level in a set, ordered by the scale rather
@@ -785,6 +848,20 @@ func (c *Control) deriveLastResort(describe protocol.Describe) (protocol.ModelBi
 		}
 		return binding, nil
 	}
+	if binding, ok := preferredModel(describe); ok {
+		return binding, nil
+	}
+	if binding, ok := firstAuthenticated(describe); ok {
+		return binding, nil
+	}
+	return protocol.ModelBinding{}, fmt.Errorf(
+		"%w: run `acornfall provider add <provider> <api-key>` or connect one in the UI", ErrNoProvider,
+	)
+}
+
+// preferredModel is the decision part of the last resort: a model this install asked for by
+// name, and only from a provider whose credentials are there to run it.
+func preferredModel(describe protocol.Describe) (protocol.ModelBinding, bool) {
 	for _, wanted := range lastResortModels {
 		for _, provider := range describe.Providers {
 			if !provider.Authenticated {
@@ -792,20 +869,24 @@ func (c *Control) deriveLastResort(describe protocol.Describe) (protocol.ModelBi
 			}
 			for _, model := range provider.Models {
 				if model.ID == wanted {
-					return protocol.ModelBinding{Provider: provider.ID, ModelID: wanted}, nil
+					return protocol.ModelBinding{Provider: provider.ID, ModelID: wanted}, true
 				}
 			}
 		}
 	}
+	return protocol.ModelBinding{}, false
+}
+
+// firstAuthenticated is the guess at the end of the line: the first provider that can run
+// something, and the first model it lists.
+func firstAuthenticated(describe protocol.Describe) (protocol.ModelBinding, bool) {
 	for _, provider := range describe.Providers {
 		if !provider.Authenticated || len(provider.Models) == 0 {
 			continue
 		}
-		return protocol.ModelBinding{Provider: provider.ID, ModelID: provider.Models[0].ID}, nil
+		return protocol.ModelBinding{Provider: provider.ID, ModelID: provider.Models[0].ID}, true
 	}
-	return protocol.ModelBinding{}, fmt.Errorf(
-		"%w: run `acornfall provider add <provider> <api-key>` or connect one in the UI", ErrNoProvider,
-	)
+	return protocol.ModelBinding{}, false
 }
 
 func (c *Control) isAvailable(describe protocol.Describe, binding protocol.ModelBinding) bool {

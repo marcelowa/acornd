@@ -8,11 +8,63 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
-	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 	"strings"
 	"time"
+
+	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 )
+
+// expandCommand asks the worker to expand a slash command, because that is where the templates
+// live; an unknown name comes back unchanged, so a message that happens to start with a slash is
+// never rewritten. A builtin is an action rather than a turn: it is run here, recorded, and
+// reported as done, and nothing is sent to the model.
+func (c *Control) expandCommand(ctx context.Context, conversationID, text string) (string, bool, error) {
+	var expanded struct {
+		Text    string `json:"text"`
+		Command string `json:"command"`
+		Action  string `json:"action"`
+	}
+	if err := c.worker.CallInto(ctx, protocol.Command{Type: "expand", Text: text}, &expanded); err != nil {
+		workerpool.Log("expanding %q: %v", text, err)
+		return text, false, nil
+	}
+	if expanded.Action != "compact" && expanded.Action != "reset" {
+		if expanded.Command != "" {
+			return expanded.Text, false, nil
+		}
+		return text, false, nil
+	}
+	now := time.Now().UnixMilli()
+	c.mu.Lock()
+	c.promptedAt[conversationID] = now
+	c.actionAt[conversationID] = now
+	c.mu.Unlock()
+	// The busy sign goes up with the click, not with the answer: the worker answers this call
+	// only once the act and its record are in.
+	c.publish(protocol.Frame{Type: "state"})
+	var response struct {
+		ConversationID string `json:"conversationId"`
+	}
+	err := c.worker.CallInto(ctx, protocol.Command{
+		Type:           "action",
+		ConversationID: conversationID,
+		Text:           strings.TrimSpace(text),
+		Action:         expanded.Action,
+	}, &response)
+	c.mu.Lock()
+	delete(c.promptedAt, conversationID)
+	delete(c.actionAt, conversationID)
+	c.mu.Unlock()
+	if err != nil {
+		return text, false, err
+	}
+	// The invocation was a message like any other: whatever was being typed for this room has
+	// been said, and every machine should hear that it is gone.
+	c.clearDraft(conversationID)
+	c.publish(protocol.Frame{Type: "state"})
+	return text, true, nil
+}
 
 func (c *Control) Prompt(ctx context.Context, conversationID, text string, when protocol.WhenBusy, attachments []string) error {
 	// A prompt admitted while a secret restart runs must not start a tool call against the
@@ -28,52 +80,16 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 	if err := c.ensureConversation(ctx, conversationID); err != nil {
 		return err
 	}
-	// A message that opens with a slash may be a command. The worker expands it, because
-	// that is where the templates live; unknown names come back unchanged, so a message
-	// that happens to start with a slash is never rewritten.
+	// A message that opens with a slash may be a command.
 	if strings.HasPrefix(strings.TrimSpace(text), "/") {
-		var expanded struct {
-			Text    string `json:"text"`
-			Command string `json:"command"`
-			Action  string `json:"action"`
+		expanded, acted, err := c.expandCommand(ctx, conversationID, text)
+		if err != nil {
+			return err
 		}
-		if err := c.worker.CallInto(ctx, protocol.Command{Type: "expand", Text: text}, &expanded); err != nil {
-			workerpool.Log("expanding %q: %v", text, err)
-		} else if expanded.Action == "compact" || expanded.Action == "reset" {
-			// A builtin is an action, not a turn: the worker runs it, then records
-			// the invocation as a user message. Nothing is sent to the model.
-			now := time.Now().UnixMilli()
-			c.mu.Lock()
-			c.promptedAt[conversationID] = now
-			c.actionAt[conversationID] = now
-			c.mu.Unlock()
-			// The busy sign goes up with the click, not with the answer: the worker
-			// answers this call only once the act and its record are in.
-			c.publish(protocol.Frame{Type: "state"})
-			var response struct {
-				ConversationID string `json:"conversationId"`
-			}
-			err := c.worker.CallInto(ctx, protocol.Command{
-				Type:           "action",
-				ConversationID: conversationID,
-				Text:           strings.TrimSpace(text),
-				Action:         expanded.Action,
-			}, &response)
-			c.mu.Lock()
-			delete(c.promptedAt, conversationID)
-			delete(c.actionAt, conversationID)
-			c.mu.Unlock()
-			if err != nil {
-				return err
-			}
-			// The invocation was a message like any other: whatever was being typed for this
-			// room has been said, and every machine should hear that it is gone.
-			c.clearDraft(conversationID)
-			c.publish(protocol.Frame{Type: "state"})
+		if acted {
 			return nil
-		} else if expanded.Command != "" {
-			text = expanded.Text
 		}
+		text = expanded
 	}
 	if err := c.worker.CallInto(ctx, protocol.Command{
 		Type:           "prompt",
