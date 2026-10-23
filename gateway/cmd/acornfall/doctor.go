@@ -31,61 +31,99 @@ func doctorCommand(argv []string) {
 		log.Fatalf("acornfall doctor: %v", err)
 	}
 
-	engines := sandboxReports(resolved)
-	defaultEngine := sandbox.NewTier(resolved, "", nil).Default()
+	report := gatherDoctor(resolved)
+	if *asJSON {
+		printDoctorJSON(report)
+	} else {
+		printDoctor(report)
+	}
+	// The exit code is about this install, not about an engine it will not use: a machine
+	// without a hypervisor that runs on bwrap is working, and says so. An engine that is not
+	// downloaded yet is not a failure either — the first start fetches it.
+	if report.chosen.Problem != "" && report.chosen.Installed {
+		os.Exit(1)
+	}
+}
+
+// doctorReport is everything doctor asks before it decides how to say it.
+type doctorReport struct {
+	engines      []engineReport
+	defaultName  string
+	chosen       sandbox.Report
+	health       update.Preflight
+	requirements []ready.Requirement
+}
+
+// gatherDoctor asks every manager doctor already owns. Report-only: doctor changes nothing.
+func gatherDoctor(dataDir string) doctorReport {
+	engines := sandboxReports(dataDir)
+	defaultName := sandbox.NewTier(dataDir, "", nil).Default()
 	var chosen sandbox.Report
 	for _, engine := range engines {
 		if engine.Default {
 			chosen = engine.Report
 		}
 	}
-	updater := update.New(resolved, "")
+	updater := update.New(dataDir, "")
 	if err := updater.Open(); err != nil {
 		log.Fatalf("acornfall doctor: %v", err)
 	}
-	// Preflight never blocks on the network: an offline machine still gets
-	// every local answer, and the release check degrades to a sentence.
+	// Preflight never blocks on the network: an offline machine still gets every local answer,
+	// and the release check degrades to a sentence.
 	checkCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	health := updater.Preflight(checkCtx)
-	requirements := ready.Check(readyInput(resolved, updater, health, chosen))
-	if *asJSON {
-		payload, err := json.MarshalIndent(struct {
-			Engines   []engineReport      `json:"engines"`
-			Default   string              `json:"default"`
-			Update    update.Preflight    `json:"update"`
-			Readiness []ready.Requirement `json:"readiness"`
-		}{Engines: engines, Default: defaultEngine, Update: health, Readiness: requirements}, "", "  ")
-		if err != nil {
-			log.Fatalf("acornfall doctor: %v", err)
-		}
-		fmt.Println(string(payload))
-	} else {
-		printEngines(engines, defaultEngine)
-		fmt.Println("update")
-		fmt.Printf("  version   %s\n", health.Version)
-		fmt.Printf("  worker    %s\n", health.Worker)
-		fmt.Printf("  bun       %s\n", health.Bun)
-		if health.Latest != "" {
-			fmt.Printf("  releases  %s (latest)\n", health.Latest)
-		} else {
-			fmt.Printf("  releases  %s\n", health.Releases)
-		}
-		fmt.Println("readiness")
-		for _, requirement := range requirements {
-			if requirement.OK {
-				fmt.Printf("  %-11s yes %s\n", requirement.Name, requirement.Detail)
-				continue
-			}
-			fmt.Printf("  %-11s NO  %s\n", requirement.Name, requirement.Detail)
-			fmt.Printf("  %-11s     fix: %s\n", "", requirement.Fix)
-		}
+	return doctorReport{
+		engines:      engines,
+		defaultName:  defaultName,
+		chosen:       chosen,
+		health:       health,
+		requirements: ready.Check(readyInput(dataDir, updater, health, chosen)),
 	}
-	// The exit code is about this install, not about an engine it will not use: a machine
-	// without a hypervisor that runs on bwrap is working, and says so. An engine that is not
-	// downloaded yet is not a failure either — the first start fetches it.
-	if chosen.Problem != "" && chosen.Installed {
-		os.Exit(1)
+}
+
+func printDoctorJSON(report doctorReport) {
+	payload, err := json.MarshalIndent(struct {
+		Engines   []engineReport      `json:"engines"`
+		Default   string              `json:"default"`
+		Update    update.Preflight    `json:"update"`
+		Readiness []ready.Requirement `json:"readiness"`
+	}{Engines: report.engines, Default: report.defaultName, Update: report.health, Readiness: report.requirements}, "", "  ")
+	if err != nil {
+		log.Fatalf("acornfall doctor: %v", err)
+	}
+	fmt.Println(string(payload))
+}
+
+func printDoctor(report doctorReport) {
+	printEngines(report.engines, report.defaultName)
+	printUpdate(report.health)
+	printReadiness(report.requirements)
+}
+
+func printUpdate(health update.Preflight) {
+	fmt.Println("update")
+	fmt.Printf("  version   %s\n", health.Version)
+	fmt.Printf("  worker    %s\n", health.Worker)
+	fmt.Printf("  bun       %s\n", health.Bun)
+	if health.Latest != "" {
+		fmt.Printf("  releases  %s (latest)\n", health.Latest)
+		return
+	}
+	fmt.Printf("  releases  %s\n", health.Releases)
+}
+
+// printReadiness is one line per requirement, and a second line for the fix when there is one:
+// a requirement that is not met is a sentence someone can act on, not a red mark.
+func printReadiness(requirements []ready.Requirement) {
+	fmt.Println("readiness")
+	for _, requirement := range requirements {
+		if requirement.OK {
+			fmt.Printf("  %-11s yes %s\n", requirement.Name, requirement.Detail)
+			continue
+		}
+		fmt.Printf("  %-11s NO  %s\n", requirement.Name, requirement.Detail)
+		fmt.Printf("  %-11s     fix: %s\n", "", requirement.Fix)
 	}
 }
 
@@ -135,25 +173,31 @@ func printEngines(engines []engineReport, defaultEngine string) {
 			version = " " + version
 		}
 		fmt.Printf("%s %-14s %s%s\n", marker, engine.Engine, stateOf(engine), version)
-		if engine.Path != "" && engine.Installed {
-			fmt.Printf("  %-14s at %s\n", "", engine.Path)
-		}
-		if engine.Default {
-			if engine.Nesting.Available {
-				fmt.Printf("  %-14s nesting yes\n", "")
-			} else if engine.Isolated {
-				fmt.Printf("  %-14s nesting no (%s)\n", "", engine.Nesting.Reason)
-			}
-		}
-		if engine.Problem != "" && engine.Installed {
-			fmt.Printf("  %-14s problem %s\n", "", engine.Problem)
-		}
+		printEngineDetail(engine)
 	}
 	if defaultEngine == "" {
 		fmt.Println("\nno engine can run here: acornfall setup says what this machine needs")
 		return
 	}
 	fmt.Printf("\n* this machine will use %s\n", defaultEngine)
+}
+
+// printEngineDetail is the lines under an engine's row: where it is, whether it can nest, and
+// what is wrong with it. Each is about that engine, so each is decided there.
+func printEngineDetail(engine engineReport) {
+	if engine.Path != "" && engine.Installed {
+		fmt.Printf("  %-14s at %s\n", "", engine.Path)
+	}
+	if engine.Default {
+		if engine.Nesting.Available {
+			fmt.Printf("  %-14s nesting yes\n", "")
+		} else if engine.Isolated {
+			fmt.Printf("  %-14s nesting no (%s)\n", "", engine.Nesting.Reason)
+		}
+	}
+	if engine.Problem != "" && engine.Installed {
+		fmt.Printf("  %-14s problem %s\n", "", engine.Problem)
+	}
 }
 
 // stateOf is one word for what an engine can do here, written so the three read as a column.
