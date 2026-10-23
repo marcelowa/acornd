@@ -191,67 +191,36 @@ func (s *Server) secretDelete(w http.ResponseWriter, r *http.Request, store *vau
 // secretRequestAnswer is the card's endpoint: the value comes from the interface, goes
 // straight into the vault, and never through the worker. The tool waiting on the other side
 // learns only that it was set (and whether a restart is needed) or that it was cancelled.
+// secretAnswerBody is the card's answer. A pointer is "not mentioned": an answer that names no
+// description keeps the one the tool asked with.
+type secretAnswerBody struct {
+	Value       string    `json:"value"`
+	Description *string   `json:"description"`
+	Hosts       *[]string `json:"hosts"`
+	Scope       string    `json:"scope"`
+	Cancelled   bool      `json:"cancelled"`
+}
+
 func (s *Server) secretRequestAnswer(w http.ResponseWriter, r *http.Request) {
 	store, ok := s.secretStore(w)
 	if !ok {
 		return
 	}
-	ctl, err := s.controlFor(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
-		return
-	}
-	requestID := r.PathValue("request")
-	prompt, ok := ctl.SecretPrompt(requestID)
+	ctl, prompt, ok := s.waitingSecret(w, r)
 	if !ok {
-		http.Error(w, "no secret request is waiting", http.StatusNotFound)
 		return
 	}
-	if prompt.ConversationID != r.PathValue("id") {
-		http.Error(w, "no secret request is waiting for this conversation", http.StatusNotFound)
-		return
-	}
-	var body struct {
-		Value       string    `json:"value"`
-		Description *string   `json:"description"`
-		Hosts       *[]string `json:"hosts"`
-		Scope       string    `json:"scope"`
-		Cancelled   bool      `json:"cancelled"`
-	}
+	var body secretAnswerBody
 	if !decode(w, r, &body) {
 		return
 	}
 	if body.Cancelled {
-		if !ctl.ResolveSecret(requestID, true, "", false, "the user cancelled") {
-			http.Error(w, "no secret request is waiting", http.StatusNotFound)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"cancelled": true})
+		s.cancelSecret(w, ctl, prompt)
 		return
 	}
-	if body.Value == "" {
-		http.Error(w, "a secret needs a value", http.StatusBadRequest)
-		return
-	}
-	scope := vault.Workspace
-	switch body.Scope {
-	case "", "workspace":
-	case "global":
-		scope = vault.Global
-	default:
-		http.Error(w, `scope is "workspace" or "global"`, http.StatusBadRequest)
-		return
-	}
-	description := prompt.Description
-	if body.Description != nil {
-		description = strings.TrimSpace(*body.Description)
-	}
-	hosts := prompt.Hosts
-	if body.Hosts != nil {
-		hosts = *body.Hosts
-	}
-	if ctl.SecretNeedsHost() && len(hosts) == 0 {
-		http.Error(w, "this engine needs at least one allowed host for a secret: name the host the value may reach", http.StatusBadRequest)
+	scope, hosts, refusal := answerTarget(ctl, prompt, body)
+	if refusal != "" {
+		http.Error(w, refusal, http.StatusBadRequest)
 		return
 	}
 	workspace := ""
@@ -260,7 +229,7 @@ func (s *Server) secretRequestAnswer(w http.ResponseWriter, r *http.Request) {
 	}
 	meta, err := store.Upsert(vault.Upsert{
 		Name:        prompt.Name,
-		Description: description,
+		Description: answerDescription(prompt, body),
 		Scope:       scope,
 		Workspace:   workspace,
 		Value:       body.Value,
@@ -279,11 +248,84 @@ func (s *Server) secretRequestAnswer(w http.ResponseWriter, r *http.Request) {
 		// continuation itself once that restart lands; the user does not resume.
 		ctl.QueueSecretContinuation(prompt.ConversationID, prompt.Name)
 	}
-	ctl.ResolveSecret(requestID, false, string(scope), restart, "")
+	ctl.ResolveSecret(prompt.RequestID, false, string(scope), restart, "")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"secret":          meta,
 		"restartRequired": restart,
 	})
+}
+
+// waitingSecret is the request the path names, refused when it is not waiting or not this
+// conversation's: a card answered after its turn ended must not write a value into the vault.
+func (s *Server) waitingSecret(w http.ResponseWriter, r *http.Request) (*control.Control, control.SecretPrompt, bool) {
+	ctl, ok := s.withControl(w, r)
+	if !ok {
+		return nil, control.SecretPrompt{}, false
+	}
+	prompt, waiting := ctl.SecretPrompt(r.PathValue("request"))
+	if !waiting {
+		http.Error(w, "no secret request is waiting", http.StatusNotFound)
+		return nil, control.SecretPrompt{}, false
+	}
+	if prompt.ConversationID != r.PathValue("id") {
+		http.Error(w, "no secret request is waiting for this conversation", http.StatusNotFound)
+		return nil, control.SecretPrompt{}, false
+	}
+	return ctl, prompt, true
+}
+
+func (s *Server) cancelSecret(w http.ResponseWriter, ctl *control.Control, prompt control.SecretPrompt) {
+	if !ctl.ResolveSecret(prompt.RequestID, true, "", false, "the user cancelled") {
+		http.Error(w, "no secret request is waiting", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"cancelled": true})
+}
+
+// answerTarget is where the value goes and what it may reach, or the sentence saying why the
+// card cannot be answered as written.
+func answerTarget(ctl *control.Control, prompt control.SecretPrompt, body secretAnswerBody) (vault.Scope, []string, string) {
+	if body.Value == "" {
+		return "", nil, "a secret needs a value"
+	}
+	scope, err := answerScope(body.Scope)
+	if err != nil {
+		return "", nil, err.Error()
+	}
+	hosts, refusal := answerHosts(ctl, prompt, body)
+	return scope, hosts, refusal
+}
+
+// answerScope is the one word on the wire that says where the value belongs.
+func answerScope(value string) (vault.Scope, error) {
+	switch value {
+	case "", "workspace":
+		return vault.Workspace, nil
+	case "global":
+		return vault.Global, nil
+	}
+	return "", errors.New(`scope is "workspace" or "global"`)
+}
+
+// answerDescription is what the card said, or what the tool asked with.
+func answerDescription(prompt control.SecretPrompt, body secretAnswerBody) string {
+	if body.Description == nil {
+		return prompt.Description
+	}
+	return strings.TrimSpace(*body.Description)
+}
+
+// answerHosts is the set the value may reach: what the card names, or what the tool asked with.
+// An engine that substitutes the value needs one, because it has nowhere else to send it.
+func answerHosts(ctl *control.Control, prompt control.SecretPrompt, body secretAnswerBody) ([]string, string) {
+	hosts := prompt.Hosts
+	if body.Hosts != nil {
+		hosts = *body.Hosts
+	}
+	if ctl.SecretNeedsHost() && len(hosts) == 0 {
+		return hosts, "this engine needs at least one allowed host for a secret: name the host the value may reach"
+	}
+	return hosts, ""
 }
 
 // applySecrets asks the running workspaces a change affects to pick it up. The store already
