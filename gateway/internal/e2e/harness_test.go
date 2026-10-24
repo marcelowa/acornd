@@ -158,6 +158,9 @@ type settings struct {
 	// providers, none of which authenticate in the curated test environment, and no
 	// last resort to guess from.
 	noDevProvider bool
+	// ownBinary runs this gateway from a copy of the suite's binary. An update replaces the
+	// binary that ran, and the suite's own build must not be the one swapped out from under it.
+	ownBinary bool
 	// updateURL is where the release lookups go for this gateway. It is a setting rather than an
 	// environment variable because tests run in parallel: one test's mirror must not be another
 	// test's, and os.Setenv while another test reads the environment is a data race.
@@ -168,6 +171,11 @@ type settings struct {
 // user message wins, its tools are called, and then its Reply is the answer.
 func withScript(rules ...scriptRule) func(*settings) {
 	return func(s *settings) { s.script = rules }
+}
+
+// withOwnBinary runs the gateway from its own copy of the binary, which an update may replace.
+func withOwnBinary() func(*settings) {
+	return func(s *settings) { s.ownBinary = true }
 }
 
 // withUpdateURL points this gateway's release lookups at a mirror.
@@ -324,7 +332,20 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 		hostEngine = true
 		engineEnv = "host"
 	}
-	cmd := exec.Command(gatewayBin, args...)
+	binary := gatewayBin
+	if s.cfg.ownBinary {
+		// Copied after the setup functions, so a test may write the version this build runs before
+		// the process starts: without one a development build has nothing to compare a release to.
+		payload, err := os.ReadFile(gatewayBin)
+		if err != nil {
+			t.Fatalf("copy the gateway binary: %v", err)
+		}
+		binary = filepath.Join(s.DataDir, "acornfall")
+		if err := os.WriteFile(binary, payload, 0o755); err != nil {
+			t.Fatalf("copy the gateway binary: %v", err)
+		}
+	}
+	cmd := exec.Command(binary, args...)
 	// A curated environment: the test must not inherit a real install's home, token, or
 	// provider credentials, or it would be testing someone else's configuration. The
 	// switches that decide how this install behaves are forwarded explicitly.
