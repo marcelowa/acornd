@@ -340,6 +340,53 @@ func TestARunningCommandKeepsTheSandboxAwake(t *testing.T) {
 	}
 }
 
+// A command can end with a process in another session still holding its stdout. `timeout 20
+// pasta …` does exactly that: timeout runs the command in a process group of its own, and pasta
+// ignores SIGTERM. Killing the run's group then leaves that process alive with the pipe in its
+// hands. The run has ended all the same, and the client waiting for its exit must hear so;
+// before this it kept the shell a zombie and no exit ever came, so the tool call it belonged to
+// hung forever — past its own timeout and past an abort.
+func TestAKilledRunEndsEvenWhenAGrandchildHoldsThePipes(t *testing.T) {
+	_, socket := startServer(t)
+	c := dial(t, socket)
+	c.send(t, Request{
+		Type: "run",
+		ID:   "1",
+		Argv: []string{"/bin/sh", "-c", "setsid sh -c 'echo held; sleep 5' & wait"},
+		Env:  map[string]string{"PATH": "/usr/bin:/bin"},
+		Dir:  "/",
+	})
+	// Wait until the grandchild is really running and holding the pipes before killing the run:
+	// it prints "held" after it has its own session and the inherited stdout.
+	_ = c.conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	held := false
+	for !held {
+		var event Event
+		if err := c.decoder.Decode(&event); err != nil {
+			t.Fatalf("the command did not start: %v", err)
+		}
+		if event.Type == "chunk" && event.Stream == "stdout" {
+			data, _ := base64.StdEncoding.DecodeString(event.Data)
+			held = strings.Contains(string(data), "held")
+		}
+	}
+
+	c.send(t, Request{Type: "kill", ID: "1"})
+	_ = c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for {
+		var event Event
+		if err := c.decoder.Decode(&event); err != nil {
+			t.Fatalf("the run never ended after it was killed: %v", err)
+		}
+		if event.Type == "exit" {
+			if event.Stopped != "killed" {
+				t.Fatalf("the exit should say it was killed: %+v", event)
+			}
+			return
+		}
+	}
+}
+
 func TestPingAnswersWithTheVersion(t *testing.T) {
 	_, socket := startServer(t)
 	c := dial(t, socket)

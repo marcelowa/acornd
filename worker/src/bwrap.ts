@@ -72,6 +72,14 @@ const systemPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 const KEEPALIVE_INTERVAL_MS = 5 * 60_000;
 
 /**
+ * How long a killed command is given to end before the client stops waiting. The supervisor ends
+ * a killed run promptly, but an older one can be wedged on a process that left the run's group
+ * and still holds its output, and a tool call must settle even then: an abort or a timeout is the
+ * answer, not a turn that waits forever.
+ */
+const KILL_GRACE_MS = 3_000;
+
+/**
  * What a command's PATH starts with. Tools a workspace installs itself land in its own home, so
  * the two folders every unprivileged installer uses come first — otherwise a toolchain that
  * survived one command would still not be found by the next one.
@@ -207,29 +215,47 @@ class BwrapClient extends WorkspaceFiles implements SandboxClient {
 	): Promise<ExecResult> {
 		const stdout: Uint8Array[] = [];
 		const stderr: Uint8Array[] = [];
-		let stopped: "aborted" | "timeout" | undefined;
-		const kill = (reason: "aborted" | "timeout"): void => {
-			if (stopped !== undefined) return;
-			stopped = reason;
-			socket.write(`${JSON.stringify({ type: "kill", id: request.id })}\n`);
-		};
-		const abort = (): void => kill("aborted");
-		if (options.signal?.aborted === true) abort();
-		else options.signal?.addEventListener("abort", abort, { once: true });
-		let timer: ReturnType<typeof setTimeout> | undefined;
-		if (options.timeoutMs !== undefined && options.timeoutMs > 0) {
-			timer = setTimeout(() => kill("timeout"), options.timeoutMs);
-		}
-		socket.write(`${JSON.stringify(request)}\n`);
 
 		return new Promise<ExecResult>((resolve, reject) => {
 			let buffered = "";
-			const finish = (result: ExecResult | Error): void => {
+			let stopped: "aborted" | "timeout" | undefined;
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			let grace: ReturnType<typeof setTimeout> | undefined;
+			const done = (code: number): ExecResult => ({
+				code,
+				stdout: concatChunks(stdout),
+				stderr: concatChunks(stderr),
+			});
+			const finish = (outcome: ExecResult | Error): void => {
 				if (timer !== undefined) clearTimeout(timer);
+				if (grace !== undefined) clearTimeout(grace);
 				options.signal?.removeEventListener("abort", abort);
-				if (result instanceof Error) reject(result);
-				else resolve({ ...result, ...(stopped === undefined ? {} : { stopped }) });
+				if (outcome instanceof Error) reject(outcome);
+				else resolve({ ...outcome, ...(stopped === undefined ? {} : { stopped }) });
 			};
+			const kill = (reason: "aborted" | "timeout"): void => {
+				if (stopped !== undefined) return;
+				stopped = reason;
+				socket.write(`${JSON.stringify({ type: "kill", id: request.id })}\n`);
+				// The supervisor is expected to end the run at once. It cannot when a process that
+				// left the run's group still holds the output pipe, and an older supervisor never
+				// will; the turn must not wait on either.
+				grace = setTimeout(() => finish(done(143)), KILL_GRACE_MS);
+				grace.unref?.();
+			};
+			const abort = (): void => kill("aborted");
+
+			if (options.signal?.aborted === true) {
+				// Nothing was sent, so there is nothing to kill: settle as the abort it is.
+				stopped = "aborted";
+				finish(done(143));
+				return;
+			}
+			options.signal?.addEventListener("abort", abort, { once: true });
+			if (options.timeoutMs !== undefined && options.timeoutMs > 0) {
+				timer = setTimeout(() => kill("timeout"), options.timeoutMs);
+			}
+			socket.write(`${JSON.stringify(request)}\n`);
 			socket.on("data", (chunk: Buffer) => {
 				buffered += chunk.toString("utf8");
 				let newline = buffered.indexOf("\n");

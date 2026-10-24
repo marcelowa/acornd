@@ -190,11 +190,21 @@ func (b *Bwrap) Egress() error {
 // anything, and a machine that refuses that refuses every network-on workspace at start. It runs
 // one cheap command there, which is what a start does anyway.
 func probePasta(pasta string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	return probePastaWithin(pasta, 10*time.Second)
+}
+
+// probePastaWithin is probePasta with the wait it is allowed, so a test can ask the question in a
+// second instead of ten. The wait is the context's; WaitDelay bounds the other half — pasta can
+// leave a process holding the output pipe, and CombinedOutput waits for every writer to close it.
+// A probe that waits forever is a sandbox that never starts, which is what a pasta stuck on a
+// missing /dev/net/tun produced inside a dev workspace.
+func probePastaWithin(pasta string, wait time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), wait)
 	defer cancel()
 	command := exec.CommandContext(ctx, pasta,
 		"-q", "-t", "none", "-u", "none", "-T", "none", "-U", "none", "--no-map-gw",
 		"-a", "10.0.2.15", "-n", "24", "-g", "10.0.2.2", "--", "/bin/true")
+	command.WaitDelay = time.Second
 	output, err := command.CombinedOutput()
 	if err != nil {
 		detail := strings.TrimSpace(string(output))

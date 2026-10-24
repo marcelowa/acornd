@@ -25,7 +25,7 @@ export interface Fake {
 }
 
 /** A supervisor that speaks the protocol and runs what it is told, on this machine. */
-export function fakeSupervisor(dir: string): Promise<Fake> {
+export function fakeSupervisor(dir: string, options: { ignoreKill?: boolean } = {}): Promise<Fake> {
 	const socket = join(dir, "supervisor.sock");
 	const captured: Captured[] = [];
 	const keepalives: { type: string }[] = [];
@@ -90,7 +90,11 @@ export function fakeSupervisor(dir: string): Promise<Fake> {
 					keepalives.push({ type: request.type });
 					send({ type: "ready" });
 				}
-				if (request.type === "kill" && request.id !== undefined) {
+				if (
+					request.type === "kill" &&
+					request.id !== undefined &&
+					options.ignoreKill !== true
+				) {
 					const child = children.get(request.id);
 					if (child !== undefined) {
 						try {

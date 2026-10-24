@@ -33,13 +33,16 @@ interface Opened {
 }
 
 /** A workspace, its config, and a supervisor to talk to. */
-async function open(network: "pasta" | "off" = "off"): Promise<Opened> {
+async function open(
+	network: "pasta" | "off" = "off",
+	options: { ignoreKill?: boolean } = {},
+): Promise<Opened> {
 	const root = await realpath(await mkdtemp(join(tmpdir(), "acornfall-bwrap-")));
 	opened.push(root);
 	const dir = join(root, "work");
 	const state = join(root, "state");
 	for (const path of [dir, state, join(state, "home")]) await mkdir(path, { recursive: true });
-	const fake = await fakeSupervisor(root);
+	const fake = await fakeSupervisor(root, options);
 	const name = "acornfall-test";
 	await writeFile(
 		join(state, `${name}.json`),
@@ -184,6 +187,22 @@ test("a sandbox that is not answering says so, and what to do, without guessing"
 	const failure = client.exec("true", {});
 	expect(failure).rejects.toThrow("is not answering");
 	expect(failure).rejects.toThrow("restarting acornfall starts it again");
+});
+
+test("a command the supervisor cannot end is still reported as stopped", async () => {
+	// The fake takes the kill request and does nothing with it: a supervisor wedged on a process
+	// that left the run's group holding the output pipe. The client's own grace is what settles
+	// the call, so an abort or a timeout cannot leave a turn waiting forever.
+	const { client, fake } = await open("off", { ignoreKill: true });
+	try {
+		const started = Date.now();
+		const result = await client.exec("sleep 30", { timeoutMs: 50 });
+		expect(result.stopped).toBe("timeout");
+		expect(result.code).toBe(143);
+		expect(Date.now() - started).toBeLessThan(5000);
+	} finally {
+		await fake.close();
+	}
 });
 
 test("an attached worker tells its sandbox it is still here", async () => {

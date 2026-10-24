@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/supervise"
 )
@@ -208,6 +209,27 @@ func TestBwrapCreateWritesWhatTheWorkspaceRunsUnder(t *testing.T) {
 	info, err := os.Stat(config.DataDir)
 	if err != nil || !info.IsDir() {
 		t.Fatalf("home was not created: %v", err)
+	}
+}
+
+// A pasta that leaves a process behind holding its output must be a refusal, not a hang. The
+// probe runs before a sandbox starts, and a CombinedOutput that waits for every writer is a
+// workspace that never opens — the two minutes a dev workspace spent on this were the same bug as
+// a killed run that never ends, one layer down.
+func TestAPastaThatLeavesAProcessBehindIsRefusedNotHung(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "pasta")
+	// It holds stdout open in another session and ignores the kill, like a pasta waiting for a
+	// device that is not there.
+	body := "#!/bin/sh\nsetsid sh -c 'sleep 6' &\nwait\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("write the fake pasta: %v", err)
+	}
+	start := time.Now()
+	if err := probePastaWithin(script, 200*time.Millisecond); err == nil {
+		t.Fatal("a pasta that never answers should be refused")
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("the probe waited %s; it should bound the wait", elapsed)
 	}
 }
 

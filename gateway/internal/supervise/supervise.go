@@ -378,24 +378,50 @@ func (s *Server) start(connection *conn, request Request) {
 	go pump(stdout, "stdout")
 	go pump(stderr, "stderr")
 
+	go s.finish(current, request.ID, command, stdout, stderr, &streams)
+}
+
+// finish reaps a command and reports its exit to the clients waiting on it.
+//
+// It reaps first, and it does not let the pipes hold the run open. A command can exit while a
+// process it started — one that left its process group, as `timeout` does for the command it
+// runs — still holds the write end of stdout. Waiting for that to close before calling Wait is a
+// run that never ends: the shell stays a zombie and the client waiting on the exit hears nothing,
+// past its own timeout and past an abort.
+func (s *Server) finish(current *run, id string, command *exec.Cmd, stdout, stderr io.ReadCloser, streams *sync.WaitGroup) {
+	err := command.Wait()
+	drained := make(chan struct{})
 	go func() {
 		streams.Wait()
-		err := command.Wait()
-		s.mu.Lock()
-		delete(s.runs, request.ID)
-		stopped := current.stopped
-		s.mu.Unlock()
-		event := Event{Type: "exit", ID: request.ID, Stopped: stopped}
-		if command.ProcessState != nil {
-			event.Code = command.ProcessState.ExitCode()
-		}
-		if err != nil && command.ProcessState == nil {
-			// It never ran: Start succeeded and Wait failed, which is a broken process.
-			event.Type = "error"
-			event.Error = err.Error()
-		}
-		s.emit(current, event)
+		close(drained)
 	}()
+	select {
+	case <-drained:
+	case <-time.After(pipeDrainGrace):
+		// The command is gone and the rest of the output has been given its moment: the read
+		// ends are ours, so close them and let the pumps finish.
+		_ = stdout.Close()
+		_ = stderr.Close()
+		<-drained
+	}
+	// The pumps are done with them either way; leaving the read ends open would leak a file
+	// descriptor per command.
+	_ = stdout.Close()
+	_ = stderr.Close()
+	s.mu.Lock()
+	delete(s.runs, id)
+	stopped := current.stopped
+	s.mu.Unlock()
+	event := Event{Type: "exit", ID: id, Stopped: stopped}
+	if command.ProcessState != nil {
+		event.Code = command.ProcessState.ExitCode()
+	}
+	if err != nil && command.ProcessState == nil {
+		// It never ran: Start succeeded and Wait failed, which is a broken process.
+		event.Type = "error"
+		event.Error = err.Error()
+	}
+	s.emit(current, event)
 }
 
 // validateStart refuses what cannot be run, and says which: the sandbox stopping, an id that is not
@@ -427,17 +453,38 @@ func startProcess(request Request) (command *exec.Cmd, stdout, stderr io.ReadClo
 	command.Env = environment(request.Env)
 	command.Dir = request.Dir
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if stdout, err = command.StdoutPipe(); err != nil {
+	// Pipes of our own rather than StdoutPipe: a *os.File writer is passed straight to the child,
+	// so Wait does not wait for an io.Copy goroutine, and the read ends stay ours to close when
+	// the command has exited. A command that leaves a writer behind cannot pin the run open.
+	stdoutRead, stdoutWrite, err := os.Pipe()
+	if err != nil {
 		return nil, nil, nil, err
 	}
-	if stderr, err = command.StderrPipe(); err != nil {
+	stderrRead, stderrWrite, err := os.Pipe()
+	if err != nil {
+		_ = stdoutRead.Close()
+		_ = stdoutWrite.Close()
 		return nil, nil, nil, err
 	}
+	command.Stdout = stdoutWrite
+	command.Stderr = stderrWrite
 	if err := command.Start(); err != nil {
+		for _, file := range []*os.File{stdoutRead, stdoutWrite, stderrRead, stderrWrite} {
+			_ = file.Close()
+		}
 		return nil, nil, nil, err
 	}
-	return command, stdout, stderr, nil
+	// The child holds its own copies; leaving the parent's write ends open would keep the pipes
+	// from ever reaching EOF, which is what the pumps wait for.
+	_ = stdoutWrite.Close()
+	_ = stderrWrite.Close()
+	return command, stdoutRead, stderrRead, nil
 }
+
+// pipeDrainGrace bounds the wait for a run's output after the command itself has exited. A normal
+// command closes its pipes with it; this only elapses when a process that left the run's group
+// still holds one open, and the run has to end anyway.
+const pipeDrainGrace = time.Second
 
 // listenSocket is the supervisor's socket: only its owner may talk to it, which is why the mode is
 // set before anything is accepted.
