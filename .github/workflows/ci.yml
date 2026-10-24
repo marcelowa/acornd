@@ -85,12 +85,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - name: Install a browser
+      - name: Check the browser
+        # The image ships Google Chrome; Ubuntu's chromium package is a snap, and on a runner it
+        # intermittently misses puppeteer's thirty-second window to print its endpoint — three of
+        # five runs on 2026-10-28 failed there with nothing changed in the code under test. Chrome
+        # is already here, so the suite runs in it rather than installing a browser that may not
+        # start under confinement.
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq chromium-browser || sudo apt-get install -y -qq chromium
-          command -v chromium || command -v chromium-browser
+          command -v google-chrome
+          google-chrome --version
       - run: make ui-check
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
 
   verify:
     # The name branch protection requires. It runs nothing itself: it is the fan-in, so a job added
