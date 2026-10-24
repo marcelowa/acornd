@@ -14,7 +14,7 @@ internal/control     94  169
 internal/sandbox    100  409
 internal/supervise   87   47
 internal/update      90  256
-internal/vault       88  105
+internal/vault       95  114
 internal/workerpool  87    7
 internal/ready       86   31
 #
@@ -26,6 +26,11 @@ internal/ready       86   31
 #     names, models.go:578 compares scale ranks, and both are unique by construction, so `<` and
 #     `<=` are the same function;
 #   one is the two-minute budget on turn.go:267, which is only observable by waiting two minutes.
+#
+# vault's four are the same shape: two sort comparators on secret names (vault.go:178, :180, and
+# :637 twice), and a name is unique in a list of secrets by definition, so `<` and `<=` are one
+# function. Its fifth is a time-out: the mutation makes the store keep its lock, and gremlins
+# reports that as timed out rather than killed.
 # Those are the honest end of a mutation score, not a gap in the tests.
 #
 # Not measured, on purpose: `internal/httpapi` and `cmd/acornfall` keep their tests in the
