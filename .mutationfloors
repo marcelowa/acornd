@@ -9,7 +9,7 @@
 #
 # Measured 2026-10-27, worst first. `sandbox` at 100 means every mutation in its covered code is
 # caught, which is what a pass over the engine should leave behind.
-internal/control     75
+internal/control     84
 internal/sandbox    100
 internal/supervise   87
 internal/update      85

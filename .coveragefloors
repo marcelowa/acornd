@@ -6,7 +6,7 @@
 # clause — and the reason is a fact about the code, not about the test suite.
 
 cmd/acornfall        68   -- root, a namespace, or an os.Exit: the plan's application, the probe re-exec, netns
-internal/control     79
+internal/control     80
 internal/httpapi     68
 internal/netns       33   -- a netlink shim: needs CAP_NET_ADMIN to run at all
 internal/protocol   100
