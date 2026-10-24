@@ -219,3 +219,48 @@ func TestAnUpdateWaitsForRuns(t *testing.T) {
 		t.Errorf("the refusal should say a run is in the way: %q", body)
 	}
 }
+
+// Every route that works inside a workspace refuses one that is not there, in the same words and
+// with the same status. It is one rule in one place — the edge resolves the workspace before the
+// handler runs — and this is the test that keeps it that way: a route that reached its handler
+// with a missing workspace would be a nil dereference or, worse, an answer about the wrong one.
+func TestEveryWorkspaceRouteRefusesAWorkspaceThatIsNotThere(t *testing.T) {
+	t.Parallel()
+	s := start(t)
+	c := s.client()
+
+	routes := []struct {
+		method string
+		path   string
+		body   any
+		// want is 409 everywhere but the status route, which answers 404: it is the one route that
+		// is *about* a workspace existing, so "not found" is its own answer rather than a conflict
+		// with something else.
+		want int
+	}{
+		{"GET", "/api/workspaces/nowhere/state", nil, 409},
+		{"GET", "/api/workspaces/nowhere/status", nil, 404},
+		{"GET", "/api/workspaces/nowhere/conversations", nil, 409},
+		{"POST", "/api/workspaces/nowhere/conversations", nil, 409},
+		{"GET", "/api/workspaces/nowhere/agents", nil, 409},
+		{"GET", "/api/workspaces/nowhere/commands", nil, 409},
+		{"GET", "/api/workspaces/nowhere/usage", nil, 409},
+		{"POST", "/api/workspaces/nowhere/conversations/1/messages", map[string]any{"text": "hello"}, 409},
+		{"POST", "/api/workspaces/nowhere/conversations/1/draft", map[string]any{"text": "hi"}, 409},
+		{"POST", "/api/workspaces/nowhere/conversations/1/abort", nil, 409},
+		{"POST", "/api/workspaces/nowhere/attachments", nil, 409},
+		{"POST", "/api/workspaces/nowhere/providers/login", map[string]any{"providerId": "faux", "authType": "api_key"}, 409},
+		{"POST", "/api/workspaces/nowhere/providers/logout", map[string]any{"providerId": "faux"}, 409},
+		{"POST", "/api/workspaces/nowhere/providers/refresh", nil, 409},
+		{"POST", "/api/workspaces/nowhere/auth/answer", map[string]any{"promptId": "p", "value": "v"}, 409},
+		{"POST", "/api/workspaces/nowhere/auth/cancel", map[string]any{"promptId": "p"}, 409},
+		{"POST", "/api/workspaces/nowhere/default-model", map[string]any{"provider": "faux", "modelId": "m"}, 409},
+		{"GET", "/api/workspaces/nowhere/conversations/1/policy", nil, 409},
+	}
+	for _, route := range routes {
+		status, body := c.do(route.method, route.path, route.body)
+		if status != route.want {
+			t.Errorf("%s %s = %d, want %d (%s)", route.method, route.path, status, route.want, strings.TrimSpace(string(body)))
+		}
+	}
+}
