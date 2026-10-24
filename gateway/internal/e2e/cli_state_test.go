@@ -179,3 +179,69 @@ func reportKeys(report map[string]any) []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// A workspace's secrets are listed as what its commands actually receive: its own entries plus the
+// install's, with the wider one shadowed where both name the same thing. The list is per workspace
+// because that is the only place the answer is "what will this command get".
+func TestASecretsListForOneWorkspaceIsWhatItReceives(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	folder := t.TempDir()
+	if _, stderr, code := cli(t, dir, "", "workspace", "add", "demo", folder, "--sandbox", "host", "--data-dir", dir); code != 0 {
+		t.Fatalf("workspace add: exit %d\n%s", code, stderr)
+	}
+
+	// The install's own secret, and if the working directory is a workspace, its own.
+	if _, stderr, code := cli(t, dir, "v\n", "secret", "add", "SHARED", "--global", "--description", "from the install", "--hosts", "api.example.com", "--data-dir", dir); code != 0 {
+		t.Fatalf("secret add: exit %d\n%s", code, stderr)
+	}
+
+	out, stderr, code := cli(t, dir, "", "secret", "list", "--workspace", "demo", "--data-dir", dir)
+	if code != 0 {
+		t.Fatalf("secret list --workspace: exit %d\n%s", code, stderr)
+	}
+	if !strings.Contains(out, "SHARED") {
+		t.Errorf("a workspace receives the install's secrets:\n%s", out)
+	}
+	if strings.Contains(out, "v\n") || strings.Contains(out, "s3cret") {
+		t.Errorf("the list must never carry a value:\n%s", out)
+	}
+
+	// A workspace that is not in the registry is refused by name: a list for a folder nobody has
+	// would answer "nothing", which reads as "no secrets" rather than "no workspace".
+	if _, stderr, code := cli(t, dir, "", "secret", "list", "--workspace", "nowhere", "--data-dir", dir); code == 0 {
+		t.Errorf("an unknown workspace: exit 0\n%s", stderr)
+	} else if !strings.Contains(stderr, "nowhere") {
+		t.Errorf("the refusal should name the workspace: %q", stderr)
+	}
+}
+
+// The provider keys an install holds are listed by name and type, never by value, and a machine
+// with none says so rather than printing an empty table.
+func TestTheModelListNamesTheProviderKeysItHas(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	out, _, code := cli(t, dir, "", "model", "list", "--data-dir", dir)
+	if code != 0 {
+		t.Fatalf("model list: exit %d", code)
+	}
+	if !strings.Contains(out, "none") {
+		t.Errorf("with no keys the list says so:\n%s", out)
+	}
+
+	// A key is stored by `provider add`, which reads the value from stdin so it never reaches argv.
+	if _, stderr, code := cli(t, dir, "sk-test-value\n", "provider", "add", "faux", "--data-dir", dir); code != 0 {
+		t.Fatalf("provider add: exit %d\n%s", code, stderr)
+	}
+	out, _, code = cli(t, dir, "", "model", "list", "--data-dir", dir)
+	if code != 0 {
+		t.Fatalf("model list: exit %d", code)
+	}
+	if !strings.Contains(out, "faux") {
+		t.Errorf("the list should name the provider and its type:\n%s", out)
+	}
+	if strings.Contains(out, "sk-test-value") {
+		t.Errorf("the list must never carry a key:\n%s", out)
+	}
+}
