@@ -55,7 +55,7 @@ reply quoting the request. `make dev` uses it.
 | T1 | A prompt produces a transcript: the message, the prompt that was sent, the answer, and the spend. | `TestPromptRoundTrip` |
 | T2 | Tool calls run for real, and both the call and its output are recorded. | `TestAToolCallRunsAndIsRecorded` |
 | T3 | Steering joins a running turn instead of starting a second one. | `TestSteeringJoinsTheRunningTurn` |
-| T4 | Abort stops the run, and the conversation is usable afterwards. | `TestAbortStopsTheRun` |
+| T4 | Abort stops the run, and the conversation is usable afterwards — including when the command left a process in another session holding its output: the supervisor reaps and reports the exit, and the worker stops waiting after a grace rather than hanging the turn ([ADR 0029](adr/0029-a-run-ends-when-its-command-does.md)). | `TestAbortStopsTheRun`, `TestAKilledRunEndsEvenWhenAGrandchildHoldsThePipes`, `worker/test/bwrap.test.ts` |
 | T5 | A conversation can choose its own model and thinking level. | `TestThinkingIsClampedButTheRequestIsRemembered` |
 | T6 | A level the model cannot express is clamped, and what was asked for is kept and reported. | `TestThinkingIsClampedButTheRequestIsRemembered` + `gateway/internal/control/thinking_test.go` |
 | T7 | Spend is reported per conversation. | `TestUsageIsReportedForAWorkspace` |
