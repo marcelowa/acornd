@@ -5,7 +5,7 @@
 # The target is 95% for everything. Where a package cannot reach it, the line says why in one
 # clause — and the reason is a fact about the code, not about the test suite.
 
-cmd/acornfall                      72
+cmd/acornfall                      74
 internal/control     80
 internal/httpapi                    75
 internal/netns                      51
