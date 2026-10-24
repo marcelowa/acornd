@@ -64,15 +64,25 @@ function covers(pattern, file) {
 // move up: a ratchet is the difference between a bar and a wish.
 function floors(path, fallback) {
 	const perPackage = new Map();
+	const reasons = new Map();
 	for (const line of readFileSync(path, "utf8").split("\n")) {
 		const text = line.trim();
 		if (text === "" || text.startsWith("#")) continue;
-		const [name, rest] = text.split(/\s+/, 2);
-		const value = Number(rest?.split(" ")[0]);
+		// Split at the first gap rather than on whitespace: a `split(/\s+/, 2)` keeps two tokens
+		// and throws the rest of the line away, which is where a package's reason lives.
+		const gap = text.search(/\s/);
+		const name = gap === -1 ? text : text.slice(0, gap);
+		const rest = gap === -1 ? "" : text.slice(gap).trim();
+		const value = Number(rest.split(" ")[0]);
 		if (name === undefined || !Number.isFinite(value)) throw new Error(`${path}: cannot read "${text}"`);
 		perPackage.set(name, value);
+		// The clause after the number is the reason this package cannot reach the target, and a
+		// reason is not the same thing as work left to do. The report says which is which.
+		const clause = rest?.includes("--") ? rest.slice(rest.indexOf("--") + 2).trim() : "";
+		if (clause !== "") reasons.set(name, clause);
 	}
-	return (name) => perPackage.get(name) ?? fallback;
+	const floor = (name) => perPackage.get(name) ?? fallback;
+	return Object.assign(floor, { reason: (name) => reasons.get(name) ?? "" });
 }
 
 function report(profile, floor, ignorePath, root, floorPath) {
@@ -145,10 +155,18 @@ function report(profile, floor, ignorePath, root, floorPath) {
 		console.error(`\ncoverage: not met\n  - ${problems.join("\n  - ")}`);
 		process.exit(1);
 	}
-	const below95 = rows.filter(([name, pkg]) => percent(pkg.covered, pkg.statements) < 95).map(([name]) => name);
+	// Below the target is two different things: work left to do, and a package whose floor line
+	// carries the reason it cannot get there. Printing them together made the second look like the
+	// first, which is how an exception stops being exceptional.
+	const short = rows.filter(([name, pkg]) => percent(pkg.covered, pkg.statements) < 95).map(([name]) => name);
+	const grinding = short.filter((name) => floorFor.reason(name) === "");
+	const excepted = short.filter((name) => floorFor.reason(name) !== "");
 	console.log(`\ncoverage: every package at or above its floor`);
-	if (below95.length > 0) {
-		console.log(`to reach 95%: ${below95.join(", ")}`);
+	if (grinding.length > 0) {
+		console.log(`to reach 95%: ${grinding.join(", ")}`);
+	}
+	for (const name of excepted) {
+		console.log(`excepted at ${floorFor(name)}%: ${name} — ${floorFor.reason(name)}`);
 	}
 }
 
