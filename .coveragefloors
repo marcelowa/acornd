@@ -13,7 +13,7 @@ internal/protocol   100
 internal/ready       83
 internal/sandbox     78
 internal/supervise   84
-internal/update      77
+internal/update      78
 internal/vault       85
 internal/workerpool  85
 web                  75

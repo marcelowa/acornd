@@ -16,7 +16,7 @@
 internal/control     84
 internal/sandbox    100
 internal/supervise   87
-internal/update      85
+internal/update      87
 internal/vault       88
 internal/workerpool  87
 internal/ready       86
