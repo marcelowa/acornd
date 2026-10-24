@@ -1,3 +1,4 @@
+import type { ImageContent, TextContent, UserMessage } from "@earendil-works/pi-ai";
 /**
  * Attachments: files riding with a message, stored where the sandbox reads
  * them and the host cannot — the workspace's hidden folder, never a host
@@ -168,4 +169,51 @@ export function kindName(mime: string): string {
 	if (mime.startsWith("audio/")) return "audio file";
 	if (mime.startsWith("video/")) return "video file";
 	return "file";
+}
+
+/**
+ * The content a prompt turns into. The text may be absent rather than empty: the gateway's command
+ * carries it with omitempty, so a message that is only files arrives without one at all, and a
+ * screenshot on its own is still a message. Reading it as undefined used to fail the whole send
+ * with a TypeError instead of reaching the model.
+ */
+export function messageContent(
+	text: string | undefined,
+	files: readonly { meta: AttachmentMeta; bytes: Uint8Array }[],
+): UserMessage["content"] {
+	const words = text ?? "";
+	if (files.length === 0) return words;
+	const header = words.trim() === "" ? [] : [words, ""];
+	const blocks: (TextContent | ImageContent)[] = [
+		{
+			type: "text",
+			text: [
+				...header,
+				...files.map(({ meta }) => attachmentLine(meta)),
+				...files.flatMap(({ meta }) =>
+					shapeFor(meta.mime, meta.name) === "path"
+						? [
+								`${meta.name} is a ${kindName(meta.mime)} (${formatAttachmentSize(meta.size)}) at ${ATTACHMENTS_DIR}/${storedName(meta.id, meta.name)}.`,
+							]
+						: [],
+				),
+			].join("\n"),
+		},
+	];
+	for (const { meta, bytes } of files) {
+		const shape = shapeFor(meta.mime, meta.name);
+		if (shape === "image") {
+			blocks.push({
+				type: "image",
+				data: Buffer.from(bytes).toString("base64"),
+				mimeType: partMime(meta.mime, meta.name),
+			});
+		} else if (shape === "text" && bytes.byteLength <= INLINE_TEXT_MAX_BYTES) {
+			blocks.push({
+				type: "text",
+				text: `--- ${meta.name} ---\n${Buffer.from(bytes).toString("utf8")}`,
+			});
+		}
+	}
+	return blocks;
 }

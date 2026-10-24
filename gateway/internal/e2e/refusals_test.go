@@ -264,3 +264,65 @@ func TestEveryWorkspaceRouteRefusesAWorkspaceThatIsNotThere(t *testing.T) {
 		}
 	}
 }
+
+// The two verbs that carry a message and the one that stops it, each refusing with a sentence: an
+// empty message, a whenBusy nobody implements, and an abort of a conversation with nothing running
+// are three different mistakes and three different answers.
+func TestTheTurnVerbsRefuseWhatTheyCannotDo(t *testing.T) {
+	t.Parallel()
+	s := start(t)
+	c := s.client()
+	root := c.waitForConversation("general")
+	path := c.conversationPath("general", root)
+
+	// Nothing to send: a message needs words or files, and the answer says so rather than queueing
+	// an empty turn the model would be charged for.
+	status, body := c.do("POST", path+"/messages", map[string]any{"text": "   "})
+	if status != 409 {
+		t.Errorf("an empty message: %d %s", status, body)
+	}
+	if !strings.Contains(string(body), "empty message") {
+		t.Errorf("the refusal should say the message was empty: %q", body)
+	}
+
+	// A whenBusy this build does not implement is the caller's mistake, and the answer lists the
+	// three that exist.
+	status, body = c.do("POST", path+"/messages", map[string]any{"text": "hello", "whenBusy": "queue-it"})
+	if status != 400 {
+		t.Errorf("an unknown whenBusy: %d %s", status, body)
+	}
+	if !strings.Contains(string(body), "steer, followUp or reject") {
+		t.Errorf("the refusal should name what exists: %q", body)
+	}
+
+	// An abort with nothing running is not an error the screen can act on, but it is not a silent
+	// success either: the answer says what happened, and the conversation is still there.
+	status, body = c.do("POST", path+"/abort", nil)
+	if status != 200 && status != 409 {
+		t.Errorf("aborting an idle conversation: %d %s", status, body)
+	}
+
+	// And a draft is written for a conversation that exists, answering with what was stored rather
+	// than the whole state: a keystroke is not a change to anything else.
+	var stored struct {
+		Text      string `json:"text"`
+		UpdatedAt int64  `json:"updatedAt"`
+	}
+	c.post(path+"/draft", map[string]any{"text": "half a thought"}, &stored)
+	if stored.Text != "half a thought" || stored.UpdatedAt == 0 {
+		t.Errorf("the draft's answer is what was stored: %+v", stored)
+	}
+}
+
+// A prompt that is only files rides alone: a screenshot with no words is still a message, and
+// refusing it would make the composer's own attachment button useless.
+func TestAMessageOfFilesAloneIsAccepted(t *testing.T) {
+	t.Parallel()
+	workspaceResources(t)
+	s := start(t, withScript(scriptRule{Match: "", Reply: "seen"}))
+	c := s.client()
+	root := c.waitForConversation("general")
+
+	attached := c.upload("general", "shot.txt", "text/plain", []byte("a file with no words beside it"))
+	c.post(c.conversationPath("general", root)+"/messages", map[string]any{"attachments": []string{attached}}, nil)
+}

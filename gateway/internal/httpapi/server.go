@@ -71,6 +71,28 @@ func (s *Server) stateChange(w http.ResponseWriter, r *http.Request, change func
 // stateBody is stateChange with one JSON body read first. A body that will not decode has
 // already been answered.
 func stateBody[B any](s *Server, w http.ResponseWriter, r *http.Request, change func(*control.Control, B) error) {
+	bodyChange(s, w, r, func(ctl *control.Control, body B) (bool, error) {
+		if err := change(ctl, body); err != nil {
+			return false, err
+		}
+		writeJSON(w, http.StatusOK, ctl.State())
+		return true, nil
+	})
+}
+
+// ownAnswer is stateBody for a handler whose answer is its own value rather than the state: a
+// draft's answer is the stored draft, and a keystroke is not a change to anything else. The
+// change writes the answer itself and says so, so the state is not written after it — two JSON
+// documents on one response is a body no client can parse.
+func ownAnswer[B any](s *Server, w http.ResponseWriter, r *http.Request, change func(*control.Control, B) error) {
+	bodyChange(s, w, r, func(ctl *control.Control, body B) (bool, error) {
+		return true, change(ctl, body)
+	})
+}
+
+// bodyChange is the shared half: the workspace, the body, and the error the caller gets for a
+// mutation it refused. answered is whether the change wrote its own response.
+func bodyChange[B any](s *Server, w http.ResponseWriter, r *http.Request, change func(*control.Control, B) (bool, error)) {
 	ctl, ok := s.withControl(w, r)
 	if !ok {
 		return
@@ -79,11 +101,9 @@ func stateBody[B any](s *Server, w http.ResponseWriter, r *http.Request, change 
 	if !decode(w, r, &body) {
 		return
 	}
-	if err := change(ctl, body); err != nil {
+	if _, err := change(ctl, body); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
-		return
 	}
-	writeJSON(w, http.StatusOK, ctl.State())
 }
 
 // view answers with what a read produced.

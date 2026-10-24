@@ -13,7 +13,6 @@ import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/models";
-import type { ImageContent, TextContent, UserMessage } from "@earendil-works/pi-ai";
 import {
 	AgentDoc,
 	type Conversation,
@@ -35,17 +34,12 @@ import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { FileCredentialStore } from "./credentials.ts";
 import {
 	ATTACHMENTS_DIR,
-	INLINE_TEXT_MAX_BYTES,
 	MAX_ATTACHMENTS_PER_MESSAGE,
 	MAX_ATTACHMENTS_TOTAL_BYTES,
 	MAX_ATTACHMENT_BYTES,
-	attachmentLine,
-	formatAttachmentSize,
-	kindName,
+	messageContent,
 	metaName,
 	safeName,
-	partMime,
-	shapeFor,
 	storedName,
 	type AttachmentMeta,
 } from "./attachments.ts";
@@ -385,46 +379,6 @@ async function attachmentFiles(
  * the tools can read. The names travel in the text, so the transcript shows
  * what rode along without a second channel.
  */
-function messageContent(
-	text: string,
-	files: readonly { meta: AttachmentMeta; bytes: Uint8Array }[],
-): UserMessage["content"] {
-	if (files.length === 0) return text;
-	const header = text.trim() === "" ? [] : [text, ""];
-	const blocks: (TextContent | ImageContent)[] = [
-		{
-			type: "text",
-			text: [
-				...header,
-				...files.map(({ meta }) => attachmentLine(meta)),
-				...files.flatMap(({ meta }) =>
-					shapeFor(meta.mime, meta.name) === "path"
-						? [
-								`${meta.name} is a ${kindName(meta.mime)} (${formatAttachmentSize(meta.size)}) at ${ATTACHMENTS_DIR}/${storedName(meta.id, meta.name)}.`,
-							]
-						: [],
-				),
-			].join("\n"),
-		},
-	];
-	for (const { meta, bytes } of files) {
-		const shape = shapeFor(meta.mime, meta.name);
-		if (shape === "image") {
-			blocks.push({
-				type: "image",
-				data: Buffer.from(bytes).toString("base64"),
-				mimeType: partMime(meta.mime, meta.name),
-			});
-		} else if (shape === "text" && bytes.byteLength <= INLINE_TEXT_MAX_BYTES) {
-			blocks.push({
-				type: "text",
-				text: `--- ${meta.name} ---\n${Buffer.from(bytes).toString("utf8")}`,
-			});
-		}
-	}
-	return blocks;
-}
-
 async function conversationFor(id: string): Promise<Conversation> {
 	const existing = handles.get(id);
 	if (existing !== undefined) return existing;
@@ -1079,6 +1033,9 @@ async function handle(command: HandledCommand): Promise<unknown> {
 		}
 		case "prompt": {
 			const conversation = await conversationFor(command.conversationId);
+			// The gateway's command carries the text with omitempty, so a message that is only files
+			// arrives without one at all. A prompt with no words is a message — a screenshot on its
+			// own is one — and reading it as undefined made the whole send fail with a TypeError.
 			const content = messageContent(
 				command.text,
 				await attachmentFiles(command.attachments ?? []),

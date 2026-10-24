@@ -63,7 +63,9 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 // clear it; the answer is what was stored, stamp included, so the client can tell its own
 // echo from another machine's write.
 func (s *Server) draft(w http.ResponseWriter, r *http.Request) {
-	stateBody(s, w, r, func(ctl *control.Control, body struct {
+	// ownAnswer, not stateBody: this handler answers with the stored draft, and a second document
+	// (the state) written after it is a body no client can parse.
+	ownAnswer(s, w, r, func(ctl *control.Control, body struct {
 		Text        string                    `json:"text"`
 		Attachments []control.DraftAttachment `json:"attachments"`
 	}) error {
