@@ -10,13 +10,23 @@
 # floor may only move up, and it is checked separately.
 #
 # Measured 2026-10-27.
-internal/control     90  162
+internal/control     94  169
 internal/sandbox    100  400
 internal/supervise   87   47
 internal/update      87  249
 internal/vault       88  105
 internal/workerpool  87    7
 internal/ready       86   31
+#
+# What a survivor means, read from control's last sweep (169 killed, 10 lived):
+#   six are log-only conditions — auth.go:32, auth.go:35, turn.go:269, workspaces.go:1006,
+#     workspaces.go:1040 twice. Each one decides whether to write a line, and killing it means
+#     asserting on a log string, which pins wording instead of behaviour;
+#   three are boundaries on a key that cannot repeat — workspaces.go:316 and :983 sort workspace
+#     names, models.go:578 compares scale ranks, and both are unique by construction, so `<` and
+#     `<=` are the same function;
+#   one is the two-minute budget on turn.go:267, which is only observable by waiting two minutes.
+# Those are the honest end of a mutation score, not a gap in the tests.
 #
 # Not measured, on purpose: `internal/httpapi` and `cmd/acornfall` keep their tests in the
 # end-to-end suite, and gremlins only runs the package's own. A number from them would report the
