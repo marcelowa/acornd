@@ -52,7 +52,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+      # The only job that installs the linters: it is the only one that runs them.
       - uses: ./.github/actions/setup
+        with:
+          tools: true
       - run: make lint
 
   go:
@@ -72,7 +75,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - run: make ui-build
       - run: make js-test
 
   browser:

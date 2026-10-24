@@ -193,8 +193,8 @@ anyone editing the rule.
 | Job | What it runs | Why it is its own job |
 |---|---|---|
 | `static` | `make lint` | a broken rule is worth knowing before a slow suite |
-| `go` | `make test-suite COVER=1` | the suite **once**, instrumented, so the test verdict and the coverage floors come from one run |
-| `worker` | `make js-test` after `make ui-build` | seconds, and the bundle has to exist for the end-to-end suite |
+| `go` | `make test-suite COVER=1` | the Go suites **once**, instrumented, so the test verdict and the coverage floors come from one run |
+| `worker` | `make js-test` | the harness and interface unit tests: seconds, and they need no bundle |
 | `browser` | `make ui-check` | a real gateway and a real browser, which nothing else has |
 | `commits` | `scripts/check-commits.mjs` | needs the commit range, not the tree |
 | `sandbox` | `make test-sandbox` | boots real microVMs; the slowest and the only one that needs `/dev/kvm` |

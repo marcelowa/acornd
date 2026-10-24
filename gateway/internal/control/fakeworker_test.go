@@ -315,32 +315,20 @@ func TestASettledRunRefreshesTheListAndClearsTheBusySign(t *testing.T) {
 	worker.answer["conversations"] = map[string]any{"conversations": []any{}}
 	control := controlWithWorker(t, worker)
 	control.promptedAt["1"] = 1
-	done := make(chan struct{})
-	control.subscribers[1] = make(chan protocol.Frame, 8)
+	stale := make(chan struct{}, 1)
+	control.staleSignals[1] = stale
 
 	control.onFrame(protocol.Frame{Type: "submission", ConversationID: "1", Status: "done"})
 
-	// The refresh runs on its own goroutine, so the assertion waits for the effect rather than for
-	// a duration.
-	go func() {
-		defer close(done)
-		for index := 0; index < 200; index++ {
-			for _, command := range worker.asked() {
-				if command.Type == "conversations" {
-					control.mu.RLock()
-					_, stamped := control.promptedAt["1"]
-					control.mu.RUnlock()
-					if !stamped {
-						return
-					}
-				}
-			}
-			time.Sleep(5 * time.Millisecond)
-		}
-	}()
+	// The refresh runs on its own goroutine and tells the state listeners when it is done — a state
+	// frame does not go to the transcript subscribers, so this is the signal to wait on. Waiting
+	// matters: the goroutine writes to this control's data folder, and returning before it finished
+	// made the temp folder's cleanup fail with "not empty", a flake that only showed on a machine
+	// fast enough to finish the test first.
 	select {
-	case <-done:
+	case <-stale:
 	case <-time.After(5 * time.Second):
+		t.Fatal("the settled run never refreshed the list")
 	}
 	control.mu.RLock()
 	_, stamped := control.promptedAt["1"]

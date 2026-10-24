@@ -256,15 +256,14 @@ check: ui-build typecheck js-test ## fast: the compiler, the bundle, and the uni
 # `test` is what a person runs: the static rules first, because a rule broken is cheaper to see
 # before a slow suite, and then the suites. CI runs the two halves in parallel jobs instead, which
 # is why the suites are their own target — a job that lints and a job that tests must not both lint.
-test: ## the default tier: the static rules, then units and the feature suite
+test: ## the default tier: the static rules, then every suite, no hypervisor needed
 	$(MAKE) lint
+	$(MAKE) js-test
 	$(MAKE) test-suite
 
-test-suite: ## units and the feature suite, no hypervisor needed, no static rules
-	cd worker && bun test
-	# The interface's unit tests are milliseconds and its bundle has to build, or CI's word
-	# about the interface means nothing.
-	cd ui && bun test
+test-suite: ## the Go suites, unit and feature, no hypervisor needed and no static rules
+	# The bundle has to build: the end-to-end suite drives the client the gateway serves, and a
+	# run against a stale one is a run that says nothing about the tree.
 	$(MAKE) ui-build
 	# ACORNFALL_NO_SANDBOX forces the refusal path instead of auto-detecting a hypervisor, so
 	# the same command behaves the same on a machine with /dev/kvm and in CI. -short skips the

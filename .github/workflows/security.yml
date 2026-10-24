@@ -37,10 +37,12 @@ jobs:
   sast:
     runs-on: [self-hosted, linux, x64]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: gateway/go.mod
+      # Not the shared setup: this job installs the one tool it runs and needs no bun, no worker
+      # dependencies, and no interface. Paying for them would be minutes spent to ignore them.
       - name: gosec
         # A report, not a gate. This is a sandbox orchestrator: it opens paths and runs processes
         # named by configuration on purpose, so G304 and G204 fire on the architecture rather than
@@ -54,7 +56,7 @@ jobs:
   secrets:
     runs-on: [self-hosted, linux, x64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The history, not just the diff: a key that was committed once and deleted is still in
           # every clone, and a secret that is only clean in HEAD is not clean.
@@ -83,6 +85,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
+        with:
+          tools: true
       - name: mutations ${{ matrix.package }}
         id: mutants
         run: |
