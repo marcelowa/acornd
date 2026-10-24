@@ -42,6 +42,8 @@ export interface EngineSummary {
 	isDefault: boolean;
 	/** False means this machine cannot run it; `problem` says why. */
 	usable: boolean;
+	/** True when choosing it starts with a download: the engine is not on the machine yet. */
+	downloads: boolean;
 	problem?: string | undefined;
 	/** A short word for a narrow control: the engine's own name, or its family. */
 	label: string;

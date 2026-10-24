@@ -159,3 +159,44 @@ func TestProgressTracksAnOpeningWorkspace(t *testing.T) {
 		t.Fatalf("the view should carry the status, got %+v", views)
 	}
 }
+
+// The engine list is a machine answer that moves while the gateway runs: the microVM engine
+// downloads itself on a workspace's first use. A cached "not installed" that outlives the
+// download leaves the chooser refusing the engine this machine now has.
+func TestTheEngineListNoticesAnEngineInstalledWhileRunning(t *testing.T) {
+	dir := t.TempDir()
+	workspaces := NewWorkspaces(WorkspacesOptions{
+		DataDir:   dir,
+		Sandboxes: sandbox.NewTier(dir, "", nil),
+	})
+	installed := func() bool {
+		for _, engine := range workspaces.Engines() {
+			if engine.Name == "microsandbox" {
+				return engine.Installed
+			}
+		}
+		t.Fatal("the microVM engine is missing from the list")
+		return false
+	}
+
+	if installed() {
+		t.Fatal("nothing installs the engine before a workspace first asks for it")
+	}
+	// First use puts the pinned binary where the driver looks for it.
+	binary := filepath.Join(dir, "tools", "microsandbox", sandbox.Version, "bin", "msb")
+	if err := os.MkdirAll(filepath.Dir(binary), 0o755); err != nil {
+		t.Fatalf("engine folder: %v", err)
+	}
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("engine binary: %v", err)
+	}
+	if installed() {
+		t.Fatal("the answer is kept until a workspace start drops it, not probed per request")
+	}
+
+	workspaces.refreshEngines()
+
+	if !installed() {
+		t.Fatal("after a workspace start the chooser should see the engine that landed")
+	}
+}

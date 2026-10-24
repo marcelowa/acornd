@@ -197,12 +197,19 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 			},
 		],
 		engines: [
-			{ name: "microsandbox", isDefault: true, usable: true, label: "microVM" },
-			{ name: "bwrap", isDefault: false, usable: true, label: "bwrap" },
+			{
+				name: "microsandbox",
+				isDefault: true,
+				usable: true,
+				downloads: true,
+				label: "microVM",
+			},
+			{ name: "bwrap", isDefault: false, usable: true, downloads: false, label: "bwrap" },
 			{
 				name: "host",
 				isDefault: false,
-				usable: true,
+				usable: false,
+				downloads: false,
 				label: "host",
 				problem: "not isolated: commands run on the machine itself",
 			},

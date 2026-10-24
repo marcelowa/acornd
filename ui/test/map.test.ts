@@ -552,6 +552,28 @@ describe("the engines a workspace can be created on", () => {
 		expect(engines.map((engine) => engine.label)).toEqual(["microVM", "bwrap"]);
 		expect(engines[0]?.isDefault).toBe(true);
 		expect(engines[1]?.isDefault).toBe(false);
+		expect(engines.map((engine) => engine.downloads)).toEqual([false, false]);
+	});
+
+	test("offers an engine that is not downloaded yet, and says it will download", () => {
+		const [micro] = toEngines([
+			{ name: "microsandbox", default: true, isolated: true, installed: false },
+		]);
+		expect(micro?.usable).toBe(true);
+		expect(micro?.downloads).toBe(true);
+	});
+
+	test("refuses an engine this machine cannot run even before it is downloaded", () => {
+		const [bwrap] = toEngines([
+			{
+				name: "bwrap",
+				isolated: true,
+				installed: false,
+				problem: "bubblewrap cannot create a user namespace here",
+			},
+		]);
+		expect(bwrap?.usable).toBe(false);
+		expect(bwrap?.problem).toContain("user namespace");
 	});
 
 	test("offers an engine this machine cannot run, with the reason", () => {

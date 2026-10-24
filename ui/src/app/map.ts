@@ -214,7 +214,12 @@ export function toEngines(engines: WireEngine[] | undefined): EngineSummary[] {
 	return (engines ?? []).map((engine) => ({
 		name: engine.name,
 		isDefault: engine.default === true,
-		usable: engine.installed && engine.problem === undefined,
+		// A machine fact and a download are different things. An engine with no problem is one
+		// this machine can run; the engines that are not shipped with the release fetch
+		// themselves on first use, so "not installed yet" is a wait, not a refusal. Treating it
+		// as a refusal disabled the switch whose workspace would have installed it.
+		usable: engine.problem === undefined,
+		downloads: !engine.installed,
 		// The gateway's refusals carry its own "sandbox unavailable:" prefix, which is an internal
 		// marker: what a person needs is the sentence after it, and the fix it names.
 		problem: engine.problem?.replace(/^sandbox unavailable:\s*/, ""),

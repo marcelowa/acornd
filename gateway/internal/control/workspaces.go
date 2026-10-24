@@ -219,10 +219,14 @@ type Workspaces struct {
 	starting map[string]*sync.Mutex
 	closed   bool
 
-	// engines is the machine's answer for the chooser, computed once: it changes when a
-	// package is installed, not while a gateway runs.
-	enginesOnce sync.Once
-	engines     []EngineInfo
+	// engines is the machine's answer for the chooser. It is kept because the probe behind it
+	// does real work (bubblewrap runs a user namespace) and the answer rarely moves — but it
+	// does move while a gateway runs: the microVM engine downloads itself on a workspace's
+	// first use, so a workspace start drops the answer instead of serving a stale "not
+	// installed" until the next restart.
+	enginesMu  sync.Mutex
+	engines    []EngineInfo
+	enginesSet bool
 
 	// used is guarded by usedMu rather than by mu, because it changes on every request:
 	// taking the registry's write lock to store a timestamp would put the hot path in
@@ -557,6 +561,9 @@ func (w *Workspaces) open(ctx context.Context, name string, workspace Workspace)
 		return nil, err
 	}
 	control.Open(ctx)
+	// A start is also an install: the microVM engine fetches itself the first time a workspace
+	// asks for it, so the chooser's kept answer is stale from here on.
+	w.refreshEngines()
 	w.mu.Lock()
 	w.controls[name] = control
 	w.mu.Unlock()
@@ -1211,24 +1218,43 @@ func (w *Workspaces) DefaultEngine() string {
 }
 
 // Engines reports every engine this build implements, whether this machine can run it, and
-// which one a workspace with no engine of its own gets. It is cached: the answer changes when
-// somebody installs a package, not while a gateway runs.
+// which one a workspace with no engine of its own gets. The answer is kept until a workspace
+// start drops it: an engine with no package manager installs itself on first use, so the
+// chooser must not keep saying it is missing once it is there (refreshEngines).
 func (w *Workspaces) Engines() []EngineInfo {
-	w.enginesOnce.Do(func() {
-		def := w.DefaultEngine()
-		infos := make([]EngineInfo, 0, len(sandbox.EngineNames()))
-		for _, name := range sandbox.EngineNames() {
-			infos = append(infos, w.engineInfo(name, name == def))
-		}
-		w.engines = infos
-	})
-	return w.engines
+	w.enginesMu.Lock()
+	defer w.enginesMu.Unlock()
+	if w.enginesSet {
+		return w.engines
+	}
+	def := w.DefaultEngine()
+	infos := make([]EngineInfo, 0, len(sandbox.EngineNames()))
+	for _, name := range sandbox.EngineNames() {
+		infos = append(infos, w.engineInfo(name, name == def))
+	}
+	w.engines = infos
+	w.enginesSet = true
+	return infos
+}
+
+// refreshEngines drops the kept answer so the next request probes the machine again. A
+// workspace's start is where an engine without a package manager arrives: the microVM
+// downloads itself on first use, and a list cached before that would leave the switch that
+// asked for it disabled with no way to install it.
+func (w *Workspaces) refreshEngines() {
+	w.enginesMu.Lock()
+	w.enginesSet = false
+	w.engines = nil
+	w.enginesMu.Unlock()
 }
 
 // engineInfo is what this machine can say about one engine without starting it: whether it is
 // installed, what version, and — a probe the machine answers rather than a claim from a table —
-// whether it is usable here. Bubblewrap checks a user namespace; the microVM engine checks its
-// hypervisor.
+// whether it is usable here. Bubblewrap checks a user namespace and the package itself; the
+// microVM engine checks its hypervisor, which is a fact about the machine and not about whether
+// the 67 MB engine has been fetched. The probe runs whether or not the engine is on disk: an
+// engine that is missing and cannot fetch itself must keep saying why, and one that fetches
+// itself on first use must be offered with no download behind it.
 func (w *Workspaces) engineInfo(name string, isDefault bool) EngineInfo {
 	info := EngineInfo{Name: name, Default: isDefault}
 	manager := w.engineManager(name)
@@ -1243,10 +1269,8 @@ func (w *Workspaces) engineInfo(name string, isDefault bool) EngineInfo {
 		info.Problem = report.Problem
 		return info
 	}
-	if info.Installed {
-		if err := manager.Driver().Usable(); err != nil {
-			info.Problem = err.Error()
-		}
+	if err := manager.Driver().Usable(); err != nil {
+		info.Problem = err.Error()
 	}
 	return info
 }
