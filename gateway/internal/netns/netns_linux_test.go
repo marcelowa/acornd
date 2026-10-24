@@ -3,6 +3,7 @@
 package netns
 
 import (
+	"errors"
 	"net"
 	"strings"
 	"syscall"
@@ -99,5 +100,84 @@ func TestABadRangeIsRefusedWithItsName(t *testing.T) {
 	}
 	if err := Up("there-is-no-such-interface"); err == nil || !strings.Contains(err.Error(), "there-is-no-such-interface") {
 		t.Fatalf("a missing interface should be named, got %v", err)
+	}
+}
+
+// The kernel's answer is one datagram that may hold several messages, and the wait ends only when
+// one of them is the acknowledgement. An ACK with a zero code is success; a non-zero code is the
+// kernel's refusal, in its own errno; and a datagram of notifications alone is not the end of the
+// wait — reading it as one would report a route as installed before the kernel saw it.
+func TestTheAnswerIsReadUntilTheAcknowledgement(t *testing.T) {
+	ack := func(code int32) []byte {
+		frame := message(nlmsgError, 0, make([]byte, 4))
+		native.PutUint32(frame[16:], uint32(code))
+		return frame
+	}
+
+	if acked, err := readMessages(ack(0)); !acked || err != nil {
+		t.Errorf("a zero code is success: acked=%v err=%v", acked, err)
+	}
+
+	// The kernel reports a refusal as a *negative* errno — -EPERM, not EPERM — which is why
+	// readMessages negates it back. A fixture with the sign the other way round reads as errno -1
+	// and would have hidden a real sign mistake in the code beneath it.
+	acked, err := readMessages(ack(-int32(syscall.EPERM)))
+	if acked {
+		t.Error("a refusal is not an acknowledgement")
+	}
+	if !errors.Is(err, syscall.EPERM) {
+		t.Errorf("the kernel's errno should come through, got %v", err)
+	}
+
+	// A notification first, then the ACK in the same datagram.
+	notice := message(rtmNewLink, 0, make([]byte, 8))
+	both := append(append([]byte{}, notice...), ack(0)...)
+	if acked, err := readMessages(both); !acked || err != nil {
+		t.Errorf("the ACK after a notification is still the answer: acked=%v err=%v", acked, err)
+	}
+
+	// Notifications alone: not an answer, so the caller keeps waiting.
+	if acked, err := readMessages(notice); acked || err != nil {
+		t.Errorf("notifications alone are not an acknowledgement: acked=%v err=%v", acked, err)
+	}
+
+	// A length that runs past the datagram is a message the kernel would not have sent, and it is
+	// an error rather than a silent skip.
+	broken := message(rtmNewLink, 0, make([]byte, 8))
+	native.PutUint32(broken[0:], uint32(len(broken)+16))
+	if _, err := readMessages(broken); err == nil {
+		t.Error("a message longer than its datagram should be refused")
+	}
+}
+
+// What is refused before the socket is opened: an address that is not an address, a prefix that is
+// not a prefix, and an interface that is not here. Each refusal names what it refused, because the
+// caller is a sandbox start that has to explain itself.
+func TestAnAddressIsCheckedBeforeTheKernelSeesIt(t *testing.T) {
+	if err := Address("lo", "not-an-address"); err == nil || !strings.Contains(err.Error(), "not-an-address") {
+		t.Errorf("a bad CIDR: %v", err)
+	}
+	if err := Address("no-such-interface-here", "10.0.0.1/24"); err == nil || !strings.Contains(err.Error(), "no-such-interface-here") {
+		t.Errorf("an interface that is not here: %v", err)
+	}
+	if err := Gateway("lo", "not-an-ip"); err == nil || !strings.Contains(err.Error(), "not-an-ip") {
+		t.Errorf("a bad gateway: %v", err)
+	}
+	if err := Gateway("no-such-interface-here", "10.0.0.1"); err == nil {
+		t.Errorf("a gateway on an interface that is not here should be refused")
+	}
+	if err := Unreachable("nonsense"); err == nil || !strings.Contains(err.Error(), "nonsense") {
+		t.Errorf("a bad range: %v", err)
+	}
+	if err := Unreachable("10.0.0.0/33"); err == nil {
+		t.Errorf("a prefix longer than the address should be refused")
+	}
+}
+
+// The link is brought up with its own flags: a sandbox whose interface stayed down has no network
+// however many routes were installed on it.
+func TestALinkComesUp(t *testing.T) {
+	if err := Up("no-such-interface-here"); err == nil {
+		t.Error("bringing up an interface that is not here should be refused")
 	}
 }

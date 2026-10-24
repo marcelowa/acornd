@@ -5,10 +5,10 @@
 # The target is 95% for everything. Where a package cannot reach it, the line says why in one
 # clause — and the reason is a fact about the code, not about the test suite.
 
-cmd/acornfall                      71
+cmd/acornfall                      72
 internal/control     80
 internal/httpapi                    75
-internal/netns       33   -- a netlink shim: needs CAP_NET_ADMIN to run at all
+internal/netns                      51
 internal/protocol   100
 internal/ready       83
 internal/sandbox     78
