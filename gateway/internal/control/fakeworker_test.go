@@ -21,6 +21,9 @@ type fakeWorker struct {
 	answer map[string]any
 	// failure is returned by every call, when it is set.
 	failure error
+	// failOn is a failure for one command type, so a test can let a sign-out succeed and the
+	// describe that follows it fail.
+	failOn  map[string]error
 	started int
 	closed  int
 	frames  func(protocol.Frame)
@@ -29,7 +32,7 @@ type fakeWorker struct {
 }
 
 func newFakeWorker() *fakeWorker {
-	return &fakeWorker{answer: map[string]any{}}
+	return &fakeWorker{answer: map[string]any{}, failOn: map[string]error{}}
 }
 
 func (f *fakeWorker) Start(context.Context) error {
@@ -49,6 +52,9 @@ func (f *fakeWorker) Call(_ context.Context, command protocol.Command) (json.Raw
 	f.mu.Lock()
 	f.commands = append(f.commands, command)
 	failure := f.failure
+	if one, ok := f.failOn[command.Type]; ok {
+		failure = one
+	}
 	answer := f.answer[command.Type]
 	f.mu.Unlock()
 	if failure != nil {

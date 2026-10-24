@@ -10,7 +10,7 @@
 # floor may only move up, and it is checked separately.
 #
 # Measured 2026-10-27.
-internal/control     88  159
+internal/control     90  162
 internal/sandbox    100  400
 internal/supervise   87   47
 internal/update      87  249
