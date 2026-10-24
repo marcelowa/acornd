@@ -434,8 +434,15 @@ func (c *Control) Close() {
 	if c.stop != nil {
 		c.stop()
 	}
-	if c.worker != nil {
-		c.worker.Close()
+	// The flag goes with the process. stopWorker has always cleared it; this path did not, so a
+	// closed workspace went on reporting itself as running — and a list built after a shutdown
+	// said every workspace was still up.
+	c.mu.Lock()
+	worker := c.worker
+	c.workerUp = false
+	c.mu.Unlock()
+	if worker != nil {
+		worker.Close()
 	}
 	// The worker is gone, so nothing can use the sandbox: stopping it frees the memory and
 	// the engine's own idle timeout would do it anyway. Its disk stays, so a workspace that

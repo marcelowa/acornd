@@ -10,7 +10,7 @@
 # restart switch) leaves a process alive until cleanup, and its counters may miss the merge. The
 # floors sit below the low observation on purpose — a ratchet that flaps is worse than a loose one.
 
-cmd/acornfall                                          75  -- 77 statements need root: probeAs runs the probe as another account, runPlanAsRoot applies the plan through sudo, configureNamespace is the sandbox's first process inside a namespace. No privileged job runs, and a test here would prove the kernel's permissions rather than this code.
+cmd/acornfall                     75  -- 77 statements need root: probeAs runs the probe as another account, runPlanAsRoot applies the plan through sudo, configureNamespace is the sandbox's first process inside a namespace. No privileged job runs, and a test here would prove the kernel's permissions rather than this code.
 internal/control                     84
 internal/httpapi                   84
 internal/netns                      51  -- the write half needs CAP_NET_ADMIN in a namespace; what can be read without it (framing, the answer, the refusals) is tested
