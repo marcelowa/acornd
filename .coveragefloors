@@ -7,7 +7,7 @@
 
 cmd/acornfall        68   -- root, a namespace, or an os.Exit: the plan's application, the probe re-exec, netns
 internal/control     80
-internal/httpapi                    70
+internal/httpapi                    75
 internal/netns       33   -- a netlink shim: needs CAP_NET_ADMIN to run at all
 internal/protocol   100
 internal/ready       83

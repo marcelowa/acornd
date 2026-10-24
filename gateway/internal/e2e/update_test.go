@@ -5,8 +5,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeReleases is github's release API as this build reads it: the newest release, a page of
@@ -207,4 +209,112 @@ func TestTheUpdateSwitchOnlyTakesWhatItCanDo(t *testing.T) {
 	if !answer.AutoCheck {
 		t.Error("autoCheck should have been saved")
 	}
+}
+
+// Notes ride in bunches: the screen asks once for the tags between the running build and the one
+// picked, and an empty list is an empty answer rather than a fetch. Too many tags is the caller
+// building a request nobody can answer.
+func TestNotesAreAskedForInBunches(t *testing.T) {
+	withUpdateSource(t)
+	s := start(t)
+	c := s.client()
+
+	var empty struct {
+		Notes map[string]string `json:"notes"`
+	}
+	c.get("/api/update/notes", &empty)
+	if len(empty.Notes) != 0 {
+		t.Errorf("no tags, no notes: %v", empty.Notes)
+	}
+
+	var some struct {
+		Notes map[string]string `json:"notes"`
+	}
+	c.get("/api/update/notes?tags=v1.0.0,%20v0.9.0", &some)
+	if len(some.Notes) != 2 {
+		t.Errorf("notes = %v", some.Notes)
+	}
+	if !strings.Contains(some.Notes["v1.0.0"], "what changed") {
+		t.Errorf("the notes for v1.0.0 are %q", some.Notes["v1.0.0"])
+	}
+
+	many := make([]string, 0, 101)
+	for index := 0; index < 101; index++ {
+		many = append(many, "v1.0."+strconv.Itoa(index))
+	}
+	if status, body := c.do("GET", "/api/update/notes?tags="+strings.Join(many, ","), nil); status != 400 {
+		t.Errorf("a hundred and one tags: %d %s", status, body)
+	}
+}
+
+// Applying, restarting and rolling back are the three things that must not happen by accident, so
+// what they do when there is nothing to do is a sentence rather than a half-applied update: a
+// drain mode nobody implements, a rollback with no backup, a restart with nothing pending.
+func TestAnUpdateThatCannotHappenSaysWhy(t *testing.T) {
+	withUpdateSource(t)
+	s := start(t)
+	c := s.client()
+
+	if status, body := c.do("POST", "/api/update/apply", map[string]any{"drain": "sometimes"}); status != 400 {
+		t.Errorf("an unimplemented drain: %d %s", status, body)
+	}
+	// Nothing has been checked and downloaded, so there is nothing to apply; the answer is not 200
+	// and it is not a swap.
+	if status, body := c.do("POST", "/api/update/apply", map[string]any{}); status < 400 {
+		t.Errorf("apply with nothing ready: %d %s", status, body)
+	}
+	if status, body := c.do("POST", "/api/update/rollback", nil); status < 400 {
+		t.Errorf("rollback with no backup: %d %s", status, body)
+	}
+	// The gateway is still serving after all of them: a refusal that took the process with it
+	// would be worse than the mistake.
+	var health struct {
+		OK bool `json:"ok"`
+	}
+	c.get("/healthz", &health)
+	if !health.OK {
+		t.Error("the gateway should still be up")
+	}
+}
+
+// The restart switch answers before it replaces the process, and the gateway comes back serving:
+// this is the step that makes an update take effect, so a switch that answered and then left
+// nothing listening would be an install that stopped at the last move. It is its own test because
+// it is the one request here that ends the process it was sent to.
+func TestTheRestartSwitchAnswersAndTheGatewayComesBack(t *testing.T) {
+	withUpdateSource(t)
+	s := start(t)
+	c := s.client()
+
+	var answer struct {
+		Restarting bool `json:"restarting"`
+	}
+	c.post("/api/update/restart", nil, &answer)
+	if !answer.Restarting {
+		t.Fatalf("restart answered %+v", answer)
+	}
+
+	// The answer is written before the exec, and the exec happens half a second later: what is
+	// asserted is that something answers again, not how fast.
+	back := false
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		var health struct {
+			OK bool `json:"ok"`
+		}
+		if err := c.getTry("/healthz", &health); err == nil && health.OK {
+			back = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !back {
+		t.Fatal("the gateway did not come back after the restart")
+	}
+
+	// And it is a working gateway, not only a listener: the state is rebuilt from disk.
+	var status struct {
+		Current string `json:"current"`
+	}
+	c.get("/api/update/status", &status)
 }
