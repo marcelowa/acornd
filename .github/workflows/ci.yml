@@ -70,6 +70,10 @@ jobs:
       - run: make deps
       - run: make tools
       - run: make test
+      # Coverage is a gate with a per-package floor, and a floor nothing runs is decoration. It
+      # repeats the suite with instrumentation, which is one more minute on the job that already
+      # runs it; the alternative was a number nobody checks.
+      - run: make cover
 
   commits:
     # The commit format is a standard (`.pi/skills/conventional-commits`), so it is checked

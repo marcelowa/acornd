@@ -5,6 +5,11 @@
 # The target is 95% for everything. Where a package cannot reach it, the line says why in one
 # clause — and the reason is a fact about the code, not about the test suite.
 #
+# `internal/sandbox` moves by four points with the machine rather than between runs: its bwrap
+# tests skip where bubblewrap is not installed, which is the case on a stock runner, so the same
+# commit reads 81.9% here and 77.8% in CI. The floor sits at the low one — a floor that a machine
+# without a tool cannot meet is a red run that says nothing about the change.
+#
 # `cmd/acornfall` and `internal/update` move by a few tenths between runs, because their coverage
 # comes from child processes writing counters as they exit: a test that re-execs the gateway (the
 # restart switch) leaves a process alive until cleanup, and its counters may miss the merge. The
@@ -16,7 +21,7 @@ internal/httpapi                   84
 internal/netns                      51  -- the write half needs CAP_NET_ADMIN in a namespace; what can be read without it (framing, the answer, the refusals) is tested
 internal/protocol   100
 internal/ready       83
-internal/sandbox                  81
+internal/sandbox                  77
 internal/supervise   84
 internal/update                    79
 internal/vault       85

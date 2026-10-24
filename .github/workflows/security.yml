@@ -8,6 +8,9 @@
 # On the weekly schedule a red run is a report — it says a dependency has a CVE and blocks
 # nothing. On a release tag it is a gate, because adopting a vulnerable dependency is worse than a
 # failing pipeline at exactly that moment.
+#
+# The mutation job is the exception: it is a report on the same schedule, and its red run means a
+# test stopped proving something rather than that a dependency moved.
 name: security
 
 on:
@@ -63,3 +66,26 @@ jobs:
         run: |
           go install github.com/zricethezav/gitleaks/v8@latest
           gitleaks detect --no-banner --redact
+
+  mutations:
+    # The mutation floors are the honest half of "a test that fails without the change", and they
+    # cost minutes per package — which is exactly why they are here and not on a pull request. A
+    # nightly red run means an assertion was lost, and the report names the file and the line.
+    #
+    # The two packages with the most behaviour behind them: control is the domain, sandbox is the
+    # engine boundary. The rest are at their floors and run on demand with `make mutations PKG=…`.
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ["./internal/control", "./internal/sandbox"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: gateway/go.mod
+          cache-dependency-path: gateway/go.sum
+      - run: make deps
+      - run: make tools
+      - name: mutations ${{ matrix.package }}
+        run: make mutations PKG=${{ matrix.package }}
