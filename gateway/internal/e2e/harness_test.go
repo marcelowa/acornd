@@ -335,6 +335,12 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 		// workspace records its own engine, and this is the test telling the install otherwise.
 		env = append(env, "ACORNFALL_SANDBOX_ENGINE="+engineEnv)
 	}
+	if updateURL := os.Getenv("ACORNFALL_UPDATE_URL"); updateURL != "" {
+		// The update tier talks to whatever ACORNFALL_UPDATE_URL names, so a test can answer as
+		// github does without reaching it. The gateway under test is a child process, which is
+		// why the variable has to be passed along here.
+		env = append(env, "ACORNFALL_UPDATE_URL="+updateURL)
+	}
 	if noSandbox := os.Getenv("ACORNFALL_NO_SANDBOX"); noSandbox != "" && !hostEngine {
 		env = append(env, "ACORNFALL_NO_SANDBOX="+noSandbox)
 	}

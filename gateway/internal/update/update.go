@@ -245,16 +245,28 @@ type Manager struct {
 // migrateDir is where a development build keeps release scripts; empty means the ones baked into
 // the binary. Tests set it directly, which is the only caller that wants a directory.
 // explicitly in production; empty disables the migrate step in tests.
+// envOr is the value of an environment variable, or the default when it is empty.
+func envOr(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
+
 func New(dataDir, binPath string) *Manager {
 	if binPath == "" {
 		if executable, err := os.Executable(); err == nil {
 			binPath = executable
 		}
 	}
+	// ACORNFALL_UPDATE_URL points the release lookups at a mirror. It is the same kind of
+	// decision as ACORNFALL_GITHUB_TOKEN, which is already an environment variable for the same
+	// reason — a private mirror or a rate-limited API — and it is what lets the update screen be
+	// tested against a server instead of against github.
 	return &Manager{
 		dataDir:   dataDir,
 		binPath:   binPath,
-		latestURL: LatestURL,
+		latestURL: envOr("ACORNFALL_UPDATE_URL", LatestURL),
 		client:    &http.Client{Timeout: 30 * time.Second},
 		settings:  DefaultSettings(),
 		IsAdmin:   func(*http.Request) bool { return true },

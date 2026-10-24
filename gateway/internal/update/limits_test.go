@@ -271,3 +271,21 @@ func TestADownloadCarriesTheTokenAndTheAcceptHeader(t *testing.T) {
 		t.Errorf("Accept = %q", accept)
 	}
 }
+
+// The release lookups can be pointed at a mirror, which is what a private install sets and what
+// lets the update screen be driven against a server instead of github.
+func TestTheReleaseSourceCanBeAMirror(t *testing.T) {
+	t.Setenv("ACORNFALL_UPDATE_URL", "https://mirror.example/repos/o/r/releases/latest")
+	manager := New(t.TempDir(), "")
+	if got := manager.apiBase(); got != "https://mirror.example/repos/o/r" {
+		t.Errorf("apiBase = %q", got)
+	}
+
+	// A URL that does not carry the shape falls back to github rather than deriving a base from
+	// nothing: a mistyped mirror is not a reason to ask github, but a base cannot be invented
+	// either — and the fallback is what makes the mistake visible.
+	t.Setenv("ACORNFALL_UPDATE_URL", "https://mirror.example/whatever")
+	if got := New(t.TempDir(), "").apiBase(); got != defaultAPIBase {
+		t.Errorf("a URL without the release path should not become an API base, got %q", got)
+	}
+}

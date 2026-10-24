@@ -13,7 +13,7 @@
 internal/control     94  169
 internal/sandbox    100  409
 internal/supervise   85   47
-internal/update      90  256
+internal/update      90  258
 internal/vault       95  114
 internal/workerpool  87    7
 internal/ready       97   40
