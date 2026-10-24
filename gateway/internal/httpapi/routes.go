@@ -27,8 +27,10 @@ func (s *Server) Handler() http.Handler {
 	s.secretRoutes(mux)
 	s.workspaceRoutes(mux)
 	s.pageRoutes(mux)
-	// The client's own assets, and nothing else: a path that matches no route is a client-side
-	// route, so the file server answers with index.html and the client decides.
+	// The client's own assets, and nothing else. Every URL the interface routes is registered
+	// above — the whole /settings subtree, one page per conversation and per workspace, the
+	// release pages — so a path outside them is a 404 rather than a document the client cannot
+	// route anywhere.
 	mux.Handle("GET /", noCache(http.FileServerFS(s.static)))
 	return mux
 }

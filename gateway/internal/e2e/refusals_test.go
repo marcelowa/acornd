@@ -3,6 +3,7 @@ package e2e
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // The edge's refusals, as they are typed into a browser or a script. Every one of these is a
@@ -139,4 +140,82 @@ func anyStrings(value any) []string {
 		out = append(out, typed)
 	}
 	return out
+}
+
+// A workspace is edited through one endpoint, and every field it takes is checked before anything
+// is written: an unknown engine, a network that is neither on nor off, and a trust flag this build
+// does not have are each refused with the values that would have worked.
+func TestEditingAWorkspaceChecksEveryField(t *testing.T) {
+	t.Parallel()
+	s := start(t)
+	c := s.client()
+
+	refusals := []struct {
+		why  string
+		body map[string]any
+		says string
+	}{
+		{"an engine that does not exist", map[string]any{"engine": "qemu"}, "sandbox engine"},
+		{"a network that is neither", map[string]any{"network": "maybe"}, `"on" or "off"`},
+		{"a trust flag this build does not have", map[string]any{"trusted": true}, "trust"},
+	}
+	for _, one := range refusals {
+		status, body := c.do("POST", "/api/workspaces/general/update", one.body)
+		if status != 400 {
+			t.Errorf("%s: %d %s", one.why, status, body)
+			continue
+		}
+		if !strings.Contains(string(body), one.says) {
+			t.Errorf("%s: answered %q, want it to mention %q", one.why, strings.TrimSpace(string(body)), one.says)
+		}
+	}
+
+	// What it does accept is written and answered with the whole list, so the screen redraws from
+	// one answer.
+	var listed struct {
+		Workspaces []struct {
+			Name  string `json:"name"`
+			Title string `json:"title"`
+			Image string `json:"image"`
+		} `json:"workspaces"`
+	}
+	c.post("/api/workspaces/general/update", map[string]any{"title": "The general one", "image": "alpine:3.20"}, &listed)
+	found := false
+	for _, workspace := range listed.Workspaces {
+		if workspace.Name == "general" {
+			found = true
+			if workspace.Title != "The general one" {
+				t.Errorf("title = %q", workspace.Title)
+			}
+			if workspace.Image != "alpine:3.20" {
+				t.Errorf("image = %q", workspace.Image)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("the answer should list the workspace that was edited")
+	}
+}
+
+// An update asked for while a conversation is answering is refused with a conflict, and the reason:
+// the default is to wait for the run, and stopping it is a decision somebody has to make.
+func TestAnUpdateWaitsForRuns(t *testing.T) {
+	t.Parallel()
+	source := withUpdateSource(t)
+	s := start(t, source, withSlowModel(), withScript(scriptRule{Match: "keep going", Reply: "a long answer"}))
+	c := s.client()
+	root := c.waitForConversation("general")
+	defer c.watch("general", root)()
+	c.prompt("general", root, "keep going")
+	// The run has to be running before the update is asked for: the gate reads what is running now,
+	// and a prompt that has been accepted but not started is not a run yet.
+	c.waitRunning("general", root, 30*time.Second)
+
+	status, body := c.do("POST", "/api/update/apply", map[string]any{})
+	if status != 409 {
+		t.Fatalf("apply while a run is active: %d %s", status, body)
+	}
+	if !strings.Contains(string(body), "run") {
+		t.Errorf("the refusal should say a run is in the way: %q", body)
+	}
 }

@@ -4,6 +4,11 @@
 #
 # The target is 95% for everything. Where a package cannot reach it, the line says why in one
 # clause — and the reason is a fact about the code, not about the test suite.
+#
+# `cmd/acornfall` and `internal/update` move by a few tenths between runs, because their coverage
+# comes from child processes writing counters as they exit: a test that re-execs the gateway (the
+# restart switch) leaves a process alive until cleanup, and its counters may miss the merge. The
+# floors sit below the low observation on purpose — a ratchet that flaps is worse than a loose one.
 
 cmd/acornfall                      74
 internal/control     80
