@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/protocol"
 )
@@ -248,4 +249,111 @@ func indexOf(haystack, needle string) int {
 		}
 	}
 	return -1
+}
+
+// A describe that finds no provider still refreshes: the catalog being empty is a state the
+// interface shows, not a failure to report. Only another kind of error is returned.
+func TestRefreshReportsOnlyWhatIsNotTheAbsenceOfAProvider(t *testing.T) {
+	worker := newFakeWorker()
+	worker.answer["describe"] = protocol.Describe{}
+	control := controlWithWorker(t, worker)
+	// No providers and no credentials: ensureLastResort says there is nothing to run with, which
+	// is ErrNoProvider and is the state a fresh install is in.
+	if err := control.Refresh(context.Background()); err != nil {
+		t.Fatalf("an install with no provider should still refresh: %v", err)
+	}
+}
+
+// Refreshing re-opens the conversation that is active: the catalog just changed, and the binding
+// a client is looking at has to be re-applied against it.
+func TestRefreshReopensTheActiveConversation(t *testing.T) {
+	worker := newFakeWorker()
+	worker.answer["describe"] = protocol.Describe{Provider: "faux", Providers: []protocol.ProviderInfo{{
+		ID: "faux", Authenticated: true, Models: []protocol.ModelInfo{{ID: "faux-1"}},
+	}}}
+	worker.answer["open"] = map[string]any{"agent": map[string]string{"model": "faux/faux-1"}}
+	control := controlWithWorker(t, worker)
+	control.active = "1"
+	control.conversations = []protocol.ConversationInfo{{ID: "1"}}
+	control.bindings["1"] = protocol.ModelBinding{Provider: "faux", ModelID: "faux-1"}
+
+	if err := control.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	opened := false
+	for _, command := range worker.asked() {
+		if command.Type == "open" && command.ConversationID == "1" {
+			opened = true
+		}
+	}
+	if !opened {
+		t.Errorf("the active conversation should be reopened, asked %+v", worker.asked())
+	}
+}
+
+// A settled run is when a conversation's name can change, so the list is read again — and the
+// prompt stamp is cleared, because the run is over and the busy sign should come down with the
+// answer rather than lingering for the rest of its window.
+func TestASettledRunRefreshesTheListAndClearsTheBusySign(t *testing.T) {
+	worker := newFakeWorker()
+	worker.answer["conversations"] = map[string]any{"conversations": []any{}}
+	control := controlWithWorker(t, worker)
+	control.promptedAt["1"] = 1
+	done := make(chan struct{})
+	control.subscribers[1] = make(chan protocol.Frame, 8)
+
+	control.onFrame(protocol.Frame{Type: "submission", ConversationID: "1", Status: "done"})
+
+	// The refresh runs on its own goroutine, so the assertion waits for the effect rather than for
+	// a duration.
+	go func() {
+		defer close(done)
+		for index := 0; index < 200; index++ {
+			for _, command := range worker.asked() {
+				if command.Type == "conversations" {
+					control.mu.RLock()
+					_, stamped := control.promptedAt["1"]
+					control.mu.RUnlock()
+					if !stamped {
+						return
+					}
+				}
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+	}
+	control.mu.RLock()
+	_, stamped := control.promptedAt["1"]
+	control.mu.RUnlock()
+	if stamped {
+		t.Error("a settled run should clear the prompt stamp")
+	}
+	refreshed := false
+	for _, command := range worker.asked() {
+		if command.Type == "conversations" {
+			refreshed = true
+		}
+	}
+	if !refreshed {
+		t.Error("a settled run should read the conversation list again")
+	}
+}
+
+// A sign-out whose refresh cannot find a provider is still a sign-out: the binding is gone and the
+// screen should be told. Only a different failure is worth returning.
+func TestASignOutSurvivesAWorldWithNoProvider(t *testing.T) {
+	worker := newFakeWorker()
+	worker.answer["describe"] = protocol.Describe{}
+	control := controlWithWorker(t, worker)
+	control.bindings["1"] = protocol.ModelBinding{Provider: "gone", ModelID: "m"}
+	if err := control.Logout(context.Background(), "gone"); err != nil {
+		t.Fatalf("a sign-out that leaves no provider is still a sign-out: %v", err)
+	}
+	if got := control.bindings["1"]; got.Provider != "" {
+		t.Errorf("the binding should be cleared: %+v", got)
+	}
 }
