@@ -1533,8 +1533,10 @@ try {
 	});
 	check("nothing in the composer runs past the phone's edge", controlOverflow === 0, `${controlOverflow} elements`);
 
-	// The secret field: hidden by default, an eye that reveals without changing the value,
-	// the caret kept across the type switch, and the password-manager opt-outs present.
+	// The secret field: masked by default, an eye that reveals without changing the value, the
+	// caret kept across the switch, and **not a password field** — which is the fix for the manager
+	// that kept offering to save a tool secret as a login. The opt-outs stay for the managers that
+	// read them, but the field's own type is what no manager classifies.
 	await page.setViewport({ width: 1400, height: 900 });
 	await page.goto(`${url}/settings/secrets?workspace=general`, { waitUntil: "networkidle2" });
 	await page.waitForSelector("[data-slot=secrets-section]", { timeout: 15000 });
@@ -1557,18 +1559,28 @@ try {
 			lastPass: input.getAttribute("data-lpignore"),
 			inForm: input.closest("form") !== null,
 			nameOptOut: name?.getAttribute("data-1p-ignore"),
+			// Which mask this browser got: the native glyph masking where it exists, the drawn one
+			// where it does not. Either way the value is not on screen.
+			nativeMask: getComputedStyle(input).webkitTextSecurity === "disc",
+			drawnMask: document.querySelector("[data-slot=secret-mask]") !== null,
+			transparent: getComputedStyle(input).color === "rgba(0, 0, 0, 0)",
 		};
 	});
 	check(
-		"the secret manager opt-outs are on the value and the name",
+		"the secret field is not a password field",
 		secretField !== null &&
-			secretField.type === "password" &&
-			secretField.autocomplete === "new-password" &&
+			secretField.type === "text" &&
+			secretField.autocomplete === "off" &&
 			secretField.onePassword === "true" &&
 			secretField.bitwarden === "true" &&
 			secretField.lastPass === "true" &&
 			secretField.nameOptOut === "true" &&
 			!secretField.inForm,
+		JSON.stringify(secretField),
+	);
+	check(
+		"the secret field is masked, by the browser or by us",
+		secretField !== null && (secretField.nativeMask || (secretField.drawnMask && secretField.transparent)),
 		JSON.stringify(secretField),
 	);
 	await page.type("[data-slot=secret-input] input", "ui-check-secret");
@@ -1609,13 +1621,22 @@ try {
 		const input = document.querySelector("[data-slot=secret-input] input");
 		const button = document.querySelector("[data-slot=secret-input] button");
 		return input instanceof HTMLInputElement && button instanceof HTMLButtonElement
-			? { type: input.type, value: input.value, pressed: button.getAttribute("aria-pressed") }
+			? {
+					value: input.value,
+					pressed: button.getAttribute("aria-pressed"),
+					// The browser's own mask where it has one, ours where it does not.
+					masked:
+						getComputedStyle(input).webkitTextSecurity === "disc" ||
+						getComputedStyle(input).color === "rgba(0, 0, 0, 0)",
+					labeled: button.getAttribute("aria-label"),
+				}
 			: null;
 	});
 	check(
-		"the eye hides it again without touching the value",
+		"the eye hides it again without touching the value, and the mask comes back",
 		hiddenAgain !== null &&
-			hiddenAgain.type === "password" &&
+			hiddenAgain.masked &&
+			hiddenAgain.labeled === "Show secret" &&
 			hiddenAgain.value === "ui-check-secret" &&
 			hiddenAgain.pressed === "false",
 		JSON.stringify(hiddenAgain),
