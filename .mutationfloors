@@ -11,7 +11,7 @@
 #
 # Measured 2026-10-27.
 internal/control     90  218
-internal/sandbox    100  409
+internal/sandbox    100  410
 internal/supervise   85   47
 internal/update      90  258
 internal/vault       95  114
