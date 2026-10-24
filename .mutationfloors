@@ -10,7 +10,7 @@
 # floor may only move up, and it is checked separately.
 #
 # Measured 2026-10-27.
-internal/control     94  169
+internal/control     86  199
 internal/sandbox    100  409
 internal/supervise   85   47
 internal/update      90  258
@@ -26,6 +26,12 @@ internal/ready       97   40
 #     names, models.go:578 compares scale ranks, and both are unique by construction, so `<` and
 #     `<=` are the same function;
 #   one is the two-minute budget on turn.go:267, which is only observable by waiting two minutes.
+#
+# control's ratio fell from 94.41% to 86.15% while its killed count rose from 169 to 199, and that is
+# the shape of testing error paths: 52 mutants that were not covered became testable, 30 of them are
+# killed, and the other 22 are in code now executed but not asserted — an ordering, a persist, a
+# published frame. They are visible in the queue now instead of hiding behind "not covered", which is
+# the point of the killed count being the ratchet.
 #
 # supervise's eight are timing: the idle check's clamps are `interval < 100ms` and `interval >
 # 30s`, and `<=`/`>=` produce the same value at the boundary, because the clamp assigns the same

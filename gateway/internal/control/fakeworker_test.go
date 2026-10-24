@@ -89,6 +89,16 @@ func (f *fakeWorker) OnExit(handler func(error)) {
 
 func (f *fakeWorker) LastWords() string { return f.words }
 
+// ran reports whether a command of this type was sent at all.
+func (f *fakeWorker) ran(kind string) bool {
+	for _, command := range f.asked() {
+		if command.Type == kind {
+			return true
+		}
+	}
+	return false
+}
+
 // asked is every command it was sent, in order.
 func (f *fakeWorker) asked() []protocol.Command {
 	f.mu.Lock()

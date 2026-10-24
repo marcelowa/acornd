@@ -11,7 +11,7 @@
 # floors sit below the low observation on purpose — a ratchet that flaps is worse than a loose one.
 
 cmd/acornfall                      74
-internal/control     80
+internal/control                     84
 internal/httpapi                    75
 internal/netns                      51
 internal/protocol   100
