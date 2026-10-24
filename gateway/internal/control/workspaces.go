@@ -388,9 +388,10 @@ func (w *Workspaces) Update(workspace Workspace) error {
 	// new process. Stopping it here is what makes a move mean something immediately instead of
 	// at the next idle eviction.
 	restart := control != nil && existing.Path != workspace.Path
-	// A private-networks grant is built into the sandbox when it starts, so a change needs a new
+	// A private-networks grant is built into the sandbox when it is created, so a change needs a new
 	// one. Withdrawing it is a downgrade and waits for nothing.
-	if control != nil && existing.Private != workspace.Private {
+	privateChanged := control != nil && existing.Private != workspace.Private
+	if privateChanged {
 		restart = true
 	}
 	if restart {
@@ -400,7 +401,22 @@ func (w *Workspaces) Update(workspace Workspace) error {
 	if restart {
 		control.Close()
 		workerpool.Log("workspace %s stopped: its record changed", workspace.Name)
-	} else if control != nil {
+	}
+	if privateChanged {
+		// Stopping is not enough for what the engine baked into the sandbox at creation: it is
+		// started again, not built again, so the workspace would go on reaching nothing while the
+		// record said otherwise. The sandbox is discarded so the next start is built from the
+		// record — the grant is a decision about the guest's network, and a guest keeps the one it
+		// booted with.
+		if manager := control.sandboxManager(); manager != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), sandbox.Timeout)
+			defer cancel()
+			if err := manager.Remove(ctx, existing.Path); err != nil && !errors.Is(err, sandbox.ErrUnavailable) {
+				workerpool.Log("discarding the sandbox for %s: %v", workspace.Name, err)
+			}
+		}
+	}
+	if !restart && control != nil {
 		control.SetWorkspace(workspace)
 	}
 	return w.persist()

@@ -412,6 +412,7 @@ func (m *Microsandbox) Create(ctx context.Context, policy Policy, policyDir stri
 	// workspace. An engine without the flag has nothing to hear. (On the pinned 0.7.6 a
 	// refusal cannot be honored — there is no off switch — which the ADR owns as an interim
 	// limitation: the sandbox still boots.)
+	args = append(args, networkArgs(policy)...)
 	if engine := m.engineNesting(ctx); engine.Available {
 		if policy.DisableVMNesting {
 			args = append(args, "--nested-virt=false")
@@ -421,6 +422,32 @@ func (m *Microsandbox) Create(ctx context.Context, policy Policy, policyDir stri
 	}
 	_, err := m.runEnv(ctx, secretEnvValues(policy.Secrets), args...)
 	return err
+}
+
+// networkArgs is what a workspace may reach, said out loud for every case.
+//
+// The engine's implicit default is public-only, and it includes a DNS allowance that disappears the
+// moment any rule is written — so inheriting it is wrong twice over: nothing of ours says "public
+// only", and an engine release that changes that default would open every microVM workspace
+// without a line of this changing. A rule set that forgets DNS breaks name resolution, which is
+// what a naive `allow@public` does.
+//
+// So: the default is deny, public and DNS are allowed, and the private grant is the only thing
+// added for a workspace that has one. Egress off is the rendered `network: none`, which is a whole
+// policy on its own.
+func networkArgs(policy Policy) []string {
+	if !policy.Egress {
+		return nil
+	}
+	args := []string{
+		"--net-default", "deny",
+		"--net-rule", "allow@public",
+		"--net-rule", "allow@dns",
+	}
+	if policy.PrivateEgress {
+		args = append(args, "--net-rule", "allow@private")
+	}
+	return args
 }
 
 func (m *Microsandbox) Start(ctx context.Context, name string, secrets []Secret) error {

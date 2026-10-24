@@ -71,11 +71,20 @@ given the machine's networks is given its resolver too.
 
 ## What it does not solve
 
-- **The microVM engine.** This is built into the bubblewrap invocation, where the sandbox's routes
-  are ours to write. A microVM's network belongs to the engine, and `microsandbox` exposes an on/off
-  switch rather than a route table. The grant is in the policy for both engines, so the second half
-  is the engine's to grow; until then a microVM workspace with its network on reaches what the
-  machine reaches.
+- **The microVM engine, corrected 2026-10-28.** The paragraph here used to say that a microVM
+  workspace with its network on reaches what the machine reaches, and that the grant was the
+  engine's to grow. Measured on the pinned 0.7.6, that was backwards in both directions: the engine
+  **already refuses** private networks by default, and the thing that did not work was the **grant**,
+  which the engine ignored — so the dialog said *private networks: allowed* while the sandbox
+  disagreed, which is the same class of mistake the grant exists to prevent in the other direction.
+  It also meant "public only" rested on an engine default rather than on us, and that naming
+  `allow@public` alone broke name resolution, because the engine's implicit set carries a DNS
+  allowance that disappears the moment any rule is written.
+
+  The egress policy is now written into the engine's arguments for every case: default deny, public
+  and DNS allowed, and the private grant as the one rule added for a workspace that has one. The
+  sandbox bakes that in at creation, so a change to the grant **discards** the sandbox rather than
+  starting it again — a guest keeps the network it booted with.
 - **Exfiltration over public endpoints.** A workspace can still send anything it can read to any
   public address, and DNS queries still leave through the machine's resolver as the machine. This
   ADR is about which destinations are reachable, not about what may be said to them.
@@ -88,3 +97,9 @@ given the machine's networks is given its resolver too.
 - `TestABwrapSandboxCannotReachPrivateNetworks` — the bwrap tier listens on the machine's own private
   address and fails if a workspace can reach it.
 - `TestAPrivateNetworksGrantReachesThePolicy` — the workspace's field is the engine's policy.
+- `TestTheEgressPolicyIsWrittenForEveryCase` — the microVM's argv, for egress off, on, and granted.
+- `TestCreatePassesTheEgressPolicyToTheEngine` — the policy reaches `create`, which is where the
+  guest's network is built.
+- `TestAMicroVMSandboxCannotReachPrivateNetworks` and
+  `TestAMicroVMSandboxWithTheGrantReachesPrivateNetworks` — the microVM peers of the bwrap pair:
+  a listener on this machine's private address, and both answers asserted against a real engine.
