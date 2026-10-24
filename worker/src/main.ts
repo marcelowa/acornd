@@ -43,6 +43,7 @@ import {
 	storedName,
 	type AttachmentMeta,
 } from "./attachments.ts";
+import { activityOf } from "./activity.ts";
 import { thinkingLevelFor } from "./thinking.ts";
 import { PREAMBLE } from "./preamble.ts";
 import { parseSecrets, secretSection, type SecretInfo } from "./secrets.ts";
@@ -434,22 +435,6 @@ async function deriveTitle(conversation: Conversation): Promise<string> {
 	return "New conversation";
 }
 
-/**
- * Last activity is the newest entry's own message timestamp, which is when the
- * conversation last moved. An entry without timestamps carries none, so the
- * conversation keeps rendering flat rather than claiming an activity it never had.
- */
-function lastActivityOf(
-	entry: { model?: readonly { timestamp?: number }[] } | undefined,
-): number | undefined {
-	let newest: number | undefined;
-	for (const message of entry?.model ?? []) {
-		if (typeof message.timestamp !== "number") continue;
-		if (newest === undefined || message.timestamp > newest) newest = message.timestamp;
-	}
-	return newest;
-}
-
 async function listConversations(): Promise<ConversationInfo[]> {
 	const found: ConversationInfo[] = [];
 	let cursor: Parameters<typeof storage.scanConversations>[2];
@@ -477,17 +462,18 @@ async function listConversations(): Promise<ConversationInfo[]> {
 			]);
 			const effectiveModel = agentConfig?.model;
 			const effectiveThinking = agentConfig?.thinkingLevel;
-			const lastActivity = lastActivityOf(newest.items[0]);
+			// Read from committed state, so a run that survived a restart still
+			// shows as running, and a background run is never invisible.
+			const running = live?.run !== undefined;
+			const activity = activityOf(newest.items[0], running);
 			found.push({
 				id,
 				title,
 				hidden,
 				root: record.id === ROOT_CONVERSATION_ID,
-				// Read from committed state, so a run that survived a restart still
-				// shows as running, and a background run is never invisible.
-				running: live?.run !== undefined,
+				running,
 				lastEntryId: String(newest.items[0]?.id ?? ""),
-				...(lastActivity === undefined ? {} : { updatedAt: lastActivity }),
+				...(activity === undefined ? {} : { updatedAt: activity }),
 				tokens: totalTokens(usage),
 				cost: totalCost(usage),
 				...(parent === undefined ? {} : { parent }),
