@@ -7,13 +7,17 @@
 # Efficacy answers the question coverage cannot: the line ran, but would a test have failed if it
 # were wrong?
 #
+# A mutant killed by the runner's patience — a loop that never ends — is reported as timed out and
+# not counted either way, so a package with one moves by up to a point between runs. Floors sit
+# below the lowest observed number, not on it.
+#
 # Measured 2026-10-27, worst first. `sandbox` at 100 means every mutation in its covered code is
 # caught, which is what a pass over the engine should leave behind.
 internal/control     84
 internal/sandbox    100
 internal/supervise   87
 internal/update      85
-internal/vault       84
+internal/vault       88
 internal/workerpool  87
 internal/ready       86
 #
