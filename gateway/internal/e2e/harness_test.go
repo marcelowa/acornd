@@ -158,12 +158,21 @@ type settings struct {
 	// providers, none of which authenticate in the curated test environment, and no
 	// last resort to guess from.
 	noDevProvider bool
+	// updateURL is where the release lookups go for this gateway. It is a setting rather than an
+	// environment variable because tests run in parallel: one test's mirror must not be another
+	// test's, and os.Setenv while another test reads the environment is a data race.
+	updateURL string
 }
 
 // withScript is what the model does: the first rule whose Match is a substring of the last
 // user message wins, its tools are called, and then its Reply is the answer.
 func withScript(rules ...scriptRule) func(*settings) {
 	return func(s *settings) { s.script = rules }
+}
+
+// withUpdateURL points this gateway's release lookups at a mirror.
+func withUpdateURL(url string) func(*settings) {
+	return func(s *settings) { s.updateURL = url }
 }
 
 // slowTokensPerSecond is the pace withSlowModel asks for. It has to be slow enough that a
@@ -335,11 +344,8 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 		// workspace records its own engine, and this is the test telling the install otherwise.
 		env = append(env, "ACORNFALL_SANDBOX_ENGINE="+engineEnv)
 	}
-	if updateURL := os.Getenv("ACORNFALL_UPDATE_URL"); updateURL != "" {
-		// The update tier talks to whatever ACORNFALL_UPDATE_URL names, so a test can answer as
-		// github does without reaching it. The gateway under test is a child process, which is
-		// why the variable has to be passed along here.
-		env = append(env, "ACORNFALL_UPDATE_URL="+updateURL)
+	if s.cfg.updateURL != "" {
+		env = append(env, "ACORNFALL_UPDATE_URL="+s.cfg.updateURL)
 	}
 	if noSandbox := os.Getenv("ACORNFALL_NO_SANDBOX"); noSandbox != "" && !hostEngine {
 		env = append(env, "ACORNFALL_NO_SANDBOX="+noSandbox)

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -52,25 +51,22 @@ func fakeReleases(t *testing.T) *httptest.Server {
 	return server
 }
 
-// withUpdateSource points the gateway at a fake github for the length of one test.
-func withUpdateSource(t *testing.T) {
+// withUpdateSource points a gateway at a fake github, as a setting of that gateway: tests run in
+// parallel, and one test's mirror must not become another test's through the environment.
+func withUpdateSource(t *testing.T) func(*settings) {
 	t.Helper()
 	server := fakeReleases(t)
-	previous := os.Getenv("ACORNFALL_UPDATE_URL")
 	// The full latest-release URL, not the base: the manager derives the API base by cutting at
 	// `/releases/`, so a base here would silently fall back to github.
-	if err := os.Setenv("ACORNFALL_UPDATE_URL", server.URL+"/repos/owner/repo/releases/latest"); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Setenv("ACORNFALL_UPDATE_URL", previous) })
+	return withUpdateURL(server.URL + "/repos/owner/repo/releases/latest")
 }
 
 // The update screen is answered from the release API and says what it knows: the version running,
 // what was found, whether it is newer, and the state of the switch. A screen that cannot tell
 // "no update" from "never checked" is one nobody can act on.
 func TestTheUpdateScreenAnswersFromTheReleaseAPI(t *testing.T) {
-	withUpdateSource(t)
-	s := start(t)
+	source := withUpdateSource(t)
+	s := start(t, source)
 	c := s.client()
 
 	var status struct {
@@ -121,8 +117,8 @@ func TestTheUpdateScreenAnswersFromTheReleaseAPI(t *testing.T) {
 // next to the running build. A list that shows an rc to a stable machine is a one-click install of
 // an rc.
 func TestTheReleasePickerShowsStableAndSaysTheRelation(t *testing.T) {
-	withUpdateSource(t)
-	s := start(t)
+	source := withUpdateSource(t)
+	s := start(t, source)
 	c := s.client()
 
 	var stable struct {
@@ -169,8 +165,8 @@ func TestTheReleasePickerShowsStableAndSaysTheRelation(t *testing.T) {
 // One release by name answers for a tag the picker never listed, and a tag nobody published is a
 // 404 rather than an empty release: the version page has to tell those apart.
 func TestOneReleaseIsAnsweredByName(t *testing.T) {
-	withUpdateSource(t)
-	s := start(t)
+	source := withUpdateSource(t)
+	s := start(t, source)
 	c := s.client()
 
 	var release struct {
@@ -189,8 +185,8 @@ func TestOneReleaseIsAnsweredByName(t *testing.T) {
 // The switch is releases-only: the tree-build channel is designed and not built, so the endpoint
 // refuses it rather than storing a setting that changes nothing.
 func TestTheUpdateSwitchOnlyTakesWhatItCanDo(t *testing.T) {
-	withUpdateSource(t)
-	s := start(t)
+	source := withUpdateSource(t)
+	s := start(t, source)
 	c := s.client()
 
 	if status, body := c.do("POST", "/api/update/settings", map[string]any{"channel": "tree"}); status != 400 {
@@ -215,8 +211,8 @@ func TestTheUpdateSwitchOnlyTakesWhatItCanDo(t *testing.T) {
 // picked, and an empty list is an empty answer rather than a fetch. Too many tags is the caller
 // building a request nobody can answer.
 func TestNotesAreAskedForInBunches(t *testing.T) {
-	withUpdateSource(t)
-	s := start(t)
+	source := withUpdateSource(t)
+	s := start(t, source)
 	c := s.client()
 
 	var empty struct {
@@ -251,8 +247,8 @@ func TestNotesAreAskedForInBunches(t *testing.T) {
 // what they do when there is nothing to do is a sentence rather than a half-applied update: a
 // drain mode nobody implements, a rollback with no backup, a restart with nothing pending.
 func TestAnUpdateThatCannotHappenSaysWhy(t *testing.T) {
-	withUpdateSource(t)
-	s := start(t)
+	source := withUpdateSource(t)
+	s := start(t, source)
 	c := s.client()
 
 	if status, body := c.do("POST", "/api/update/apply", map[string]any{"drain": "sometimes"}); status != 400 {
@@ -282,8 +278,8 @@ func TestAnUpdateThatCannotHappenSaysWhy(t *testing.T) {
 // nothing listening would be an install that stopped at the last move. It is its own test because
 // it is the one request here that ends the process it was sent to.
 func TestTheRestartSwitchAnswersAndTheGatewayComesBack(t *testing.T) {
-	withUpdateSource(t)
-	s := start(t)
+	source := withUpdateSource(t)
+	s := start(t, source)
 	c := s.client()
 
 	var answer struct {

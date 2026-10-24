@@ -14,7 +14,6 @@ import (
 // one that has to work when nothing else is up.
 func TestTheCommandLineChecksForAnUpdateWithoutAGateway(t *testing.T) {
 	t.Parallel()
-	withUpdateSource(t)
 	dir := t.TempDir()
 
 	// A development build has no version, so nothing is offered and the answer says so rather
@@ -74,8 +73,8 @@ func TestTheWorkspaceCommandsRefuseWhatTheyCannotDo(t *testing.T) {
 // behind its back would leave it running old code.
 func TestTheCommandLineAsksARunningGateway(t *testing.T) {
 	t.Parallel()
-	withUpdateSource(t)
-	s := start(t)
+	source := withUpdateSource(t)
+	s := start(t, source)
 	address := strings.TrimPrefix(s.client().base, "http://")
 	host, port, ok := strings.Cut(address, ":")
 	if !ok {
