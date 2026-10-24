@@ -209,6 +209,11 @@ type Manager struct {
 	// per process is enough, and the page's "what changed in between" asks
 	// once for several tags instead of one read each (the owner: five
 	// seconds of nothing while the list filled in).
+	// now is the clock the backup stamp is taken from. It is a field for one reason: two
+	// backups in the same nanosecond have to share a stamp for the numbering rule to be
+	// testable at all, and that rule exists because rotation counts folders.
+	now func() time.Time
+
 	notesMu    sync.Mutex
 	notesCache map[string]string
 	failed     string
@@ -861,7 +866,11 @@ func assetNamed(release Release, name string) Asset {
 // backed up: credentials.json and secrets.json stay out, and old copies
 // are scrubbed. Update stops when backup fails.
 func (m *Manager) Backup() (string, error) {
-	stamp := time.Now().UTC().Format("20060102-150405.000000000")
+	clock := m.now
+	if clock == nil {
+		clock = time.Now
+	}
+	stamp := clock().UTC().Format("20060102-150405.000000000")
 	dir := filepath.Join(m.backupsDir(), stamp)
 	// Same-nanosecond backups must not share a folder: rotation counts
 	// folders, and two backups in one would silently be one.
