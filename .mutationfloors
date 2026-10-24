@@ -7,6 +7,15 @@
 # Efficacy answers the question coverage cannot: the line ran, but would a test have failed if it
 # were wrong?
 #
+# Two things that move the number without anything getting worse:
+#
+#   A mutant killed by the runner's patience (a loop that never ends) is reported as timed out and
+#   counted neither way, so a package with one moves by up to a point between runs.
+#
+#   A test that covers new code brings *new* mutants into the denominator. Efficacy is killed over
+#   reachable mutants, so adding a test can lower it — that is coverage improving, not assertions
+#   weakening. The floor tolerates the dip; the number to watch is killed mutants, which only rises.
+#
 # A mutant killed by the runner's patience — a loop that never ends — is reported as timed out and
 # not counted either way, so a package with one moves by up to a point between runs. Floors sit
 # below the lowest observed number, not on it.
