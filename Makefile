@@ -113,7 +113,8 @@ cover: ## coverage across both processes, merged; FLOOR=0 reports without failin
 		go test -short -count=1 -parallel $(TEST_PARALLEL) ./internal/e2e
 	cd gateway && go tool covdata textfmt -i=$(COVER_DIR)/e2e -o=$(COVER_DIR)/e2e.cover
 	bun scripts/coverage.mjs merge $(COVER_DIR)/merged.cover $(COVER_DIR)/unit.cover $(COVER_DIR)/e2e.cover
-	bun scripts/coverage.mjs report $(COVER_DIR)/merged.cover --floor $(FLOOR) --ignore .coverageignore --root $(CURDIR)
+	bun scripts/coverage.mjs report $(COVER_DIR)/merged.cover --floor $(FLOOR) \
+		--floors .coveragefloors --ignore .coverageignore --root $(CURDIR)
 
 # The complexity and maintainability half of the bar (#102): a report, not a gate. A gate that is
 # red from the day it lands is one nobody runs, so this prints the backlog and leaves the exit

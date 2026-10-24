@@ -1,0 +1,19 @@
+# The floor `make cover` enforces, per package. The number is where the package is today,
+# rounded down: a floor is a ratchet, so it may only move up. Raise one when its package goes
+# up, never lower one to make a run green.
+#
+# The target is 95% for everything. Where a package cannot reach it, the line says why in one
+# clause — and the reason is a fact about the code, not about the test suite.
+
+cmd/acornfall        68   -- root, a namespace, or an os.Exit: the plan's application, the probe re-exec, netns
+internal/control     79
+internal/httpapi     68
+internal/netns       33   -- a netlink shim: needs CAP_NET_ADMIN to run at all
+internal/protocol   100
+internal/ready       83
+internal/sandbox     78
+internal/supervise   84
+internal/update      77
+internal/vault       82
+internal/workerpool  85
+web                  75

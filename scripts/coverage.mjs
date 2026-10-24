@@ -59,7 +59,24 @@ function covers(pattern, file) {
 	return file === pattern || file.startsWith(pattern.endsWith("/") ? pattern : `${pattern}/`);
 }
 
-function report(profile, floor, ignorePath, root) {
+// A floor per package, because one number for the whole repo says nothing about a package that
+// carries its weight and one that does not. The file is where a floor may move, and it may only
+// move up: a ratchet is the difference between a bar and a wish.
+function floors(path, fallback) {
+	const perPackage = new Map();
+	for (const line of readFileSync(path, "utf8").split("\n")) {
+		const text = line.trim();
+		if (text === "" || text.startsWith("#")) continue;
+		const [name, rest] = text.split(/\s+/, 2);
+		const value = Number(rest?.split(" ")[0]);
+		if (name === undefined || !Number.isFinite(value)) throw new Error(`${path}: cannot read "${text}"`);
+		perPackage.set(name, value);
+	}
+	return (name) => perPackage.get(name) ?? fallback;
+}
+
+function report(profile, floor, ignorePath, root, floorPath) {
+	const floorFor = floors(floorPath, floor);
 	const ignored = exclusions(ignorePath);
 	const packages = new Map();
 	const excluded = { statements: 0, covered: 0, entries: new Map() };
@@ -89,7 +106,7 @@ function report(profile, floor, ignorePath, root) {
 	const rows = [...packages].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 
 	const width = Math.max(...rows.map(([name]) => name.length), "package".length);
-	console.log(`\n${"package".padEnd(width)}  statements   covered  %`);
+	console.log(`\n${"package".padEnd(width)}  statements   covered      %  floor`);
 	let totalStatements = 0;
 	let totalCovered = 0;
 	const below = [];
@@ -97,13 +114,14 @@ function report(profile, floor, ignorePath, root) {
 		totalStatements += pkg.statements;
 		totalCovered += pkg.covered;
 		const value = percent(pkg.covered, pkg.statements);
-		if (value < floor) below.push(`${name} ${value.toFixed(1)}%`);
+		const own = floorFor(name);
+		if (value < own) below.push(`${name} ${value.toFixed(1)}% (floor ${own}%)`);
 		console.log(
-			`${name.padEnd(width)}  ${String(pkg.statements).padStart(10)}  ${String(pkg.covered).padStart(9)}  ${value.toFixed(1).padStart(5)}${value < floor ? "  below" : ""}`,
+			`${name.padEnd(width)}  ${String(pkg.statements).padStart(10)}  ${String(pkg.covered).padStart(9)}  ${value.toFixed(1).padStart(5)}  ${String(floorFor(name)).padStart(5)}${value < floorFor(name) ? " below" : ""}`,
 		);
 	}
 	const all = totalStatements + excluded.statements;
-	console.log(`${"total".padEnd(width)}  ${String(totalStatements).padStart(10)}  ${String(totalCovered).padStart(9)}  ${percent(totalCovered, totalStatements).toFixed(1).padStart(5)}`);
+	console.log(`${"total".padEnd(width)}  ${String(totalStatements).padStart(10)}  ${String(totalCovered).padStart(9)}  ${percent(totalCovered, totalStatements).toFixed(1).padStart(5)}      -`);
 
 	// The cap is the point of the exclude file: a floor that the excluded part can grow around
 	// is a floor in name only.
@@ -113,7 +131,7 @@ function report(profile, floor, ignorePath, root) {
 
 	const problems = [];
 	if (excludedShare > 3) problems.push(`exclusions are ${excludedShare.toFixed(1)}% of all statements, over the 3% cap`);
-	if (below.length > 0) problems.push(`${below.length} package(s) below ${floor}%: ${below.join(", ")}`);
+	if (below.length > 0) problems.push(`${below.length} package(s) below their floor: ${below.join(", ")}`);
 	for (const entry of ignored) {
 		if (excluded.entries.has(entry.pattern)) continue;
 		// A platform file is not compiled on this host, so it appears in no profile and there is
@@ -127,7 +145,11 @@ function report(profile, floor, ignorePath, root) {
 		console.error(`\ncoverage: not met\n  - ${problems.join("\n  - ")}`);
 		process.exit(1);
 	}
-	console.log(`\ncoverage: every package at or above ${floor}%`);
+	const below95 = rows.filter(([name, pkg]) => percent(pkg.covered, pkg.statements) < 95).map(([name]) => name);
+	console.log(`\ncoverage: every package at or above its floor`);
+	if (below95.length > 0) {
+		console.log(`to reach 95%: ${below95.join(", ")}`);
+	}
 }
 
 const [command, out, ...rest] = process.argv.slice(2);
@@ -137,15 +159,17 @@ if (command === "merge" && out !== undefined && rest.length > 0) {
 	const floorFlag = rest.indexOf("--floor");
 	const ignoreFlag = rest.indexOf("--ignore");
 	const rootFlag = rest.indexOf("--root");
+	const floorsFlag = rest.indexOf("--floors");
 	const floor = floorFlag === -1 ? 95 : Number(rest[floorFlag + 1]);
 	const ignore = ignoreFlag === -1 ? ".coverageignore" : rest[ignoreFlag + 1];
 	const root = rootFlag === -1 ? "." : rest[rootFlag + 1];
+	const floorFile = floorsFlag === -1 ? ".coveragefloors" : rest[floorsFlag + 1];
 	if (!Number.isFinite(floor)) {
 		console.error("coverage: --floor needs a number");
 		process.exit(2);
 	}
-	report(out, floor, ignore, root);
+	report(out, floor, ignore, root, floorFile);
 } else {
-	console.error("usage: bun scripts/coverage.mjs merge <out> <in>... | report <profile> [--floor 95] [--ignore path] [--root .]");
+	console.error("usage: bun scripts/coverage.mjs merge <out> <in>... | report <profile> [--floor 95] [--floors path] [--ignore path] [--root .]");
 	process.exit(2);
 }
