@@ -117,19 +117,27 @@ func (s *Server) WithLogger(logger func(string, ...any)) *Server {
 	return s
 }
 
-// idleLoop stops the sandbox when nothing has run in it for a while. It checks often enough that
-// a deadline is not missed by much and rarely enough that it costs nothing.
-func (s *Server) idleLoop(ctx context.Context) {
-	if s.idle <= 0 {
-		return
-	}
-	interval := s.idle / 4
+// idleInterval is how often the idle deadline is checked: a quarter of the window, so a deadline
+// is not missed by much, clamped at both ends — often enough to be honest, rarely enough to cost
+// nothing. It is a function so the clamps can be read without waiting for a ticker.
+func idleInterval(idle time.Duration) time.Duration {
+	interval := idle / 4
 	if interval < 100*time.Millisecond {
 		interval = 100 * time.Millisecond
 	}
 	if interval > 30*time.Second {
 		interval = 30 * time.Second
 	}
+	return interval
+}
+
+// idleLoop stops the sandbox when nothing has run in it for a while. It checks often enough that
+// a deadline is not missed by much and rarely enough that it costs nothing.
+func (s *Server) idleLoop(ctx context.Context) {
+	if s.idle <= 0 {
+		return
+	}
+	interval := idleInterval(s.idle)
 	last := time.Now()
 	activity := func() {
 		s.mu.Lock()

@@ -5,12 +5,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -143,7 +144,11 @@ func TestARunSeesOnlyTheEnvironmentItWasSent(t *testing.T) {
 }
 
 // A kill takes what the command started, not only the command: a shell that started a server is
-// not the process that has to die.
+// not the process that has to die. What survived is asked of the process group this command
+// started — the pid comes from the supervisor's own "started" event — and not of the machine:
+// `pgrep -f "sleep 30"` also counts the shell running the assertion and the sleepers a killed
+// mutation run left behind, which is a green test on a quiet machine and a red one after any
+// interrupted run.
 func TestKillEndsTheCommandAndWhatItStarted(t *testing.T) {
 	_, socket := startServer(t)
 	c := dial(t, socket)
@@ -153,23 +158,57 @@ func TestKillEndsTheCommandAndWhatItStarted(t *testing.T) {
 		Argv: []string{"/bin/sh", "-c", "sleep 30 & sleep 30 & echo started; wait"},
 		Env:  map[string]string{"PATH": "/usr/bin:/bin"},
 	})
-	// Wait for the command to be up before killing it, so the test is about the kill and not a
-	// race against the spawn.
 	go func() {
 		time.Sleep(200 * time.Millisecond)
 		c.send(t, Request{Type: "kill", ID: "1"})
 	}()
-	output, event := c.collect(t, "1")
-	if !strings.Contains(output, "started") {
-		t.Fatalf("output %q", output)
+
+	var output strings.Builder
+	group := 0
+	_ = c.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	var event Event
+	for {
+		if err := c.decoder.Decode(&event); err != nil {
+			t.Fatalf("decode while waiting for 1: %v", err)
+		}
+		if event.ID != "" && event.ID != "1" {
+			continue
+		}
+		switch event.Type {
+		case "started":
+			if pgid, err := syscall.Getpgid(event.PID); err == nil {
+				group = pgid
+			}
+		case "chunk":
+			data, err := base64.StdEncoding.DecodeString(event.Data)
+			if err != nil {
+				t.Fatalf("chunk is not base64: %v", err)
+			}
+			output.Write(data)
+		}
+		if event.Type == "exit" || event.Type == "error" {
+			break
+		}
+	}
+	if !strings.Contains(output.String(), "started") {
+		t.Fatalf("output %q", output.String())
 	}
 	if event.Stopped != "killed" {
 		t.Errorf("stopped: %q, want killed", event.Stopped)
 	}
-	// Nothing of it is left running.
-	time.Sleep(100 * time.Millisecond)
-	if out := runQuietly(t, "pgrep", "-c", "-f", "sleep 30"); strings.TrimSpace(out) != "0" {
-		t.Errorf("sleepers survived the kill: %q", out)
+	if group == 0 {
+		t.Fatal("the command never reported a process group")
+	}
+	gone := false
+	for attempt := 0; attempt < 40; attempt++ {
+		if err := syscall.Kill(-group, 0); errors.Is(err, syscall.ESRCH) {
+			gone = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !gone {
+		t.Errorf("process group %d survived the kill", group)
 	}
 }
 
@@ -290,15 +329,4 @@ func TestAnUnknownRequestIsRefused(t *testing.T) {
 	if event.Type != "error" || !strings.Contains(event.Error, "unknown request") {
 		t.Fatalf("event: %+v", event)
 	}
-}
-
-// runQuietly is a helper for the kill test: it runs a program and returns what it printed.
-func runQuietly(t *testing.T, name string, args ...string) string {
-	t.Helper()
-	out, err := exec.Command(name, args...).Output()
-	if err != nil && len(out) == 0 {
-		// A count of zero exits non-zero, which is the answer this asks for.
-		return "0"
-	}
-	return string(out)
 }
