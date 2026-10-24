@@ -39,6 +39,21 @@ burning the machine on a crash loop.
 pipe is still being read, so the stdout reader remains the thing that ends; the reaper
 only announces it.
 
+## A resumed run looked idle again
+
+Recovery resumed the work, but the rail did not hear it. On 2026-10-28 a worker was restarted
+under a generation, `harness.resume()` picked the task up, and the resumed run wrote its first
+entry: a `pi.system` prompt, which carries no message timestamp. Control's busy rule wants a live
+run record **and** activity fresher than thirty minutes; with no timestamp the conversation read
+as "never moved", so `/api/state` said `running: false` while the durable task was `running` and
+the model was working. The update drain check reads the same list, so an update could walk over a
+run that had just been recovered — and `--stop-runs` did stop it, as a run it never saw.
+
+The rule was right and the record was wrong. The worker now dates a running conversation at the
+listing when its newest entry cannot date it (`activityOf`, `worker/src/activity.ts`). The control
+is unchanged: a record with no activity is still not busy once the run is over. The case is
+`worker/test/activity.test.ts`; the reproduction is the resume itself.
+
 ## The stream had no heartbeat, and then had one nobody could see
 
 An idle `text/event-stream` is indistinguishable from a dead one until something times
