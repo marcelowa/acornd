@@ -11,7 +11,7 @@
 #
 # Measured 2026-10-27.
 internal/control     88  236
-internal/sandbox    100  416
+internal/sandbox    100  389
 internal/supervise   85   47
 internal/update      90  258
 internal/vault       95  114
@@ -31,6 +31,12 @@ internal/ready       97   40
 # is the shape of testing error paths: 58 mutants that were not covered became testable. The first
 # pass at those tests executed the code without asserting what it sent, which is why 22 of them lived
 # for a while; asserting the commands, the order, the args and the environment took it back up.
+#
+# sandbox's killed count is 389 where the engine is not installed and 416 where it is: without
+# bubblewrap the live lifecycle test skips, so fewer mutants are reachable. The nightly job runs
+# without it on purpose — installing bubblewrap there made that test run inside every mutant's
+# test pass, sixteen seconds times four hundred mutants — so the floor sits at the low count. On a
+# machine with the engine the same commit reads 416, which is above the floor and may not go down.
 #
 # supervise's eight are timing: the idle check's clamps are `interval < 100ms` and `interval >
 # 30s`, and `<=`/`>=` produce the same value at the boundary, because the clamp assigns the same

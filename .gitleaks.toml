@@ -1,0 +1,18 @@
+# gitleaks: the findings that are allowed, and why each one is.
+#
+# The rule this file follows is the same one `.coverageignore` and `.mutationfloors` follow: an
+# exception carries its reason, and the reason is a fact somebody checked rather than a feeling.
+
+[allowlist]
+description = "a layout fixture that was shaped exactly like a token"
+
+# `github-fine-grained-pat` fires on `ui/src/components/transcript/user-message.stories.tsx`,
+# where the story needs a long unbroken string to assert that the transcript wraps instead of
+# widening. The string was replaced with one that says it is not a credential, but the scanner
+# reads history, so the original commit keeps the finding.
+#
+# Checked, not assumed: GitHub answers 401 to `GET /user` with that string, so it was never a live
+# credential — or was revoked before anyone could use it. If it ever answers 200, this allowlist is
+# wrong and the finding is real.
+paths = ['''ui/src/components/transcript/user-message\.stories\.tsx''']
+regexes = ['''github_pat_[A-Za-z0-9_]{80,}''']

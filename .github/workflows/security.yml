@@ -69,7 +69,7 @@ jobs:
       - name: gitleaks
         run: |
           go install github.com/zricethezav/gitleaks/v8@latest
-          "$(go env GOPATH)/bin/gitleaks" detect --no-banner --redact
+          "$(go env GOPATH)/bin/gitleaks" detect --no-banner --redact --config .gitleaks.toml
 
   mutations:
     # The mutation floors are the honest half of "a test that fails without the change", and they
@@ -92,13 +92,6 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           tools: true
-      # The sandbox package's tests skip without bubblewrap, and a floor measured on a machine
-      # that has it is unreachable on one that does not — the same four points the coverage floor
-      # learned about. Installing it makes the number mean the same thing on both.
-      - name: Install the engine's tools
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq bubblewrap passt
       - name: mutations ${{ matrix.package }}
         id: mutants
         run: |
@@ -120,8 +113,10 @@ jobs:
           } > "$RUNNER_TEMP/body.md"
           [ "$status" -eq 0 ] || exit 1
       - name: File what survived
-        # Only when the mutation run itself failed: an install that broke is not a survivor.
-        if: steps.mutants.outcome == 'failure'
+        # `failure()` and the outcome: a step's own `if` is read as `success() && …`, so the
+        # outcome alone skips this in exactly the case it exists for — and the outcome alone also
+        # keeps a broken install from being filed as "a test is missing".
+        if: failure() && steps.mutants.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
           PACKAGE: ${{ matrix.package }}

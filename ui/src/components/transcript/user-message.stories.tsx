@@ -111,6 +111,10 @@ export const LongToken: Story = {
 		entry: {
 			kind: "user",
 			id: "long-token",
+			// A token shaped like a GitHub one and deliberately not one: the story exists to show
+			// that a long unbroken string wraps instead of widening the transcript, and a real
+			// value pasted here is a credential in a public repository. The scanner in the security
+			// workflow is what caught the last one.
 			text: "github_pat_NOT-A-CREDENTIAL-this-is-a-layout-fixture-0000000000000000000000000000",
 			at,
 		},
