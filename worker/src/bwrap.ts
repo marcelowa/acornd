@@ -61,6 +61,17 @@ export interface BwrapConfig {
 const systemPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
 /**
+ * How often an attached worker tells its sandbox it is still here.
+ *
+ * The supervisor stops itself after a window with nothing running — thirty minutes by default,
+ * and fed by the policy — which is the net under a gateway that died. It cannot tell that from a
+ * worker that is attached and simply has nothing to run, so the worker says so. A conversation
+ * idle for longer than the window keeps its shell, and the timer still reclaims a sandbox whose
+ * worker and gateway are both gone.
+ */
+const KEEPALIVE_INTERVAL_MS = 5 * 60_000;
+
+/**
  * What a command's PATH starts with. Tools a workspace installs itself land in its own home, so
  * the two folders every unprivileged installer uses come first — otherwise a toolchain that
  * survived one command would still not be found by the next one.
@@ -88,12 +99,36 @@ interface Event {
 class BwrapClient extends WorkspaceFiles implements SandboxClient {
 	readonly name: string;
 	private readonly config: BwrapConfig;
+	private readonly keepalive: ReturnType<typeof setInterval>;
 	private nextID = 0;
 
 	constructor(config: BwrapConfig) {
 		super();
 		this.config = config;
 		this.name = `bwrap:${config.workspace}`;
+		this.keepalive = setInterval(() => this.sendKeepalive(), KEEPALIVE_INTERVAL_MS);
+		this.keepalive.unref?.();
+		// One now, not in five minutes: the sandbox's timer starts when it is created, and a
+		// worker that attaches to one already near its deadline should not wait to say so.
+		this.sendKeepalive();
+	}
+
+	/**
+	 * One keepalive, on a connection of its own. Silent on failure: a sandbox that is gone is the
+	 * next command's to report, and a heartbeat that logged every stop would bury that error.
+	 */
+	private sendKeepalive(): void {
+		const socket = connect(this.config.socket);
+		const done = (): void => {
+			socket.destroy();
+		};
+		socket.on("error", done);
+		socket.once("connect", () => {
+			socket.write(`${JSON.stringify({ type: "keepalive" })}\n`);
+		});
+		socket.once("data", done);
+		const timer = setTimeout(done, 5000);
+		timer.unref?.();
 	}
 
 	/**
@@ -140,7 +175,7 @@ class BwrapClient extends WorkspaceFiles implements SandboxClient {
 			const failed = (error: Error): void => {
 				reject(
 					new Error(
-						`the sandbox at ${this.config.socket} is not answering (${error.message}): the workspace's sandbox stops when the workspace is stopped`,
+						`the sandbox at ${this.config.socket} is not answering (${error.message}): the sandbox is stopped, and restarting acornfall starts it again`,
 					),
 				);
 			};

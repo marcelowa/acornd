@@ -260,6 +260,62 @@ func TestAnIdleSandboxStopsItself(t *testing.T) {
 	}
 }
 
+// A worker sits attached with nothing to run for as long as a conversation is idle, which can be
+// longer than the sandbox's own window. That is not an abandoned sandbox: the worker is still
+// there, and the timer that exists for a gateway that died must not stop it under one.
+func TestAKeepaliveKeepsTheSandboxAwake(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "supervisor.sock")
+	server := New(socket, "test", 300*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- server.Serve(ctx) }()
+	if err := WaitForReady(context.Background(), socket, 3*time.Second); err != nil {
+		t.Fatalf("ready: %v", err)
+	}
+	c := dial(t, socket)
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
+		c.send(t, Request{Type: "keepalive"})
+		var event Event
+		_ = c.conn.SetReadDeadline(time.Now().Add(time.Second))
+		if err := c.decoder.Decode(&event); err != nil {
+			t.Fatalf("keepalive: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	select {
+	case <-stopped:
+		t.Fatal("a keepalive did not keep the sandbox awake")
+	default:
+	}
+}
+
+// Asking whether the sandbox is up is not the same as being a client of it: control's status and
+// adoption probes must not keep a sandbox nobody is using alive, or the timer that reclaims one
+// after a dead gateway never fires.
+func TestAPingDoesNotKeepTheSandboxAwake(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "supervisor.sock")
+	server := New(socket, "test", 300*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- server.Serve(ctx) }()
+	if err := WaitForReady(context.Background(), socket, 3*time.Second); err != nil {
+		t.Fatalf("ready: %v", err)
+	}
+	c := dial(t, socket)
+	// Ping like a status probe would, and expect the sandbox to stop anyway.
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		_ = c.encoder.Encode(Request{Type: "ping"})
+		select {
+		case <-stopped:
+			return
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	t.Fatal("a sandbox kept awake by pings never stopped")
+}
+
 // A command is activity: a sandbox that is doing something is not idle, however long it takes.
 func TestARunningCommandKeepsTheSandboxAwake(t *testing.T) {
 	socket := filepath.Join(t.TempDir(), "supervisor.sock")

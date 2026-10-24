@@ -38,7 +38,9 @@ import (
 
 // Request is one line from a client.
 type Request struct {
-	// Type is "run", "kill", "shutdown", or "ping".
+	// Type is "run", "kill", "shutdown", "ping", or "keepalive". A ping asks whether the
+	// sandbox is up; a keepalive says the client is still attached and nothing has run for a
+	// while, which is a different fact and the one the idle timer cares about.
 	Type string `json:"type"`
 	// ID names a command, is chosen by the client, and is what events carry.
 	ID string `json:"id,omitempty"`
@@ -81,6 +83,9 @@ type Server struct {
 	mu    sync.Mutex
 	runs  map[string]*run
 	conns map[*conn]struct{}
+	// lastActivity is the last time a client showed it was there: a keepalive, or a tick with a
+	// command running. The idle timer measures from it.
+	lastActivity time.Time
 	// shuttingDown stops new runs and ends Serve.
 	shuttingDown bool
 	listener     net.Listener
@@ -102,11 +107,12 @@ type run struct {
 // idle, or never when that is zero.
 func New(socket, version string, idle time.Duration) *Server {
 	return &Server{
-		socket:  socket,
-		version: version,
-		idle:    idle,
-		runs:    map[string]*run{},
-		conns:   map[*conn]struct{}{},
+		socket:       socket,
+		version:      version,
+		idle:         idle,
+		runs:         map[string]*run{},
+		conns:        map[*conn]struct{}{},
+		lastActivity: time.Now(),
 	}
 }
 
@@ -115,6 +121,14 @@ func New(socket, version string, idle time.Duration) *Server {
 func (s *Server) WithLogger(logger func(string, ...any)) *Server {
 	s.logger = logger
 	return s
+}
+
+// touch pushes the idle deadline out: a client said it is still attached. It is the keepalive's
+// whole effect, and it is why a sandbox with a live worker does not stop under it.
+func (s *Server) touch() {
+	s.mu.Lock()
+	s.lastActivity = time.Now()
+	s.mu.Unlock()
 }
 
 // idleInterval is how often the idle deadline is checked: a quarter of the window, so a deadline
@@ -133,19 +147,16 @@ func idleInterval(idle time.Duration) time.Duration {
 
 // idleLoop stops the sandbox when nothing has run in it for a while. It checks often enough that
 // a deadline is not missed by much and rarely enough that it costs nothing.
+//
+// A command in flight is activity however long it takes, and so is a keepalive: the timer exists
+// for a sandbox whose gateway and worker are both gone, not for one with a worker still attached
+// and nothing to run. A worker can sit attached for hours; the sandbox it will run the next
+// command in must still be there.
 func (s *Server) idleLoop(ctx context.Context) {
 	if s.idle <= 0 {
 		return
 	}
 	interval := idleInterval(s.idle)
-	last := time.Now()
-	activity := func() {
-		s.mu.Lock()
-		if len(s.runs) > 0 {
-			last = time.Now()
-		}
-		s.mu.Unlock()
-	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -153,8 +164,13 @@ func (s *Server) idleLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			activity()
-			if time.Since(last) < s.idle {
+			s.mu.Lock()
+			if len(s.runs) > 0 {
+				s.lastActivity = time.Now()
+			}
+			idleFor := time.Since(s.lastActivity)
+			s.mu.Unlock()
+			if idleFor < s.idle {
 				continue
 			}
 			// Nothing has run for the whole window: a sandbox holding nothing is the thing the
@@ -290,17 +306,15 @@ func (s *Server) serveConn(connection *conn) {
 		switch request.Type {
 		case "ping":
 			connection.send(Event{Type: "ready", Version: s.version})
+		case "keepalive":
+			// A client that is attached but idle, which is not the same as a sandbox nobody
+			// needs. Nothing runs, so nothing is sent back beyond the acknowledgement.
+			s.touch()
+			connection.send(Event{Type: "ready", Version: s.version})
 		case "run":
 			s.start(connection, request)
 		case "kill":
-			s.mu.Lock()
-			command := s.runs[request.ID]
-			s.mu.Unlock()
-			if command == nil {
-				connection.send(Event{Type: "error", ID: request.ID, Error: "no such command"})
-				continue
-			}
-			s.kill(command, "killed")
+			s.killRequested(connection, request)
 		case "shutdown":
 			connection.send(Event{Type: "ready", Version: s.version})
 			s.Shutdown()
@@ -309,6 +323,19 @@ func (s *Server) serveConn(connection *conn) {
 			connection.send(Event{Type: "error", ID: request.ID, Error: "unknown request " + request.Type})
 		}
 	}
+}
+
+// killRequested stops one command by id, and says so when there is none. It is out of the
+// request switch because the switch is the protocol's shape and this is one verb's work.
+func (s *Server) killRequested(connection *conn, request Request) {
+	s.mu.Lock()
+	command := s.runs[request.ID]
+	s.mu.Unlock()
+	if command == nil {
+		connection.send(Event{Type: "error", ID: request.ID, Error: "no such command"})
+		return
+	}
+	s.kill(command, "killed")
 }
 
 // start begins one command and reports its output to the client that asked for it.

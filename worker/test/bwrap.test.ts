@@ -178,8 +178,24 @@ test("a config for another workspace is refused", async () => {
 	}
 });
 
-test("a sandbox that is not answering says so, and says what stops it", async () => {
+test("a sandbox that is not answering says so, and what to do, without guessing", async () => {
 	const { client, fake } = await open();
 	await fake.close();
-	expect(client.exec("true", {})).rejects.toThrow("is not answering");
+	const failure = client.exec("true", {});
+	expect(failure).rejects.toThrow("is not answering");
+	expect(failure).rejects.toThrow("restarting acornfall starts it again");
+});
+
+test("an attached worker tells its sandbox it is still here", async () => {
+	const { fake } = await open();
+	try {
+		// The first one goes out with the client, before any command: a sandbox that is already
+		// near the end of its window should not wait five minutes to hear that it is not alone.
+		for (let attempt = 0; attempt < 20 && fake.keepalives.length === 0; attempt += 1) {
+			await Bun.sleep(10);
+		}
+		expect(fake.keepalives.length).toBeGreaterThan(0);
+	} finally {
+		await fake.close();
+	}
 });

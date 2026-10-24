@@ -101,7 +101,9 @@ Three consequences worth writing down:
 - **The sandbox has its own idle timer too**, `--idle-timeout`, fed by the same policy value as
   the microVM engine's: 30 minutes by default, and a value that never fires for a workspace that
   asked to be kept alive. Both engines now answer "stop when idle" the same way, and each has the
-  net under a gateway that died.
+  net under a gateway that died. *Amended by [ADR 0028](0028-a-sandbox-stays-while-its-worker-does.md):
+  the timer counted only commands, so it stopped a bwrap sandbox under a live worker that had
+  nothing to run; the worker now sends a keepalive while it is attached.*
 - **A clean shutdown stops every sandbox; a crash does not.** `Workspaces.Close` closes each
   control, and each close stops its sandbox. So "the sandbox survives the gateway" means a
   gateway that died, not one that was asked to stop — which is why adoption is the recovery path

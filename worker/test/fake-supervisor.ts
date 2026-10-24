@@ -18,6 +18,8 @@ export interface Captured {
 export interface Fake {
 	socket: string;
 	captured: Captured[];
+	/** Every keepalive the client sent, so a test can see that an attached worker says so. */
+	keepalives: { type: string }[];
 	children: Map<string, ReturnType<typeof Bun.spawn>>;
 	close: () => Promise<void>;
 }
@@ -26,6 +28,7 @@ export interface Fake {
 export function fakeSupervisor(dir: string): Promise<Fake> {
 	const socket = join(dir, "supervisor.sock");
 	const captured: Captured[] = [];
+	const keepalives: { type: string }[] = [];
 	const children = new Map<string, ReturnType<typeof Bun.spawn>>();
 	const server: Server = createServer((connection: Socket) => {
 		let buffered = "";
@@ -83,6 +86,10 @@ export function fakeSupervisor(dir: string): Promise<Fake> {
 				if (line.trim() === "") continue;
 				const request = JSON.parse(line) as { type: string; id?: string };
 				if (request.type === "run") void run(request as unknown as Captured);
+				if (request.type === "keepalive") {
+					keepalives.push({ type: request.type });
+					send({ type: "ready" });
+				}
 				if (request.type === "kill" && request.id !== undefined) {
 					const child = children.get(request.id);
 					if (child !== undefined) {
@@ -101,6 +108,7 @@ export function fakeSupervisor(dir: string): Promise<Fake> {
 			resolve({
 				socket,
 				captured,
+				keepalives,
 				children,
 				close: () =>
 					new Promise<void>((done) => {
