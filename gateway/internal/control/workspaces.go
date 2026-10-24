@@ -1067,22 +1067,41 @@ func (w *Workspaces) ensureGeneral() error {
 			return err
 		}
 	}
-	// Exactly one general workspace: a registry hand-edited into two is repaired by keeping the
-	// first and clearing the rest.
-	seenGeneral := false
+	// Exactly one general workspace: a registry hand-edited into two is repaired by keeping one and
+	// clearing the rest.
+	w.exactlyOneGeneral()
+	return nil
+}
+
+// exactlyOneGeneral keeps the workspace named general if one is, and otherwise the first by name.
+// The rule decides rather than the iteration order: the registry is a map, which has no order to
+// keep, so "the first in the file" was a promise this code could not have kept.
+func (w *Workspaces) exactlyOneGeneral() {
+	keeper := ""
 	for name, workspace := range w.registry {
 		if !workspace.General {
 			continue
 		}
-		if seenGeneral {
-			workspace.General = false
-			w.registry[name] = workspace
+		switch {
+		case keeper == "":
+			keeper = name
+		case name == GeneralWorkspaceName:
+			keeper = name
+		case keeper != GeneralWorkspaceName && name < keeper:
+			keeper = name
+		}
+	}
+	for name, workspace := range w.registry {
+		if !workspace.General || name == keeper {
 			continue
 		}
-		seenGeneral = true
+		workspace.General = false
+		w.registry[name] = workspace
 	}
-	return nil
 }
+
+// persist writes the registry: the folder it records, and every workspace in it. It is the file
+// that answers where a workspace lives on the next start.
 
 func (w *Workspaces) persist() error {
 	w.mu.RLock()
