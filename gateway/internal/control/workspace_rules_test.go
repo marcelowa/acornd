@@ -98,7 +98,7 @@ func TestTheEvictionRuleHasABoundary(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			// The rule as written: evict only when the workspace has been idle for at least the
 			// window, which is the "<" in the sweep read the other way round.
-			evict := !(test.idle < idleEviction)
+			evict := test.idle >= idleEviction
 			if evict != test.evict {
 				t.Errorf("idle %v: evict = %v, want %v", test.idle, evict, test.evict)
 			}

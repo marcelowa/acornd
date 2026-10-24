@@ -69,7 +69,7 @@ split would hide exactly that.
 | S5 | Errors are loud at startup, returned at boundaries, and told to the model as results. | A silent misconfiguration is a support burden; a stack trace in a tool result is noise. | Convention, end-to-end |
 | S6 | The protocol is defined once per language; change both in one commit. | `worker/src/protocol.ts` ↔ `gateway/internal/protocol/protocol.go` are one contract. | Convention |
 | S7 | Storage is the truth, frames are complete views, a reconnect is safe. | The client must be able to throw its state away. | `TestTheStreamSendsStateViewsAndKeepalives` |
-| S8 | One path for one thing: if a second entry point needs what the first does, extract it. | Recovery reimplemented start and got it wrong (a duplicate conversation, no model). | `make analyze` reports duplication; the extraction itself is Convention |
+| S8 | One path for one thing: if a second entry point needs what the first does, extract it. | Recovery reimplemented start and got it wrong (a duplicate conversation, no model). | `make lint` → `make analyze` fails on a duplicated block; the extraction itself is Convention |
 | S9 | An exception carries its reason on the same line — a lint disable, an entry in `.coverageignore`, a floor with a clause. | An unexplained `nolint`/`disable` is a rule losing quietly. | `make lint`, `make cover` |
 | S10 | Coverage and mutation floors are **ratchets**: they may only move up, and a number that looks worse while the work under it grew says so next to the number. | A bar that can be lowered to make a run green is a wish. Efficacy is killed over *reachable* mutants, so covering new code lowers the ratio while nothing gets worse — the **killed count** is what may not fall. | `make cover` (`FLOOR=0` reports without failing), `make mutations PKG=…` |
 | S11 | A package that cannot reach the target says why **on its floor line**, and the report prints it as excepted rather than as work left to do. | An exception that reads like a to-do stops being exceptional, and a reason nobody writes down is a reason nobody can argue with. | `make cover` — `excepted at N%: …` |
@@ -86,7 +86,7 @@ split would hide exactly that.
 | G4 | Document the lock order on the struct, and take locks in that order. **Never hold a lock across I/O or a process call.** | Two orders for one pair of locks is a deadlock that only shows under a writer. | `internal/control/lockorder_test.go` |
 | G5 | One owner per goroutine, and the owner cancels it. A supervisor must be idempotent: a duplicated "it died" signal must not start a second process. | A closed worker that restarted itself left two harnesses over one storage. | Convention, `TestABrokenWorkspaceFileIsReportedAndHeals` |
 | G6 | `panic` is for the unrecoverable; `log.Fatal` and `os.Exit` live in `cmd/` only. | A library that exits takes the decision away from its caller. | Convention |
-| G7 | `internal/` is the default; an exported identifier has a doc comment and a caller. | The public surface is a cost, not a status symbol. | `make analyze` (deadcode, on both platforms, with the feature suite as a second root); the doc comment is Convention |
+| G7 | `internal/` is the default; an exported identifier has a doc comment and a caller. | The public surface is a cost, not a status symbol. | `make lint` → `make analyze` fails on a symbol unreachable on both platforms (the feature suite is a second root); the doc comment is Convention |
 | G14 | Ending the process is the entry point's decision: a signal or an explicit shutdown, cleanup once, in `cmd/`. A package returns an error and lets its caller decide. | A library that exits takes the decision away, and cleanup in five places means it happens in none of them reliably. | Convention |
 | G17 | The layer table in ADR 0002 is the import graph: `cmd` may import `internal/*`, `httpapi` may not import `sandbox`, and `control` is the only package that knows both the edge and the engines. A new edge is a decision, and it is written into the row it belongs to. | The transport re-deriving a rule the domain owns is how `httpapi` came to import `sandbox` and validate an engine name itself. | `internal/arch/arch_test.go`, in `make lint` |
 
@@ -96,7 +96,7 @@ split would hide exactly that.
 |---|---|---|---|
 | G8 | Wrap with `%w` where a caller can act on the cause; return as-is where wrapping adds nothing. | `errors.Is` works only if someone wrapped. | Convention |
 | G9 | Never log an error **and** return it. | One failure, one report; double reporting trains people to ignore logs. | Convention |
-| G10 | An ignored error is written as `_ =` and only where the reason is obvious: a `Close` on a read, a best-effort shutdown, a response whose failure the client already sees. Never for a write to storage, a commit, or a request. | `errcheck` bans the whole class and gets ignored; this bans the part that matters. | `make lint` (`errcheck` through golangci-lint) |
+| G10 | An ignored error is written as `_ =` and only where the reason is obvious: a `Close` on a read, a best-effort shutdown, a response whose failure the client already sees. Never for a write to storage, a commit, or a request. | `errcheck` bans the whole class and gets ignored; this bans the part that matters. | `make lint` → `make analyze` (`errcheck` and `staticcheck` through golangci-lint) |
 
 ### Tests
 
@@ -150,7 +150,7 @@ rather than pretending to have checked:
 |---|---|
 | Go formatting | `gofmt -l` |
 | Go correctness | `go vet ./...` |
-| Go beyond vet, complexity, duplication, and error shape | `make lint` → `golangci-lint` (which contains `staticcheck`; 2026.2+ for Go 1.27) |
+| Go beyond vet: complexity, duplication, dead code, error shape | `make lint` → `make analyze` → `golangci-lint` and `deadcode` (golangci-lint contains `staticcheck`; 2026.2+ for Go 1.27) |
 | Go idioms | `make modernize` — deliberately not in `make lint`: it is the one Go check that costs seconds, and what it finds is drift, so a daily workflow runs it as a prompt rather than a gate |
 | no `init()` in the gateway | a grep, because the rule is absolute |
 | the layer table | `internal/arch/arch_test.go`, in `make lint` — G17 |
@@ -177,7 +177,7 @@ Four reports sit beside the gate, and a floor with no command that runs it is de
 |---|---|---|
 | coverage across both processes, merged, per package | `make cover` — fails below a floor; `FLOOR=0` reports without failing | `verify`, on every push |
 | mutation efficacy per package | `make mutations PKG=./internal/control` — fails below a floor of efficacy **or** of killed mutants | nightly, for `control` and `sandbox`; on demand for the rest |
-| the backlog as a report: complexity, duplication, dead code, unreachable code | `make analyze` — 0 findings today | locally, and before a package is called done |
+| complexity, duplication, dead code, unreachable code | `make analyze` — **fails on any finding**; 0 today | `make lint`, so on every push |
 | known vulnerabilities and the security rules staticcheck does not carry | `make security` — `govulncheck`, `gosec`, `bun audit` | the `security` workflow, weekly and on a release tag |
 
 Mutation testing is minutes per package, which is why it is not on a pull request: a slow gate is

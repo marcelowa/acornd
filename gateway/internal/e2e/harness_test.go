@@ -231,6 +231,58 @@ type system struct {
 }
 
 // start boots the gateway against a scratch installation and stops it when the test ends.
+// environment is the curated environment this gateway is started with. It is a method rather
+// than a block inside start because it is one decision per switch — the engine, the update source,
+// the scripted model, the coverage folder — and start was long enough that reading them together
+// stopped being possible.
+func (s *system) environment(engineEnv string, hostEngine bool, lastResort string) []string {
+	env := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + s.DataDir,
+		"ACORNFALL_DATA_DIR=" + s.DataDir,
+		// The worker sources are a folder, and a folder is a thing the environment says
+		// (ACORNFALL_WORKER) rather than a flag on the server.
+		"ACORNFALL_WORKER=" + workerDir,
+	}
+	if lastResort != "" {
+		env = append(env, lastResort)
+	}
+	if engineEnv != "" {
+		// The engine for the whole install is an environment decision now, not a flag: a
+		// workspace records its own engine, and this is the test telling the install otherwise.
+		env = append(env, "ACORNFALL_SANDBOX_ENGINE="+engineEnv)
+	}
+	if s.cfg.updateURL != "" {
+		env = append(env, "ACORNFALL_UPDATE_URL="+s.cfg.updateURL)
+	}
+	if noSandbox := os.Getenv("ACORNFALL_NO_SANDBOX"); noSandbox != "" && !hostEngine {
+		env = append(env, "ACORNFALL_NO_SANDBOX="+noSandbox)
+	}
+	if len(s.cfg.script) > 0 {
+		scriptPath := filepath.Join(s.DataDir, "script.json")
+		payload := map[string]any{"rules": s.cfg.script}
+		if s.cfg.slow {
+			payload["tokensPerSecond"] = slowTokensPerSecond
+		}
+		encoded, err := json.MarshalIndent(payload, "", "  ")
+		if err != nil {
+			s.t.Fatal(err)
+		}
+		if err := os.WriteFile(scriptPath, encoded, 0o644); err != nil {
+			s.t.Fatal(err)
+		}
+		env = append(env, "ACORNFALL_DEV_SCRIPT="+scriptPath)
+	} else if !s.cfg.noDevProvider {
+		env = append(env, "ACORNFALL_DEV_PROVIDER=1")
+	}
+	if coverDir != "" {
+		// Not inherited from os.Environ on purpose: the environment here is curated, and a
+		// stray GOCOVERDIR from someone's shell would silently swallow the run's counters.
+		env = append(env, "GOCOVERDIR="+coverDir)
+	}
+	return env
+}
+
 func start(t *testing.T, opts ...func(*settings)) *system {
 	t.Helper()
 	if skipReason != "" {
@@ -349,51 +401,7 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	// A curated environment: the test must not inherit a real install's home, token, or
 	// provider credentials, or it would be testing someone else's configuration. The
 	// switches that decide how this install behaves are forwarded explicitly.
-	env := []string{
-		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + s.DataDir,
-		"ACORNFALL_DATA_DIR=" + s.DataDir,
-		// The worker sources are a folder, and a folder is a thing the environment says
-		// (ACORNFALL_WORKER) rather than a flag on the server.
-		"ACORNFALL_WORKER=" + workerDir,
-	}
-	if lastResort != "" {
-		env = append(env, lastResort)
-	}
-	if engineEnv != "" {
-		// The engine for the whole install is an environment decision now, not a flag: a
-		// workspace records its own engine, and this is the test telling the install otherwise.
-		env = append(env, "ACORNFALL_SANDBOX_ENGINE="+engineEnv)
-	}
-	if s.cfg.updateURL != "" {
-		env = append(env, "ACORNFALL_UPDATE_URL="+s.cfg.updateURL)
-	}
-	if noSandbox := os.Getenv("ACORNFALL_NO_SANDBOX"); noSandbox != "" && !hostEngine {
-		env = append(env, "ACORNFALL_NO_SANDBOX="+noSandbox)
-	}
-	if len(s.cfg.script) > 0 {
-		scriptPath := filepath.Join(s.DataDir, "script.json")
-		payload := map[string]any{"rules": s.cfg.script}
-		if s.cfg.slow {
-			payload["tokensPerSecond"] = slowTokensPerSecond
-		}
-		encoded, err := json.MarshalIndent(payload, "", "  ")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(scriptPath, encoded, 0o644); err != nil {
-			t.Fatal(err)
-		}
-		env = append(env, "ACORNFALL_DEV_SCRIPT="+scriptPath)
-	} else if !s.cfg.noDevProvider {
-		env = append(env, "ACORNFALL_DEV_PROVIDER=1")
-	}
-	if coverDir != "" {
-		// Not inherited from os.Environ on purpose: the environment here is curated, and a
-		// stray GOCOVERDIR from someone's shell would silently swallow the run's counters.
-		env = append(env, "GOCOVERDIR="+coverDir)
-	}
-	cmd.Env = env
+	cmd.Env = s.environment(engineEnv, hostEngine, lastResort)
 	cmd.Stdout = s.logs
 	cmd.Stderr = s.logs
 	if err := cmd.Start(); err != nil {

@@ -372,28 +372,43 @@ func (w *Workspaces) Update(workspace Workspace) error {
 	if err := validateWorkspace(workspace); err != nil {
 		return err
 	}
+	existing, control, privateChanged, err := w.adopt(workspace)
+	if err != nil {
+		return err
+	}
+	if control != nil && privateChanged {
+		// Stopping is not enough for what the engine baked into the sandbox at creation: it is
+		// started again, not built again, so the workspace would go on reaching nothing while the
+		// record said otherwise. The sandbox is discarded so the next start is built from the
+		// record — the grant is a decision about the guest's network, and a guest keeps the one it
+		// booted with.
+		control.discardSandbox(existing.Path)
+	}
+	return w.persist()
+}
+
+// adopt writes the record and returns what the caller has to do about it: the previous record, the
+// control that was running it, and whether a grant changed — which is the one edit that needs the
+// sandbox rebuilt rather than the worker restarted.
+func (w *Workspaces) adopt(workspace Workspace) (Workspace, *Control, bool, error) {
 	w.mu.Lock()
 	existing, exists := w.registry[workspace.Name]
 	if !exists {
 		w.mu.Unlock()
-		return fmt.Errorf("no workspace %q", workspace.Name)
+		return Workspace{}, nil, false, fmt.Errorf("no workspace %q", workspace.Name)
 	}
-	// An existing record keeps its general flag: exactly one workspace is general, and it
-	// is not this call's to change.
+	// An existing record keeps its general flag: exactly one workspace is general, and it is not
+	// this call's to change.
 	workspace.General = existing.General
 	workspace.Name = existing.Name
 	w.registry[workspace.Name] = workspace
 	control := w.controls[workspace.Name]
-	// The folder is passed to the worker when it starts, so a change only takes effect in a
-	// new process. Stopping it here is what makes a move mean something immediately instead of
-	// at the next idle eviction.
-	restart := control != nil && existing.Path != workspace.Path
-	// A private-networks grant is built into the sandbox when it is created, so a change needs a new
-	// one. Withdrawing it is a downgrade and waits for nothing.
+	// The folder is passed to the worker when it starts, so a change only takes effect in a new
+	// process. Restarting here is what makes a move mean something immediately instead of at the
+	// next idle eviction. A grant is built into the sandbox at creation, so it needs a new one —
+	// and withdrawing it is a downgrade that waits for nothing.
 	privateChanged := control != nil && existing.Private != workspace.Private
-	if privateChanged {
-		restart = true
-	}
+	restart := control != nil && (existing.Path != workspace.Path || privateChanged)
 	if restart {
 		delete(w.controls, workspace.Name)
 	}
@@ -401,25 +416,25 @@ func (w *Workspaces) Update(workspace Workspace) error {
 	if restart {
 		control.Close()
 		workerpool.Log("workspace %s stopped: its record changed", workspace.Name)
-	}
-	if privateChanged {
-		// Stopping is not enough for what the engine baked into the sandbox at creation: it is
-		// started again, not built again, so the workspace would go on reaching nothing while the
-		// record said otherwise. The sandbox is discarded so the next start is built from the
-		// record — the grant is a decision about the guest's network, and a guest keeps the one it
-		// booted with.
-		if manager := control.sandboxManager(); manager != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), sandbox.Timeout)
-			defer cancel()
-			if err := manager.Remove(ctx, existing.Path); err != nil && !errors.Is(err, sandbox.ErrUnavailable) {
-				workerpool.Log("discarding the sandbox for %s: %v", workspace.Name, err)
-			}
-		}
-	}
-	if !restart && control != nil {
+	} else if control != nil {
 		control.SetWorkspace(workspace)
 	}
-	return w.persist()
+	return existing, control, privateChanged, nil
+}
+
+// discardSandbox deletes the workspace's sandbox so the next start builds it from the record. It
+// exists for the edits an engine bakes in at creation — the network policy above all — where
+// stopping is not enough because a stopped sandbox is started again, not built again.
+func (c *Control) discardSandbox(workspacePath string) {
+	manager := c.sandboxManager()
+	if manager == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sandbox.Timeout)
+	defer cancel()
+	if err := manager.Remove(ctx, workspacePath); err != nil && !errors.Is(err, sandbox.ErrUnavailable) {
+		workerpool.Log("discarding the sandbox for %s: %v", c.opts.Workspace.Name, err)
+	}
 }
 
 // Remove forgets a workspace. It never touches the folder or the history, the same way

@@ -102,6 +102,10 @@ lint: ui-build typecheck ## the static rules; fails on the first one broken
 	cd ui && bun run lint
 	cd ui && bun run check:system
 	cd ui && bun run format:check
+	# Complexity, duplication, dead code and error shape. In the gate because a report nobody runs
+	# drifted three findings away from the number standards.md promised — and because it costs
+	# seconds, which is the only reason to ever leave a check out of a gate.
+	$(MAKE) analyze
 
 cover: ## coverage across both processes, merged; FLOOR=0 reports without failing
 	@# Two halves, one number. `go test -cover` sees only the unit half: the feature suite starts
@@ -122,22 +126,27 @@ cover: ## coverage across both processes, merged; FLOOR=0 reports without failin
 # The complexity and maintainability half of the bar (#102): a report, not a gate. A gate that is
 # red from the day it lands is one nobody runs, so this prints the backlog and leaves the exit
 # code alone; it joins `make lint` when the queue is empty.
-analyze: ## complexity, duplication, dead code, error shape: the backlog as a report
-	@if [ -x "$(GOLANGCI)" ]; then cd gateway && $(GOLANGCI) run ./... || true; \
-	else echo "golangci-lint: not installed (make tools)"; fi
+analyze: ## complexity, duplication, dead code, error shape: fails on any finding
+	@# A report nobody reads is how this drifted: the numbers in standards.md said 0 while the
+	@# tree had three, because nothing ran it. It is a gate now, and it is cheap — five seconds
+	@# with the module cache warm.
+	@if [ ! -x "$(GOLANGCI)" ]; then echo "golangci-lint: not installed (make tools)"; exit 0; fi; \
+	cd gateway && $(GOLANGCI) run ./...
 	@# A symbol is dead only if no platform reaches it: run per GOOS and keep the intersection.
 	@# `nestedFromApple` is unreachable on linux and the only caller on darwin, which is exactly
 	@# the false positive a single-platform run would report as a deletion.
 	@# The feature suite is a second root: a package made only of tests is invisible to a run that
-	# starts from the commands, and `sandbox.EngineVersion` is used there and nowhere else.
-	@if [ -x "$(DEADCODE)" ]; then cd gateway && tmp=$$(mktemp -d) && \
-		for pair in linux/amd64 darwin/arm64; do \
-			GOOS=$${pair%/*} GOARCH=$${pair#*/} $(DEADCODE) -test ./cmd/acornfall ./internal/e2e | sort > $$tmp/$${pair%/*}; \
-		done; \
-		printf '\ndead code, unreachable on both linux and darwin:\n'; \
-		comm -12 $$tmp/linux $$tmp/darwin | sed 's/^/  /'; \
-		rm -rf $$tmp; \
-	else echo "deadcode: not installed (make tools)"; fi
+	@# starts from the commands, and `sandbox.EngineVersion` is used there and nowhere else.
+	@if [ ! -x "$(DEADCODE)" ]; then echo "deadcode: not installed (make tools)"; exit 0; fi; \
+	tmp=$$(mktemp -d); \
+	cd gateway && for pair in linux/amd64 darwin/arm64; do \
+		GOOS=$${pair%/*} GOARCH=$${pair#*/} $(DEADCODE) -test ./cmd/acornfall ./internal/e2e | sort > $$tmp/$${pair%/*}; \
+	done; cd ..; \
+	dead=$$(comm -12 $$tmp/linux $$tmp/darwin); rm -rf $$tmp; \
+	if [ -n "$$dead" ]; then \
+		echo "dead code, unreachable on both linux and darwin:"; echo "$$dead" | sed 's/^/  /'; exit 1; \
+	fi; \
+	echo "deadcode: clean on both platforms"
 
 # Mutation testing for one package. Coverage says a line ran; this says whether any assertion would
 # have failed if the line were wrong — which is the difference between a test and a call.
@@ -150,7 +159,6 @@ analyze: ## complexity, duplication, dead code, error shape: the backlog as a re
 #
 # It is a report with a floor, not a gate on every push: a survivor is a test to write, and the
 # floor in .mutationfloors is where a package is today, moving only up.
-PKG ?= ./internal/control
 MUTATIONS_WORKERS ?= 8
 MUTATION_TIMEOUT ?= 500
 
