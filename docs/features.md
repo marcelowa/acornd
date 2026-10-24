@@ -12,7 +12,7 @@ Each feature is covered at the lowest level that can decide it:
 | Unit (worker) | `bun test` (from `worker/`) | The overlay, guards, commands, skills, credentials, the worker protocol. Under a second. |
 | Feature (end to end) | `go test ./internal/e2e/...` | A real gateway, a real worker, and a scripted provider over HTTP: everything a client can see. Resource tests run on the host engine; tests that need no engine run against the refusal path. |
 | Sandbox engine boundary | `make test-sandbox` | The live driver, the worker SDK (exec streaming, kill, file operations), and the four end-to-end tests that exercise execution and the mounts. Needs a hypervisor (~35s). |
-| Interface | `make ui` | The served interface, driven in a real browser: the rail, the transcript, the splitter, per-pane controls, the theme, and the phone drawer. |
+| Interface | `make ui-check` | The served interface, driven in a real browser — the suite starts a gateway for itself and stops it. The rail, the transcript, the splitter, per-pane controls, the theme, the phone drawer, and the secret field. `make ui` is the same suite against a gateway somebody already started. |
 
 `make test` is the default gate: `-short -race`, the worker units, the Go units, and the
 feature suite — resource tests on the host engine, tests that need no engine against the
@@ -102,6 +102,9 @@ The chain is **conversation → its definition → this workspace → the instal
 | W7 | The tools can run on the host engine, chosen explicitly, and the state says it is not isolated. It is never selected by a missing hypervisor, and an unknown engine is refused with the list. | `TestWorkspaceRulesReachThePrompt`, `TestTheHostEngineNeedsNothing`, `TestIsolationSaysWhichEngineSeparatesFromTheHost`, `TestEngineRefusesANameItDoesNotImplement`, `worker/test/host.test.ts` |
 | W8 | A tool call against a sandbox the engine stopped for being idle wakes it and runs, instead of failing or reporting files as missing. | `worker/test/microsandbox.test.ts` + `worker/test/sandbox.integration.test.ts` (real stop under a live client) |
 | W9 | The worker refuses a loaded SDK that is not the pinned engine, and doctor reports a store the pinned engine cannot read — so no side migrates the shared catalog past the other. | `worker/test/microsandbox.test.ts` + `TestVerifyReadsTheStoreThroughThePinnedEngine` + house-rules pin check |
+| W10 | Egress is on or off, and a workspace that may reach private networks has a grant: off means no network at all, on means public and DNS, and private only with the grant. The policy is written into the engine's own arguments on both engines — never inherited from an engine default. | `TestTheEgressPolicyIsWrittenForEveryCase`, `TestABwrapSandboxCannotReachPrivateNetworks`, `TestAMicroVMSandboxCannotReachPrivateNetworks` |
+| W11 | A workspace with the grant reaches this machine's private networks, on bwrap and inside a microVM. | `TestABwrapAGrantReachesPrivateNetworks`, `TestAMicroVMSandboxWithTheGrantReachesPrivateNetworks` |
+| W12 | Changing the grant rebuilds the sandbox rather than restarting it: the network is what the guest booted with, so stopping is not enough. | `TestAWorkspaceUpdateRestartsWhatDependsOnTheFolder` |
 
 ## Resources: rules, agents, skills
 
@@ -162,7 +165,7 @@ The chain is **conversation → its definition → this workspace → the instal
 | P9 | An environment engine puts the value in the sandbox; `allowEnv: false` withholds it and the state says why. | `TestHostEngineDeliversSecretsIntoTheWorkerEnvironment` |
 | P10 | The agent can list secrets and ask for a value through a card; the value goes to the gateway, never the transcript or the model. | `TestTheConversationAsksForASecretWithoutShowingItsValue`, `TestTheConversationListsSecretsWithoutValues` |
 | P11 | Rotating an existing name is live where the engine can; adding or removing one is stored, applied after the active run settles, and the control starts the continuation itself. | `TestSecretsChangedRotatesLive`, `TestSecretsReachTheSandboxWithoutTheirValues`, `TestHostEngineDeliversSecretsIntoTheWorkerEnvironment` |
-| P12 | The secret value field hides by default, reveals with a keyboard-operable eye without changing the value, keeps the caret, and carries the common password-manager opt-outs; it is never in a form. Bitwarden on Firefox still prompts (#100). | `make ui` |
+| P12 | The secret value field is masked by default, reveals with a keyboard-operable eye without changing the value, and keeps the caret and selection across the switch. It is **not a password field** — masking is the browser's glyph masking where it has one and a drawn mask where it does not — because managers classify by the type and no opt-out beats it. | `make ui-check`, `ui/test/secret-input.test.ts` |
 
 ## The worker protocol
 
@@ -180,8 +183,9 @@ gateway in the way: `worker/test/protocol.test.ts`.
 
 ## Fixed by writing these tests
 
-Five things were broken, and the feature tests are what found them. Each has its own test now,
-and the fix is in the history rather than a workaround:
+Eleven things were broken, and the tests are what found them — every one while writing a test
+for something else. Each has its own test now, and the fix is in the history rather than a
+workaround:
 
 1. A conversation could be bound to a model with no credentials, or to a definition that does
    not exist, and failed later as a provider error.
@@ -194,6 +198,20 @@ and the fix is in the history rather than a workaround:
    the copy; and it skipped the settings and last-resort model a first start performs, so a
    workspace whose first start failed answered nothing.
 5. A workspace that had never saved settings never read the install defaults.
+6. Repairing a registry hand-edited into two general workspaces kept "the first" — but the
+   registry is a map, so which one survived was whatever the iteration produced, and the same
+   file could open differently on two runs.
+7. `Close` stopped a workspace's worker and left `workerUp` true, so a list built after a
+   shutdown said every workspace was still running.
+8. A message that was **only files** reached the worker without `text` (the field is `omitempty`
+   on the wire) and failed the whole send on `text.trim()`.
+9. The draft endpoint answered with the draft **and then the state**: two JSON documents on one
+   response, which no client can parse.
+10. A microVM workspace's private-networks **grant** was a no-op the engine ignored, while the
+    dialog said it was allowed — and the refusal that did work came from an engine default
+    rather than from us.
+11. The secret field was a password field, so Bitwarden kept offering to save a tool secret as a
+    login, and no opt-out attribute beats the type.
 
 ## Not covered, and why
 
@@ -215,7 +233,7 @@ and the fix is in the history rather than a workaround:
   streaming execution are exercised against the real SDK there too
   ([ADR 0013](adr/0013-test-tiers.md), [ADR 0015](adr/0015-host-engine.md)).
 - **Memory and self-improvement.** Designed, not built (see `docs/adr/`).
-- **The interface.** `make ui` drives the interface the gateway serves: the rail and the
+- **The interface.** `make ui-check` drives the interface the gateway serves: the rail and the
   transcript, the resizable splitter that remembers its width, per-pane format toggles and
   copy, the theme toggle, and the phone drawer. The inspector and the settings sheet are
   still being rebuilt (#13), which is why their assertions are not in the suite yet.
