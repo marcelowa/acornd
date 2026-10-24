@@ -118,7 +118,15 @@ cover: ## coverage across both processes, merged; FLOOR=0 reports without failin
 		$$(go list ./... | grep -v /internal/e2e)
 	cd gateway && ACORNFALL_NO_SANDBOX=1 ACORNFALL_COVER_DIR=$(COVER_DIR)/e2e \
 		go test -short -count=1 -parallel $(TEST_PARALLEL) ./internal/e2e
-	cd gateway && go tool covdata textfmt -i=$(COVER_DIR)/e2e -o=$(COVER_DIR)/e2e.cover
+	$(MAKE) coverage-report
+
+coverage-report: ## merge what the last run wrote, and judge it against the floors
+	@if [ ! -f $(COVER_DIR)/unit.cover ]; then \
+		echo "coverage-report: no profile from a run — use \`make cover\`, or \`make test COVER=1\`"; exit 1; \
+	fi
+	@if [ -d $(COVER_DIR)/e2e ] && [ -n "$$(ls -A $(COVER_DIR)/e2e 2>/dev/null)" ]; then \
+		cd gateway && go tool covdata textfmt -i=$(COVER_DIR)/e2e -o=$(COVER_DIR)/e2e.cover; \
+	else : > $(COVER_DIR)/e2e.cover; fi
 	bun scripts/coverage.mjs merge $(COVER_DIR)/merged.cover $(COVER_DIR)/unit.cover $(COVER_DIR)/e2e.cover
 	bun scripts/coverage.mjs report $(COVER_DIR)/merged.cover --floor $(FLOOR) \
 		--floors .coveragefloors --ignore .coverageignore --root $(CURDIR)
@@ -234,16 +242,25 @@ COVER_DIR ?= $(CURDIR)/.cover
 # pure report, which is what a checkout that has not been brought to the bar yet wants.
 FLOOR ?= 95
 
-check: ui-build typecheck ## fast: the compiler, the bundle, and the unit tests, no processes
+js-test: ## the worker's and the interface's unit tests
 	cd worker && bun test
 	cd ui && bun test
+
+check: ui-build typecheck js-test ## fast: the compiler, the bundle, and the unit tests, no processes
 	# -count=1 because the suite's inputs include worker/src and the built interface, which
 	# Go's test cache cannot see: a cached pass would be a pass for code that has changed.
 	# The end-to-end suite is excluded: it starts a gateway and a worker per test, and that is
 	# its own tier (`make test`). A gate that takes a minute is a gate nobody runs.
 	cd gateway && go test -short -count=1 -shuffle=on $$(go list ./... | grep -v /internal/e2e)
 
-test: lint ## the default tier: units and the feature suite, no hypervisor needed
+# `test` is what a person runs: the static rules first, because a rule broken is cheaper to see
+# before a slow suite, and then the suites. CI runs the two halves in parallel jobs instead, which
+# is why the suites are their own target — a job that lints and a job that tests must not both lint.
+test: ## the default tier: the static rules, then units and the feature suite
+	$(MAKE) lint
+	$(MAKE) test-suite
+
+test-suite: ## units and the feature suite, no hypervisor needed, no static rules
 	cd worker && bun test
 	# The interface's unit tests are milliseconds and its bundle has to build, or CI's word
 	# about the interface means nothing.
@@ -254,7 +271,18 @@ test: lint ## the default tier: units and the feature suite, no hypervisor neede
 	# tests whose assertions need a sandbox; the rest of the feature suite runs in parallel.
 	# -count=1 because the suite's inputs include worker/src and the built interface, which
 	# Go's test cache cannot see: a cached pass would be a pass for code that has changed.
-	cd gateway && ACORNFALL_NO_SANDBOX=1 go test -short -race -count=1 -shuffle=on -parallel $(TEST_PARALLEL) ./...
+	@# COVER=1 is the same suite, instrumented: the profiles are what `make cover` would have
+	@# produced from a second run, and padding the counters of a -race run is free. It is how CI
+	@# gets a test verdict and a coverage verdict from one pass instead of two.
+	@if [ "$(COVER)" = "1" ]; then \
+		rm -rf $(COVER_DIR) && mkdir -p $(COVER_DIR)/e2e; \
+		cd gateway && ACORNFALL_NO_SANDBOX=1 ACORNFALL_COVER_DIR=$(COVER_DIR)/e2e \
+			go test -short -race -count=1 -shuffle=on -parallel $(TEST_PARALLEL) \
+				-covermode=atomic -coverpkg=./... -coverprofile=$(COVER_DIR)/unit.cover ./...; \
+		status=$$?; cd ..; $(MAKE) coverage-report; exit $$status; \
+	else \
+		cd gateway && ACORNFALL_NO_SANDBOX=1 go test -short -race -count=1 -shuffle=on -parallel $(TEST_PARALLEL) ./...; \
+	fi
 
 test-bwrap: ## the bubblewrap engine end to end: it fetches an image, so it is not part of `make test`	# A bwrap workspace gets its own copy of its image and carries egress with pasta; both are
 	# why this is its own tier, the same way the microVM tier needs /dev/kvm. Needs bubblewrap,
@@ -290,6 +318,29 @@ dev: build ## run with the scripted dev provider (no api key needed)
 
 ui: ## check the interface in a real browser (needs a running gateway)
 	cd tools && bun run check-ui.mjs $(URL)
+
+UI_CHECK_PORT ?= 7791
+UI_CHECK_DIR ?= .ui-check
+ui-check: build ## the browser suite, with a gateway started for it and stopped after
+	@# `make ui` needs somebody to have started a gateway with a workspace and a browser beside it,
+	@# which is why it was never in CI: the suite is the valuable half, the setup is what made it
+	@# somebody's afternoon. This is the setup, once.
+	rm -rf $(UI_CHECK_DIR) && mkdir -p $(UI_CHECK_DIR)
+	@ACORNFALL_SANDBOX_ENGINE=host ACORNFALL_DEV_PROVIDER=1 ACORNFALL_MODEL=faux/faux-1 \
+		ACORNFALL_WORKER=$(CURDIR)/worker \
+		$(CURDIR)/$(BIN) start --data-dir $(UI_CHECK_DIR) \
+		--workspaces-dir $(UI_CHECK_DIR)/workspaces --host 127.0.0.1 --port $(UI_CHECK_PORT) \
+		> $(UI_CHECK_DIR)/gateway.log 2>&1 & echo $$! > $(UI_CHECK_DIR)/pid
+	@echo "waiting for the gateway on $(UI_CHECK_PORT)"
+	@for attempt in $$(seq 1 60); do \
+		if curl -sf -o /dev/null http://127.0.0.1:$(UI_CHECK_PORT)/healthz; then break; fi; \
+		if [ $$attempt -eq 60 ]; then echo "the gateway did not come up:"; tail -20 $(CURDIR)/$(UI_CHECK_DIR)/gateway.log; exit 1; fi; \
+		sleep 1; \
+	done
+	@cd tools && CHROME_PATH=$${CHROME_PATH:-/usr/bin/chromium} bun run check-ui.mjs http://127.0.0.1:$(UI_CHECK_PORT) \
+		|| { status=$$?; kill $$(cat $(CURDIR)/$(UI_CHECK_DIR)/pid) 2>/dev/null; \
+			echo "gateway log:"; tail -30 $(CURDIR)/$(UI_CHECK_DIR)/gateway.log; exit $$status; }
+	@kill $$(cat $(UI_CHECK_DIR)/pid) 2>/dev/null || true
 
 ui-dev: ## serve the interface from source with vite, proxying /api to the gateway
 	cd ui && VITE_GATEWAY=$(URL) bun run dev

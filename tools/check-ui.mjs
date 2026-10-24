@@ -403,10 +403,27 @@ try {
 		// sandbox manager writes that folder while tearing the sandbox down — so this leaves
 		// one directory behind, and the next run's cleanup at the top of this block is what
 		// removes it. A fixed name keeps that to one directory rather than one per run.
+		// The workspace list is a level of the rail, not a URL: it opens from the rail's own button
+		// and pushes a history entry, which is why this clicks rather than navigates.
 		const scratch = "ui-check";
+		await page.evaluate(() => {
+			const button = document.querySelector("[data-slot=workspace-button]");
+			if (button instanceof HTMLElement) button.click();
+		});
+		const listOpened = await page
+			.waitForSelector("[data-slot=workspaces-create]", { timeout: 10000 })
+			.then(() => true)
+			.catch(() => false);
+		check("the rail opens the workspace list", listOpened);
 		const workspacesDir = await page.evaluate(
 			async () => (await (await fetch("/api/state")).json()).workspacesDir ?? "",
 		);
+		// Forgetting the workspace is a request, not a folder delete: a previous run left it
+		// registered, and creating it again would be refused as a name already taken. The folders
+		// are removed after that, because forgetting keeps a workspace's state on purpose.
+		await page.evaluate(async (name) => {
+			await fetch(`/api/workspaces/${name}/remove`, { method: "POST" });
+		}, scratch);
 		const litter = [
 			join(workspacesDir, scratch),
 			join(dirname(workspacesDir), "state", scratch),
@@ -414,7 +431,17 @@ try {
 		for (const path of litter) rmSync(path, { recursive: true, force: true });
 
 		await page.type("[data-slot=workspaces-create] input", scratch);
-		await press(page, "[data-slot=workspaces-create] button");
+		// The form carries the engine toggles as buttons too, so the create button is found by what
+		// it says rather than by being first: it is last, and a name beats an index.
+		const formSubmitted = await page.evaluate(() => {
+			const region = document.querySelector("[data-slot=workspaces-create]");
+			const button = [...(region?.querySelectorAll("button") ?? [])].find(
+				(candidate) => candidate.textContent?.trim() === "Create",
+			);
+			button?.click();
+			return button !== undefined;
+		});
+		check("the workspace form has a create button", formSubmitted);
 		const opened = await page
 			.waitForFunction(
 				(name) =>

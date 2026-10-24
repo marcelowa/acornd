@@ -45,35 +45,71 @@ on:
         type: string
 
 jobs:
-  verify:
+  static:
+    # The compiler's half: formatting, vet, the layer table, the cross-platform build, and the
+    # analysis (complexity, duplication, dead code, error shape). The only test here is the
+    # architecture one, so a failure is a rule rather than a behaviour.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version: "1.27.3"
-          cache-dependency-path: gateway/go.sum
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      # staticcheck, golangci-lint, deadcode, govulncheck and gosec are compiled from source and
-      # that is minutes, not seconds. A hosted runner starts empty, so the built binaries are
-      # cached: keyed on go.mod, because that is what changes their inputs.
-      - uses: actions/cache@v4
-        with:
-          path: ~/go/bin
-          key: go-tools-${{ runner.os }}-${{ hashFiles('gateway/go.mod') }}
-          restore-keys: go-tools-${{ runner.os }}-
+      - uses: ./.github/actions/setup
+      - run: make lint
 
-      # The end-to-end suite skips itself without bun and the worker's dependencies, so a
-      # missing install would look like a pass.
-      - run: make deps
-      - run: make tools
-      - run: make test
-      # Coverage is a gate with a per-package floor, and a floor nothing runs is decoration. It
-      # repeats the suite with instrumentation, which is one more minute on the job that already
-      # runs it; the alternative was a number nobody checks.
-      - run: make cover
+  go:
+    # The Go suite, run **once**: COVER=1 instruments the same pass, so the test verdict and the
+    # coverage floors come out of one run instead of two. This is the long pole.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: make test-suite COVER=1
+
+  worker:
+    # The harness suite and the interface's unit tests: seconds each, and they need the bundle
+    # built. The Go unit tests are not here — they are in the `go` job's single instrumented run,
+    # and running them twice was most of what made this pipeline slow.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: make ui-build
+      - run: make js-test
+
+  browser:
+    # The behaviours a curl cannot see, against a real gateway and a real browser. The gateway is
+    # started by the check itself on the host engine: a runner has no hypervisor for the engine
+    # tiers, and this suite is about the console rather than the sandbox.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Install a browser
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq chromium-browser || sudo apt-get install -y -qq chromium
+          command -v chromium || command -v chromium-browser
+      - run: make ui-check
+
+  verify:
+    # The name branch protection requires. It runs nothing itself: it is the fan-in, so a job added
+    # to this file cannot be forgotten by the protection rule, and a failed job makes this fail
+    # because `needs` is a dependency and not a notification.
+    if: always()
+    needs: [static, go, worker, browser, commits]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Every job has to have passed
+        env:
+          STATIC: ${{ needs.static.result }}
+          GO: ${{ needs.go.result }}
+          WORKER: ${{ needs.worker.result }}
+          BROWSER: ${{ needs.browser.result }}
+          COMMITS: ${{ needs.commits.result }}
+        run: |
+          echo "static=$STATIC go=$GO worker=$WORKER browser=$BROWSER commits=$COMMITS"
+          for result in "$STATIC" "$GO" "$WORKER" "$BROWSER" "$COMMITS"; do
+            [ "$result" = "success" ] || exit 1
+          done
 
   commits:
     # The commit format is a standard (`.pi/skills/conventional-commits`), so it is checked
@@ -116,13 +152,7 @@ jobs:
     runs-on: ${{ inputs.runner || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version: "1.27.3"
-          cache-dependency-path: gateway/go.sum
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
+      - uses: ./.github/actions/setup
       - name: Make /dev/kvm readable
         if: runner.environment == 'github-hosted' && runner.os == 'Linux'
         run: |
@@ -130,7 +160,6 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
           ls -l /dev/kvm
-      - run: make deps
       - run: make test-sandbox
 
 
@@ -147,13 +176,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version: "1.27.3"
-          cache-dependency-path: gateway/go.sum
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
+      - uses: ./.github/actions/setup
       - name: Install what the engine needs
         # bubblewrap for the sandbox and pasta for its network: the namespace's address and
         # routes are set by the gateway over netlink, so iproute2 is not on this list.
@@ -170,5 +193,4 @@ jobs:
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           bwrap --ro-bind / / --unshare-all -- /bin/true && echo "bubblewrap can make a user namespace"
-      - run: make deps
       - run: make test-bwrap

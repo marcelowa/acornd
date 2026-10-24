@@ -161,6 +161,7 @@ rather than pretending to have checked:
 | Interface design system | `cd ui && bun run check:system` — the source scan and the Tailwind probe behind T12 and T13 |
 | Interface bundle | `make ui-build`, and `make test` runs it before the Go tests |
 | lint and ignore exceptions have reasons | a grep |
+| the console's behaviour in a real browser | `make ui-check` — it starts a gateway on the host engine, runs the suite, and stops it |
 | commit message shape | `scripts/check-commits.mjs`, over a pull request's commits in CI |
 
 `make check` is the fast loop (types and unit tests, ~6s). `make test` adds the end-to-end suite
@@ -185,9 +186,24 @@ a gate people learn to skip. The nightly run covers the two packages with the mo
 behind them, and a red run means a test stopped proving something.
 
 None of this is enforced by a machine unless it runs on every change: `.github/workflows/ci.yml`
-runs `make lint`, `make test` and `make cover` on push, in four jobs — `verify`, `bwrap`, `sandbox`
-(which boots real microVMs), and `commits`. `main` is protected: those four are required,
-administration is not exempt, and history cannot be rewritten.
+runs on every push, in jobs that share one setup action (`.github/actions/setup`), and `verify` is
+the fan-in that branch protection requires — a job added to the file is covered by the rule without
+anyone editing the rule.
+
+| Job | What it runs | Why it is its own job |
+|---|---|---|
+| `static` | `make lint` | a broken rule is worth knowing before a slow suite |
+| `go` | `make test-suite COVER=1` | the suite **once**, instrumented, so the test verdict and the coverage floors come from one run |
+| `worker` | `make js-test` after `make ui-build` | seconds, and the bundle has to exist for the end-to-end suite |
+| `browser` | `make ui-check` | a real gateway and a real browser, which nothing else has |
+| `commits` | `scripts/check-commits.mjs` | needs the commit range, not the tree |
+| `sandbox` | `make test-sandbox` | boots real microVMs; the slowest and the only one that needs `/dev/kvm` |
+| `bwrap` | `make test-bwrap` | real bubblewrap and pasta, and an image from a registry |
+
+`main` is protected: `verify` is required, administration is not exempt, and history cannot be
+rewritten. A run that files something rather than failing it — a surviving mutant — opens an issue
+with the report, because writing the test that kills it needs judgement and a pull request made
+without any would be a guess with a green tick on it.
 
 CI runs on GitHub's machines, which is what makes the sandbox tier a gate rather than an
 occasional: a hosted runner exposes `/dev/kvm` once a udev rule makes it readable, so the tier that

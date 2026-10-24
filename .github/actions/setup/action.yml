@@ -1,0 +1,40 @@
+# The setup every job shares: the two toolchains, the caches, and the dependencies.
+#
+# It lives here because four jobs and two workflows were doing the same seven steps, and the
+# fifth copy is where they start to disagree — one job pinning Go differently from another is a
+# green run that means something else. A change to how this repository is set up is a change to
+# one file now.
+name: Setup
+description: Go, bun, the linter cache, and the dependencies
+
+inputs:
+  tools:
+    description: "Install the linters and mutation tester too (they are compiled, so this is cached)"
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: gateway/go.mod
+        cache-dependency-path: gateway/go.sum
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: latest
+    # staticcheck, golangci-lint, deadcode, gremlins, govulncheck and gosec are compiled from
+    # source and that is minutes, not seconds. A hosted runner starts empty, so the built binaries
+    # are cached: keyed on go.mod, because that is what changes their inputs.
+    - uses: actions/cache@v4
+      with:
+        path: ~/go/bin
+        key: go-tools-${{ runner.os }}-${{ hashFiles('gateway/go.mod') }}
+        restore-keys: go-tools-${{ runner.os }}-
+    # The end-to-end suite skips itself without bun and the worker's dependencies, so a missing
+    # install would look like a pass.
+    - run: make deps
+      shell: bash
+    - if: inputs.tools == 'true'
+      run: make tools
+      shell: bash

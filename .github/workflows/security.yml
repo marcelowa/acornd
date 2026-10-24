@@ -24,11 +24,8 @@ jobs:
   vulnerabilities:
     runs-on: [self-hosted, linux, x64]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: gateway/go.mod
-          cache-dependency-path: gateway/go.sum
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
       - name: govulncheck
         # Reachable only: the call graph decides, so a CVE in a dependency this build never calls
         # does not hold a release. It found eleven reachable standard-library vulnerabilities on
@@ -69,23 +66,54 @@ jobs:
 
   mutations:
     # The mutation floors are the honest half of "a test that fails without the change", and they
-    # cost minutes per package — which is exactly why they are here and not on a pull request. A
-    # nightly red run means an assertion was lost, and the report names the file and the line.
+    # cost minutes per package — which is exactly why they are here and not on a pull request.
     #
-    # The two packages with the most behaviour behind them: control is the domain, sandbox is the
-    # engine boundary. The rest are at their floors and run on demand with `make mutations PKG=…`.
+    # A red run files an issue rather than opening a pull request: a workflow can say which line
+    # survived, and nothing more. Writing the test that kills it needs judgement, and a fix PR made
+    # without it would be a guess with a green tick on it. The issue carries the report, so the fix
+    # is a five-minute job with the evidence already in hand.
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
     strategy:
       fail-fast: false
       matrix:
         package: ["./internal/control", "./internal/sandbox"]
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: gateway/go.mod
-          cache-dependency-path: gateway/go.sum
-      - run: make deps
-      - run: make tools
+      - uses: ./.github/actions/setup
       - name: mutations ${{ matrix.package }}
-        run: make mutations PKG=${{ matrix.package }}
+        id: mutants
+        run: |
+          set +e
+          make mutations PKG=${{ matrix.package }} > "$RUNNER_TEMP/mutants.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/mutants.log"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          # The report a person needs, written where the issue step can read it.
+          {
+            echo "make mutations PKG=${{ matrix.package }} failed on \`${{ github.sha }}\`."
+            echo
+            echo '```'
+            grep -E 'LIVED|Killed:|Test efficacy' "$RUNNER_TEMP/mutants.log" | sed 's/^ *//' | head -40
+            echo '```'
+            echo
+            echo "A surviving mutant is a test that ran and did not distinguish, and the floor in"
+            echo "\`.mutationfloors\` may only move up — so the fix is a test, not a number."
+          } > "$RUNNER_TEMP/body.md"
+          [ "$status" -eq 0 ] || exit 1
+      - name: File what survived
+        if: failure() || steps.mutants.outputs.status != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE: ${{ matrix.package }}
+        run: |
+          gh label create mutation --description "A mutant lived: a test that ran and did not distinguish" --color "fbca04" 2>/dev/null || true
+          title="Mutation survivors in ${PACKAGE#./}"
+          existing=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh issue create --title "$title" --body-file "$RUNNER_TEMP/body.md" --label mutation
+          fi

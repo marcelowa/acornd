@@ -17,3 +17,5 @@ tools/node_modules/
 
 # `make cover` writes a run's profiles here; a coverage number is not source.
 .cover/
+# `make ui-check` starts a gateway for the browser suite and keeps its data here.
+.ui-check/
