@@ -1,36 +1,24 @@
-# Mutation efficacy per package: the share of mutants the tests kill, of the ones they could.
+# Mutation testing per package: <package> <efficacy floor %> <killed mutants floor>.
 #
-# A floor is where the package is today, and it may only move up — same rule as .coveragefloors.
-# A package not listed here is reported and not enforced, because a floor invented before the
-# first measurement is a number nobody chose.
+# The ratchet is the KILLED COUNT, because it is the number that cannot fall without an assertion
+# being lost. Efficacy is killed over reachable mutants, so covering new code brings new mutants
+# into the denominator and *lowers* the ratio while nothing gets worse — control has done that
+# twice, going 84.56% -> 84.42% on one pass and 88.54% -> 86.23% on the next, with killed rising
+# 126 -> 130 -> 139 -> 144 each time. A floor on the ratio alone would be red for the right work.
 #
-# Efficacy answers the question coverage cannot: the line ran, but would a test have failed if it
-# were wrong?
+# So: the efficacy floor may sit below the highest observation and tolerates that dip; the killed
+# floor may only move up, and it is checked separately.
 #
-# Two things that move the number without anything getting worse:
-#
-#   A mutant killed by the runner's patience (a loop that never ends) is reported as timed out and
-#   counted neither way, so a package with one moves by up to a point between runs.
-#
-#   A test that covers new code brings *new* mutants into the denominator. Efficacy is killed over
-#   reachable mutants, so adding a test can lower it — that is coverage improving, not assertions
-#   weakening. The floor tolerates the dip; the number to watch is killed mutants, which only rises.
-#
-# A mutant killed by the runner's patience — a loop that never ends — is reported as timed out and
-# not counted either way, so a package with one moves by up to a point between runs. Floors sit
-# below the lowest observed number, not on it.
-#
-# Measured 2026-10-27, worst first. `sandbox` at 100 means every mutation in its covered code is
-# caught, which is what a pass over the engine should leave behind.
-internal/control     88
-internal/sandbox    100
-internal/supervise   87
-internal/update      87
-internal/vault       88
-internal/workerpool  87
-internal/ready       86
+# Measured 2026-10-27.
+internal/control     86  144
+internal/sandbox    100  400
+internal/supervise   87   47
+internal/update      87  249
+internal/vault       88  105
+internal/workerpool  87    7
+internal/ready       86   31
 #
 # Not measured, on purpose: `internal/httpapi` and `cmd/acornfall` keep their tests in the
 # end-to-end suite, and gremlins only runs the package's own. A number from them would report the
-# absence of unit tests, not the strength of the tests. Their confidence signal is coverage through
-# the feature suite, and `make cover` says it.
+# absence of unit tests, not the strength of the tests. Their signal is coverage through the
+# feature suite, and `make cover` says it.

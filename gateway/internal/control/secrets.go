@@ -33,7 +33,7 @@ type SandboxSecret struct {
 type pendingSecret struct {
 	requestID      string
 	conversationID string
-	worker         *workerpool.Worker
+	worker         workerConn
 	name           string
 	description    string
 	hosts          []string
@@ -512,7 +512,7 @@ func (c *Control) dropSecrets(conversationID string) {
 	}
 }
 
-func (c *Control) answerSecret(worker *workerpool.Worker, requestID string, cancelled bool, scope string, restart bool, reason string) {
+func (c *Control) answerSecret(worker workerConn, requestID string, cancelled bool, scope string, restart bool, reason string) {
 	if worker == nil {
 		return
 	}

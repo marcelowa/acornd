@@ -300,7 +300,7 @@ func (c *Control) markWorkerLost(reason string) {
 
 // workerDied is the difference between a quiet conversation and a dead backend. Without
 // it the gateway keeps serving a cached view and everything looks idle and healthy.
-func (c *Control) workerFailed(worker *workerpool.Worker, err error) {
+func (c *Control) workerFailed(worker workerConn, err error) {
 	c.mu.Lock()
 	// A notification from a worker that has already been replaced is not this control's
 	// problem: the process it describes is gone, and the one running now is fine. Acting on it
@@ -418,7 +418,7 @@ func (c *Control) WorkerCall(ctx context.Context, kind, conversationID string) (
 
 // currentWorker is the live harness, or a refusal. A control that failed to open has none;
 // an endpoint asked anyway should answer that, not dereference nil.
-func (c *Control) currentWorker() (*workerpool.Worker, error) {
+func (c *Control) currentWorker() (workerConn, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if c.worker == nil {

@@ -154,12 +154,20 @@ PKG ?= ./internal/control
 MUTATIONS_WORKERS ?= 8
 MUTATION_TIMEOUT ?= 500
 
-mutations: ## mutation testing for one package (PKG=./internal/control), against its floor
-	@floor=$$(awk -v p="$(PKG)" '$$1==p {print $$2}' .mutationfloors 2>/dev/null); \
-	if [ -x "$(GREMLINS)" ]; then \
-		cd gateway && $(GREMLINS) unleash --workers $(MUTATIONS_WORKERS) --timeout-coefficient $(MUTATION_TIMEOUT) \
-			$${floor:+--threshold-efficacy $$floor} $(PKG); \
-	else echo "gremlins: not installed (make tools)"; fi
+mutations: ## mutation testing for one package (PKG=./internal/control), against its floors
+	@pkg=$${PKG#./}; \
+	efficacy=$$(awk -v p="$$pkg" '$$1==p {print $$2}' .mutationfloors); \
+	killed=$$(awk -v p="$$pkg" '$$1==p {print $$3}' .mutationfloors); \
+	if [ ! -x "$(GREMLINS)" ]; then echo "gremlins: not installed (make tools)"; exit 0; fi; \
+	out=$$(mktemp); \
+	(cd gateway && $(GREMLINS) unleash --workers $(MUTATIONS_WORKERS) --timeout-coefficient $(MUTATION_TIMEOUT) \
+		$${efficacy:+--threshold-efficacy $$efficacy} $(PKG)) > $$out 2>&1; \
+	status=$$?; cat $$out; \
+	got=$$(sed -n 's/^Killed: \([0-9]*\).*/\1/p' $$out); rm -f $$out; \
+	if [ -n "$$killed" ] && [ -n "$$got" ] && [ "$$got" -lt "$$killed" ]; then \
+		echo "mutations: $$got mutants killed, the floor is $$killed — an assertion was lost"; exit 1; \
+	fi; \
+	exit $$status
 
 # The checks that need a network for their database, so they cannot be in `lint`. The same two run
 # weekly in .github/workflows/security.yml and gate a release tag; here they are reproducible

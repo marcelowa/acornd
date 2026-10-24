@@ -177,9 +177,27 @@ type State struct {
 	Seq       int64                   `json:"seq"`
 }
 
+// workerConn is what control needs from a harness process: the commands it sends, the frames it is
+// handed, and the little it asks about one that has died. Declared here because this package is the
+// consumer; every method is one control actually calls, and *workerpool.Worker is the only
+// implementation in the product. It exists because the tests speak the protocol without a process,
+// which is the reason G2 allows an interface at all.
+type workerConn interface {
+	Start(ctx context.Context) error
+	Close()
+	Call(ctx context.Context, command protocol.Command) (json.RawMessage, error)
+	CallInto(ctx context.Context, command protocol.Command, out any) error
+	OnFrame(handler func(protocol.Frame))
+	OnExit(handler func(error))
+	LastWords() string
+}
+
 type Control struct {
-	opts   Options
-	worker *workerpool.Worker
+	opts Options
+	// worker is the harness process. It is an interface because control is its consumer and the
+	// tests speak the protocol without a process: the only implementation in the product is
+	// *workerpool.Worker, which is what startWorker assigns.
+	worker workerConn
 
 	mu            sync.RWMutex
 	describe      protocol.Describe
