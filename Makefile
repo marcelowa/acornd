@@ -25,6 +25,8 @@ GOLANGCI := $(GOBIN)/golangci-lint
 # Unreachable code, which `unused` cannot see across function boundaries.
 DEADCODE := $(GOBIN)/deadcode
 # The two that need a vulnerability database, so they cannot live in `lint`.
+# Mutation testing: coverage says a line ran, this says whether a test would notice.
+GREMLINS := $(GOBIN)/gremlins
 GOVULNCHECK := $(GOBIN)/govulncheck
 GOSEC := $(GOBIN)/gosec
 # The language version the gateway is written against, from its own go.mod. The linters must
@@ -69,6 +71,7 @@ tools: ## install the linters used by `make lint` and `make analyze`, if they ar
 	$(call install_if_missing,$(STATICCHECK),honnef.co/go/tools/cmd/staticcheck)
 	$(call install_if_missing,$(GOLANGCI),github.com/golangci/golangci-lint/v2/cmd/golangci-lint)
 	$(call install_if_missing,$(DEADCODE),golang.org/x/tools/cmd/deadcode)
+	$(call install_if_missing,$(GREMLINS),github.com/go-gremlins/gremlins/cmd/gremlins)
 	$(call install_if_missing,$(GOVULNCHECK),golang.org/x/vuln/cmd/govulncheck)
 	$(call install_if_missing,$(GOSEC),github.com/securego/gosec/v2/cmd/gosec)
 	cd worker && bun install
@@ -135,6 +138,28 @@ analyze: ## complexity, duplication, dead code, error shape: the backlog as a re
 		comm -12 $$tmp/linux $$tmp/darwin | sed 's/^/  /'; \
 		rm -rf $$tmp; \
 	else echo "deadcode: not installed (make tools)"; fi
+
+# Mutation testing for one package. Coverage says a line ran; this says whether any assertion would
+# have failed if the line were wrong — which is the difference between a test and a call.
+#
+# Two things to know before the flags make sense. `gremlins` mutates only what the tests cover, so
+# the number is a property of this package's own tests, not of the end-to-end suite. And the timeout
+# is a coefficient of the baseline test run: here that baseline is milliseconds, so a small
+# coefficient means every mutant times out before the test binary compiles. 500 is what makes
+# compilation fit.
+#
+# It is a report with a floor, not a gate on every push: a survivor is a test to write, and the
+# floor in .mutationfloors is where a package is today, moving only up.
+PKG ?= ./internal/control
+MUTATIONS_WORKERS ?= 8
+MUTATION_TIMEOUT ?= 500
+
+mutations: ## mutation testing for one package (PKG=./internal/control), against its floor
+	@floor=$$(awk -v p="$(PKG)" '$$1==p {print $$2}' .mutationfloors 2>/dev/null); \
+	if [ -x "$(GREMLINS)" ]; then \
+		cd gateway && $(GREMLINS) unleash --workers $(MUTATIONS_WORKERS) --timeout-coefficient $(MUTATION_TIMEOUT) \
+			$${floor:+--threshold-efficacy $$floor} $(PKG); \
+	else echo "gremlins: not installed (make tools)"; fi
 
 # The checks that need a network for their database, so they cannot be in `lint`. The same two run
 # weekly in .github/workflows/security.yml and gate a release tag; here they are reproducible

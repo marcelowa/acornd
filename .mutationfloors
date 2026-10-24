@@ -1,0 +1,10 @@
+# Mutation efficacy per package: the share of mutants the tests kill, of the ones they could.
+#
+# A floor is where the package is today, and it may only move up — same rule as .coveragefloors.
+# A package not listed here is reported and not enforced, because a floor invented before the
+# first measurement is a number nobody chose.
+#
+# Efficacy answers the question coverage cannot: the line ran, but would a test have failed if it
+# were wrong? `internal/control` at 68% means a third of the mutations in its covered code are
+# invisible to its unit tests.
+internal/control  75
