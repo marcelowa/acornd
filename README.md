@@ -124,6 +124,16 @@ every engine has the same create / start / stop / remove lifecycle
 ([ADR 0024](docs/adr/0024-one-lifecycle.md)). What it gives up today: the copy costs its image's
 size on disk ([ADR 0023](docs/adr/0023-bwrap-engine.md)).
 
+A bwrap workspace also receives the host's `/dev/net/tun` and `/dev/kvm`, and the
+capabilities nested pasta needs, so it can run another acornfall with its own bwrap engine
+and network instead of falling back to the host. A workspace can withdraw them with
+`acornfall workspace add --no-devices` (or `disable_devices` in the registry and the API);
+the default is on, and a missing device is skipped rather than failing the boot. The inner
+bwrap sandbox reuses the user namespace pasta already made, because a third user namespace
+inside it cannot write its uid map. The outer workspace remains the boundary and its egress
+policy is the ceiling ([ADR 0030](docs/adr/0030-nested-engines.md)). The KVM permission inside
+a bwrap sandbox is proven; booting the microsandbox engine there is the next spike.
+
 ### Install from a release (one binary, no toolchain)
 
 One line (the token rides along while the repo is private):

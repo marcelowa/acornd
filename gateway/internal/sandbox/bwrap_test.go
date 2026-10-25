@@ -58,6 +58,7 @@ func testBwrap(t *testing.T, dataDir string) (*Bwrap, *fakeBwrap) {
 	driver := NewBwrap(dataDir).
 		WithRunner(runner).
 		WithImageSource(fakeImage).
+		WithDevicePaths("", "").
 		WithLookPath(func(string) (string, error) { return "/usr/bin/bwrap", nil })
 	driver.pasta = func(string) error { return nil }
 	return driver, runner
@@ -378,7 +379,8 @@ func TestBwrapSandboxArgvIsOneSandboxPerWorkspace(t *testing.T) {
 	}
 	for _, want := range []string{
 		// The workspace's own image as `/`, as root inside a single mapping.
-		"--bind /state/ws/rootfs / --uid 0 --gid 0",
+		"--bind /state/ws/rootfs /",
+		"--uid 0 --gid 0",
 		// A root still needs the machine's resolver, read-only.
 		"--ro-bind /etc/resolv.conf /etc/resolv.conf",
 		// The private home, the workspace at its own path, and the socket's folder on both sides.
@@ -515,11 +517,15 @@ func TestBwrapHasALifecycleLikeEveryOtherEngine(t *testing.T) {
 	if len(instances) != 1 || !instances[0].Running() {
 		t.Fatalf("a restarted sandbox should be running: %+v", instances)
 	}
+	pid := driver.pid(Name(workspace))
 	if err := driver.Remove(context.Background(), Name(workspace)); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 	if instances, _ := driver.List(context.Background()); len(instances) != 0 {
 		t.Fatalf("a removed sandbox is gone: %+v", instances)
+	}
+	if pid > 0 && alive(pid) {
+		t.Fatalf("remove left the sandbox process %d running", pid)
 	}
 }
 
@@ -539,14 +545,116 @@ func TestBwrapDeliversSecretsInTheEnvironment(t *testing.T) {
 	}
 }
 
-func TestBwrapDoesNotClaimNesting(t *testing.T) {
+func TestBwrapDoesNotClaimNestingWithoutKVM(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
 	support := driver.Nesting(context.Background())
 	if support.Available {
-		t.Fatal("bwrap claims a hypervisor can start inside it; the config binds no /dev/kvm")
+		t.Fatal("bwrap claims a hypervisor can start without a /dev/kvm to bind")
 	}
 	if !strings.Contains(support.Reason, "/dev/kvm") {
 		t.Fatalf("reason %q does not say what is missing", support.Reason)
+	}
+}
+
+func TestBwrapConfigRecordsNestedFromTheParent(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	t.Setenv(nestedEnv, "1")
+	config, err := driver.writeConfig(Policy{Workspace: t.TempDir()}, t.TempDir())
+	if err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if !config.Nested {
+		t.Fatal("a bwrap engine inside a parent sandbox must record that it is nested")
+	}
+}
+
+func TestBwrapClaimsNestingWhenKVMIsBound(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	kvm := filepath.Join(t.TempDir(), "kvm")
+	if err := os.WriteFile(kvm, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	driver.WithDevicePaths("", kvm)
+	if support := driver.Nesting(context.Background()); !support.Available {
+		t.Fatalf("a machine with /dev/kvm should be able to nest: %+v", support)
+	}
+}
+
+func TestBwrapBindsDevicesAndGrantsNestedEnginesTheCaps(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	tun := filepath.Join(t.TempDir(), "tun")
+	kvm := filepath.Join(t.TempDir(), "kvm")
+	for _, path := range []string{tun, kvm} {
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	driver.WithDevicePaths(tun, kvm)
+	policy := Policy{Workspace: t.TempDir(), Devices: true}
+	config, err := driver.writeConfig(policy, t.TempDir())
+	if err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if !config.Devices {
+		t.Fatal("the config forgot the device grant")
+	}
+	argv, err := driver.sandboxArgv(config)
+	if err != nil {
+		t.Fatalf("argv: %v", err)
+	}
+	joined := strings.Join(argv, " ")
+	for _, want := range []string{
+		"--dev-bind " + tun + " " + tun,
+		"--dev-bind " + kvm + " " + kvm,
+		"--cap-add ALL",
+		"--setenv " + nestedEnv + " 1",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("argv does not contain %q: %v", want, argv)
+		}
+	}
+}
+
+func TestBwrapNestedEgressReusesPastaUserNamespace(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	config := bwrapConfig{
+		Bwrap:       "/usr/bin/bwrap",
+		Rootfs:      "/rootfs",
+		Network:     bwrapNetwork{Mode: "pasta", Address: sandboxAddress, Gateway: sandboxGateway, Pasta: "/usr/bin/pasta"},
+		Nested:      true,
+		DataDir:     "/home",
+		Workspace:   "/work",
+		Run:         "/run",
+		GuestRun:    guestRunDir,
+		Supervisor:  "/usr/local/bin/acornfall",
+		GuestSocket: guestSocketPath,
+	}
+	argv, err := driver.sandboxArgv(config)
+	if err != nil {
+		t.Fatalf("argv: %v", err)
+	}
+	joined := strings.Join(argv, " ")
+	if strings.Contains(joined, "--unshare-all") {
+		t.Error("a nested sandbox with egress must not unshare a user namespace of its own")
+	}
+	if strings.Contains(joined, "--uid 0") || strings.Contains(joined, "--gid 0") {
+		t.Error("a nested sandbox with egress runs in pasta's root, so it must not remap the uid")
+	}
+	for _, want := range []string{"--unshare-pid", "--unshare-uts", "--unshare-ipc", "--unshare-cgroup", "--share-net"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("argv does not contain %q: %v", want, argv)
+		}
+	}
+}
+
+func TestAPastaThatCannotMapItsUserNamespaceIsRefused(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "pasta")
+	body := "#!/bin/sh\necho \"Couldn't configure user mappings\" >&2\nexit 0\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := probePastaWithin(script, time.Second); err == nil {
+		t.Fatal("pasta exited 0 but never made its user namespace; the probe must refuse it")
 	}
 }
 

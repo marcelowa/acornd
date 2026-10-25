@@ -105,6 +105,9 @@ The chain is **conversation → its definition → this workspace → the instal
 | W10 | Egress is on or off, and a workspace that may reach private networks has a grant: off means no network at all, on means public and DNS, and private only with the grant. The policy is written into the engine's own arguments on both engines — never inherited from an engine default. | `TestTheEgressPolicyIsWrittenForEveryCase`, `TestABwrapSandboxCannotReachPrivateNetworks`, `TestAMicroVMSandboxCannotReachPrivateNetworks` |
 | W11 | A workspace with the grant reaches this machine's private networks, on bwrap and inside a microVM. | `TestABwrapAGrantReachesPrivateNetworks`, `TestAMicroVMSandboxWithTheGrantReachesPrivateNetworks` |
 | W12 | Changing the grant rebuilds the sandbox rather than restarting it: the network is what the guest booted with, so stopping is not enough. | `TestAWorkspaceUpdateRestartsWhatDependsOnTheFolder` |
+| W13 | A bwrap workspace receives the host's `/dev/net/tun` and `/dev/kvm`, and the capabilities nested pasta needs, by default; a workspace can withdraw them, and a missing device is skipped rather than failing the boot. | `TestBwrapBindsDevicesAndGrantsNestedEnginesTheCaps`, `TestBwrapClaimsNestingWhenKVMIsBound`, `TestDevicesAreOnByDefaultAndTheWorkspaceCanWithdrawThem`, `TestAWorkspaceUpdateRebuildsTheSandboxWhenDevicesChange` |
+| W14 | A bwrap engine inside another bwrap workspace reuses pasta's user namespace for a network-on sandbox instead of creating a third one; the inner network is its own, and pasta's printed user-namespace failure is a refusal even when it exits 0. | `TestBwrapNestedEgressReusesPastaUserNamespace`, `TestBwrapConfigRecordsNestedFromTheParent`, `TestAPastaThatCannotMapItsUserNamespaceIsRefused` |
+| W15 | Removing a sandbox stops it before deleting its files; a test that removes a started sandbox leaves no process. | `TestBwrapHasALifecycleLikeEveryOtherEngine` |
 
 ## Resources: rules, agents, skills
 
@@ -212,6 +215,12 @@ workaround:
     rather than from us.
 11. The secret field was a password field, so Bitwarden kept offering to save a tool secret as a
     login, and no opt-out attribute beats the type.
+12. `Bwrap.Remove` deleted a running sandbox's files and left its supervisor, bubblewrap, and
+    commands behind; the lifecycle test passed because `List` only reads configs. Two test runs
+    were still alive on a real machine when the leak was found.
+13. Nested pasta printed `Couldn't configure user mappings` and exited 0, so the probe called a
+    network that never existed healthy — and the inner acornfall would have chosen bwrap and lost
+    its egress.
 
 ## Not covered, and why
 
@@ -237,3 +246,6 @@ workaround:
   transcript, the resizable splitter that remembers its width, per-pane format toggles and
   copy, the theme toggle, and the phone drawer. The inspector and the settings sheet are
   still being rebuilt (#13), which is why their assertions are not in the suite yet.
+- **The microVM inside a bwrap workspace.** The KVM device opens and `KVM_CREATE_VM` /
+  `KVM_CREATE_VCPU` succeed inside a bwrap sandbox, with and without caps; booting the
+  microsandbox engine there is the next spike, not a feature this inventory claims.

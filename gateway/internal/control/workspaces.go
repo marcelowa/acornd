@@ -79,6 +79,11 @@ type Workspace struct {
 	// --disable-vm-nesting; a pointer because true is a choice and absent is not. Like Image,
 	// it takes effect at the next sandbox, because nesting is decided when one is created.
 	DisableVMNesting *bool `json:"disable_vm_nesting,omitempty"`
+	// DisableDevices is whether this bwrap workspace must not receive the host's
+	// /dev/net/tun and /dev/kvm. Nil means the default: devices are granted, so a
+	// workspace can run another acornfall with its own bwrap engine and network. A
+	// pointer because true is a decision and absent is not.
+	DisableDevices *bool `json:"disable_devices,omitempty"`
 	// Running is runtime state, never stored: a persisted `true` would be a claim about a
 	// process that does not exist after a restart.
 	Running bool `json:"-"`
@@ -98,12 +103,17 @@ func (w Workspace) SandboxPolicy(dataDir, userHome string) sandbox.Policy {
 	if w.DisableVMNesting != nil {
 		disableVMNesting = *w.DisableVMNesting
 	}
+	devices := true
+	if w.DisableDevices != nil {
+		devices = !*w.DisableDevices
+	}
 	policy := sandbox.Policy{
 		Image:            w.Image,
 		Workspace:        w.Path,
 		Egress:           w.Network != NetworkOff,
 		PrivateEgress:    w.Private,
 		DisableVMNesting: disableVMNesting,
+		Devices:          devices,
 		Global:           sandbox.GlobalPaths(dataDir, userHome),
 	}
 	if w.KeepAlive {
@@ -154,6 +164,7 @@ func Views(list []Workspace, progress func(string) Progress) []WorkspaceState {
 			KeepAlive:        workspace.KeepAlive,
 			Engine:           workspace.Engine,
 			DisableVMNesting: workspace.DisableVMNesting,
+			DisableDevices:   workspace.DisableDevices,
 			Running:          workspace.Running,
 		}
 		if progress != nil {
@@ -376,16 +387,16 @@ func (w *Workspaces) Update(workspace Workspace) error {
 	if err := validateWorkspace(workspace); err != nil {
 		return err
 	}
-	existing, control, privateChanged, err := w.adopt(workspace)
+	existing, control, rebuilt, err := w.adopt(workspace)
 	if err != nil {
 		return err
 	}
-	if control != nil && privateChanged {
+	if control != nil && rebuilt {
 		// Stopping is not enough for what the engine baked into the sandbox at creation: it is
 		// started again, not built again, so the workspace would go on reaching nothing while the
 		// record said otherwise. The sandbox is discarded so the next start is built from the
-		// record — the grant is a decision about the guest's network, and a guest keeps the one it
-		// booted with.
+		// record — the network grant and the device grant are decisions about the guest, and a
+		// guest keeps the one it booted with.
 		control.discardSandbox(existing.Path)
 	}
 	return w.persist()
@@ -412,7 +423,9 @@ func (w *Workspaces) adopt(workspace Workspace) (Workspace, *Control, bool, erro
 	// next idle eviction. A grant is built into the sandbox at creation, so it needs a new one —
 	// and withdrawing it is a downgrade that waits for nothing.
 	privateChanged := control != nil && existing.Private != workspace.Private
-	restart := control != nil && (existing.Path != workspace.Path || privateChanged)
+	devicesChanged := control != nil && disabled(existing.DisableDevices) != disabled(workspace.DisableDevices)
+	rebuilt := privateChanged || devicesChanged
+	restart := control != nil && (existing.Path != workspace.Path || rebuilt)
 	if restart {
 		delete(w.controls, workspace.Name)
 	}
@@ -423,8 +436,11 @@ func (w *Workspaces) adopt(workspace Workspace) (Workspace, *Control, bool, erro
 	} else if control != nil {
 		control.SetWorkspace(workspace)
 	}
-	return existing, control, privateChanged, nil
+	return existing, control, rebuilt, nil
 }
+
+// disabled is a workspace's opt-out as a boolean: absent and false mean the same thing.
+func disabled(value *bool) bool { return value != nil && *value }
 
 // discardSandbox deletes the workspace's sandbox so the next start builds it from the record. It
 // exists for the edits an engine bakes in at creation — the network policy above all — where

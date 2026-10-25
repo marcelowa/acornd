@@ -117,6 +117,32 @@ func TestAWorkspaceUpdateRestartsWhatDependsOnTheFolder(t *testing.T) {
 	}
 }
 
+// The device grant is baked into a running sandbox, so withdrawing it rebuilds the sandbox and
+// stops the worker instead of leaving a guest that still has the devices the record says it
+// does not.
+func TestAWorkspaceUpdateRebuildsTheSandboxWhenDevicesChange(t *testing.T) {
+	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: t.TempDir(), WorkspacesDir: t.TempDir()})
+	first := Workspace{Name: "w", Path: t.TempDir()}
+	workspaces.registry["w"] = first
+	worker := newFakeWorker()
+	control := controlWithWorker(t, worker)
+	control.opts.Workspace = first
+	workspaces.controls["w"] = control
+
+	on := true
+	updated := first
+	updated.DisableDevices = &on
+	if err := workspaces.Update(updated); err != nil {
+		t.Fatal(err)
+	}
+	if control.WorkerUp() {
+		t.Error("a device change should stop the worker whose sandbox was built with them")
+	}
+	if got := workspaces.registry["w"].DisableDevices; got == nil || !*got {
+		t.Errorf("the registry should keep the withdrawal, has %+v", got)
+	}
+}
+
 // Updating a workspace that is not registered is refused rather than created: a create through the
 // update path would skip the folder checks that creating does.
 func TestUpdatingAWorkspaceThatIsNotThereIsRefused(t *testing.T) {

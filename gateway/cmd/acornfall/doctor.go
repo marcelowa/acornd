@@ -217,22 +217,25 @@ func stateOf(engine engineReport) string {
 // doctor already owns. Report-only where possible: doctor changes nothing.
 func readyInput(dataDir string, updater *update.Manager, health update.Preflight, report sandbox.Report) ready.Input {
 	_, bunOK := updater.BunInstalled()
+	hypervisorOK, hypervisorDetail := ready.Hypervisor()
 	return ready.Input{
-		DataDir:         dataDir,
-		Current:         health.Version,
-		RuntimeTag:      updater.RuntimeTag(),
-		Worker:          updater.WorkerVersion(),
-		BunPath:         updater.BunPath(),
-		BunOK:           bunOK,
-		EngineName:      report.Engine,
-		EngineVersion:   report.Version,
-		EngineInstalled: report.Installed,
-		EngineIsolated:  report.Isolated,
-		EngineProblem:   report.Problem,
-		EngineDisabled:  disabledReason(),
-		Latest:          health.Latest,
-		ReleasesNote:    health.Releases,
-		HasCredential:   ready.HasCredential(dataDir),
+		DataDir:          dataDir,
+		Current:          health.Version,
+		RuntimeTag:       updater.RuntimeTag(),
+		Worker:           updater.WorkerVersion(),
+		BunPath:          updater.BunPath(),
+		BunOK:            bunOK,
+		EngineName:       report.Engine,
+		EngineVersion:    report.Version,
+		EngineInstalled:  report.Installed,
+		EngineIsolated:   report.Isolated,
+		EngineProblem:    report.Problem,
+		EngineDisabled:   disabledReason(),
+		Latest:           health.Latest,
+		ReleasesNote:     health.Releases,
+		HasCredential:    ready.HasCredential(dataDir),
+		HypervisorOK:     hypervisorOK,
+		HypervisorDetail: hypervisorDetail,
 	}
 }
 
@@ -250,15 +253,18 @@ func disabledReason() string {
 func readyInputForBoot(dataDir string, updates *update.Manager, engine *sandbox.Manager) ready.Input {
 	_, bunOK := updates.BunInstalled()
 	status := updates.Status()
+	hypervisorOK, hypervisorDetail := ready.Hypervisor()
 	input := ready.Input{
-		DataDir:       dataDir,
-		Current:       status.Current,
-		RuntimeTag:    updates.RuntimeTag(),
-		Worker:        updates.WorkerVersion(),
-		BunPath:       updates.BunPath(),
-		BunOK:         bunOK,
-		HasCredential: ready.HasCredential(dataDir),
-		Latest:        status.Latest,
+		DataDir:          dataDir,
+		Current:          status.Current,
+		RuntimeTag:       updates.RuntimeTag(),
+		Worker:           updates.WorkerVersion(),
+		BunPath:          updates.BunPath(),
+		BunOK:            bunOK,
+		HasCredential:    ready.HasCredential(dataDir),
+		Latest:           status.Latest,
+		HypervisorOK:     hypervisorOK,
+		HypervisorDetail: hypervisorDetail,
 	}
 	if engine == nil {
 		input.EngineDisabled = disabledReason()

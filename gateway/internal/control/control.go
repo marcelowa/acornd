@@ -109,7 +109,10 @@ type WorkspaceState struct {
 	// and a choice of its own otherwise. True refuses nesting; absent or false allows it
 	// wherever the engine and the machine can.
 	DisableVMNesting *bool `json:"disable_vm_nesting,omitempty"`
-	Running          bool  `json:"running"`
+	// DisableDevices is nil when this bwrap workspace receives /dev/net/tun and /dev/kvm,
+	// which is the default, and a choice of its own otherwise. True withholds them.
+	DisableDevices *bool `json:"disable_devices,omitempty"`
+	Running        bool  `json:"running"`
 	// Status is stopped, opening, ready, or failed; Stage is the step an opening workspace is on,
 	// in the words of the code doing it. They are separate from Running because a workspace that
 	// is opening has no worker yet, and "not running" would say nothing about why.

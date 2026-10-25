@@ -141,7 +141,7 @@ func (c *Control) provisionSandbox(ctx context.Context) SandboxState {
 	// Whether the sandbox that is running nests is what it was created with; this says what
 	// the next one gets, and why it cannot when it cannot. A workspace that disables nesting
 	// carries neither: its own setting, visible beside this state, is the reason.
-	if !policy.DisableVMNesting {
+	if !policy.DisableVMNesting && (state.Engine != "bwrap" || policy.Devices) {
 		state.Nested, state.NestedReason = nestingFor(ctx, manager)
 	}
 	if status, err := manager.Status(ctx, c.opts.Workspace.Path); err == nil {

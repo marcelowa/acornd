@@ -76,6 +76,7 @@ func TestAWorkspaceBodyChangesOnlyWhatItNames(t *testing.T) {
 		Engine:           "bwrap",
 		KeepAlive:        false,
 		DisableVMNesting: boolean(true),
+		DisableDevices:   boolean(true),
 	}
 	title := "Renamed"
 	engine := "host"
@@ -90,6 +91,9 @@ func TestAWorkspaceBodyChangesOnlyWhatItNames(t *testing.T) {
 	}
 	if updated.Image != "debian:12" || updated.Network != "off" || updated.DisableVMNesting == nil || !*updated.DisableVMNesting {
 		t.Errorf("an unmentioned field changed: %+v", updated)
+	}
+	if updated.DisableDevices == nil || !*updated.DisableDevices {
+		t.Errorf("the device opt-out was not kept: %+v", updated)
 	}
 	if changed := (workspaceBody{}).apply(existing); changed != existing {
 		t.Errorf("an empty body should change nothing: %+v", changed)

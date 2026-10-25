@@ -8,17 +8,19 @@ import (
 
 func testInput(dataDir string) Input {
 	return Input{
-		DataDir:         dataDir,
-		Current:         "v0.9.0",
-		Worker:          "v0.9.0",
-		BunPath:         filepath.Join(dataDir, "tools", "bun-1.4.3", "bun"),
-		BunOK:           true,
-		EngineName:      "microsandbox",
-		EngineVersion:   "0.7.6",
-		EngineInstalled: true,
-		EngineIsolated:  true,
-		Latest:          "v0.9.0",
-		HasCredential:   true,
+		DataDir:          dataDir,
+		Current:          "v0.9.0",
+		Worker:           "v0.9.0",
+		BunPath:          filepath.Join(dataDir, "tools", "bun-1.4.3", "bun"),
+		BunOK:            true,
+		EngineName:       "microsandbox",
+		EngineVersion:    "0.7.6",
+		EngineInstalled:  true,
+		EngineIsolated:   true,
+		Latest:           "v0.9.0",
+		HasCredential:    true,
+		HypervisorOK:     true,
+		HypervisorDetail: "/dev/kvm present",
 	}
 }
 

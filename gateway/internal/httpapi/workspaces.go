@@ -40,7 +40,10 @@ type workspaceBody struct {
 	// DisableVMNesting, when true, keeps this workspace's sandbox from nesting; absent or
 	// false nests whenever the engine and the machine can.
 	DisableVMNesting *bool `json:"disable_vm_nesting"`
-	Trusted          *bool `json:"trusted"`
+	// DisableDevices, when true, withholds /dev/net/tun and /dev/kvm from a bwrap
+	// workspace. Absent means the default: the devices are granted.
+	DisableDevices *bool `json:"disable_devices"`
+	Trusted        *bool `json:"trusted"`
 }
 
 // refusal is why a body is not one this build accepts. Refused rather than ignored, because a
@@ -80,6 +83,9 @@ func (b workspaceBody) apply(workspace control.Workspace) control.Workspace {
 	}
 	if b.DisableVMNesting != nil {
 		workspace.DisableVMNesting = b.DisableVMNesting
+	}
+	if b.DisableDevices != nil {
+		workspace.DisableDevices = b.DisableDevices
 	}
 	return workspace
 }

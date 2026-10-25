@@ -229,6 +229,9 @@ with a deadline:
 | A message that was only files reached the worker without `text` (omitempty) and failed the whole send on `text.trim()`. | S6 — the field is optional on the wire, so the handler reads it as absent |
 | The draft endpoint answered with the draft **and then the state**: two JSON documents on one response, which no client can parse. | S8 — the shared shape wrote an answer that belonged to one handler |
 | The page routes' comment promised `index.html` for any unmatched path; the server answers 404, and a test asserting the comment is what found it. | S1 — a comment that is not true is a lie the next reader trusts |
+| `Bwrap.Remove` deleted a running sandbox's files but left its supervisor, bubblewrap, and commands; the lifecycle test passed because `List` reads only configs, and two runs were still alive on a real machine. | G16, S2 — the test removed what it created, but not the processes it created |
+| Nested pasta printed `Couldn't configure user mappings` and exited 0, so the probe called a network that never existed healthy. | S2 — an exit status is not the whole answer when the tool prints its own failure |
+| `TestSatisfiedInstallIsQuiet` read `/dev/kvm` from the machine, so the fast tier failed in the very bwrap workspace this project develops in. | G11 — a unit test has to answer on the machine that runs it, and the machine fact belongs in the input |
 
 ## Convention (not enforced)
 

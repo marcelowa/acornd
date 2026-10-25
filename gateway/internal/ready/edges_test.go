@@ -40,7 +40,8 @@ func TestTheEngineIsNamedWithItsVersionWhenThereIsOne(t *testing.T) {
 // Where there is no hypervisor to check for, the line says so rather than reporting a missing
 // device: a Mac has no /dev/kvm and is not broken.
 func TestTheHypervisorLineKnowsItsPlatform(t *testing.T) {
-	requirement := hypervisor()
+	ok, detail := Hypervisor()
+	requirement := hypervisor(Input{HypervisorOK: ok, HypervisorDetail: detail})
 	if runtime.GOOS != "linux" {
 		if !requirement.OK || !strings.Contains(requirement.Detail, "not applicable") {
 			t.Errorf("off Linux the check does not apply: %+v", requirement)
@@ -50,6 +51,10 @@ func TestTheHypervisorLineKnowsItsPlatform(t *testing.T) {
 	// On Linux the answer is about /dev/kvm, whichever way it goes, and never "not applicable".
 	if strings.Contains(requirement.Detail, "not applicable") {
 		t.Errorf("Linux has a hypervisor to look for: %+v", requirement)
+	}
+	missing := hypervisor(Input{HypervisorOK: false})
+	if missing.OK || missing.Detail != "no /dev/kvm" || missing.Fix == "" {
+		t.Errorf("a missing hypervisor is a named refusal with a fix: %+v", missing)
 	}
 }
 

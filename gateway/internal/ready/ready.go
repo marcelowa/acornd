@@ -54,21 +54,38 @@ type Input struct {
 	Latest        string
 	ReleasesNote  string
 	HasCredential bool
+	// HypervisorOK is the machine fact the list reports, gathered by the caller so a test
+	// can state it instead of depending on the machine running the test.
+	HypervisorOK     bool
+	HypervisorDetail string
 }
 
 // Check builds the list. Filesystem reads stay under DataDir so tests run
-// anywhere; /dev/kvm and disk space read the machine, which is the point.
+// anywhere; the caller gathers the one machine fact (/dev/kvm), and disk
+// space reads the data folder.
 func Check(input Input) []Requirement {
 	return []Requirement{
 		dataDirWritable(input.DataDir),
 		bun(input),
 		worker(input),
 		engine(input),
-		hypervisor(),
+		hypervisor(input),
 		credentials(input),
 		disk(input.DataDir),
 		releases(input),
 	}
+}
+
+// Hypervisor is the machine fact the readiness list reports. It is here, not inside Check, so
+// the check is a function of its input and a test can state both answers without a device.
+func Hypervisor() (ok bool, detail string) {
+	if runtime.GOOS != "linux" {
+		return true, "not applicable on " + runtime.GOOS
+	}
+	if _, err := os.Stat("/dev/kvm"); err != nil {
+		return false, "no /dev/kvm"
+	}
+	return true, "/dev/kvm present"
 }
 
 func dataDirWritable(dataDir string) Requirement {
@@ -134,14 +151,22 @@ func engine(input Input) Requirement {
 	return Requirement{"engine", true, name + " installed", ""}
 }
 
-func hypervisor() Requirement {
+func hypervisor(input Input) Requirement {
 	if runtime.GOOS != "linux" {
 		return Requirement{"hypervisor", true, "not applicable on " + runtime.GOOS, ""}
 	}
-	if _, err := os.Stat("/dev/kvm"); err != nil {
-		return Requirement{"hypervisor", false, "no /dev/kvm", "run where KVM exists, or choose another engine: bwrap (user namespaces) or host (unconfined)"}
+	if !input.HypervisorOK {
+		detail := input.HypervisorDetail
+		if detail == "" {
+			detail = "no /dev/kvm"
+		}
+		return Requirement{"hypervisor", false, detail, "run where KVM exists, or choose another engine: bwrap (user namespaces) or host (unconfined)"}
 	}
-	return Requirement{"hypervisor", true, "/dev/kvm present", ""}
+	detail := input.HypervisorDetail
+	if detail == "" {
+		detail = "/dev/kvm present"
+	}
+	return Requirement{"hypervisor", true, detail, ""}
 }
 
 func credentials(input Input) Requirement {

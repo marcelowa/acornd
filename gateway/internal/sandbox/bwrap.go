@@ -45,10 +45,26 @@ type Bwrap struct {
 	resolver resolverFiles
 	// pasta is the egress probe, a field so a test can answer without running one.
 	pasta func(string) error
+	// devices are the host paths a sandbox may be given. They are fields so a test can
+	// answer for a machine that has neither without making the suite depend on this one.
+	devices hostDevices
 
 	once    sync.Once
 	version string
 }
+
+// hostDevices is where the host's tun and KVM nodes are. A path that is empty, missing, or
+// not a device is simply not bound: a workspace still opens, and the engine says why it
+// cannot nest instead of failing the boot.
+type hostDevices struct {
+	tun string
+	kvm string
+}
+
+// nestedEnv marks a process that is already inside a sandbox. The outer bwrap sets it for
+// the workspace's processes; a bwrap engine that finds it reuses the user namespace pasta
+// made instead of creating a third one inside it.
+const nestedEnv = "ACORNFALL_NESTED"
 
 // NewBwrap builds the driver. Unlike the microVM engine it installs nothing: bubblewrap is a
 // distribution package, and installing one is the operator's business, not a gateway's.
@@ -59,7 +75,15 @@ func NewBwrap(dataDir string) *Bwrap {
 		look:     exec.LookPath,
 		pull:     pullImage,
 		resolver: resolverFiles{Host: "/etc/resolv.conf", Upstream: "/run/systemd/resolve/resolv.conf"},
+		devices:  hostDevices{tun: "/dev/net/tun", kvm: "/dev/kvm"},
 	}
+}
+
+// WithDevicePaths answers "does this machine have them" for a test, which must not depend on
+// the device nodes of the machine running it.
+func (b *Bwrap) WithDevicePaths(tun, kvm string) *Bwrap {
+	b.devices = hostDevices{tun: tun, kvm: kvm}
+	return b
 }
 
 // WithImageSource replaces the registry with a directory of its own, which is how the pull and
@@ -206,20 +230,35 @@ func probePastaWithin(pasta string, wait time.Duration) error {
 		"-a", "10.0.2.15", "-n", "24", "-g", "10.0.2.2", "--", "/bin/true")
 	command.WaitDelay = time.Second
 	output, err := command.CombinedOutput()
-	if err != nil {
-		detail := strings.TrimSpace(string(output))
-		if detail == "" {
-			detail = err.Error()
-		}
-		return fmt.Errorf("%w: pasta cannot make a network namespace here: %s", ErrUnavailable, lastLine(detail))
+	detail := strings.TrimSpace(string(output))
+	// pasta can print a failure on stderr and still exit 0: inside a bwrap workspace without
+	// the caps nested pasta needs, it cannot write its uid map and runs the command anyway.
+	// The caller must not read that as a network that works.
+	if err == nil && !pastaUserNamespaceFailure(detail) {
+		return nil
 	}
-	return nil
+	if detail == "" && err != nil {
+		detail = err.Error()
+	}
+	return fmt.Errorf("%w: pasta cannot make a network namespace here: %s", ErrUnavailable, lastLine(detail))
 }
 
-// Nesting reports that a hypervisor cannot run in this sandbox: the config does not bind
-// /dev/kvm, and binding it would be a deliberate grant rather than a default.
+// pastaUserNamespaceFailure is the failure pasta prints when it cannot create the user
+// namespace it runs the sandbox in. The exit status is 0 because the command it ran still
+// ran; only the output says the namespace never existed.
+func pastaUserNamespaceFailure(detail string) bool {
+	return strings.Contains(detail, "Couldn't configure user mappings") ||
+		strings.Contains(detail, "Couldn't write to /proc/self/uid_map")
+}
+
+// Nesting reports whether a hypervisor can run in a bwrap sandbox. It can when the machine
+// has /dev/kvm and the workspace grants devices: the device is bound into the sandbox and
+// the capabilities nested pasta needs come with it.
 func (b *Bwrap) Nesting(context.Context) NestingSupport {
-	return unavailable("a bwrap sandbox does not bind /dev/kvm, so a hypervisor inside it cannot start")
+	if _, err := os.Stat(b.devices.kvm); err != nil {
+		return unavailable("no /dev/kvm on this machine, so a hypervisor inside a bwrap sandbox cannot start")
+	}
+	return NestingSupport{Available: true}
 }
 
 // config is what one workspace's commands run under, written for a person to read and for the
@@ -254,6 +293,11 @@ type bwrapConfig struct {
 	// IdleTimeout stops a sandbox nothing has run in for a while. It is the same policy value the
 	// microVM engine is given, so both engines answer the question the same way.
 	IdleTimeout string `json:"idleTimeout"`
+	// Devices is whether this sandbox received the host's /dev/net/tun and /dev/kvm.
+	Devices bool `json:"devices,omitempty"`
+	// Nested is whether this sandbox was created inside another bwrap workspace. A nested
+	// sandbox reuses pasta's user namespace instead of trying to make one more inside it.
+	Nested bool `json:"nested,omitempty"`
 	// Beta notes what this shape does not do yet, so the file does not read as a promise.
 	Beta string `json:"beta"`
 }
@@ -463,6 +507,8 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 		Run:         supervisor.run,
 		GuestRun:    guestRunDir,
 		IdleTimeout: idleTimeoutOrDefault(policy.IdleTimeout),
+		Devices:     policy.Devices,
+		Nested:      os.Getenv(nestedEnv) == "1",
 		Beta:        "one sandbox per workspace, held by this binary as its first process",
 	}
 	data, err := json.MarshalIndent(config, "", "  ")
@@ -608,7 +654,11 @@ func (b *Bwrap) List(context.Context) ([]Instance, error) {
 // Remove deletes the config and the workspace's private home — the things a bwrap sandbox
 // accumulates — and the socket's folder, which is not in the workspace's folder any more. The
 // workspace folder is the user's and is not touched.
-func (b *Bwrap) Remove(_ context.Context, name string) error {
+func (b *Bwrap) Remove(ctx context.Context, name string) error {
+	// Removing a running sandbox removes its files but leaves the supervisor, its bubblewrap,
+	// and every command they hold; a test that called Remove after Start leaked them. Stop is
+	// idempotent, so the control path that already closed the sandbox pays nothing for it.
+	_ = b.Stop(ctx, name)
 	// Read before removing: the config is what names the socket's folder, and it lives outside
 	// everything else this deletes.
 	run := ""
@@ -865,6 +915,30 @@ func (b *Bwrap) bootArgv(config bwrapConfig) ([]string, error) {
 	return append(argv, sandbox...), nil
 }
 
+// deviceArgs gives a sandbox the host devices and the capabilities nested engines need. A
+// path that is not there is skipped, not refused: a workspace still opens on a machine
+// without a hypervisor. The capabilities are what lets nested pasta write its user namespace
+// inside the parent sandbox; binding the devices alone is not enough.
+func (b *Bwrap) deviceArgs() []string {
+	var args []string
+	for _, device := range []string{b.devices.tun, b.devices.kvm} {
+		if device == "" {
+			continue
+		}
+		if info, err := os.Stat(device); err != nil || info.IsDir() {
+			continue
+		}
+		args = append(args, "--dev-bind", device, device)
+	}
+	if len(args) == 0 {
+		return nil
+	}
+	return append(args,
+		"--cap-add", "ALL",
+		"--setenv", nestedEnv, "1",
+	)
+}
+
 // sandboxArgv is the bubblewrap command: what a command in this workspace can see, once, for as
 // long as the sandbox lives.
 func (b *Bwrap) sandboxArgv(config bwrapConfig) ([]string, error) {
@@ -872,24 +946,58 @@ func (b *Bwrap) sandboxArgv(config bwrapConfig) ([]string, error) {
 		return nil, errors.New("sandbox: the config has no bubblewrap path: recreate the sandbox")
 	}
 	argv := []string{config.Bwrap}
+	argv = append(argv, b.mountArgs(config)...)
+	argv = append(argv, isolationArgs(config)...)
+	argv = append(argv, "--", guestSupervisor, "internal", "sandbox-supervisor", "--socket", config.GuestSocket)
+	if config.IdleTimeout != "" {
+		// A kept-alive workspace is given a timeout that never fires rather than none at all, so
+		// the flag always says what the policy decided.
+		argv = append(argv, "--idle-timeout", config.IdleTimeout)
+	}
+	return argv, nil
+}
+
+// mountArgs is everything the sandbox can see: the root, the devices it was granted, the
+// workspace, its private home, the resource folders, and the supervisor.
+func (b *Bwrap) mountArgs(config bwrapConfig) []string {
+	var argv []string
 	if config.Rootfs != "" {
 		argv = append(argv, "--bind", config.Rootfs, "/",
-			// Root inside a single mapping, so files written by root land owned by the user.
-			"--uid", "0", "--gid", "0",
 			// A root of its own still needs the machine's resolver, or its upstreams.
 			"--ro-bind", resolverOrHost(config), "/etc/resolv.conf")
 	} else {
 		argv = append(argv, "--ro-bind", "/", "/", "--tmpfs", config.Hidden)
 	}
 	argv = append(argv, "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp")
+	if config.Devices {
+		// After --dev, so the bind lands in the /dev this sandbox actually has.
+		argv = append(argv, b.deviceArgs()...)
+	}
 	for _, path := range config.ReadOnly {
 		argv = append(argv, "--ro-bind", path, path)
 	}
-	argv = append(argv,
+	return append(argv,
 		"--bind", config.DataDir, guestHome(config),
 		"--bind", config.Workspace, config.Workspace,
 		"--bind", config.Run, config.GuestRun,
 		"--ro-bind", config.Supervisor, guestSupervisor)
+}
+
+// isolationArgs is what the sandbox is separated from. A nested sandbox with a network shares
+// the user namespace pasta already made: asking bubblewrap for a third one inside it cannot
+// write its uid map, even when the process is root. The namespaces that still separate the
+// command (pid, uts, ipc, cgroup) are unshared one by one; the user namespace is pasta's. A
+// sandbox without a network, or outside a parent, keeps a user namespace of its own.
+func isolationArgs(config bwrapConfig) []string {
+	nestedNetwork := config.Nested && config.Network.Mode != NetworkOffName
+	var argv []string
+	if config.Rootfs != "" && !nestedNetwork {
+		// Root inside a single mapping, so files written by root land owned by the user.
+		argv = append(argv, "--uid", "0", "--gid", "0")
+	}
+	if nestedNetwork {
+		return append(argv, "--unshare-pid", "--unshare-uts", "--unshare-ipc", "--unshare-cgroup", "--share-net")
+	}
 	// A user namespace of the sandbox's own, with the single mapping that makes root inside the
 	// user outside. It nests inside the one pasta makes when there is egress, which is worth
 	// knowing: on a host that restricts unprivileged user namespaces (Ubuntu 24.04 and its
@@ -899,13 +1007,7 @@ func (b *Bwrap) sandboxArgv(config bwrapConfig) ([]string, error) {
 		// Share the network namespace of whoever started bubblewrap: pasta, when there is one.
 		argv = append(argv, "--share-net")
 	}
-	argv = append(argv, "--", guestSupervisor, "internal", "sandbox-supervisor", "--socket", config.GuestSocket)
-	if config.IdleTimeout != "" {
-		// A kept-alive workspace is given a timeout that never fires rather than none at all, so
-		// the flag always says what the policy decided.
-		argv = append(argv, "--idle-timeout", config.IdleTimeout)
-	}
-	return argv, nil
+	return argv
 }
 
 // guestHome is where the private home appears inside the sandbox: the root's own home when there

@@ -35,6 +35,12 @@ type Policy struct {
 	// it has the switch. A sandbox on a machine that cannot nest still boots. See
 	// docs/adr/0018-disable-vm-nesting.md.
 	DisableVMNesting bool
+	// Devices grants a bwrap sandbox the host's /dev/net/tun and /dev/kvm, and the
+	// capabilities nested pasta needs. It is what lets a workspace run another acornfall
+	// honestly: the inner engine gets a real bwrap sandbox and a real network instead of
+	// falling back to the host escape hatch. False by default at this layer; control fills
+	// it from the workspace's own opt-out. See docs/adr/0030-nested-engines.md.
+	Devices bool
 	// OnStage reports a step that takes time — pulling an image, copying it, booting the engine —
 	// so the interface can say what is happening instead of showing an empty pane. Nil means
 	// nobody is listening, which is the case for a command or a test.

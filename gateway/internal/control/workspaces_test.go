@@ -95,6 +95,19 @@ func TestNestingIsTheWorkspacesOwnDecision(t *testing.T) {
 	}
 }
 
+// Devices are on by default so a bwrap workspace can run another acornfall, and a workspace
+// that does not want them can say so once.
+func TestDevicesAreOnByDefaultAndTheWorkspaceCanWithdrawThem(t *testing.T) {
+	const dataDir, userHome = "/home/me/.acornfall", "/home/me"
+	on := true
+	if !(Workspace{}).SandboxPolicy(dataDir, userHome).Devices {
+		t.Fatal("a workspace that asked for nothing should get the devices")
+	}
+	if (Workspace{DisableDevices: &on}).SandboxPolicy(dataDir, userHome).Devices {
+		t.Fatal("a workspace that withdrew the devices should not get them")
+	}
+}
+
 // A workspace's sandbox belongs to the engine the workspace chose. Removing it must ask that
 // engine: the default one's manager answers "no such sandbox" and the disk stays — which is what
 // a real install showed, 88 MB per forgotten bwrap workspace.

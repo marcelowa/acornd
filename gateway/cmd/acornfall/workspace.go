@@ -61,6 +61,7 @@ func workspaceAdd(argv []string) {
 	engine := flags.String("sandbox", "", "sandbox engine: microsandbox, bwrap, or host (default: what this machine can run)")
 	keepAlive := flags.Bool("keep-alive", false, "keep this workspace's sandbox running when nobody is watching it (for daemons and cron jobs)")
 	noNesting := flags.Bool("no-vm-nesting", false, "refuse a hypervisor inside this workspace's sandbox")
+	noDevices := flags.Bool("no-devices", false, "withhold /dev/net/tun and /dev/kvm from this bwrap sandbox")
 	flags.Usage = func() { fmt.Fprint(os.Stderr, addUsage) }
 	// Flags after the name and the folder are documented above, and the standard flag package
 	// stops at the first positional. Splitting them is what makes
@@ -102,6 +103,7 @@ func workspaceAdd(argv []string) {
 		private:   private,
 		keepAlive: *keepAlive,
 		noNesting: *noNesting,
+		noDevices: *noDevices,
 	})
 	fmt.Printf("added %s at %s\n", name, absolute)
 	fmt.Printf("sandbox: %s, engine %s, egress %s\n", imageLabel(*image), engineLabel(chosen), egressLabel(network, private))
@@ -116,6 +118,8 @@ const addUsage = `usage: acornfall workspace add <name> [folder] [flags]
   --egress WHERE     public (default), private (this machine's LAN and tailnet too), or off
   --keep-alive       keep the sandbox running when nobody is watching it
   --no-vm-nesting    refuse a hypervisor inside the sandbox
+  --no-devices       withhold /dev/net/tun and /dev/kvm from a bwrap sandbox; the
+                     default grants them so a workspace can run another acornfall
   --data-dir DIR     the acornfall folder (default: ~/.acornfall)
 
 The folder defaults to ./<name>. The engine is recorded here, once: a workspace keeps the
@@ -172,6 +176,7 @@ type addRecord struct {
 	private   bool
 	keepAlive bool
 	noNesting bool
+	noDevices bool
 }
 
 // recordWorkspace appends the workspace and writes the registry, and answers with the engine it
@@ -188,10 +193,15 @@ func recordWorkspace(dir string, registry control.RegistryFile, record addRecord
 		decision := true
 		nesting = &decision
 	}
+	var devices *bool
+	if record.noDevices {
+		decision := true
+		devices = &decision
+	}
 	registry.Workspaces = append(registry.Workspaces, control.Workspace{
 		Name: record.name, Path: record.absolute, Title: record.name, Image: record.image,
 		Network: record.network, Engine: chosen, KeepAlive: record.keepAlive,
-		Private: record.private, DisableVMNesting: nesting,
+		Private: record.private, DisableVMNesting: nesting, DisableDevices: devices,
 	})
 	if err := control.SaveRegistryFile(registry); err != nil {
 		log.Fatalf("acornfall: %v", err)
