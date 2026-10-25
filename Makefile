@@ -292,8 +292,11 @@ check: ui-build typecheck js-test ## fast: the compiler, the bundle, and the uni
 # `test` is what a person runs: the static rules first, because a rule broken is cheaper to see
 # before a slow suite, and then the suites. CI runs the two halves in parallel jobs instead, which
 # is why the suites are their own target — a job that lints and a job that tests must not both lint.
-test: ## the default tier: the static rules, then every suite, no hypervisor needed
+test: ## the default tier: the static rules, the floors, then every suite, no hypervisor needed
 	$(MAKE) lint
+	# The floors are a merge gate, so a session that ends with `make test` should not discover on
+	# push that it lowered one. It compares with `origin/main`, which every clone has.
+	$(MAKE) floors
 	$(MAKE) js-test
 	$(MAKE) test-suite
 
