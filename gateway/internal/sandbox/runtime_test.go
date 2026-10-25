@@ -73,7 +73,7 @@ func TestTwoPullsOfOneImageDoNotInterleave(t *testing.T) {
 				return err
 			}
 		}
-		for index := 0; index < 40; index++ {
+		for index := range 40 {
 			path := filepath.Join(dest, "usr", "lib", "file"+strconv.Itoa(index))
 			if err := os.WriteFile(path, []byte("payload"), 0o644); err != nil {
 				return err

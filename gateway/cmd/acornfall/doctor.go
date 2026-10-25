@@ -144,7 +144,7 @@ func sandboxReports(dataDir string) []engineReport {
 	for _, name := range sandbox.EngineNames() {
 		manager, err := reportManager(dataDir, name)
 		if err != nil {
-			reports = append(reports, engineReport{Report: sandbox.Report{Engine: name, Problem: err.Error()}, Default: name == defaultEngine})
+			reports = append(reports, engineReport{Engine: name, Problem: err.Error(), Default: name == defaultEngine})
 			continue
 		}
 		// Read the store through the pinned engine, so a catalog migrated forward by a

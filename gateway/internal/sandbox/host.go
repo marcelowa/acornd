@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 )
 
@@ -117,10 +118,5 @@ func ValidEngine(name string) bool {
 	if name == "" {
 		return true
 	}
-	for _, known := range EngineNames() {
-		if known == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(EngineNames(), name)
 }

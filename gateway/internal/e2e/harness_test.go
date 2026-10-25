@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"os/exec"
@@ -1074,9 +1075,7 @@ func (c *client) createWorkspace(name string) {
 func (c *client) createWorkspaceWith(name string, body map[string]any) state {
 	c.t.Helper()
 	fields := map[string]any{"name": name}
-	for key, value := range body {
-		fields[key] = value
-	}
+	maps.Copy(fields, body)
 	c.post("/api/workspaces", fields, nil)
 	return c.state("general")
 }

@@ -136,7 +136,7 @@ func parseChallenge(header string) map[string]string {
 	if _, rest, ok := strings.Cut(header, " "); ok {
 		header = rest
 	}
-	for _, part := range strings.Split(header, ",") {
+	for part := range strings.SplitSeq(header, ",") {
 		key, value, ok := strings.Cut(strings.TrimSpace(part), "=")
 		if !ok {
 			continue

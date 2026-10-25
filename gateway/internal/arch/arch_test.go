@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -111,7 +112,7 @@ func moduleRoot(t *testing.T) (root, module string) {
 	if err != nil {
 		t.Fatalf("read go.mod: %v", err)
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "module "); ok {
 			module = strings.TrimSpace(rest)
 			break
@@ -133,10 +134,5 @@ func sorted[V any](set map[string]V) []string {
 }
 
 func contains(list []string, value string) bool {
-	for _, candidate := range list {
-		if candidate == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, value)
 }

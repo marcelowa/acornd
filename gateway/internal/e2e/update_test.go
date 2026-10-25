@@ -235,7 +235,7 @@ func TestNotesAreAskedForInBunches(t *testing.T) {
 	}
 
 	many := make([]string, 0, 101)
-	for index := 0; index < 101; index++ {
+	for index := range 101 {
 		many = append(many, "v1.0."+strconv.Itoa(index))
 	}
 	if status, body := c.do("GET", "/api/update/notes?tags="+strings.Join(many, ","), nil); status != 400 {

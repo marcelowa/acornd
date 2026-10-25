@@ -69,7 +69,7 @@ func TestAFrameWithNoHandlerIsDropped(t *testing.T) {
 // that prints a thousand lines must not grow the gateway's memory with them.
 func TestTheStderrTailKeepsTheLastLines(t *testing.T) {
 	w := New(Config{})
-	for index := 0; index < stderrKept*3; index++ {
+	for range stderrKept * 3 {
 		w.rememberStderr("line")
 	}
 	w.rememberStderr("the last thing it said")

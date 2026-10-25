@@ -683,7 +683,7 @@ func (b *Bwrap) stopProcess(name string) {
 		return
 	}
 	_ = process.Signal(syscall.SIGTERM)
-	for waited := 0; waited < 100; waited++ {
+	for range 100 {
 		if !alive(pid) {
 			break
 		}
@@ -1300,7 +1300,7 @@ func (b *Bwrap) resolverFile(workspaceDir string) (string, error) {
 // hasLoopbackServers reports whether a resolver file names an address that only means something
 // on the machine itself: 127.0.0.0/8 and ::1.
 func hasLoopbackServers(contents string) bool {
-	for _, line := range strings.Split(contents, "\n") {
+	for line := range strings.SplitSeq(contents, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 2 || fields[0] != "nameserver" {
 			continue

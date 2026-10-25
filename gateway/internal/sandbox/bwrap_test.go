@@ -91,7 +91,7 @@ func fakeImage(_ context.Context, reference, dest string, _ func(string, ...any)
 	if err != nil {
 		return nil
 	}
-	for _, field := range strings.Fields(string(libraries)) {
+	for field := range strings.FieldsSeq(string(libraries)) {
 		if !strings.HasPrefix(field, "/") {
 			continue
 		}
@@ -303,7 +303,7 @@ func TestBwrapCreateIsIdempotent(t *testing.T) {
 	workspace := t.TempDir()
 	driver, _ := testBwrap(t, dataDir)
 	policy := Policy{Workspace: workspace}
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if _, err := driver.writeConfig(policy, t.TempDir()); err != nil {
 			t.Fatalf("create %d: %v", i, err)
 		}

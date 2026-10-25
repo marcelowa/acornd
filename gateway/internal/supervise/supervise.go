@@ -135,14 +135,7 @@ func (s *Server) touch() {
 // is not missed by much, clamped at both ends — often enough to be honest, rarely enough to cost
 // nothing. It is a function so the clamps can be read without waiting for a ticker.
 func idleInterval(idle time.Duration) time.Duration {
-	interval := idle / 4
-	if interval < 100*time.Millisecond {
-		interval = 100 * time.Millisecond
-	}
-	if interval > 30*time.Second {
-		interval = 30 * time.Second
-	}
-	return interval
+	return min(max(idle/4, 100*time.Millisecond), 30*time.Second)
 }
 
 // idleLoop stops the sandbox when nothing has run in it for a while. It checks often enough that

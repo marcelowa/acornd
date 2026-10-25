@@ -755,7 +755,7 @@ func validateHost(host string) error {
 	if err != nil {
 		return err
 	}
-	for _, part := range strings.Split(label, ".") {
+	for part := range strings.SplitSeq(label, ".") {
 		if err := validateLabel(host, part); err != nil {
 			return err
 		}

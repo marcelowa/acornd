@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -89,12 +90,7 @@ func TestCreatePassesSecretValuesInTheProcessEnvironment(t *testing.T) {
 }
 
 func contains(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, want)
 }
 
 func TestSecretSpecUsesTheEngineSpelling(t *testing.T) {
@@ -243,7 +239,7 @@ func secretFromSpec(spec string) engineSecret {
 	}
 	entry := engineSecret{EnvVar: name}
 	entry.Substitution.Headers = true
-	for _, option := range strings.Split(options, ",") {
+	for option := range strings.SplitSeq(options, ",") {
 		switch option {
 		case "no-headers":
 			entry.Substitution.Headers = false

@@ -200,7 +200,7 @@ func TestKillEndsTheCommandAndWhatItStarted(t *testing.T) {
 		t.Fatal("the command never reported a process group")
 	}
 	gone := false
-	for attempt := 0; attempt < 40; attempt++ {
+	for range 40 {
 		if err := syscall.Kill(-group, 0); errors.Is(err, syscall.ESRCH) {
 			gone = true
 			break
@@ -243,8 +243,7 @@ func TestACommandSurvivesItsClientGoingAway(t *testing.T) {
 func TestAnIdleSandboxStopsItself(t *testing.T) {
 	socket := filepath.Join(t.TempDir(), "supervisor.sock")
 	server := New(socket, "test", 300*time.Millisecond)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(ctx) }()
 	if err := WaitForReady(context.Background(), socket, 3*time.Second); err != nil {
@@ -266,8 +265,7 @@ func TestAnIdleSandboxStopsItself(t *testing.T) {
 func TestAKeepaliveKeepsTheSandboxAwake(t *testing.T) {
 	socket := filepath.Join(t.TempDir(), "supervisor.sock")
 	server := New(socket, "test", 300*time.Millisecond)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	stopped := make(chan error, 1)
 	go func() { stopped <- server.Serve(ctx) }()
 	if err := WaitForReady(context.Background(), socket, 3*time.Second); err != nil {
@@ -296,8 +294,7 @@ func TestAKeepaliveKeepsTheSandboxAwake(t *testing.T) {
 func TestAPingDoesNotKeepTheSandboxAwake(t *testing.T) {
 	socket := filepath.Join(t.TempDir(), "supervisor.sock")
 	server := New(socket, "test", 300*time.Millisecond)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	stopped := make(chan error, 1)
 	go func() { stopped <- server.Serve(ctx) }()
 	if err := WaitForReady(context.Background(), socket, 3*time.Second); err != nil {
@@ -320,8 +317,7 @@ func TestAPingDoesNotKeepTheSandboxAwake(t *testing.T) {
 func TestARunningCommandKeepsTheSandboxAwake(t *testing.T) {
 	socket := filepath.Join(t.TempDir(), "supervisor.sock")
 	server := New(socket, "test", 300*time.Millisecond)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	stopped := make(chan error, 1)
 	go func() { stopped <- server.Serve(ctx) }()
 	if err := WaitForReady(context.Background(), socket, 3*time.Second); err != nil {

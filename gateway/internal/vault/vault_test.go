@@ -21,8 +21,6 @@ func openTemp(t *testing.T) (*Store, string) {
 	return store, path
 }
 
-func boolPointer(value bool) *bool { return &value }
-
 func hostsPointer(values ...string) *[]string { return &values }
 
 func headersOnly() *Substitution { return &Substitution{Headers: true} }
@@ -49,7 +47,7 @@ func TestStoreUpsertListAndPermissions(t *testing.T) {
 		Value:        "value-that-must-not-leak",
 		Hosts:        hostsPointer("api.github.com", "github.com"),
 		Substitution: headersOnly(),
-		AllowEnv:     boolPointer(false),
+		AllowEnv:     new(false),
 	})
 
 	info, err := os.Stat(path)
@@ -166,7 +164,7 @@ func TestUpsertWithoutValueKeepsTheStoredOne(t *testing.T) {
 	store, _ := openTemp(t)
 	created := mustUpsert(t, store, Upsert{
 		Name: "DB_PASSWORD", Description: "old", Scope: Global, Value: "old-value",
-		Substitution: headersOnly(), AllowEnv: boolPointer(true),
+		Substitution: headersOnly(), AllowEnv: new(true),
 	})
 	updated := mustUpsert(t, store, Upsert{
 		Name: "DB_PASSWORD", Description: "new description", Scope: Global,
@@ -314,7 +312,7 @@ func TestTwoStoresSerializeTheirWrites(t *testing.T) {
 	const writers = 20
 	var wg sync.WaitGroup
 	errs := make(chan error, writers)
-	for i := 0; i < writers; i++ {
+	for i := range writers {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

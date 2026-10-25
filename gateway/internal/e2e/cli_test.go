@@ -40,8 +40,7 @@ func cli(t *testing.T, dir string, stdin string, args ...string) (string, string
 	command.Stderr = &stderr
 	err := command.Run()
 	code := 0
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
+	if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 		code = exit.ExitCode()
 	} else if err != nil {
 		t.Fatalf("run %v: %v", args, err)

@@ -168,7 +168,7 @@ func TestTheNotesCacheDoesNotGrowForever(t *testing.T) {
 	manager, _ := testManager(t)
 	manager.notesMu.Lock()
 	manager.notesCache = map[string]string{}
-	for index := 0; index < 201; index++ {
+	for index := range 201 {
 		manager.notesCache[fmt.Sprintf("v1.0.%d", index)] = "notes"
 	}
 	manager.notesMu.Unlock()
@@ -197,7 +197,7 @@ func TestTheNotesCacheHoldsTwoHundred(t *testing.T) {
 	manager, _ := testManager(t)
 	manager.notesMu.Lock()
 	manager.notesCache = map[string]string{}
-	for index := 0; index < 200; index++ {
+	for index := range 200 {
 		manager.notesCache[fmt.Sprintf("v1.0.%d", index)] = "notes"
 	}
 	manager.notesMu.Unlock()

@@ -10,6 +10,7 @@ import (
 	"hash/fnv"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -404,10 +405,8 @@ func (c *Control) QueueSecretContinuation(conversationID, name string) {
 	}
 	c.continuationMu.Lock()
 	defer c.continuationMu.Unlock()
-	for _, existing := range c.continuations[conversationID] {
-		if existing == name {
-			return
-		}
+	if slices.Contains(c.continuations[conversationID], name) {
+		return
 	}
 	c.continuations[conversationID] = append(c.continuations[conversationID], name)
 }

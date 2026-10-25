@@ -541,9 +541,7 @@ func TestTwoCallersStartingAtOnceGetOneCA(t *testing.T) {
 	pems := make([]string, callers)
 	var wg sync.WaitGroup
 	for index := range callers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			ca, err := LoadOrCreateCA(dir)
 			if err != nil {
 				t.Errorf("caller %d: %v", index, err)
@@ -551,7 +549,7 @@ func TestTwoCallersStartingAtOnceGetOneCA(t *testing.T) {
 			}
 			pems[index] = string(readCAFile(t, dir))
 			_ = ca
-		}()
+		})
 	}
 	wg.Wait()
 	for index, got := range pems {
