@@ -27,5 +27,9 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "1.27.3"
-          cache-dependency-path: gateway/go.sum
+          # No module cache, on purpose. It buys this job seconds — `go install @latest` and
+          # `go vet` are a minute on a cold machine and four seconds on a fresh one either way —
+          # and the post step that saves it hung for ten minutes on two dispatched runs in a row
+          # (2026-10-29), holding a green job in "in progress" behind a cache upload.
+          cache: false
       - run: make modernize
