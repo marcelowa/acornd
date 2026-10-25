@@ -18,6 +18,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"syscall"
 )
@@ -71,7 +72,7 @@ func Up(name string) error {
 	payload := make([]byte, 16)
 	// Family zero (unspecified), one byte of padding, then the interface's own type (zero:
 	// "whatever it is"), index, flags, and the flags this message is allowed to change.
-	native.PutUint32(payload[4:], uint32(index))
+	native.PutUint32(payload[4:], index)
 	native.PutUint32(payload[8:], iffUp)
 	native.PutUint32(payload[12:], iffUp)
 	return request(message(rtmNewLink, nlmFRequest|nlmFAck, payload))
@@ -93,13 +94,16 @@ func Address(name, cidr string) error {
 	if err != nil {
 		return err
 	}
-	ones, _ := network.Mask.Size()
+	prefix, err := prefixBits(network.Mask)
+	if err != nil {
+		return err
+	}
 	payload := make([]byte, 8)
 	payload[0] = family
-	payload[1] = byte(ones)
+	payload[1] = prefix
 	payload[2] = 0 // flags
 	payload[3] = rtScopeUniverse
-	native.PutUint32(payload[4:], uint32(index))
+	native.PutUint32(payload[4:], index)
 
 	body := append(attribute(ifaLocal, address), attribute(ifaAddress, address)...)
 	err = request(message(rtmNewAddr, nlmFRequest|nlmFAck|nlmFCreate|nlmFExcl, append(payload, body...)))
@@ -125,7 +129,7 @@ func Gateway(name, gateway string) error {
 		return err
 	}
 	payload := routeMessage(family, 0, rtnUnicast)
-	body := append(attribute(rtaGateway, bytes), uint32Attribute(rtaOIF, uint32(index))...)
+	body := append(attribute(rtaGateway, bytes), uint32Attribute(rtaOIF, index)...)
 	err = request(message(rtmNewRoute, nlmFRequest|nlmFAck|nlmFCreate|nlmFExcl, append(payload, body...)))
 	if errors.Is(err, syscall.EEXIST) {
 		return nil
@@ -146,8 +150,11 @@ func Unreachable(cidr string) error {
 	if err != nil {
 		return err
 	}
-	ones, _ := network.Mask.Size()
-	payload := routeMessage(family, byte(ones), rtnUnreach)
+	prefix, err := prefixBits(network.Mask)
+	if err != nil {
+		return err
+	}
+	payload := routeMessage(family, prefix, rtnUnreach)
 	body := attribute(rtaDst, bytes)
 	err = request(message(rtmNewRoute, nlmFRequest|nlmFAck|nlmFCreate|nlmFExcl, append(payload, body...)))
 	if errors.Is(err, syscall.EEXIST) {
@@ -175,6 +182,8 @@ func routeMessage(family byte, prefix byte, kind byte) []byte {
 func message(kind uint16, flags uint16, payload []byte) []byte {
 	const header = 16
 	frame := make([]byte, align4(header+len(payload)))
+	// #nosec G115 -- the length is the frame allocated a line above; a netlink header's field is
+	// 32 bits and this process cannot hold a message that does not fit in it.
 	native.PutUint32(frame[0:], uint32(header+len(payload)))
 	native.PutUint16(frame[4:], kind)
 	native.PutUint16(frame[6:], flags)
@@ -187,6 +196,8 @@ func message(kind uint16, flags uint16, payload []byte) []byte {
 func attribute(kind uint16, data []byte) []byte {
 	length := 4 + len(data)
 	attribute := make([]byte, align4(length))
+	// #nosec G115 -- a netlink attribute's length field is 16 bits, and every caller passes an
+	// address (4 or 16 bytes) or an index (4), so the value never reaches the limit.
 	native.PutUint16(attribute[0:], uint16(length))
 	native.PutUint16(attribute[2:], kind)
 	copy(attribute[4:], data)
@@ -238,7 +249,10 @@ func readMessages(payload []byte) (acked bool, err error) {
 			return false, errors.New("netns: the kernel's answer is not a netlink message")
 		}
 		if kind == nlmsgError && length >= 20 {
+			// #nosec G115 -- the error field is a signed 32-bit errno by definition: a negative value
+			// is the failure, and its magnitude is the errno the caller gets back.
 			if code := int32(native.Uint32(payload[offset+16:])); code != 0 {
+				// #nosec G115 -- code is negative by the test above, so negating it is the positive errno.
 				return false, syscall.Errno(-code)
 			}
 			return true, nil
@@ -248,12 +262,28 @@ func readMessages(payload []byte) (acked bool, err error) {
 	return false, nil
 }
 
-func interfaceIndex(name string) (int, error) {
+// interfaceIndex is an interface's kernel index in the width netlink carries it. The field is 32
+// bits, and the check is that width rather than an assumption: an index that wrapped would name
+// a different interface, and this package's job is to say which one the kernel acts on.
+func interfaceIndex(name string) (uint32, error) {
 	iface, err := net.InterfaceByName(name)
 	if err != nil {
 		return 0, fmt.Errorf("netns: no interface %q here: %w", name, err)
 	}
-	return iface.Index, nil
+	if iface.Index < 0 || iface.Index > math.MaxUint32 {
+		return 0, fmt.Errorf("netns: interface %q has an index netlink cannot carry: %d", name, iface.Index)
+	}
+	return uint32(iface.Index), nil
+}
+
+// prefixBits is a mask's length in the one byte netlink has for it. A prefix is at most 128 bits,
+// so the range is the field's own, and the check is what makes the byte honest rather than lucky.
+func prefixBits(mask net.IPMask) (byte, error) {
+	ones, _ := mask.Size()
+	if ones < 0 || ones > 128 {
+		return 0, fmt.Errorf("netns: %d is not a prefix length", ones)
+	}
+	return byte(ones), nil
 }
 
 // familyAndBytes is the address as the kernel wants it: a family, and four bytes for IPv4 or
