@@ -268,6 +268,13 @@ test-suite: ## the Go suites, unit and feature, no hypervisor needed and no stat
 	# ACORNFALL_NO_SANDBOX forces the refusal path instead of auto-detecting a hypervisor, so
 	# the same command behaves the same on a machine with /dev/kvm and in CI. -short skips the
 	# tests whose assertions need a sandbox; the rest of the feature suite runs in parallel.
+	# A machine where every process is root — a container that maps only uid 0, where setpriv
+	# cannot make anyone else — skips the two assertions about the unprivileged path, because
+	# there is no unprivileged path to run. Declaring ACORNFALL_NO_UNPRIVILEGED=1 records that
+	# decision; it does not hide a skip, and the suite is green either way. A skip is a line
+	# nobody sees without -v, so the gate says it once where a person is looking.
+	@if [ "$$(id -u)" = 0 ] && [ -z "$$ACORNFALL_NO_UNPRIVILEGED" ]; then \
+		echo "note: root, undeclared — the two unprivileged assertions skip themselves (declare it: ACORNFALL_NO_UNPRIVILEGED=1)"; fi
 	# -count=1 because the suite's inputs include worker/src and the built interface, which
 	# Go's test cache cannot see: a cached pass would be a pass for code that has changed.
 	@# COVER=1 is the same suite, instrumented: the profiles are what `make cover` would have

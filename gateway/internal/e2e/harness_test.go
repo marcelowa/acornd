@@ -73,6 +73,15 @@ func TestMain(m *testing.M) {
 		}
 	}
 
+	// Two assertions check what setup does for a person, and root has nothing to show them: it is
+	// the account that would be asked for a password, and a container that maps only uid 0 cannot
+	// become another one to look. They skip themselves, and a skip is a line nobody sees without
+	// -v, so the run says it once instead. Declaring ACORNFALL_NO_UNPRIVILEGED is the machine
+	// stating that nobody here can be that person; it silences the reminder, not the skip.
+	if os.Geteuid() == 0 && os.Getenv("ACORNFALL_NO_UNPRIVILEGED") == "" {
+		fmt.Fprintln(os.Stderr, "e2e: running as root, undeclared: the two unprivileged assertions skip themselves (declare it: ACORNFALL_NO_UNPRIVILEGED=1)")
+	}
+
 	if skipReason == "" {
 		dir, err := os.MkdirTemp("", "acornfall-e2e-*")
 		if err != nil {

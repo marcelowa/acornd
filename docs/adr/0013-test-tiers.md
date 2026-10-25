@@ -58,6 +58,14 @@ honest.**
   makes the gateway build no sandbox tier at all — the same state as a machine without a
   hypervisor — so the tools refuse and the worker starts anyway. It is never a host-backed
   stand-in: an unconfined execution engine must not exist in the product for a test to select.
+- **A machine where nobody but root can run says so.** Two fast-tier assertions check what
+  `acornfall setup` does for a person: that `--privileged` refuses one, and that it prints the
+  commands instead of failing when it cannot ask. As root there is nothing to observe — root is
+  the account that would be asked — and a container that maps only uid 0 cannot become someone
+  else to look (`setpriv: setresuid failed`), so both skip. A skip is a line nobody sees in a
+  non-verbose run, so the suite says it once on stderr until the machine declares
+  `ACORNFALL_NO_UNPRIVILEGED=1`. The declaration silences the reminder, not the skip: the run is
+  green either way, and what went untested is in the skip message rather than in a failure.
 - **A test removes only what it created.** The end-to-end harness computes the sandbox names
   from the workspaces the test owns — its general folder plus its own workspaces directory —
   and removes exactly those. Nothing removes by label, and nothing deletes the shared image
