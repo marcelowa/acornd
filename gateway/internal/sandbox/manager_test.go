@@ -22,6 +22,8 @@ type fakeDriver struct {
 	installed   bool
 	installErrs []error
 	policy      Policy
+	// restart is what this engine says about a running sandbox whose baked config changed.
+	restart bool
 }
 
 func (f *fakeDriver) Name() string       { return "fake" }
@@ -59,6 +61,10 @@ func (f *fakeDriver) Prepare(_ context.Context, policy Policy, _ string) error {
 	f.calls = append(f.calls, "prepare")
 	f.policy = policy
 	return f.err
+}
+func (f *fakeDriver) RestartRequired(context.Context, Policy) (bool, error) {
+	f.calls = append(f.calls, "restart-check")
+	return f.restart, f.err
 }
 func (f *fakeDriver) Start(context.Context, string, []Secret) error {
 	f.calls = append(f.calls, "start")
@@ -126,6 +132,31 @@ func TestProduceRefreshesTheConfigOfAnExistingSandbox(t *testing.T) {
 				t.Error("Produce must not recreate an existing sandbox")
 			}
 		})
+	}
+}
+
+// Changing the secrets proxy changes what pasta forwards and what the guest trusts, and both
+// are baked into the argv a running sandbox already booted with. Refreshing only the config
+// file leaves every command with a proxy URL that nothing forwards, which reads as connection
+// refused. The sandbox is stopped and started, not recreated, so its files survive.
+func TestProduceRestartsARunningSandboxWhoseBakedConfigChanged(t *testing.T) {
+	workspace := "/home/me/work"
+	driver := &fakeDriver{
+		listed:  []Instance{{Name: Name(workspace), Status: "running"}},
+		restart: true,
+	}
+	manager := openWith(t, driver)
+	if _, err := manager.Produce(context.Background(), Policy{Workspace: workspace}, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if driver.ran("create") {
+		t.Error("a changed baked setting must restart the sandbox, not recreate it")
+	}
+	if !driver.ran("stop") {
+		t.Errorf("the running sandbox should be stopped: %v", driver.calls)
+	}
+	if !driver.ran("start") {
+		t.Errorf("the running sandbox should be started from the new config: %v", driver.calls)
 	}
 }
 

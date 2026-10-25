@@ -146,12 +146,18 @@ story.
    running proxy, and bwrap's `SecretsChanged` answers "no restart". The inspector's wording is
    slice 3's.
 
-Two things the build decided that this ADR did not:
+Three things the build decided that this ADR did not:
 
 - **The port is derived from the workspace**, not picked per start. pasta's forward is baked into
   the sandbox's argv, so a gateway that restarts has to bind the port the sandbox it adopts was
   booted with. A workspace whose derived port is taken has no proxy and says so, rather than a
   sandbox forwarding into nothing.
+- **A sandbox that booted before its proxy is restarted, not merely re-configured.** Its argv has
+  `-T none` and no trust bundle, so writing the next-start config leaves every command holding a
+  proxy URL that nothing forwards — the measured symptom is `ECONNREFUSED` on the workspace's
+  loopback. The same restart is owed when the first secret appears or the last one is removed. A
+  value or host change keeps the listener and is the live grant swap; a name change does not,
+  because the placeholders a command gets are part of the worker's arguments.
 - **Only an engine that asks for it gets a proxy.** `Manager.SecretProxyInControl` is an optional
   capability on the driver: bwrap implements it, and a microVM engine — which substitutes on its own
   egress path — does not, so control does not open a second listener to hold a value twice.
@@ -182,6 +188,12 @@ Two things the build decided that this ADR did not:
   test that found the gap the fast suite could not: the guest held nothing at all, because control
   had stopped putting values in the worker's environment and nothing put the placeholder in its
   place.
+- `TestBwrapRestartsOnlyWhenTheProxyForwardChanges` — a sandbox booted without the forward, a
+  rotation that keeps it, a moved port, and the last proxy removed.
+- `TestProduceRestartsARunningSandboxWhoseBakedConfigChanged` — the lifecycle: stop and start, never
+  recreate, when the running argv cannot absorb the refreshed config.
+- `TestAFirstProxyAndANewNameNeedARestartButARotationDoesNot` — the first listener and a new
+  placeholder name owe a restart; a value or host rotation stays live.
 
 ## Alternatives
 

@@ -414,6 +414,36 @@ func (b *Bwrap) Prepare(_ context.Context, policy Policy, dir string) error {
 	return err
 }
 
+// RestartRequired reports whether the running sandbox's argv already carries the secrets proxy
+// this policy needs. pasta's forward and the CA bundle are both baked into that argv, so a
+// sandbox that booted without them cannot be given them by refreshing the config file: every
+// command would be handed a proxy URL that nothing forwards, which reads as connection refused.
+func (b *Bwrap) RestartRequired(_ context.Context, policy Policy) (bool, error) {
+	running, err := b.readConfig(Name(policy.Workspace))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return proxyForwardChanged(running.SecretProxy, policy.SecretProxy), nil
+}
+
+// proxyForwardChanged is whether the running sandbox and the policy disagree about the one port
+// pasta forwards. A rotation keeps the listener and its derived port, so it does not restart
+// anything; adding the first proxy, removing the last one, or moving the port does.
+func proxyForwardChanged(running *bwrapSecretProxy, wanted *SecretProxy) bool {
+	if running == nil || wanted == nil {
+		return running != nil || wanted != nil
+	}
+	_, port, err := net.SplitHostPort(wanted.Addr())
+	if err != nil {
+		return true
+	}
+	number, err := strconv.Atoi(port)
+	return err != nil || running.Port != number
+}
+
 // writeConfig is Create without the boot: what the workspace runs under, written where a person
 // can read it and the sandbox can be started from it later.
 // validatePolicy refuses a policy before anything is created for it.

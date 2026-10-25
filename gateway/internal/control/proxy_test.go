@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/url"
@@ -159,5 +160,74 @@ func TestAWorkspaceWithNoNetworkGetsNoProxyAndSaysWhy(t *testing.T) {
 	}
 	if !strings.Contains(resolved.problem, "network off") {
 		t.Errorf("the state should say why: %q", resolved.problem)
+	}
+}
+
+// A proxy that is already there takes a rotation live, but a name the worker did not start with
+// cannot reach a command: the placeholder is part of the environment the worker builds. The first
+// proxy and the last one removed are topology changes on top of that, so both owe a restart.
+func TestAFirstProxyAndANewNameNeedARestartButARotationDoesNot(t *testing.T) {
+	t.Parallel()
+	control := proxyControl(t)
+	t.Cleanup(control.Close)
+	ctx := context.Background()
+
+	resolved := func(names ...string) sandboxSecrets {
+		out := sandboxSecrets{}
+		for _, name := range names {
+			out.delivered = append(out.delivered, sandbox.Secret{
+				Name: name, Value: "v", Hosts: []string{"api.example.com"}, Headers: true,
+			})
+			out.state = append(out.state, SandboxSecret{
+				Name: name, Status: "delivered", Delivery: "substitute",
+			})
+		}
+		return out
+	}
+	clearRestart := func() {
+		restart := false
+		control.recordSecrets(control.sandbox.Secrets, "", &restart)
+	}
+
+	if err := control.applyProxySecrets(ctx, resolved("GITHUB_TOKEN"), true); err != nil {
+		t.Fatalf("first secret: %v", err)
+	}
+	if !control.SecretsRestart() {
+		t.Fatal("the first proxy is a config the running sandbox and worker did not have")
+	}
+
+	// A rotation keeps the name, so it is a grant swap and nothing restarts.
+	clearRestart()
+	rotated := resolved("GITHUB_TOKEN")
+	rotated.delivered[0].Value = "rotated"
+	rotated.delivered[0].Hosts = []string{"api.github.com"}
+	if err := control.applyProxySecrets(ctx, rotated, true); err != nil {
+		t.Fatalf("rotation: %v", err)
+	}
+	if control.SecretsRestart() {
+		t.Fatal("a rotation under the same proxy should stay live")
+	}
+
+	// A new name is not a rotation: the worker builds command environments from the names it
+	// was started with, so it has to be started again.
+	clearRestart()
+	if err := control.applyProxySecrets(ctx, resolved("GITHUB_TOKEN", "CLOUDFLARE_TOKEN"), true); err != nil {
+		t.Fatalf("second secret: %v", err)
+	}
+	if !control.SecretsRestart() {
+		t.Fatal("a name the worker did not start with needs a restart")
+	}
+
+	// Removing the last proxy closes the listener and restarts the workspace that still points at
+	// it, so a command already running cannot keep using the removed grants.
+	clearRestart()
+	if err := control.applyProxySecrets(ctx, sandboxSecrets{}, true); err != nil {
+		t.Fatalf("remove every secret: %v", err)
+	}
+	if !control.SecretsRestart() {
+		t.Fatal("removing the last proxy needs a restart")
+	}
+	if control.proxy != nil {
+		t.Fatal("the listener should be closed with the last grant")
 	}
 }

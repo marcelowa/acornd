@@ -266,6 +266,14 @@ type prepared interface {
 	Prepare(ctx context.Context, policy Policy, dir string) error
 }
 
+// restarter is an engine that bakes part of its config into what a running sandbox booted with.
+// Refreshing the file for the next start is not enough for such a change: the running guest keeps
+// the old argv until it is started again. It reads the current config before Prepare overwrites
+// it, which is why Produce asks this first.
+type restarter interface {
+	RestartRequired(ctx context.Context, policy Policy) (bool, error)
+}
+
 // Produce makes sure a workspace's sandbox exists and is running, and returns its name.
 //
 // It never recreates an existing sandbox: the sandbox is where a workspace's dependencies
@@ -292,23 +300,43 @@ func (m *Manager) Produce(ctx context.Context, policy Policy, dir string) (strin
 		if instance.Name != name {
 			continue
 		}
-		// The guest keeps the shape it booted with; the file must not. A stopped sandbox
-		// reads it on Start below, and a running one reads it at its next start after an
-		// upgrade, a stop, or an idle eviction.
-		if err := m.prepare(ctx, policy, dir); err != nil {
-			return "", err
-		}
-		if instance.Running() {
-			return name, nil
-		}
-		policy.Stage("booting the sandbox")
-		if err := m.driver.Start(ctx, name, policy.Secrets); err != nil {
-			return "", err
+		return m.produceExisting(ctx, name, instance, policy, dir)
+	}
+	policy.Stage("booting the sandbox")
+	if err := m.driver.Create(ctx, policy, dir); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+// produceExisting refreshes an existing sandbox's config and makes sure it runs. The guest keeps
+// the shape it booted with; the file must not. A stopped sandbox reads the new file on Start, and
+// a running one reads it at its next start after an upgrade, a stop, or an idle eviction. A change
+// the running argv cannot absorb is the exception: it is restarted here, from the config just
+// written, and never recreated.
+func (m *Manager) produceExisting(ctx context.Context, name string, instance Instance, policy Policy, dir string) (string, error) {
+	restart, err := m.restartRequired(ctx, policy)
+	if err != nil {
+		return "", err
+	}
+	if err := m.prepare(ctx, policy, dir); err != nil {
+		return "", err
+	}
+	if instance.Running() {
+		if restart {
+			policy.Stage("restarting the sandbox for its new settings")
+			if err := m.Stop(ctx, policy.Workspace); err != nil {
+				return "", err
+			}
+			policy.Stage("booting the sandbox")
+			if err := m.driver.Start(ctx, name, policy.Secrets); err != nil {
+				return "", err
+			}
 		}
 		return name, nil
 	}
 	policy.Stage("booting the sandbox")
-	if err := m.driver.Create(ctx, policy, dir); err != nil {
+	if err := m.driver.Start(ctx, name, policy.Secrets); err != nil {
 		return "", err
 	}
 	return name, nil
@@ -322,6 +350,17 @@ func (m *Manager) prepare(ctx context.Context, policy Policy, dir string) error 
 		return nil
 	}
 	return engine.Prepare(ctx, policy, dir)
+}
+
+// restartRequired asks whether the running sandbox's argv already carries everything this policy
+// needs. It is read before prepare rewrites the config, because the old file is the only record of
+// what the running sandbox booted with.
+func (m *Manager) restartRequired(ctx context.Context, policy Policy) (bool, error) {
+	engine, ok := m.driver.(restarter)
+	if !ok {
+		return false, nil
+	}
+	return engine.RestartRequired(ctx, policy)
 }
 
 // SecretProxyInControl reports whether this engine substitutes through a proxy this process runs

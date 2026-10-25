@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -724,6 +725,53 @@ func TestBwrapPrepareWritesTheCurrentConfig(t *testing.T) {
 	}
 	if !config.Devices {
 		t.Fatal("Prepare wrote a config without the device grant")
+	}
+}
+
+// pasta's forward and the trust bundle are argv at boot. A sandbox that started before its proxy
+// existed cannot be repaired by rewriting the file; adding the first proxy, removing the last, or
+// moving its port has to restart the sandbox. A rotation keeps the same listener and port.
+func TestBwrapRestartsOnlyWhenTheProxyForwardChanges(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	workspace := t.TempDir()
+	name := Name(workspace)
+	write := func(proxy *bwrapSecretProxy) {
+		t.Helper()
+		raw, err := json.Marshal(bwrapConfig{Workspace: workspace, SecretProxy: proxy})
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := driver.configPath(name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy := func(port int) Policy {
+		return Policy{Workspace: workspace, SecretProxy: &SecretProxy{
+			URL: fmt.Sprintf("http://acornfall:token@127.0.0.1:%d", port),
+		}}
+	}
+
+	write(nil)
+	if restart, err := driver.RestartRequired(context.Background(), Policy{Workspace: workspace}); err != nil || restart {
+		t.Fatalf("no proxy on either side is not a restart: %v, %v", restart, err)
+	}
+	if restart, err := driver.RestartRequired(context.Background(), policy(21606)); err != nil || !restart {
+		t.Fatalf("the first proxy needs the sandbox started again: %v, %v", restart, err)
+	}
+
+	write(&bwrapSecretProxy{Port: 21606})
+	if restart, err := driver.RestartRequired(context.Background(), policy(21606)); err != nil || restart {
+		t.Fatalf("the same forward is a live rotation: %v, %v", restart, err)
+	}
+	if restart, err := driver.RestartRequired(context.Background(), policy(21607)); err != nil || !restart {
+		t.Fatalf("a moved forward needs a new sandbox: %v, %v", restart, err)
+	}
+	if restart, err := driver.RestartRequired(context.Background(), Policy{Workspace: workspace}); err != nil || !restart {
+		t.Fatalf("removing the last proxy needs the forward taken away: %v, %v", restart, err)
 	}
 }
 

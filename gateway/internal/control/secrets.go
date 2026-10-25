@@ -75,16 +75,29 @@ func secretPlaceholder(delivery sandbox.Delivery, name string) string {
 // proxy that is already listening is given the new grants instead of a second listener, which is
 // what makes a rotation live rather than a restart.
 func (c *Control) startSecretsProxy(delivery sandbox.Delivery, delivered []sandbox.Secret) (*secretsproxy.Proxy, error) {
-	if delivery != sandbox.DeliverySubstitute || len(delivered) == 0 {
-		return nil, nil
-	}
-	grants := grantsFor(delivered)
+	proxy, _, err := c.ensureSecretsProxy(delivery, delivered)
+	return proxy, err
+}
+
+// ensureSecretsProxy is startSecretsProxy with the fact its caller needs: whether the workspace's
+// proxy topology changed. Starting the first proxy or stopping the last one is a change the guest
+// and the worker cannot absorb, because both learned the old topology when they started; a grant
+// swap under the same listener is not.
+func (c *Control) ensureSecretsProxy(delivery sandbox.Delivery, delivered []sandbox.Secret) (*secretsproxy.Proxy, bool, error) {
 	c.mu.Lock()
 	running := c.proxy
 	c.mu.Unlock()
+	if delivery != sandbox.DeliverySubstitute || len(delivered) == 0 {
+		if running != nil {
+			c.stopSecretsProxy()
+			return nil, true, nil
+		}
+		return nil, false, nil
+	}
+	grants := grantsFor(delivered)
 	if running != nil {
 		running.SetGrants(grants)
-		return running, nil
+		return running, false, nil
 	}
 	dir := filepath.Join(c.opts.DataDir, "proxy")
 	name := c.opts.Workspace.Name
@@ -96,19 +109,43 @@ func (c *Control) startSecretsProxy(delivery sandbox.Delivery, delivered []sandb
 		},
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	// Its own context, not the caller's: the caller is one request, and a proxy that stopped with
 	// it would leave the sandbox's forward pointing at a closed port (G1).
 	serve, stop := context.WithCancel(context.Background())
-	go func() {
-		// A proxy that stops is the control's own shutdown, not a failure to report here.
-		_ = proxy.Serve(serve)
-	}()
 	c.mu.Lock()
 	c.proxy, c.proxyStop = proxy, stop
 	c.mu.Unlock()
-	return proxy, nil
+	go func() {
+		// A proxy that stops is the control's own shutdown, not a failure to report here. Forget
+		// it afterwards, so the next change starts a listener instead of handing out a dead one.
+		_ = proxy.Serve(serve)
+		c.forgetSecretsProxy(proxy)
+	}()
+	return proxy, true, nil
+}
+
+// stopSecretsProxy closes the listener and drops it, so a removed grant cannot stay usable through
+// a command that is already running with the proxy's URL.
+func (c *Control) stopSecretsProxy() {
+	c.mu.Lock()
+	stop := c.proxyStop
+	c.proxy, c.proxyStop = nil, nil
+	c.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
+}
+
+// forgetSecretsProxy clears the pointer only when it still names the proxy that stopped. A newer
+// listener that replaced it is not this goroutine's to forget.
+func (c *Control) forgetSecretsProxy(proxy *secretsproxy.Proxy) {
+	c.mu.Lock()
+	if c.proxy == proxy {
+		c.proxy, c.proxyStop = nil, nil
+	}
+	c.mu.Unlock()
 }
 
 // secretProxyPolicy is what the engine needs to carry the proxy: the URL a command puts in
@@ -137,6 +174,28 @@ func grantsFor(delivered []sandbox.Secret) []secretsproxy.Grant {
 		})
 	}
 	return grants
+}
+
+// deliveredNames is the set a worker learned at start, because the placeholders a command gets
+// are part of the worker's arguments. A value or host change is live under the proxy; a name
+// appearing or disappearing is not, because the worker would not know what to put in the command.
+func deliveredNames(secrets []SandboxSecret) []string {
+	names := make([]string, 0, len(secrets))
+	for _, secret := range secrets {
+		if secret.Status == "delivered" {
+			names = append(names, secret.Name)
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
+// recordedSecretNames is what the current worker was told, as far as the state can say.
+func (c *Control) recordedSecretNames() []string {
+	c.mu.RLock()
+	secrets := c.sandbox.Secrets
+	c.mu.RUnlock()
+	return deliveredNames(secrets)
 }
 
 // proxyPort is where a workspace's proxy listens. Derived from the workspace rather than picked,
@@ -233,7 +292,7 @@ func (c *Control) ApplySecrets(ctx context.Context, deferRestart bool) error {
 		return c.applyWorkerSecrets(ctx, resolved, deferRestart)
 	}
 	if delivery == sandbox.DeliverySubstitute && manager.SecretProxyInControl() {
-		return c.applyProxySecrets(resolved)
+		return c.applyProxySecrets(ctx, resolved, deferRestart)
 	}
 	return c.applyEngineSecrets(ctx, manager, resolved, deferRestart)
 }
@@ -254,13 +313,31 @@ func (c *Control) applyEngineSecrets(ctx context.Context, manager *sandbox.Manag
 	return nil
 }
 
-// applyProxySecrets is the proxy engine's answer: the grants are swapped under a running proxy, so a
-// rotation is live and a command that is running is not interrupted for it. A proxy that cannot
-// start is a change that never landed, and the person who saved the value hears about it.
-func (c *Control) applyProxySecrets(resolved sandboxSecrets) error {
-	if _, err := c.startSecretsProxy(sandbox.DeliverySubstitute, resolved.delivered); err != nil {
+// applyProxySecrets is the proxy engine's answer: a rotation is a grant swap under the listener
+// that is already there, so a command is not interrupted for it. A topology change is different:
+// the first proxy or the removal of the last one has to reach the sandbox's argv and the worker's
+// config, and both read that only at start. That is a restart owed, not a live update.
+func (c *Control) applyProxySecrets(ctx context.Context, resolved sandboxSecrets, deferRestart bool) error {
+	named := c.recordedSecretNames()
+	_, changed, err := c.ensureSecretsProxy(sandbox.DeliverySubstitute, resolved.delivered)
+	if err != nil {
 		c.recordSecrets(resolved.state, err.Error(), nil)
 		return err
+	}
+	// A name the worker did not have at start cannot reach a command: the placeholder is part of
+	// the environment it builds. Rotating an existing name or changing its hosts is a grant swap,
+	// which is what makes that the live path.
+	renamed := !slices.Equal(named, deliveredNames(resolved.state))
+	if !changed && !renamed {
+		c.recordSecrets(resolved.state, "", nil)
+		return nil
+	}
+	restart := true
+	c.recordSecrets(resolved.state, "", &restart)
+	if !deferRestart && !c.AnyRunning() {
+		// Nobody is running: apply it now instead of waiting for a submission that may be
+		// hours away. A run in flight, or a card answered during one, waits for that run.
+		c.applyPendingSecretRestart(ctx)
 	}
 	return nil
 }
@@ -339,12 +416,16 @@ func (c *Control) restartPending() bool {
 	return restart && !c.AnyRunning()
 }
 
-// applyRestart does the kind of restart this engine needs. Three deliveries, three answers:
-// a substitute engine rereads its config on the next start, an environment engine needs a
-// new worker, and everything else applies in place.
+// applyRestart does the kind of restart this engine needs. A proxy engine reads the proxy from the
+// sandbox config in the worker, and starting the worker provisions the sandbox first; that also
+// restarts a sandbox whose argv predates the proxy. An engine with its own substitution rereads
+// its config on the next sandbox start, an environment engine needs a new worker, and everything
+// else applies in place.
 func (c *Control) applyRestart(ctx context.Context, manager *sandbox.Manager) bool {
 	delivery := manager.SecretDelivery()
 	switch {
+	case delivery == sandbox.DeliverySubstitute && manager.SecretProxyInControl():
+		return c.restartWorkerForSecrets(ctx)
 	case delivery == sandbox.DeliverySubstitute:
 		return c.restartSandboxForSecrets(ctx, manager, delivery)
 	case manager.SecretEnvInWorker():
