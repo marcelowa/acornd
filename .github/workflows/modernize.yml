@@ -17,9 +17,11 @@ on:
 
 jobs:
   modernize:
-    # On the self-hosted runner, where the rest of the CI runs: the toolchain is already
-    # there, and a job that reads and reports costs nothing to run off the shelf.
-    runs-on: [self-hosted, linux, x64]
+    # A hosted runner, like everything else: this repository is public, so they cost nothing,
+    # and each job gets its own machine. The self-hosted box it used to sit on runs one job at
+    # a time, so a report whose whole point is that it gets read queued behind a release for an
+    # hour — 15s of work behind a 1h43m queue on 2026-10-29.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7

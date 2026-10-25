@@ -209,6 +209,14 @@ CI runs on GitHub's machines, which is what makes the sandbox tier a gate rather
 occasional: a hosted runner exposes `/dev/kvm` once a udev rule makes it readable, so the tier that
 boots real microVMs runs beside the fast ones instead of queueing behind them.
 
+Nothing runs on the self-hosted box, and nothing asks for it. The one thing it bought was a
+hypervisor, and the hosted runner has one; everything else it ran — the security checks, the daily
+`modernize`, the release's four cross-builds — was paying for a single machine that runs one job at
+a time. On 2026-10-29 that machine made a four-leg release take **1h43m** and a 16-second
+`govulncheck` wait twenty minutes for its turn. The `sandbox` job still takes a `runner` input on a
+manual dispatch, for the day the tier needs a machine with another hypervisor or another
+architecture.
+
 ## The evidence
 
 Every rule above with a bug behind it is here, because a rule with a story survives contact

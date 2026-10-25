@@ -4,11 +4,12 @@
 # against a real worker process, -race, and the end-to-end suite against a real gateway.
 # `make test-sandbox` boots real microVMs, which need /dev/kvm.
 #
-# Everything else runs on GitHub's runners: this is a public repository, so they cost nothing,
-# and each job gets its own machine instead of queueing behind the others on one. The only thing
-# self-hosted bought was the hypervisor. Side benefit: a hosted runner is a fresh machine every
-# run, so the kind of poisoned state directory that took the sandbox tier down on 2026-10-26
-# cannot survive a job.
+# Everything runs on GitHub's runners: this is a public repository, so they cost nothing, and
+# each job gets its own machine instead of queueing behind the others on one. The only thing
+# self-hosted bought was the hypervisor, and it does not buy it any more — the box that has one
+# runs one job at a time, so `security`, `modernize` and `release` moved off it too and nothing
+# in this repository asks for it. Side benefit: a fresh machine every run, so the kind of
+# poisoned state directory that took the sandbox tier down on 2026-10-26 cannot survive a job.
 #
 # That includes the microVM tier: GitHub's hosted runners expose /dev/kvm once the udev rule
 # below makes it readable by the runner user, which was measured rather than assumed — the whole
@@ -41,7 +42,7 @@ on:
       runner:
         description: "Runner for the microVM suite (default: ubuntu-24.04, which has /dev/kvm)"
         required: false
-        default: kvm
+        default: ubuntu-24.04
         type: string
 
 jobs:
