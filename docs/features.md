@@ -108,6 +108,7 @@ The chain is **conversation → its definition → this workspace → the instal
 | W13 | A bwrap workspace receives the host's `/dev/net/tun` and `/dev/kvm`, and the capabilities nested pasta needs, by default; a workspace can withdraw them, and a missing device is skipped rather than failing the boot. | `TestBwrapBindsDevicesAndGrantsNestedEnginesTheCaps`, `TestBwrapClaimsNestingWhenKVMIsBound`, `TestDevicesAreOnByDefaultAndTheWorkspaceCanWithdrawThem`, `TestAWorkspaceUpdateRebuildsTheSandboxWhenDevicesChange` |
 | W14 | A bwrap engine inside another bwrap workspace reuses pasta's user namespace for a network-on sandbox instead of creating a third one; the inner network is its own, and pasta's printed user-namespace failure is a refusal even when it exits 0. | `TestBwrapNestedEgressReusesPastaUserNamespace`, `TestBwrapConfigRecordsNestedFromTheParent`, `TestAPastaThatCannotMapItsUserNamespaceIsRefused` |
 | W15 | Removing a sandbox stops it before deleting its files; a test that removes a started sandbox leaves no process. | `TestBwrapHasALifecycleLikeEveryOtherEngine` |
+| W16 | A real microVM boots inside a bwrap workspace with the granted `/dev/kvm`, `/dev/net/tun`, and caps; the host's microsandbox engine runs a command in it. | `TestAMicroVMStartsInsideABwrapSandbox` |
 
 ## Resources: rules, agents, skills
 
@@ -246,6 +247,6 @@ workaround:
   transcript, the resizable splitter that remembers its width, per-pane format toggles and
   copy, the theme toggle, and the phone drawer. The inspector and the settings sheet are
   still being rebuilt (#13), which is why their assertions are not in the suite yet.
-- **The microVM inside a bwrap workspace.** The KVM device opens and `KVM_CREATE_VM` /
-  `KVM_CREATE_VCPU` succeed inside a bwrap sandbox, with and without caps; booting the
-  microsandbox engine there is the next spike, not a feature this inventory claims.
+- **The microVM inside a bwrap workspace** is covered by the sandbox tier: the host's
+  microsandbox engine boots a real microVM inside the bwrap, and the test runs in
+  `make test-sandbox`, not in the fast suite.

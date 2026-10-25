@@ -131,8 +131,9 @@ and network instead of falling back to the host. A workspace can withdraw them w
 the default is on, and a missing device is skipped rather than failing the boot. The inner
 bwrap sandbox reuses the user namespace pasta already made, because a third user namespace
 inside it cannot write its uid map. The outer workspace remains the boundary and its egress
-policy is the ceiling ([ADR 0030](docs/adr/0030-nested-engines.md)). The KVM permission inside
-a bwrap sandbox is proven; booting the microsandbox engine there is the next spike.
+policy is the ceiling ([ADR 0030](docs/adr/0030-nested-engines.md)). The KVM permission
+inside a bwrap sandbox is proven, and a real microVM boots there with the host's microsandbox
+engine and store; `make test-sandbox` runs that test.
 
 ### Install from a release (one binary, no toolchain)
 

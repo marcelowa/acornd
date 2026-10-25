@@ -1,6 +1,6 @@
 # ADR 0030 — Nested engines: a bwrap workspace can run another acornfall
 
-Status: accepted, built; the microVM boot inside the bwrap is the next spike
+Status: accepted, built
 Date: 2026-10-29
 
 ## Context
@@ -27,6 +27,7 @@ Measured on `the host`, Debian 13, bubblewrap 0.12.0, pasta `0.0~git20250503.587
 | Outer bwrap → inner pasta → inner bwrap with `--unshare-all --uid 0` | `bwrap: setting up uid map: Operation not permitted` |
 | Inner bwrap **reuses pasta's user namespace** (no `--unshare-user`, no `--uid/--gid`; `--unshare-pid --unshare-uts --unshare-ipc --unshare-cgroup --share-net`) | **works**: inner netns `4026536116` ≠ host `4026533760`, `uid_map 0 0 1`, `curl https://1.1.1.1` → 301 in 0.1s |
 | `open /dev/kvm`, `KVM_GET_API_VERSION`, `KVM_CREATE_VM`, `KVM_CREATE_VCPU` inside a bwrap | all succeed, with and without `--cap-add ALL` |
+| `msb run --net public debian:stable-slim -- /bin/echo nested-msb-ok` inside a bwrap with the devices, caps and the host's store | `nested-msb-ok` in 0.77s |
 
 Two conclusions: the device bind is necessary but not sufficient, and the third user
 namespace is the wall. The fix is caps in the outer sandbox and **reuse** of the namespace
@@ -61,8 +62,8 @@ pasta already made, not another unshare inside it.
    hypervisor, which is the same workspace the nested acornfall is developed in.
 6. **The microVM boundary is decided by the same grant.** `Bwrap.Nesting` reports available
    when the machine has `/dev/kvm`; the control hides it when the workspace withdrew the
-   devices. The KVM permission is proven; the microsandbox engine boot inside a bwrap is the
-   remaining spike, not a claim this ADR makes.
+   devices. A real microVM boots inside the bwrap with the host's `msb` and store; the
+   sandbox-tier test is `TestAMicroVMStartsInsideABwrapSandbox`.
 
 ## Security
 
@@ -99,6 +100,7 @@ pasta already made, not another unshare inside it.
 - `TestDevicesAreOnByDefaultAndTheWorkspaceCanWithdrawThem`
 - `TestAWorkspaceUpdateRebuildsTheSandboxWhenDevicesChange`
 - `TestSatisfiedInstallIsQuiet` with the hypervisor fact in its input
+- `TestAMicroVMStartsInsideABwrapSandbox` (sandbox tier: a real microVM, the host's `msb` and
+  store)
 
-The live chain on `the host` is the evidence behind the table above; the microVM boot inside
-the bwrap is the next spike.
+The live chain on `the host` is the evidence behind the table above.

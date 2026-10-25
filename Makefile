@@ -299,7 +299,9 @@ test-sandbox: sandbox-preflight ## the engine boundary: live driver, SDK client,
 	# suite of skips. -race stays here: the sandbox's start, attach, and mount path is only
 	# taken in this tier, and the four tests plus the live driver are ~35s instrumented.
 	cd worker && env -u ACORNFALL_NO_SANDBOX ACORNFALL_SANDBOX_INTEGRATION=1 MSB_HOME=$(SANDBOX_STATE) bun test test/sandbox.integration.test.ts
-	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_SANDBOX_ONLY=1 ACORNFALL_LIVE_SANDBOX=1 ACORNFALL_SANDBOX_STATE=$(SANDBOX_STATE) go test -race -count=1 -shuffle=on -parallel $(SANDBOX_PARALLEL) ./...
+	# The tier names its own engine: a runner that also has bubblewrap installed must not
+	# change the default under the tests that expect the microVM's substitute secrets.
+	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_SANDBOX_ONLY=1 ACORNFALL_LIVE_SANDBOX=1 ACORNFALL_SANDBOX_STATE=$(SANDBOX_STATE) ACORNFALL_SANDBOX_ENGINE=microsandbox go test -race -count=1 -shuffle=on -parallel $(SANDBOX_PARALLEL) ./...
 
 sandbox-preflight: ## fail, not skip, when there is no hypervisor for the microVM engine
 	@if [ "$$(uname -s)" = "Linux" ] && [ ! -r /dev/kvm ]; then \

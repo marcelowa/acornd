@@ -545,6 +545,57 @@ func TestBwrapDeliversSecretsInTheEnvironment(t *testing.T) {
 	}
 }
 
+// The nested microVM tier: the host's engine, the host's store, and a real microVM inside a
+// bwrap sandbox with the devices and caps a workspace gets by default. It is in the sandbox
+// tier because it boots a real microVM; the fast suite skips it with -short.
+func TestAMicroVMStartsInsideABwrapSandbox(t *testing.T) {
+	if testing.Short() {
+		t.Skip("the microVM tier")
+	}
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("no bubblewrap on this machine")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home folder for the engine store")
+	}
+	engine := NewMicrosandbox(filepath.Join(home, ".acornfall"))
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	if !engine.Installed() {
+		// The sandbox tier's first suite can install it; this one must not depend on that
+		// ordering, and a skip here would be a green run that booted no microVM.
+		if err := engine.Install(ctx, t.Logf); err != nil {
+			t.Fatalf("install the microsandbox engine: %v", err)
+		}
+	}
+	store := engine.StateDir()
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatalf("make the engine store: %v", err)
+	}
+	args := []string{
+		"--ro-bind", "/", "/",
+		"--dev", "/dev",
+		"--dev-bind", "/dev/net/tun", "/dev/net/tun",
+		"--dev-bind", "/dev/kvm", "/dev/kvm",
+		"--cap-add", "ALL",
+		"--proc", "/proc",
+		"--tmpfs", "/tmp",
+		"--bind", store, store,
+		"--unshare-all", "--share-net",
+		"--uid", "0", "--gid", "0",
+		"--", "env", "MSB_HOME=" + store, engine.binary(), "run", "--net", "public",
+		"debian:stable-slim", "--", "/bin/echo", "nested-msb-ok",
+	}
+	output, err := exec.CommandContext(ctx, "bwrap", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("the microVM did not boot inside the bwrap sandbox: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "nested-msb-ok") {
+		t.Fatalf("the microVM ran but its output is missing: %s", output)
+	}
+}
+
 func TestBwrapDoesNotClaimNestingWithoutKVM(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
 	support := driver.Nesting(context.Background())

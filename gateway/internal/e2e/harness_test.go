@@ -376,7 +376,10 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	// and this is the engine that needs no hypervisor and no state directory. Everything else
 	// runs with the sandbox tier forced off, which is a refusal path and not a host fallback.
 	hostEngine := false
-	engineEnv := ""
+	// The tier names its engine (make test-sandbox sets microsandbox, the bwrap tier names
+	// bwrap). A test that names one in the map below overrides it; without this, a runner
+	// that also has bubblewrap installed silently changes the default under the suite.
+	engineEnv := os.Getenv("ACORNFALL_SANDBOX_ENGINE")
 	if value, ok := bwrapEngineTests.Load(t.Name()); ok && value == true {
 		hostEngine = true
 		engineEnv = "bwrap"
