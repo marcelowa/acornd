@@ -258,7 +258,7 @@ func fetchManifest(ctx context.Context, registry *registry, token string, ref im
 		return nil, fmt.Errorf("cannot reach %s: %w", ref.host, err)
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
-	response.Body.Close()
+	_ = response.Body.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +349,7 @@ func (r *registry) platformManifest(ctx context.Context, token string, ref image
 		return imageManifest{}, err
 	}
 	payload, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
-	response.Body.Close()
+	_ = response.Body.Close()
 	if err != nil {
 		return imageManifest{}, err
 	}
@@ -385,8 +385,10 @@ func applyLayer(ctx context.Context, registry *registry, token string, ref image
 		return err
 	}
 	defer func() {
-		scratch.Close()
-		os.Remove(scratch.Name())
+		// The layer is in the digest and the next step already has it; a failure to close a file
+		// the copy has finished with says nothing the caller can act on.
+		_ = scratch.Close()
+		_ = os.Remove(scratch.Name())
 	}()
 	digest := sha256.New()
 	written, err := io.Copy(io.MultiWriter(scratch, digest), response.Body)
@@ -459,7 +461,10 @@ func applyEntry(dest string, header *tar.Header, content io.Reader) error {
 	// A later layer replaces what an earlier one wrote, so a link is removed before it is made.
 	switch header.Typeflag {
 	case tar.TypeDir:
-		return os.MkdirAll(target, os.FileMode(header.Mode)&os.ModePerm|0o700)
+		// FileInfo() is the header read the way the standard library reads it, permissions and
+		// all: the mode it returns is already a FileMode, so no conversion of the tar field — a
+		// number an archive controls — happens here.
+		return os.MkdirAll(target, header.FileInfo().Mode().Perm()|0o700)
 	case tar.TypeSymlink:
 		_ = os.RemoveAll(target)
 		return os.Symlink(header.Linkname, target)
@@ -480,12 +485,12 @@ func writeEntry(target string, header *tar.Header, content io.Reader) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
-	file, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(header.Mode)&os.ModePerm)
+	file, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, header.FileInfo().Mode().Perm())
 	if err != nil {
 		return err
 	}
 	if _, err := io.Copy(file, content); err != nil {
-		file.Close()
+		_ = file.Close()
 		return err
 	}
 	return file.Close()
