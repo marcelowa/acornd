@@ -1,5 +1,6 @@
 # The checks nobody runs by hand: a dependency with a published vulnerability, a secret in the
-# tree, and the security rules a staticcheck pass does not carry.
+# tree, and the security rules a staticcheck pass does not carry. No job below is allowed to fail
+# quietly: each one either passes or says what it found.
 #
 # None of it is in `make lint`: every one of these needs a network for its database, and lint has
 # to work on a train. The Go half runs locally as `make security`, so a finding can be reproduced
@@ -11,6 +12,10 @@
 #
 # The mutation job is the exception: it is a report on the same schedule, and its red run means a
 # test stopped proving something rather than that a dependency moved.
+#
+# The sast job used to be the other exception, and it was the wrong kind: `continue-on-error` kept
+# it green through 115 findings, so the report it made was a report nobody could act on. It is a
+# gate now, and what it reports is a finding nobody has read yet.
 name: security
 
 on:
@@ -44,14 +49,18 @@ jobs:
       # Not the shared setup: this job installs the one tool it runs and needs no bun, no worker
       # dependencies, and no interface. Paying for them would be minutes spent to ignore them.
       - name: gosec
-        # A report, not a gate. This is a sandbox orchestrator: it opens paths and runs processes
-        # named by configuration on purpose, so G304 and G204 fire on the architecture rather than
-        # on a defect, and the rules that matter there are held by the sandbox's own tests. What
-        # gosec still earns is the file-permission and cryptography checks nobody writes by hand.
-        continue-on-error: true
+        # `make sast`, not a second copy of the command: which rules this repository has decided
+        # are architecture rather than defect is named in the Makefile beside the reason each one
+        # was read and dropped, so this gate and `make security` cannot disagree about it.
+        #
+        # A gate, and it was not one before. `continue-on-error` kept this job green while 115
+        # findings scrolled past it, which meant the one thing it could have reported — a new one —
+        # was the one thing it did not. What survives the exclusions is the class nobody writes by
+        # hand: integer conversions, unchecked errors, unsafe. Every remaining finding was fixed or
+        # is a `#nosec` that names its rule and its reason, because the target asks for both.
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@latest
-          cd gateway && gosec -quiet ./...
+          make sast
 
   secrets:
     runs-on: [self-hosted, linux, x64]

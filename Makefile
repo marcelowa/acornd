@@ -7,7 +7,7 @@ HOST ?= 0.0.0.0
 PORT ?= 7777
 URL ?= http://127.0.0.1:7777
 
-.PHONY: help deps build typecheck lint modernize analyze tools commits check test cover test-sandbox test-bwrap sandbox-preflight ui ui-build run dev fmt clean release release-branch
+.PHONY: help deps build typecheck lint modernize analyze tools commits check test cover test-sandbox test-bwrap sandbox-preflight ui ui-build run dev fmt clean release release-branch sast security
 
 # The linters, installed into the Go and bun toolchains rather than vendored. `make lint` runs
 # whichever are present and names the ones that are not, so a missing tool is a message and
@@ -29,6 +29,14 @@ DEADCODE := $(GOBIN)/deadcode
 GREMLINS := $(GOBIN)/gremlins
 GOVULNCHECK := $(GOBIN)/govulncheck
 GOSEC := $(GOBIN)/gosec
+# The gosec rules whose every finding here is the architecture instead of a defect, named once so
+# that `make sast` and the sast job cannot disagree about what this repository has decided. Each
+# was read before it was listed, and the reasons are below the target.
+#
+# A `#nosec` in the source stays available for a single line, and both flags below mean it cannot
+# be a shrug: the rule has to be named and the reason has to be written after `--`.
+GOSEC_EXCLUDE := G204,G304,G301,G302,G306,G702,G703
+GOSEC_FLAGS := -exclude=$(GOSEC_EXCLUDE) -nosec-require-rules -nosec-require-justification
 # The language version the gateway is written against, from its own go.mod. The linters must
 # be built with at least it: a staticcheck built by an older Go refuses to read newer sources
 # and reports the toolchain's standard library as broken. `go install pkg@version` ignores
@@ -192,8 +200,28 @@ mutations: ## mutation testing for one package (PKG=./internal/control), against
 security: ## known vulnerabilities, and the security rules staticcheck does not carry
 	@if [ -x "$(GOVULNCHECK)" ]; then cd gateway && $(GOVULNCHECK) ./...; \
 	else echo "govulncheck: not installed (make tools)"; fi
-	@if [ -x "$(GOSEC)" ]; then cd gateway && $(GOSEC) -quiet ./... || true; \
-	else echo "gosec: not installed (make tools)"; fi
+	@$(MAKE) --no-print-directory sast
+
+# gosec, as a gate rather than a report. The sast job runs exactly this target, so a red run here
+# and a red run there are the same sentence.
+#
+# The excluded rules are the ones whose every finding in this tree is how the program is built
+# rather than what it does wrong — a sandbox orchestrator opens paths and runs processes named by
+# its configuration, and it installs binaries that have to be executable:
+#
+#   G304/G703  a file named by a variable. The paths are the install folder, the workspace folder,
+#              and an image's own configuration; a request never reaches one.
+#   G204/G702  a process named by a variable. Running the engine, bun, and the new binary is what
+#              the program is.
+#   G301/G302/G306  a directory at 0755, a binary at 0755, a version marker at 0644. gosec's own
+#              floors are 0750 and 0600, which no install tree can meet and stay usable.
+#
+# What is left is what nobody writes by hand: integer conversions, unchecked errors, unsafe, and
+# the taint rules for the shapes above. Not `-quiet`: the summary is the evidence the check ran at
+# all, and the `Nosec` count in it may only move with a reason.
+sast: ## gosec, minus the rules this architecture makes meaningless
+	@[ -x "$(GOSEC)" ] || { echo "gosec: not installed (make tools)"; exit 1; }
+	cd gateway && $(GOSEC) $(GOSEC_FLAGS) ./...
 
 # Not part of `make test` or `make lint`, on purpose: this is the one Go check measured in seconds
 # rather than milliseconds, and what it finds is drift rather than a bug — a newer spelling of a

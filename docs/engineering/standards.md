@@ -179,7 +179,7 @@ Four reports sit beside the gate, and a floor with no command that runs it is de
 | coverage across both processes, merged, per package | `make cover` — fails below a floor; `FLOOR=0` reports without failing | `verify`, on every push |
 | mutation efficacy per package | `make mutations PKG=./internal/control` — fails below a floor of efficacy **or** of killed mutants | nightly, for `control` and `sandbox`; on demand for the rest |
 | complexity, duplication, dead code, unreachable code | `make analyze` — **fails on any finding**; 0 today | `make lint`, so on every push |
-| known vulnerabilities and the security rules staticcheck does not carry | `make security` — `govulncheck`, `gosec`, `bun audit` | the `security` workflow, weekly and on a release tag |
+| known vulnerabilities and the security rules staticcheck does not carry | `make security` — `govulncheck`, `make sast` | the `security` workflow, weekly and on a release tag |
 
 Mutation testing is minutes per package, which is why it is not on a pull request: a slow gate is
 a gate people learn to skip. The nightly run covers the two packages with the most behaviour
