@@ -25,6 +25,15 @@ updates:
     groups:
       worker:
         patterns: ["*"]
+    ignore:
+      # The engine pin is one value in two languages, and the CLI, the SDK, and the engine
+      # store share migrations: the SDK moves only when the engine release does, in a commit
+      # that moves gateway/internal/sandbox/microsandbox.go and worker/src/microsandbox.ts
+      # together. A bot cannot make that decision, and its attempt was not silent: the sandbox
+      # tier refused it ("the loaded microsandbox SDK is 0.7.11, want 0.7.6", #184). Latest is
+      # the right answer for every other dependency in this file; this is the one where it is
+      # not.
+      - dependency-name: "microsandbox"
 
   - package-ecosystem: bun
     directory: /ui
