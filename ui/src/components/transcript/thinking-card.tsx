@@ -10,6 +10,9 @@ export interface ThinkingCardProps {
 	entry: ThinkingEntry;
 	/** Start expanded; a live card always starts open. */
 	defaultExpanded?: boolean | undefined;
+	/** The fold, when the transcript holds it: see `PaneCard`. */
+	expanded?: boolean | undefined;
+	onExpandedChange?: ((expanded: boolean) => void) | undefined;
 }
 
 /**
@@ -17,7 +20,12 @@ export interface ThinkingCardProps {
  * active one stays open, a finished one starts collapsed with its length on the button,
  * and the text is never lost — only put away.
  */
-export function ThinkingCard({ entry, defaultExpanded }: ThinkingCardProps) {
+export function ThinkingCard({
+	entry,
+	defaultExpanded,
+	expanded,
+	onExpandedChange,
+}: ThinkingCardProps) {
 	const open = entry.live === true;
 	const lines = entry.text === "" ? 0 : entry.text.split("\n").length;
 	// Same rule as a tool card: short reasoning stays open with no button, because a
@@ -52,6 +60,8 @@ export function ThinkingCard({ entry, defaultExpanded }: ThinkingCardProps) {
 					: undefined
 			}
 			defaultExpanded={defaultExpanded ?? open}
+			expanded={expanded}
+			onExpandedChange={onExpandedChange}
 			below={
 				open ? (
 					<div className="px-3 pb-2">

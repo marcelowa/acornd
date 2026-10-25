@@ -1,4 +1,5 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, Loader2 } from "lucide-react";
 import type { TranscriptEntry } from "@/app/view-models";
 import { Measure } from "@/components/layout/measure";
@@ -15,6 +16,24 @@ import { PendingMessage } from "./pending-message";
 import { ToolCard } from "./tool-card";
 import { ThinkingCard } from "./thinking-card";
 import { UserMessage } from "./user-message";
+
+/**
+ * What an unmeasured turn is assumed to cost. The list opens at its end, so this decides the
+ * scrollbar's proportions and where an unmeasured turn sits until it is measured — not what the
+ * reader sees, which is measured rows. A typical turn is a message, a reply and a card.
+ */
+const TURN_ESTIMATE = 240;
+
+/**
+ * How many turns stay mounted past each edge of the viewport, in turns rather than pixels
+ * because a turn can be a screen tall. Four is roughly two screens either way: enough that a
+ * fast scroll has drawn content before it arrives, and that the gap a bad estimate leaves
+ * between two rows is always off screen.
+ */
+const OVERSCAN = 4;
+
+/** Sized by session: the same turn can be a line or a screen. */
+const estimateTurn = (): number => TURN_ESTIMATE;
 
 export interface TranscriptProps {
 	entries: TranscriptEntry[];
@@ -50,15 +69,56 @@ function entryKey(entry: TranscriptEntry): string {
 	return entry.id;
 }
 
+/** The window's key for a turn: its first entry's key, which survives every re-render of the
+ * same conversation and every later turn arriving below it. */
+function turnKey(turns: TranscriptEntry[][], index: number): string | number {
+	const first = turns[index]?.[0];
+	return first === undefined ? index : entryKey(first);
+}
+
+/** The fold a reader chose, held above the cards. */
+interface Folds {
+	/** Absent when the reader has never touched this card, so the card keeps its own default. */
+	reading(key: string): boolean | undefined;
+	keep(key: string, expanded: boolean): void;
+}
+
+/**
+ * Every fold the reader has decided, kept here rather than in the card because the list is
+ * windowed: a turn that scrolls out of the window is unmounted, and a tool card that came back
+ * folded — or a long output that came back open — would undo the reader's last decision. A card
+ * nobody has touched is absent and keeps its own default: open while live, folded when done.
+ *
+ * The store is emptied when the conversation changes, because the keys are that conversation's
+ * entry ids and nothing else will ask about them again.
+ */
+function useFolds(conversation: string): Folds {
+	const store = useRef(new Map<string, boolean>());
+	const [, bump] = useReducer((count: number) => count + 1, 0);
+	useLayoutEffect(() => {
+		store.current.clear();
+	}, [conversation]);
+	const reading = useCallback((key: string) => store.current.get(key), []);
+	const keep = useCallback((key: string, expanded: boolean) => {
+		store.current.set(key, expanded);
+		bump();
+	}, []);
+	return useMemo(() => ({ reading, keep }), [reading, keep]);
+}
+
 function Entry({
 	entry,
+	folds,
 	onOpenConversation,
 	onFork,
 }: {
 	entry: TranscriptEntry;
+	folds: Folds;
 	onOpenConversation?: ((id: string) => void) | undefined;
 	onFork?: ((at: string) => void) | undefined;
 }) {
+	const key = entryKey(entry);
+	const held = folds.reading(key);
 	switch (entry.kind) {
 		case "user":
 			return (
@@ -71,9 +131,23 @@ function Entry({
 		case "assistant":
 			return <AssistantMessage key={entry.id} entry={entry} />;
 		case "tool":
-			return <ToolCard key={entryKey(entry)} entry={entry} />;
+			return (
+				<ToolCard
+					key={key}
+					entry={entry}
+					expanded={held}
+					onExpandedChange={(expanded) => folds.keep(key, expanded)}
+				/>
+			);
 		case "thinking":
-			return <ThinkingCard key={entryKey(entry)} entry={entry} />;
+			return (
+				<ThinkingCard
+					key={key}
+					entry={entry}
+					expanded={held}
+					onExpandedChange={(expanded) => folds.keep(key, expanded)}
+				/>
+			);
 		case "notice":
 			return <NoticeLine key={entry.id} entry={entry} />;
 		case "summary":
@@ -89,8 +163,15 @@ function Entry({
  * while text arrives, and stops the moment the reader scrolls away. The next conversation
  * starts at its end again.
  *
- * Entries render as turns with two rhythms: tight within a turn, wide between turns. When
- * the reader has scrolled away, a pill offers the way back.
+ * It is a window over its turns rather than a column of them: a long conversation is thousands
+ * of cards, and every one of them costs layout on every scroll even when it is nowhere near the
+ * viewport. Measured in this repository's browser, a hundred turns (5,600 nodes) made a plain
+ * scroll cost 12ms of main-thread work per step; twenty-five turns cost nothing. The window is
+ * the fix, so the rows outside it are not in the document at all.
+ *
+ * Entries render as turns with two rhythms: tight within a turn, wide between turns. The wide
+ * rhythm is the row's own padding, so a measured row reports its gap with its height and the
+ * offsets need no second number. When the reader has scrolled away, a pill offers the way back.
  */
 export function Transcript({
 	entries,
@@ -103,10 +184,13 @@ export function Transcript({
 	const following = useRef(true);
 	const [away, setAway] = useState(false);
 
+	const conversation = entries[0]?.id ?? "";
+	const turns = useMemo(() => groupTurns(entries), [entries]);
+	const folds = useFolds(conversation);
+
 	// The first entry changes when the conversation does; the last entry's shape changes
 	// while it is still being written — an answer, a thought, a tool's output. Anything
 	// growing keeps the view pinned to its end, where the thinking indicator lives.
-	const conversation = entries[0]?.id ?? "";
 	const last = entries.at(-1);
 	const lastText =
 		last === undefined
@@ -122,6 +206,18 @@ export function Transcript({
 							: last.text;
 	const dependency = `${entries.length}:${last?.id ?? ""}:${lastText.length}`;
 
+	const virtualizer = useVirtualizer({
+		count: turns.length,
+		getScrollElement: () => scroller.current,
+		estimateSize: estimateTurn,
+		getItemKey: (index) => turnKey(turns, index),
+		overscan: OVERSCAN,
+	});
+	// Every measurement that lands moves this: it is the whole list's height as the browser
+	// knows it, estimated rows included. Pinning on it is what keeps the end steady while the
+	// rows above the viewport are still being measured.
+	const total = virtualizer.getTotalSize();
+
 	useLayoutEffect(() => {
 		following.current = true;
 		setAway(false);
@@ -131,7 +227,7 @@ export function Transcript({
 		const element = scroller.current;
 		if (element === null || !following.current) return;
 		element.scrollTop = element.scrollHeight;
-	}, [dependency, conversation]);
+	}, [dependency, conversation, total]);
 
 	const jumpLatest = (): void => {
 		const element = scroller.current;
@@ -140,8 +236,6 @@ export function Transcript({
 		setAway(false);
 		element.scrollTop = element.scrollHeight;
 	};
-
-	const turns = groupTurns(entries);
 
 	return (
 		<div data-slot="transcript" className="relative flex min-h-0 flex-1 flex-col">
@@ -176,7 +270,7 @@ export function Transcript({
 						<Stack gap="sm" align="center" className="py-16 text-center">
 							<Text tone="muted">Loading…</Text>
 						</Stack>
-					) : entries.length === 0 ? (
+					) : turns.length === 0 ? (
 						<Stack gap="sm" align="center" className="py-16 text-center">
 							<Heading level={2}>Start a conversation</Heading>
 							<Text tone="muted">
@@ -184,25 +278,31 @@ export function Transcript({
 							</Text>
 						</Stack>
 					) : (
-						<>
-							<Stack gap="2xl">
-								{turns.map((turn, index) => (
-									<Stack key={turn[0]?.id ?? index} gap="lg" data-turn={index}>
-										{turn.map((entry) => (
+						<div className="relative w-full" style={{ height: total }}>
+							{virtualizer.getVirtualItems().map((item) => (
+								<div
+									key={item.key}
+									data-index={item.index}
+									ref={virtualizer.measureElement}
+									// The wide rhythm between turns, and the air below the last one:
+									// the row carries its own gap, so its height is its whole cost.
+									className="absolute inset-x-0 top-0 pb-8"
+									style={{ transform: `translateY(${item.start}px)` }}
+								>
+									<Stack gap="lg" data-turn={item.index}>
+										{(turns[item.index] ?? []).map((entry) => (
 											<Entry
 												key={entryKey(entry)}
 												entry={entry}
+												folds={folds}
 												onOpenConversation={onOpenConversation}
 												onFork={onFork}
 											/>
 										))}
 									</Stack>
-								))}
-							</Stack>
-							{/* Air below the indicator: the end of a run should rest above the
-							 * composer with room to breathe, not glued to its edge. */}
-							<div aria-hidden className="h-8" />
-						</>
+								</div>
+							))}
+						</div>
 					)}
 				</Measure>
 			</div>

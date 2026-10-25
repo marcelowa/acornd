@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import type { TranscriptEntry } from "@/app/view-models";
 import { Transcript } from "./transcript";
 
 const meta = {
@@ -241,4 +242,79 @@ export const Pending: Story = {
 			},
 		],
 	},
+};
+
+/**
+ * The window, at the size it exists for: three hundred turns, one of them a tool output of
+ * four hundred lines. Only the rows around the viewport are in the document — the rest are an
+ * offset and an estimate — so this scrolls like a short transcript, and opens at its end.
+ */
+function longConversation(): TranscriptEntry[] {
+	const entries: TranscriptEntry[] = [];
+	for (let turn = 0; turn < 300; turn += 1) {
+		entries.push({
+			kind: "user",
+			id: `u-${turn}`,
+			at,
+			text:
+				turn % 7 === 0
+					? `Turn ${turn}: and what about the lock order in the reconciler?`
+					: `Turn ${turn}: check the suite again`,
+		});
+		if (turn % 5 === 0) {
+			entries.push({
+				kind: "thinking",
+				id: `th-${turn}`,
+				at,
+				text:
+					turn === 150
+						? Array.from({ length: 40 }, (_, line) => `Reasoning line ${line}.`).join(
+								"\n",
+							)
+						: "The failure is in the pool, not the handler.",
+			});
+		}
+		entries.push({
+			kind: "tool",
+			id: `t-${turn}`,
+			at,
+			name: turn % 3 === 0 ? "bash" : "read",
+			status: "done",
+			isError: turn % 11 === 0,
+			callId: `call-${turn}`,
+			args: { command: `go test ./internal/workerpool -run Test${turn}` },
+			output:
+				turn === 221
+					? Array.from(
+							{ length: 400 },
+							(_, line) => `output line ${line}: ok  github.com/acornfall/acornfall`,
+						).join("\n")
+					: `ok  \tgithub.com/acornfall/acornfall/gateway/internal/workerpool\t0.2${turn % 10}s`,
+		});
+		entries.push({
+			kind: "assistant",
+			id: `a-${turn}`,
+			at,
+			markdown:
+				turn % 4 === 0
+					? [
+							`Turn ${turn} is green.`,
+							"",
+							"- the pool drains before the exit",
+							"- the second announcement is the one that raced",
+							"",
+							"```go",
+							"if !stopped {",
+							"\tpool.Restart()",
+							"}",
+							"```",
+						].join("\n")
+					: `Turn ${turn}: the suite passed, nothing else to report.`,
+		});
+	}
+	return entries;
+}
+
+export const Long: Story = {
+	args: { entries: longConversation() },
 };

@@ -49,6 +49,10 @@ export interface PaneCardProps {
 	fold?: PaneFold | undefined;
 	/** Open on first render. A live card is open; a finished one is not. */
 	defaultExpanded?: boolean | undefined;
+	/** The fold, held by whoever keeps it across an unmount — the transcript, in a windowed
+	 * list. Absent means the card remembers for itself. */
+	expanded?: boolean | undefined;
+	onExpandedChange?: ((expanded: boolean) => void) | undefined;
 	/** Between the body and the footer: a running card's dots. */
 	below?: ReactNode | undefined;
 	at?: Date | undefined;
@@ -78,13 +82,22 @@ export function PaneCard({
 	aside,
 	fold,
 	defaultExpanded = false,
+	expanded: asked,
+	onExpandedChange,
 	below,
 	at,
 	trailing,
 	body,
 }: PaneCardProps) {
-	const [expanded, setExpanded] = useState(defaultExpanded);
+	const [own, setOwn] = useState(defaultExpanded);
+	const expanded = asked ?? own;
 	const folded = fold !== undefined && !expanded;
+	/** Both are told: the card keeps its own answer for the day it is uncontrolled again, and
+	 * the transcript hears the reader's so an unmount does not undo it. */
+	const flip = (): void => {
+		setOwn(!expanded);
+		onExpandedChange?.(!expanded);
+	};
 
 	return (
 		<div
@@ -112,7 +125,7 @@ export function PaneCard({
 							// A finger is not a pointer: on a coarse one the fold is the only way back into
 							// a long output, so it gets a size a thumb can hit.
 							className="pointer-coarse:h-8 pointer-coarse:px-3"
-							onClick={() => setExpanded((value) => !value)}
+							onClick={flip}
 						>
 							{fold.label(expanded)}
 						</Button>

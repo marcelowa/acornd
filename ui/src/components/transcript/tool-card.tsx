@@ -19,6 +19,9 @@ export interface ToolCardProps {
 	entry: ToolEntry;
 	/** Start expanded; stories use it to show the open form of a long card. */
 	defaultExpanded?: boolean | undefined;
+	/** The fold, when the transcript holds it: see `PaneCard`. */
+	expanded?: boolean | undefined;
+	onExpandedChange?: ((expanded: boolean) => void) | undefined;
 }
 
 /**
@@ -26,7 +29,12 @@ export interface ToolCardProps {
  * after — and it never loses the output: a long completed card collapses to the token
  * height with an explicit expand, while running and error cards stay fully open.
  */
-export function ToolCard({ entry, defaultExpanded = false }: ToolCardProps) {
+export function ToolCard({
+	entry,
+	defaultExpanded = false,
+	expanded,
+	onExpandedChange,
+}: ToolCardProps) {
 	const body = [
 		entry.args === undefined ? "" : `$ ${JSON.stringify(entry.args, null, 2)}`,
 		entry.output === "" ? "" : `\n${stripAnsi(entry.output)}`,
@@ -75,6 +83,8 @@ export function ToolCard({ entry, defaultExpanded = false }: ToolCardProps) {
 					: undefined
 			}
 			defaultExpanded={defaultExpanded}
+			expanded={expanded}
+			onExpandedChange={onExpandedChange}
 			below={
 				status === "running" ? (
 					<div className="px-3 pb-2">
