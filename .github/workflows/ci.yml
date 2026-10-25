@@ -103,8 +103,13 @@ jobs:
     # The name branch protection requires. It runs nothing itself: it is the fan-in, so a job added
     # to this file cannot be forgotten by the protection rule, and a failed job makes this fail
     # because `needs` is a dependency and not a notification.
+    #
+    # Every job in this file is a `needs`, including the two engine tiers: they boot real
+    # sandboxes, they are the only proof that an engine change works, and until 2026-10-29 they
+    # ran on every push without being able to stop a merge — a green `verify` over a red
+    # `sandbox` is the gate saying the thing it was asked not to.
     if: always()
-    needs: [static, go, worker, browser, commits]
+    needs: [static, go, worker, browser, commits, floors, mutations, sandbox, bwrap]
     runs-on: ubuntu-24.04
     steps:
       - name: Every job has to have passed
@@ -114,9 +119,15 @@ jobs:
           WORKER: ${{ needs.worker.result }}
           BROWSER: ${{ needs.browser.result }}
           COMMITS: ${{ needs.commits.result }}
+          FLOORS: ${{ needs.floors.result }}
+          MUTATIONS: ${{ needs.mutations.result }}
+          SANDBOX: ${{ needs.sandbox.result }}
+          BWRAP: ${{ needs.bwrap.result }}
         run: |
           echo "static=$STATIC go=$GO worker=$WORKER browser=$BROWSER commits=$COMMITS"
-          for result in "$STATIC" "$GO" "$WORKER" "$BROWSER" "$COMMITS"; do
+          echo "floors=$FLOORS mutations=$MUTATIONS sandbox=$SANDBOX bwrap=$BWRAP"
+          for result in "$STATIC" "$GO" "$WORKER" "$BROWSER" "$COMMITS" \
+                        "$FLOORS" "$MUTATIONS" "$SANDBOX" "$BWRAP"; do
             [ "$result" = "success" ] || exit 1
           done
 
@@ -150,6 +161,61 @@ jobs:
       - name: Nothing to check
         if: steps.range.outputs.value == ''
         run: echo "the first push to a branch has no range behind it; skipping"
+
+  floors:
+    # The ratchet, checked rather than promised. `docs/engineering/standards.md` S10 says coverage
+    # and mutation floors may only move up, and the file they live in is edited by the same pull
+    # request that would want to lower it — so this compares the tree with the base branch and
+    # fails on a step down. It is deliberately its own job: a lowered floor is not a test failure
+    # and should not read as one.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The floors it compares against are on the base branch.
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Fetch the base branch
+        # checkout's own fetch is a promise about the ref this run was started from; the floors
+        # it compares against are on `main`, and a missing ref here would be a guard that fails
+        # for a reason that has nothing to do with the change.
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+      - run: make floors
+
+  mutations:
+    # Mutation testing on the packages a change touches. It was the weekly report and nothing
+    # else, so a pull request that deleted an assertion was green until Monday and then filed an
+    # issue. Now the diff decides which packages are swept, `--max` bounds the cost at two of
+    # them, and a survivor fails the run: an assertion that stopped distinguishing is exactly the
+    # standard going down quietly.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+        with:
+          tools: true
+      - name: Fetch the base branch
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+      - name: Decide what to sweep
+        id: targets
+        run: |
+          list=$(bun scripts/mutation-targets.mjs --base origin/main --max 2)
+          echo "value=$(echo "$list" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+          echo "sweeping: ${list:-nothing}"
+      - name: Mutate what changed
+        if: steps.targets.outputs.value != ''
+        env:
+          TARGETS: ${{ steps.targets.outputs.value }}
+        run: |
+          for pkg in $TARGETS; do
+            echo "::group::make mutations PKG=$pkg"
+            make mutations PKG="$pkg" || exit 1
+            echo "::endgroup::"
+          done
 
   sandbox:
     # `make test-sandbox` boots real microVMs. A hosted runner has /dev/kvm owned by root:kvm at

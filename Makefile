@@ -178,6 +178,12 @@ analyze: ## complexity, duplication, dead code, error shape: fails on any findin
 MUTATIONS_WORKERS ?= 8
 MUTATION_TIMEOUT ?= 500
 
+floors: ## the ratchet: coverage and mutation floors may only move up (BASE=origin/main)
+	@# S10 in docs/engineering/standards.md, as a check. The two floor files are edited by the same
+	@# pull request that would want to lower them, so the comparison is against the base branch and
+	@# not against the file's own promise.
+	bun scripts/check-floors.mjs --base $(BASE)
+
 mutations: ## mutation testing for one package (PKG=./internal/control), against its floors
 	@pkg=$${PKG#./}; \
 	efficacy=$$(awk -v p="$$pkg" '$$1==p {print $$2}' .mutationfloors); \
@@ -265,6 +271,8 @@ SANDBOX_PARALLEL ?= 6
 # Where `make cover` writes the two halves and the joined profile. Kept out of the tree by
 # .gitignore: a coverage profile is a run's artefact, not a source.
 COVER_DIR ?= $(CURDIR)/.cover
+# The ref the floors are compared against, and the ref the commit range starts at.
+BASE ?= origin/main
 
 # The floor `make cover` enforces, per package and across both processes. `FLOOR=0` makes it a
 # pure report, which is what a checkout that has not been brought to the bar yet wants.
