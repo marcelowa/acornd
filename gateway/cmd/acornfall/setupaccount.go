@@ -20,8 +20,10 @@ type setupAccount struct {
 	// Basis says where the name came from, so a wrong guess is visible in the output rather than
 	// discovered later. Empty means "there was nothing to guess".
 	Basis string
-	UID   int
-	GID   int
+	// The numbers are 32 bits wide because that is the width a process is handed on exec, which is
+	// what they are for here; they are parsed at that width rather than converted to it later.
+	UID uint32
+	GID uint32
 	// DataDir is the account's own home: the child gets it so a tool that reads ~/.config reads that
 	// account's, not the acornfall folder's.
 	DataDir string
@@ -132,15 +134,26 @@ func lookupAccount(name string) (setupAccount, error) {
 	if err != nil {
 		return setupAccount{}, fmt.Errorf("no account %q here", name)
 	}
-	uid, err := strconv.Atoi(account.Uid)
+	uid, err := accountID(account.Uid)
 	if err != nil {
 		return setupAccount{}, err
 	}
-	gid, err := strconv.Atoi(account.Gid)
+	gid, err := accountID(account.Gid)
 	if err != nil {
 		return setupAccount{}, err
 	}
 	return setupAccount{Name: account.Username, UID: uid, GID: gid, DataDir: account.HomeDir}, nil
+}
+
+// accountID is one of an account's numbers in the width a process is given it. The decimal comes
+// from os/user, and a value that does not fit is a refusal rather than a wrap: this number decides
+// which account the probe runs as, so a wrapped one would ask a different account the question.
+func accountID(value string) (uint32, error) {
+	id, err := strconv.ParseUint(value, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("setup: %q is not an account id: %w", value, err)
+	}
+	return uint32(id), nil
 }
 
 // probeAs answers the probes for one account. For this process's own account that is a direct
@@ -166,7 +179,7 @@ func probeAs(who setupAccount, dataDir string) (setupReport, error) {
 		return setupReport{}, err
 	}
 	command := exec.Command(executable, "setup", "--probe", "--data-dir", dataDir)
-	if attr := credentialFor(uint32(who.UID), uint32(who.GID), groupIDs); attr != nil {
+	if attr := credentialFor(who.UID, who.GID, groupIDs); attr != nil {
 		command.SysProcAttr = attr
 	}
 	// The child's environment is the account's, not root's: PATH decides which bwrap and pasta it
@@ -201,11 +214,11 @@ func groupIDsFor(name string) ([]uint32, error) {
 	}
 	ids := make([]uint32, 0, len(names))
 	for _, id := range names {
-		value, err := strconv.Atoi(id)
+		value, err := accountID(id)
 		if err != nil {
 			return nil, err
 		}
-		ids = append(ids, uint32(value))
+		ids = append(ids, value)
 	}
 	return ids, nil
 }
