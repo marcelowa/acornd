@@ -311,7 +311,10 @@ func listen(ctx context.Context, host string, port int, handler http.Handler, di
 	}
 	go func() {
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// The cancellation that got here is the one this budget must outlive, so it is taken from a
+		// copy of the context that keeps its values and not its deadline: a plain Background would
+		// drop the request's own logging and tracing on the way out.
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_ = server.Shutdown(shutdownCtx)
 	}()
@@ -354,7 +357,11 @@ func sandboxTier(ctx context.Context, dataDir, engineName string) (*sandbox.Mana
 	if engineName == "" {
 		// Not a silent choice: which engine a new workspace gets is a security decision, and the
 		// reason is this machine's ability, so it is said rather than discovered in a record.
-		log.Printf("sandbox: no engine named, and this machine can run %s, so that is the default (each workspace keeps the engine it recorded)", engine.Driver().Name())
+		// %q, because the driver's name comes from the configuration and a newline in it would end
+		// the line early and start a record nobody wrote. gosec's taint analysis follows the value
+		// and not the verb, so the escaping it cannot see is named here.
+		// #nosec G706 -- %q escapes the control characters a log injection needs.
+		log.Printf("sandbox: no engine named, and this machine can run %q, so that is the default (each workspace keeps the engine it recorded)", engine.Driver().Name())
 	}
 	report := engine.Report()
 	if problem := engine.Problem(); problem != nil {
