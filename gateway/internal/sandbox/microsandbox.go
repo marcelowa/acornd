@@ -212,7 +212,8 @@ func (m *Microsandbox) Usable() error {
 	case "linux":
 		file, err := os.OpenFile("/dev/kvm", os.O_RDWR, 0)
 		if err == nil {
-			file.Close()
+			// Opening it answered the question; the close only gives the descriptor back.
+			_ = file.Close()
 			return nil
 		}
 		if errors.Is(err, os.ErrNotExist) {
@@ -633,7 +634,9 @@ func pruneBundle(dir string, entries []os.DirEntry) {
 		if name == "bin" || name == "lib" {
 			continue
 		}
-		os.RemoveAll(filepath.Join(dir, name))
+		// What is left is the other platforms' copies of a bundle that was unpacked read-only, and
+		// nothing runs before the rename that would notice a failure here.
+		_ = os.RemoveAll(filepath.Join(dir, name))
 	}
 }
 
@@ -689,7 +692,7 @@ func fetch(ctx context.Context, client *http.Client, url string) (io.ReadCloser,
 		return nil, fmt.Errorf("%w: %s: %w", ErrUnavailable, url, err)
 	}
 	if response.StatusCode != http.StatusOK {
-		response.Body.Close()
+		_ = response.Body.Close()
 		return nil, fmt.Errorf("%w: %s: %s", ErrUnavailable, url, response.Status)
 	}
 	return response.Body, nil
@@ -754,7 +757,9 @@ func extractFile(archive *tar.Reader, header *tar.Header, target string) error {
 		return err
 	}
 	if _, err := io.Copy(file, archive); err != nil {
-		file.Close()
+		// The copy's error is the one to report; the close of a file already known to be bad
+		// would only say the same thing twice.
+		_ = file.Close()
 		return err
 	}
 	return file.Close()
@@ -769,7 +774,8 @@ func extractSymlink(header *tar.Header, target string) error {
 	if _, err := safeJoin(filepath.Dir(target), header.Linkname); err != nil {
 		return err
 	}
-	os.Remove(target)
+	// A later layer replaces an earlier one, and the removal is allowed to find nothing there.
+	_ = os.Remove(target)
 	return os.Symlink(header.Linkname, target)
 }
 

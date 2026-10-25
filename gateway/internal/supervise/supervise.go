@@ -494,7 +494,9 @@ func listenSocket(path string) (net.Listener, error) {
 		return nil, fmt.Errorf("supervisor: cannot listen on %s: %w", path, err)
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
-		listener.Close()
+		// The chmod failure is the error worth reporting; it is the reason the socket is being
+		// given back.
+		_ = listener.Close()
 		return nil, err
 	}
 	return listener, nil

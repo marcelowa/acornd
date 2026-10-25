@@ -13,6 +13,9 @@ import (
 // password from.
 func isTerminal(file *os.File) bool {
 	var settings syscall.Termios
+	// #nosec G103 -- the third argument is a pointer to a local this call fills in, which is what
+	// TCGETS is defined as; the kernel writes the terminal's settings there and nothing is read
+	// through the pointer afterwards beyond that struct.
 	_, _, errno := syscall.Syscall6(
 		syscall.SYS_IOCTL, file.Fd(), uintptr(syscall.TCGETS),
 		uintptr(unsafe.Pointer(&settings)), 0, 0, 0)
