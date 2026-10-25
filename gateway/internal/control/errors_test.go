@@ -3,12 +3,15 @@ package control
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/protocol"
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+	"github.com/acornfall/acornfall/gateway/internal/vault"
 )
 
 // A harness that refuses is a refusal the caller sees. These are the commands whose failure has a
@@ -107,13 +110,12 @@ func TestStoppingEverythingStopsWhatItCan(t *testing.T) {
 	}
 }
 
-// A secret change applied to a sandbox that refuses it is an error the caller sees: the person
-// saved a value and the tools would still run without it.
+// A secret change that never landed is an error the caller sees: the person saved a value and the
+// tools would still run without it. On a bwrap workspace the change lands in the proxy control runs,
+// so the way to make it fail is a port the proxy cannot have.
 func TestASecretChangeThatFailsIsReported(t *testing.T) {
 	worker := newFakeWorker()
 	control := controlWithWorker(t, worker)
-	// The engine is where a change lands, and a workspace whose sandbox was never started has no
-	// sandbox to change: that is a refusal the caller sees rather than one that looks applied.
 	tier := sandbox.NewTier(t.TempDir(), "", nil)
 	if _, err := tier.For("bwrap"); err != nil {
 		t.Fatal(err)
@@ -121,8 +123,19 @@ func TestASecretChangeThatFailsIsReported(t *testing.T) {
 	control.opts.Sandboxes = tier
 	control.opts.Workspace.Engine = "bwrap"
 	control.engineDone = false
+	control.engineManager = nil
+	hosts := []string{"api.github.com"}
+	control.opts.Vault = vaultWith(t, vault.Upsert{
+		Name: "GITHUB_TOKEN", Scope: vault.Global, Description: "d", Value: "v", Hosts: &hosts,
+	})
+	occupied, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", proxyPort(control.opts.Workspace.Path)))
+	if err != nil {
+		t.Fatalf("occupy the proxy's port: %v", err)
+	}
+	defer func() { _ = occupied.Close() }()
+
 	if err := control.ApplySecrets(context.Background(), false); err == nil {
-		t.Fatal("a change that never reached a sandbox should be reported")
+		t.Fatal("a change whose proxy never started should be reported")
 	}
 }
 

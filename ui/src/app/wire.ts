@@ -48,6 +48,8 @@ export interface WireEngine {
 	default?: boolean | undefined;
 	isolated: boolean;
 	installed: boolean;
+	/** True when a secret's value stays on the host and only a placeholder enters the sandbox. */
+	substitutes?: boolean | undefined;
 	version?: string | undefined;
 	/** Why this machine cannot run it, in a sentence. Present means it cannot. */
 	problem?: string | undefined;

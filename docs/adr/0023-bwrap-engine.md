@@ -188,8 +188,10 @@ The config a command runs under, written to `<home>/sandboxes/bwrap/<name>.json`
 - the workspace bound **read-write at its own path**;
 - `--unshare-all`, with `--share-net` only when the workspace's network is on;
 - `--die-with-parent`, so a kill reaches the command;
-- `--clearenv` and then exactly the environment the worker hands over, which is also how a
-  secret arrives (the environment delivery row).
+- `--clearenv` and then exactly the environment the worker hands over. (This line described the
+  intent for a while before the code did it: `--clearenv` landed with
+  [ADR 0031](0031-a-proxy-for-bwrap-secrets.md), which also gave the sandbox's own processes a
+  three-variable environment instead of the gateway's.)
 
 **The image is the workspace's own disk.** The reference is fetched from the registry once,
 verified layer by layer against the digests the manifest names, and unpacked into

@@ -22,6 +22,7 @@ internal/netns                      51  -- the write half needs CAP_NET_ADMIN in
 internal/protocol   100
 internal/ready       83
 internal/sandbox                  77
+internal/secretsproxy                91  -- what is left is crypto/rand, x509 and os failures, with no seam worth inventing to reach 95
 internal/supervise   84
 internal/update                    79
 internal/vault       85

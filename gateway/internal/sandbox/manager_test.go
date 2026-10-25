@@ -318,3 +318,18 @@ func TestOpenRefusesWithoutADriverOrHome(t *testing.T) {
 		t.Error("a manager with no home has nowhere to install anything")
 	}
 }
+
+// Only the engine that substitutes through a proxy this process runs gets one in its policy. A
+// microVM engine substitutes on its own egress path, and asking control to start a second listener
+// for it would hold a value twice and open a port nothing forwards.
+func TestOnlyAnEngineWithAControlProxySaysSo(t *testing.T) {
+	t.Parallel()
+	manager := openWith(t, &fakeDriver{})
+	if manager.SecretProxyInControl() {
+		t.Error("the fake engine substitutes nowhere, so it should not claim a control proxy")
+	}
+	bwrap := NewBwrap(t.TempDir())
+	if !bwrap.SecretProxyInControl() {
+		t.Error("bwrap substitutes through the proxy control runs for it")
+	}
+}

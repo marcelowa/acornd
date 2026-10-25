@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { hostFiles, routingFiles, type Files } from "../src/files.ts";
 import { SandboxExecutionEnv } from "../src/sandbox-env.ts";
+import type { SecretInfo } from "../src/secrets.ts";
 import {
 	refusedSandbox,
 	type DirEntry,
@@ -120,9 +121,12 @@ class FakeSandbox implements SandboxClient {
 	}
 }
 
-function environment(): { sandbox: FakeSandbox; env: SandboxExecutionEnv } {
+function environment(secrets: readonly SecretInfo[] = []): {
+	sandbox: FakeSandbox;
+	env: SandboxExecutionEnv;
+} {
 	const sandbox = new FakeSandbox();
-	return { sandbox, env: new SandboxExecutionEnv(sandbox, "/work") };
+	return { sandbox, env: new SandboxExecutionEnv(sandbox, "/work", secrets) };
 }
 
 // -- routing: one door to the workspace ----------------------------------------------
@@ -449,4 +453,34 @@ test("the host filesystem is not reachable through the environment's own helpers
 	const onThisMachine = await hostFiles.read("/etc/hostname");
 	expect(onThisMachine).not.toBeNull();
 	expect(await env.exists("/etc/hostname", CONTEXT).then((r) => r.ok && r.value)).toBe(false);
+});
+
+test("a substitution secret reaches the command as the placeholder, never as a value", async () => {
+	const { sandbox, env } = environment([
+		{
+			name: "GITHUB_TOKEN",
+			description: "a token",
+			hosts: ["api.github.com"],
+			delivery: "substitute",
+			placeholder: "$MSB_GITHUB_TOKEN",
+		},
+	]);
+	await env.exec("true", {}, CONTEXT);
+	expect(sandbox.execs[0]?.options.secrets).toEqual({ GITHUB_TOKEN: "$MSB_GITHUB_TOKEN" });
+});
+
+test("an environment secret is not turned into a placeholder", async () => {
+	// An engine that puts the value in the guest has already done what this layer would do, and a
+	// placeholder for it would be a name whose value never arrives.
+	const { sandbox, env } = environment([
+		{
+			name: "DATABASE_URL",
+			description: "a connection string",
+			hosts: [],
+			delivery: "environment",
+			placeholder: "",
+		},
+	]);
+	await env.exec("true", {}, CONTEXT);
+	expect(sandbox.execs[0]?.options.secrets).toBeUndefined();
 });

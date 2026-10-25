@@ -56,7 +56,7 @@ export function parseSecrets(raw: string | undefined): SecretInfo[] {
 export function secretSection(secrets: readonly SecretInfo[]): string | undefined {
 	if (secrets.length === 0) return undefined;
 	const lines = [
-		"Secrets are available to commands as environment variables. A name is not its value: never print a secret, and never ask the user to paste one into the conversation. Use the secret tool to list them or ask the user to set one; the user enters the value in a card. Substitution is HTTPS only: plain HTTP is not intercepted. Do not use ${NAME} or {{NAME}} as the placeholder; use the literal the secret tool or this section names, usually $MSB_NAME. A minimal image may not have curl; install one or use the project's HTTPS client.",
+		"Secrets are available to commands as environment variables. A name is not its value: never print a secret, and never ask the user to paste one into the conversation. Use the secret tool to list them or ask the user to set one; the user enters the value in a card. Send it over HTTPS: a plain HTTP request is not substituted everywhere. Do not use ${NAME} or {{NAME}} as the placeholder; use the literal the secret tool or this section names, usually $MSB_NAME. A minimal image may not have curl; install one or use the project's HTTPS client.",
 	];
 	for (const secret of secrets) {
 		const description = secret.description.trim() === "" ? "" : `${secret.description.trim()} `;

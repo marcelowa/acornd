@@ -26,8 +26,12 @@ import { SettingsField, SettingsGroup } from "./settings-group";
 export interface SecretsSectionProps {
 	/** The workspace in view. Its own list is here; the globals are beside it. */
 	workspace?: { name: string; path: string } | undefined;
-	/** The engine decides how a value reaches a command, and the copy says so. */
-	engine?: string | undefined;
+	/**
+	 * Whether this workspace's engine substitutes: the value stays on the host and a placeholder goes
+	 * into the sandbox. The domain answers this per engine, so the copy follows it rather than keeping
+	 * its own list of names. See docs/adr/0031-a-proxy-for-bwrap-secrets.md.
+	 */
+	substitutes?: boolean;
 }
 
 type Editor =
@@ -40,7 +44,7 @@ type Editor =
  * entries are on every workspace; a workspace entry with the same name replaces one there.
  * The list is metadata only, because the API has no way to return a value.
  */
-export function SecretsSection({ workspace, engine }: SecretsSectionProps) {
+export function SecretsSection({ workspace, substitutes = false }: SecretsSectionProps) {
 	const [global, setGlobal] = useState<SecretMeta[]>([]);
 	const [view, setView] = useState<WorkspaceSecrets | undefined>(undefined);
 	const [loading, setLoading] = useState(true);
@@ -247,7 +251,7 @@ export function SecretsSection({ workspace, engine }: SecretsSectionProps) {
 					}
 					editor={editor}
 					workspace={workspaceName}
-					engine={engine}
+					substitutes={substitutes}
 					onClose={() => setEditor(undefined)}
 					onDone={done}
 				/>
@@ -331,12 +335,18 @@ function detail(secret: SecretMeta): string {
 interface SecretDialogProps {
 	editor: Editor;
 	workspace: string;
-	engine?: string | undefined;
+	substitutes?: boolean;
 	onClose: () => void;
 	onDone: () => Promise<void>;
 }
 
-function SecretDialog({ editor, workspace, engine, onClose, onDone }: SecretDialogProps) {
+function SecretDialog({
+	editor,
+	workspace,
+	substitutes = false,
+	onClose,
+	onDone,
+}: SecretDialogProps) {
 	const rotating = editor.kind === "rotate";
 	const source = editor.kind === "override" ? "workspace" : editor.scope;
 	const initial = initialValues(editor);
@@ -357,7 +367,7 @@ function SecretDialog({ editor, workspace, engine, onClose, onDone }: SecretDial
 			(description.trim() !== "" &&
 				validName &&
 				locations.length > 0 &&
-				(engine !== "microsandbox" || splitHosts(hosts).length > 0)));
+				(!substitutes || splitHosts(hosts).length > 0)));
 
 	const submit = async (): Promise<void> => {
 		if (!valid || saving) return;
@@ -400,10 +410,11 @@ function SecretDialog({ editor, workspace, engine, onClose, onDone }: SecretDial
 				: editor.scope === "global"
 					? "Every workspace may use it. Keep it specific: a global value is available everywhere."
 					: `Only ${workspace} may use it.`;
-	const delivery =
-		engine === "microsandbox"
-			? "The value stays on the host and is substituted only for the hosts you name. A secret with no hosts cannot be delivered on this engine."
-			: "This engine puts the value in the sandbox environment, where a command can read it.";
+	// Asked of the engine, not decided here: a second list of which engines substitute is a list that
+	// is wrong the day a third one arrives.
+	const delivery = substitutes
+		? "The value stays on the host and is substituted only for the hosts you name. A secret with no hosts cannot be delivered on this engine."
+		: "This engine puts the value in the sandbox environment, where a command can read it.";
 
 	return (
 		<Dialog
@@ -479,11 +490,7 @@ function SecretDialog({ editor, workspace, engine, onClose, onDone }: SecretDial
 					{rotating ? null : (
 						<>
 							<SettingsField
-								label={
-									engine === "microsandbox"
-										? "allowed hosts (required)"
-										: "allowed hosts"
-								}
+								label={substitutes ? "allowed hosts (required)" : "allowed hosts"}
 							>
 								<Input
 									inputSize="sm"
@@ -502,7 +509,7 @@ function SecretDialog({ editor, workspace, engine, onClose, onDone }: SecretDial
 								/>
 								<Text size="2xs" tone="muted">
 									Comma-separated. No scheme or path; a leading * is a wildcard.
-									{engine === "microsandbox" && splitHosts(hosts).length === 0
+									{substitutes && splitHosts(hosts).length === 0
 										? " This engine needs at least one host to deliver the value."
 										: ""}
 								</Text>
@@ -541,8 +548,8 @@ function SecretDialog({ editor, workspace, engine, onClose, onDone }: SecretDial
 									<ToggleGroupItem value="keep">keep out</ToggleGroupItem>
 								</ToggleGroup>
 								<Text size="2xs" tone="muted">
-									Only matters on a container engine; microsandbox never puts the
-									value in the sandbox.
+									Only matters on an engine that puts the value in the sandbox; a
+									proxy never puts the value in the sandbox.
 								</Text>
 							</SettingsField>
 						</>

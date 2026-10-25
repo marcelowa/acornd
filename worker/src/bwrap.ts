@@ -56,9 +56,24 @@ export interface BwrapConfig {
 	readOnly?: string[];
 	/** The sandbox's supervisor: where it listens, for this worker. */
 	socket: string;
+	/**
+	 * The workspace's secrets proxy, when it has one: the URL a command puts in HTTPS_PROXY, with
+	 * the session credential in it, and the bundle a client has to trust. Absent means the
+	 * workspace has no secrets, or its network is off and there is nothing to substitute.
+	 */
+	secretProxy?: { url: string; bundle: string };
 }
 
 const systemPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+/**
+ * What a command inherits from this process: the handful a shell needs to behave, and nothing else.
+ *
+ * This worker was started with acornfall's own environment, and a command that inherits it inherits
+ * whatever the gateway was holding — a provider key, a cloud token — with no vault involved. The
+ * list is short on purpose: a caller that needs a variable passes it.
+ */
+const inheritedEnv = ["TERM", "LANG", "LC_ALL", "TZ"] as const;
 
 /**
  * How often an attached worker tells its sandbox it is still here.
@@ -140,21 +155,42 @@ class BwrapClient extends WorkspaceFiles implements SandboxClient {
 	}
 
 	/**
-	 * The environment a command sees. An environment engine delivers secrets by putting them in
-	 * this process, so a command that inherits inherits them; `clearEnv` is how a caller asks for
-	 * nothing but what it passes. Nothing else reaches the sandbox: the supervisor starts a
-	 * command with exactly this map and nothing of its own.
+	 * The environment a command sees: the handful of variables a shell needs, whatever the caller
+	 * passed, the workspace's own home and path, and the proxy when the workspace has secrets.
+	 * Nothing else — `clearEnv` is how a caller asks for even less. The supervisor starts a command
+	 * with exactly this map and nothing of its own.
 	 */
 	private environment(options: ExecOptions): Record<string, string> {
-		const inherited = options.clearEnv === true ? {} : { ...process.env };
 		const env: Record<string, string> = {};
-		for (const [key, value] of Object.entries({ ...inherited, ...options.env })) {
-			if (typeof value === "string") env[key] = value;
+		if (options.clearEnv !== true) {
+			for (const key of inheritedEnv) {
+				const value = process.env[key];
+				if (typeof value === "string") env[key] = value;
+			}
 		}
+		// The value is not here and never will be: the command holds the placeholder and the proxy
+		// swaps it for the host the secret names. Set first, so a caller that passes a name
+		// explicitly still gets what it asked for.
+		for (const [name, placeholder] of Object.entries(options.secrets ?? {})) {
+			env[name] = placeholder;
+		}
+		for (const [key, value] of Object.entries(options.env ?? {})) env[key] = value;
 		// The sandbox's own home, always: the machine's is not in the image, so an install there
 		// would land nowhere and a `~` would mean a path the command cannot see.
 		env["HOME"] = guestHome(this.config);
 		env["PATH"] = searchPath(this.config.home);
+		const proxy = this.config.secretProxy;
+		if (proxy !== undefined) {
+			// Both schemes: a placeholder is replaced on a plain request too, because a request the
+			// proxy can read is a request it can rewrite. NO_PROXY keeps the sandbox's own loopback
+			// out of it — a dev server a command starts is not an API call.
+			env["HTTPS_PROXY"] = proxy.url;
+			env["HTTP_PROXY"] = proxy.url;
+			env["NO_PROXY"] = "127.0.0.1,localhost,::1";
+			// Node ignores the system bundle and reads its own list from here; everything else reads
+			// the bundle at the path this names.
+			env["NODE_EXTRA_CA_CERTS"] = proxy.bundle;
+		}
 		return env;
 	}
 

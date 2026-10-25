@@ -50,6 +50,13 @@ export interface ExecChunk {
 export interface ExecOptions {
 	cwd?: string;
 	env?: Record<string, string>;
+	/**
+	 * The literal a command holds for each secret it may use, by name: on an engine whose substitution
+	 * is a proxy, the guest never sees the value, so the environment has to carry the placeholder the
+	 * proxy will swap. An engine that substitutes on its own side of the boundary ignores this — it
+	 * has already put the literal in the guest.
+	 */
+	secrets?: Record<string, string>;
 	/** Start from an empty environment instead of the guest's own. */
 	clearEnv?: boolean;
 	/** Milliseconds; the command is killed when it runs longer. */

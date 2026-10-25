@@ -1218,6 +1218,10 @@ type EngineInfo struct {
 	Isolated  bool   `json:"isolated"`
 	Installed bool   `json:"installed"`
 	Version   string `json:"version,omitempty"`
+	// Substitutes is whether a secret's value stays on the host and only a placeholder enters the
+	// sandbox. The card's wording follows it, so the interface does not carry its own list of which
+	// engines substitute — a list that would be wrong the day a third engine arrives.
+	Substitutes bool `json:"substitutes,omitempty"`
 	// Problem is why this machine cannot run the engine, in a sentence. An engine that is
 	// listed with a problem is still offered: the person choosing should see the reason.
 	Problem string `json:"problem,omitempty"`
@@ -1277,6 +1281,7 @@ func (w *Workspaces) engineInfo(name string, isDefault bool) EngineInfo {
 	if manager == nil {
 		return info
 	}
+	info.Substitutes = manager.SecretDelivery() == sandbox.DeliverySubstitute
 	report := manager.Report()
 	info.Installed = report.Installed
 	info.Version = report.Version

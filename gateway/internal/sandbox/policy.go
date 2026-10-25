@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,11 +70,36 @@ type Policy struct {
 	// user's folder, so that build artifacts cannot fight between host and guest. Not used
 	// yet, deliberately: see ADR 0012, "Not doing now, on purpose".
 	Owned []string
+	// SecretProxy is where this workspace's secrets proxy listens and the CA a client inside has
+	// to trust. Nil means the engine substitutes nothing and secrets arrive as values. Only an
+	// engine that reaches the host's network has one: a workspace with its network off has no
+	// proxy, and nothing to use a secret on. See docs/adr/0031-a-proxy-for-bwrap-secrets.md.
+	SecretProxy *SecretProxy
 	// Secrets are the values a driver may deliver, already filtered for its capability. A
 	// substitute engine writes source references into the policy file and keeps the values in
 	// the create/modify process environment; an environment engine puts them in the sandbox.
 	// See docs/adr/0021-a-vault-for-tool-secrets.md.
 	Secrets []Secret
+}
+
+// SecretProxy is one workspace's proxy as the engine needs it.
+type SecretProxy struct {
+	// URL is the proxy with its session credential, which is what a client inside the sandbox puts
+	// in HTTPS_PROXY. It is a loopback credential, not a secret with a host: whoever has it can ask
+	// the proxy for a substitution, which is exactly what a command in this workspace may do.
+	URL string
+	// CAFile is the proxy's CA on the machine. A sandbox's trust bundle is built from it and the
+	// image's own roots, because a client that does not trust the proxy cannot use a secret at all.
+	CAFile string
+}
+
+// Addr is the listener's host:port, which is what a driver forwards into the sandbox.
+func (p SecretProxy) Addr() string {
+	parsed, err := url.Parse(p.URL)
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Host
 }
 
 // Defaults, chosen to be unremarkable. The image matches this host's libc family so that

@@ -55,13 +55,28 @@ const workspaces: WorkspaceSummary[] = [
 /** The engines the create form offers: the default first, one that downloads on first use, and
  * one this machine cannot run. */
 const engines = [
-	{ name: "microsandbox", isDefault: true, usable: true, downloads: true, label: "microVM" },
-	{ name: "bwrap", isDefault: false, usable: true, downloads: false, label: "bwrap" },
+	{
+		name: "microsandbox",
+		isDefault: true,
+		usable: true,
+		downloads: true,
+		substitutes: true,
+		label: "microVM",
+	},
+	{
+		name: "bwrap",
+		isDefault: false,
+		usable: true,
+		downloads: false,
+		substitutes: true,
+		label: "bwrap",
+	},
 	{
 		name: "host",
 		isDefault: false,
 		usable: false,
 		downloads: false,
+		substitutes: false,
 		label: "host",
 		problem: "not isolated: commands run on the machine itself",
 	},

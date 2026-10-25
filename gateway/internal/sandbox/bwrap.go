@@ -293,6 +293,10 @@ type bwrapConfig struct {
 	// IdleTimeout stops a sandbox nothing has run in for a while. It is the same policy value the
 	// microVM engine is given, so both engines answer the question the same way.
 	IdleTimeout string `json:"idleTimeout"`
+	// SecretProxy is where this sandbox's commands send a placeholder: the credential for
+	// HTTPS_PROXY, the trust bundle, and the port pasta forwards. Absent when the workspace has
+	// no secrets, and then the argv forwards nothing.
+	SecretProxy *bwrapSecretProxy `json:"secretProxy,omitempty"`
 	// Devices is whether this sandbox received the host's /dev/net/tun and /dev/kvm.
 	Devices bool `json:"devices,omitempty"`
 	// Nested is whether this sandbox was created inside another bwrap workspace. A nested
@@ -300,6 +304,24 @@ type bwrapConfig struct {
 	Nested bool `json:"nested,omitempty"`
 	// Beta notes what this shape does not do yet, so the file does not read as a promise.
 	Beta string `json:"beta"`
+}
+
+// processPath is what the sandbox's own processes find a program on. The supervisor is started by
+// absolute path and reads flags, but a shell inside a sandbox is started with the policy's own PATH;
+// this is the one the sandbox process itself gets before anything of the workspace exists.
+const processPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+// sandboxProcessEnv is the environment the sandbox's own processes are started with. Three
+// variables: a path for the few programs those processes may run, the workspace's private home so a
+// tool that wants a cache does not write to the machine's, and a locale so a command's bytes are
+// UTF-8 before the supervisor gives it its own environment. Everything else the gateway holds — a
+// token, a cloud key — stays out.
+func sandboxProcessEnv(config bwrapConfig) []string {
+	home := config.DataDir
+	if home == "" {
+		home = "/"
+	}
+	return []string{"PATH=" + processPath, "HOME=" + home, "LANG=C.UTF-8"}
 }
 
 // Where the supervisor lives inside a sandbox, and where its socket does. The guest paths are
@@ -315,6 +337,27 @@ const (
 // terminator). Both sides of one socket have to fit, and the host side is the long one, which is
 // why the folder is named by a short hash rather than by the sandbox's whole name.
 const socketLimit = 106
+
+// bwrapSecretProxy is what a command needs to use this workspace's secrets: a proxy URL with its
+// session credential, the bundle a client has to trust, and the port pasta forwards. The worker
+// reads the first two and sets them in the environment it hands each command.
+type bwrapSecretProxy struct {
+	URL string `json:"url"`
+	// BundleFile is the trust bundle on the machine; Bundle is where it is bound inside, and is
+	// repeated here because the worker tells node about it.
+	BundleFile string `json:"bundleFile"`
+	Bundle     string `json:"bundle"`
+	Port       int    `json:"port"`
+}
+
+// guestCABundle is the path every Debian-family image reads its roots from, and Alpine ships it
+// too. The workspace's bundle is bound over it: a client reads one file and finds the image's own
+// roots and this install's CA, which is what keeps every other TLS connection working.
+const guestCABundle = "/etc/ssl/certs/ca-certificates.crt"
+
+// noForwarding is pasta's word for a port it does not carry. A workspace with no proxy forwards
+// nothing, which is the shape every workspace had before the proxy existed.
+const noForwarding = "none"
 
 // bwrapNetwork is the network a command gets. The tool paths are resolved when the workspace is
 // created, so a missing one is a sentence then rather than a mystery in the middle of a turn.
@@ -453,6 +496,21 @@ func (b *Bwrap) networkFor(policy Policy) (bwrapNetwork, error) {
 	}, nil
 }
 
+// network is how this sandbox reaches the network and which resolver it is given. One call, because
+// the resolver depends on the network: a workspace with no egress resolves through the machine's
+// own file so that it is refused before it is asked, and one with egress resolves through pasta.
+func (b *Bwrap) network(policy Policy) (bwrapNetwork, string, error) {
+	network, err := b.networkFor(policy)
+	if err != nil {
+		return bwrapNetwork{}, "", err
+	}
+	resolvConf, err := b.resolveResolv(Name(policy.Workspace), network)
+	if err != nil {
+		return bwrapNetwork{}, "", err
+	}
+	return network, resolvConf, nil
+}
+
 // socketPaths is the session's runtime folder and the two sockets in it. The socket lives there
 // rather than in the store because a Unix socket path has a hard length and this way the length
 // is the same wherever the install lives; the limit is checked here because the failure without
@@ -487,15 +545,15 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 	if err != nil {
 		return bwrapConfig{}, err
 	}
-	network, err := b.networkFor(policy)
-	if err != nil {
-		return bwrapConfig{}, err
-	}
-	resolvConf, err := b.resolveResolv(Name(policy.Workspace), network)
+	network, resolvConf, err := b.network(policy)
 	if err != nil {
 		return bwrapConfig{}, err
 	}
 	supervisor, err := b.supervisor(policy)
+	if err != nil {
+		return bwrapConfig{}, err
+	}
+	secretProxy, err := b.secretProxyFor(policy, Name(policy.Workspace), rootfs)
 	if err != nil {
 		return bwrapConfig{}, err
 	}
@@ -516,6 +574,7 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 		Run:         supervisor.run,
 		GuestRun:    guestRunDir,
 		IdleTimeout: idleTimeoutOrDefault(policy.IdleTimeout),
+		SecretProxy: secretProxy,
 		Devices:     policy.Devices,
 		Nested:      os.Getenv(nestedEnv) == "1",
 		Beta:        "one sandbox per workspace, held by this binary as its first process",
@@ -563,6 +622,10 @@ func (b *Bwrap) Start(ctx context.Context, name string, _ []Secret) error {
 	}
 	defer logFile.Close()
 	command := exec.Command(argv[0], argv[1:]...)
+	// Its own environment, and only that: the sandbox's first process reads flags. What it inherited
+	// instead was everything acornfall was started with, readable from inside at
+	// /proc/<pid>/environ — a workspace is not a place to keep the machine's credentials.
+	command.Env = sandboxProcessEnv(config)
 	// Its own session: the sandbox outlives the gateway that started it, so that a restart can
 	// adopt it instead of killing what the workspace was running.
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -778,23 +841,103 @@ func (b *Bwrap) pullToDir(dir, base, complete, image string) error {
 	})
 }
 
+// secretProxyFor assembles what a sandbox needs to trust and reach the workspace's proxy: the port
+// pasta forwards, the URL a command puts in HTTPS_PROXY, and a trust bundle built from the image's
+// own roots plus this install's CA.
+//
+// The bundle is the image's roots *and* ours on purpose. Binding only ours would work for a secret
+// and break every other TLS connection a command makes, which is a sandbox that cannot install a
+// package; binding only the image's is a proxy nobody trusts.
+func (b *Bwrap) secretProxyFor(policy Policy, name, rootfs string) (*bwrapSecretProxy, error) {
+	if policy.SecretProxy == nil {
+		return nil, nil
+	}
+	addr := policy.SecretProxy.Addr()
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("sandbox: the secrets proxy has no usable address (%q): %w", policy.SecretProxy.URL, err)
+	}
+	number, err := strconv.Atoi(port)
+	if err != nil || number <= 0 || number > 65535 {
+		return nil, fmt.Errorf("sandbox: the secrets proxy port %q is not a port", port)
+	}
+	ca, err := os.ReadFile(policy.SecretProxy.CAFile)
+	if err != nil {
+		return nil, fmt.Errorf("sandbox: reading the secrets proxy's CA: %w", err)
+	}
+	bundleFile := filepath.Join(b.workspaceDir(name), "ca-bundle.pem")
+	if err := writeTrustBundle(bundleFile, imageRoots(rootfs), ca); err != nil {
+		return nil, err
+	}
+	return &bwrapSecretProxy{
+		URL:        policy.SecretProxy.URL,
+		BundleFile: bundleFile,
+		Bundle:     guestCABundle,
+		Port:       number,
+	}, nil
+}
+
+// imageRoots is the roots a sandbox would have trusted before this install's CA was added: its own
+// image's bundle, or the machine's when the workspace binds the host root read-only.
+func imageRoots(rootfs string) []byte {
+	paths := []string{guestCABundle}
+	if rootfs != "" {
+		paths = append([]string{filepath.Join(rootfs, guestCABundle)}, paths...)
+	}
+	for _, path := range paths {
+		if data, err := os.ReadFile(path); err == nil {
+			return data
+		}
+	}
+	return nil
+}
+
+// writeTrustBundle writes the image's roots followed by the install's CA, each on its own lines so
+// a PEM reader sees two blocks rather than one concatenated blob.
+func writeTrustBundle(path string, roots, ca []byte) error {
+	bundle := make([]byte, 0, len(roots)+len(ca)+2)
+	bundle = appendBlock(bundle, roots)
+	bundle = appendBlock(bundle, ca)
+	if err := os.WriteFile(path, bundle, 0o644); err != nil {
+		return fmt.Errorf("sandbox: writing the trust bundle: %w", err)
+	}
+	return nil
+}
+
+func appendBlock(bundle, block []byte) []byte {
+	if len(block) == 0 {
+		return bundle
+	}
+	bundle = append(bundle, block...)
+	if !strings.HasSuffix(string(block), "\n") {
+		bundle = append(bundle, '\n')
+	}
+	return bundle
+}
+
 // workspaceDir is a path inside this workspace's sandbox folder.
 func (b *Bwrap) workspaceDir(name string) string {
 	return filepath.Join(b.StateDir(), name)
 }
 
-// SecretDelivery is the environment: there is no guest to substitute into. A value in the
-// worker's environment reaches the command, and the interface says so.
-func (b *Bwrap) SecretDelivery() Delivery { return DeliveryEnvironment }
+// SecretDelivery is substitution: the guest holds a placeholder, and the proxy this install runs
+// for the workspace swaps in the value for the hosts the secret names. See
+// docs/adr/0031-a-proxy-for-bwrap-secrets.md.
+func (b *Bwrap) SecretDelivery() Delivery { return DeliverySubstitute }
 
-// SecretEnvInWorker puts the values in the worker's process environment, which is what a
-// command inside the sandbox inherits.
-func (b *Bwrap) SecretEnvInWorker() bool { return true }
+// SecretProxyInControl is true: the proxy control starts for this workspace is the thing that
+// substitutes, so the policy carries its address and its CA.
+func (b *Bwrap) SecretProxyInControl() bool { return true }
 
-// SecretsChanged cannot change what a future command's environment holds; the worker is
-// restarted and reads the new set on the way up.
+// SecretEnvInWorker is false: the worker never receives a value, so nothing it spawns — a command,
+// a hook, a crash report — can inherit one.
+func (b *Bwrap) SecretEnvInWorker() bool { return false }
+
+// SecretsChanged needs no restart. The grants live in the proxy control started for this
+// workspace, and it swaps them under the running sandbox; a workspace with no proxy has no values
+// to change either.
 func (b *Bwrap) SecretsChanged(context.Context, string, []Secret) (SecretChange, error) {
-	return SecretChange{RestartRequired: true}, nil
+	return SecretChange{}, nil
 }
 
 // configPath is where one workspace's config lives, named as the engine names sandboxes so a
@@ -902,6 +1045,13 @@ func (b *Bwrap) bootArgv(config bwrapConfig) ([]string, error) {
 		// address need.
 		configure = append(configure, refusePrivate)
 	}
+	// One port into the sandbox's own loopback: the secrets proxy, and nothing else of the
+	// machine. Measured: with -T naming a port, that port answers and every other listener on the
+	// machine's loopback stays refused. See docs/adr/0031-a-proxy-for-bwrap-secrets.md.
+	forwards := noForwarding
+	if config.SecretProxy != nil {
+		forwards = strconv.Itoa(config.SecretProxy.Port)
+	}
 	argv := []string{
 		config.Network.Pasta, "-q",
 		// Outbound only. pasta's port forwarding defaults to "auto", which mirrors every service
@@ -909,7 +1059,7 @@ func (b *Bwrap) bootArgv(config bwrapConfig) ([]string, error) {
 		// on 22 among them — and that is the machine's own surface, not the workspace's. Nothing in
 		// the sandbox needs a port opened for it, and nothing here is a port the machine should
 		// offer into a workspace.
-		"-t", "none", "-u", "none", "-T", "none", "-U", "none",
+		"-t", "none", "-u", "none", "-T", forwards, "-U", "none",
 		// The gateway address would otherwise be translated to the machine's loopback, which is
 		// the same surface by another name. See docs/adr/0023-bwrap-engine.md.
 		"--no-map-gw",
@@ -954,7 +1104,9 @@ func (b *Bwrap) sandboxArgv(config bwrapConfig) ([]string, error) {
 	if config.Bwrap == "" {
 		return nil, errors.New("sandbox: the config has no bubblewrap path: recreate the sandbox")
 	}
-	argv := []string{config.Bwrap}
+	// --clearenv first: bubblewrap applies these in order, and the devices this sandbox was granted
+	// add --setenv flags of their own. Clearing after them would clear what they set.
+	argv := []string{config.Bwrap, "--clearenv"}
 	argv = append(argv, b.mountArgs(config)...)
 	argv = append(argv, isolationArgs(config)...)
 	argv = append(argv, "--", guestSupervisor, "internal", "sandbox-supervisor", "--socket", config.GuestSocket)
@@ -984,6 +1136,11 @@ func (b *Bwrap) mountArgs(config bwrapConfig) []string {
 	}
 	for _, path := range config.ReadOnly {
 		argv = append(argv, "--ro-bind", path, path)
+	}
+	if config.SecretProxy != nil {
+		// After the root, so the bind lands in the image the sandbox actually has. Read-only: the
+		// bundle is the install's, and a workspace that could write it could trust itself.
+		argv = append(argv, "--ro-bind", config.SecretProxy.BundleFile, guestCABundle)
 	}
 	return append(argv,
 		"--bind", config.DataDir, guestHome(config),

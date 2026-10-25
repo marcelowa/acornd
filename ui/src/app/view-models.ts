@@ -44,6 +44,8 @@ export interface EngineSummary {
 	usable: boolean;
 	/** True when choosing it starts with a download: the engine is not on the machine yet. */
 	downloads: boolean;
+	/** True when a secret's value stays on the host and only a placeholder enters the sandbox. */
+	substitutes: boolean;
 	problem?: string | undefined;
 	/** A short word for a narrow control: the engine's own name, or its family. */
 	label: string;

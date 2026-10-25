@@ -220,6 +220,7 @@ export function toEngines(engines: WireEngine[] | undefined): EngineSummary[] {
 		// as a refusal disabled the switch whose workspace would have installed it.
 		usable: engine.problem === undefined,
 		downloads: !engine.installed,
+		substitutes: engine.substitutes === true,
 		// The gateway's refusals carry its own "sandbox unavailable:" prefix, which is an internal
 		// marker: what a person needs is the sentence after it, and the fix it names.
 		problem: engine.problem?.replace(/^sandbox unavailable:\s*/, ""),

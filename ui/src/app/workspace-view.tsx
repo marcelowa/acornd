@@ -607,6 +607,11 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		}
 		void platform.startLogin(provider, method).catch(() => undefined);
 	};
+	// The engine's own answer, once: the two cards below say whether a value enters the sandbox and
+	// whether a host is required, and neither keeps its own list of engine names.
+	const substitutes =
+		platform.engines?.find((one) => one.name === platform.sandbox?.engine)?.substitutes ===
+		true;
 	const secrets = (
 		<SecretsSection
 			workspace={
@@ -614,7 +619,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					? undefined
 					: { name: activeWorkspace.name, path: activeWorkspace.path }
 			}
-			engine={platform.sandbox?.engine}
+			substitutes={substitutes}
 		/>
 	);
 
@@ -823,7 +828,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			<SecretRequestDialog
 				key={platform.secretRequest?.requestId ?? "none"}
 				request={platform.secretRequest}
-				engine={platform.sandbox?.engine}
+				substitutes={substitutes}
 				onAnswer={platform.answerSecret}
 				onCancel={platform.cancelSecret}
 			/>

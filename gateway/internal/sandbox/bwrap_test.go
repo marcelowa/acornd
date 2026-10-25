@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -529,19 +530,99 @@ func TestBwrapHasALifecycleLikeEveryOtherEngine(t *testing.T) {
 	}
 }
 
-func TestBwrapDeliversSecretsInTheEnvironment(t *testing.T) {
+func TestBwrapSubstitutesSecretsThroughItsProxy(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
-	if driver.SecretDelivery() != DeliveryEnvironment {
-		t.Fatalf("delivery: %v, want environment", driver.SecretDelivery())
+	if driver.SecretDelivery() != DeliverySubstitute {
+		t.Fatalf("delivery: %v, want substitute", driver.SecretDelivery())
 	}
-	// The values belong in the worker's process, which is what a command inherits; there is
-	// no guest to substitute into.
-	if !driver.SecretEnvInWorker() {
-		t.Fatal("secrets are not delivered to the worker")
+	// The values stay in the proxy control runs for this workspace. A worker that held them would
+	// hand them to every command it spawned, a hook, and a crash report.
+	if driver.SecretEnvInWorker() {
+		t.Fatal("the worker must not carry a secret's value")
 	}
-	change, err := driver.SecretsChanged(context.Background(), "x", nil)
-	if err != nil || !change.RestartRequired {
-		t.Fatalf("change: %+v, %v; want a restart", change, err)
+	change, err := driver.SecretsChanged(context.Background(), "x", []Secret{{Name: "K", Value: "v", Hosts: []string{"api.example.com"}}})
+	if err != nil {
+		t.Fatalf("change: %v", err)
+	}
+	if change.RestartRequired {
+		t.Fatal("a grant swap under a running proxy should not need a restart")
+	}
+}
+
+// A workspace with a proxy gets one port into its own loopback and a bundle it trusts. The two
+// cases are asserted as arguments, because pasta and bubblewrap read the arguments and nothing
+// else about this decision reaches them.
+func TestABwrapWorkspaceWithASecretsProxyCarriesOnePortAndItsCA(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	base := bwrapConfig{
+		Workspace:   "/work/ws",
+		Rootfs:      "/state/ws/rootfs",
+		DataDir:     "/state/ws/home",
+		Bwrap:       "/usr/bin/bwrap",
+		Supervisor:  "/install/acornfall",
+		Run:         "/state/ws/run",
+		GuestRun:    guestRunDir,
+		GuestSocket: guestSocketPath,
+		Network: bwrapNetwork{
+			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
+			Pasta: "/usr/bin/pasta",
+		},
+	}
+
+	withProxy := base
+	withProxy.SecretProxy = &bwrapSecretProxy{
+		URL: "http://acornfall:a-token@127.0.0.1:41234", BundleFile: "/state/ws/ca-bundle.pem",
+		Bundle: guestCABundle, Port: 41234,
+	}
+	argv, err := driver.bootArgv(withProxy)
+	if err != nil {
+		t.Fatalf("argv: %v", err)
+	}
+	joined := strings.Join(argv, " ")
+	if !strings.Contains(joined, "-t none -u none -T 41234 -U none") {
+		t.Errorf("pasta should carry exactly the proxy's port:\n%s", joined)
+	}
+	if !strings.Contains(joined, "--ro-bind /state/ws/ca-bundle.pem "+guestCABundle) {
+		t.Errorf("the bundle should be bound read-only over the image's roots:\n%s", joined)
+	}
+
+	without, err := driver.bootArgv(base)
+	if err != nil {
+		t.Fatalf("argv: %v", err)
+	}
+	plain := strings.Join(without, " ")
+	if !strings.Contains(plain, "-t none -u none -T none -U none") {
+		t.Errorf("a workspace with no proxy should forward nothing:\n%s", plain)
+	}
+	if strings.Contains(plain, "ca-bundle.pem") {
+		t.Errorf("a workspace with no proxy has no bundle to bind:\n%s", plain)
+	}
+}
+
+// The trust bundle is the image's own roots and this install's CA, in that order: a client that
+// trusted only the proxy would lose every other TLS connection a command makes.
+func TestTheTrustBundleIsTheImagesRootsAndThisInstallsCA(t *testing.T) {
+	rootfs := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(rootfs, "etc/ssl/certs"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootfs, guestCABundle), []byte("-- an image root --"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "bundle.pem")
+	if err := writeTrustBundle(path, imageRoots(rootfs), []byte("-- this install's CA --")); err != nil {
+		t.Fatalf("bundle: %v", err)
+	}
+	bundle, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	want := "-- an image root --\n-- this install's CA --\n"
+	if string(bundle) != want {
+		t.Errorf("bundle is %q, want %q", bundle, want)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o644 {
+		t.Errorf("the bundle is %v, and a client inside has to read it: %v", info, err)
 	}
 }
 
@@ -923,5 +1004,41 @@ func TestBwrapEgressProbeSaysWhatToDo(t *testing.T) {
 	driver.pasta = func(string) error { return errors.New("setting up user namespace: Operation not permitted") }
 	if err := driver.Egress(); err == nil || !strings.Contains(err.Error(), "Operation not permitted") {
 		t.Fatalf("a refused namespace should be passed through with its reason: %v", err)
+	}
+}
+
+// The sandbox's own processes are started with three variables, not with the gateway's environment.
+// What they inherited instead was everything acornfall was started with, and a command inside could
+// read it at /proc/<pid>/environ: a workspace is not where the machine's credentials live.
+func TestTheSandboxProcessGetsItsOwnEnvironment(t *testing.T) {
+	t.Parallel()
+	env := sandboxProcessEnv(bwrapConfig{DataDir: "/state/ws/home"})
+	want := []string{"PATH=" + processPath, "HOME=/state/ws/home", "LANG=C.UTF-8"}
+	if !slices.Equal(env, want) {
+		t.Errorf("the sandbox's environment is %q, want %q", env, want)
+	}
+	if strings.Contains(strings.Join(env, " "), "ACORNFALL") {
+		t.Errorf("nothing of this install should reach the sandbox's own environment: %q", env)
+	}
+	if empty := sandboxProcessEnv(bwrapConfig{}); empty[1] != "HOME=/" {
+		t.Errorf("a config with no home still needs one: %q", empty)
+	}
+}
+
+// --clearenv comes first. bubblewrap applies its flags in order, and the devices a sandbox was
+// granted add --setenv flags of their own — a clear after them would clear what they set.
+func TestTheSandboxArgvClearsTheEnvironmentFirst(t *testing.T) {
+	t.Parallel()
+	driver, _ := testBwrap(t, t.TempDir())
+	argv, err := driver.sandboxArgv(bwrapConfig{
+		Bwrap: "/usr/bin/bwrap", Workspace: "/work/ws", DataDir: "/state/ws/home",
+		Run: "/state/ws/run", GuestRun: guestRunDir, GuestSocket: guestSocketPath,
+		Supervisor: "/install/acornfall",
+	})
+	if err != nil {
+		t.Fatalf("argv: %v", err)
+	}
+	if len(argv) < 2 || argv[1] != "--clearenv" {
+		t.Fatalf("the sandbox's argv should clear the environment before anything sets one: %q", argv)
 	}
 }

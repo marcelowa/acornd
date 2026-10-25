@@ -324,6 +324,14 @@ func (m *Manager) prepare(ctx context.Context, policy Policy, dir string) error 
 	return engine.Prepare(ctx, policy, dir)
 }
 
+// SecretProxyInControl reports whether this engine substitutes through a proxy this process runs
+// for the workspace. Only such an engine's policy carries a proxy: a microVM engine substitutes on
+// its own egress path, and a host engine has no guest to keep a value out of.
+func (m *Manager) SecretProxyInControl() bool {
+	proxied, ok := m.driver.(interface{ SecretProxyInControl() bool })
+	return ok && proxied.SecretProxyInControl()
+}
+
 // SecretDelivery is the engine's way of delivering a tool secret. It is a capability, not a
 // policy: the control filters the vault against it before building a policy.
 func (m *Manager) SecretDelivery() Delivery {

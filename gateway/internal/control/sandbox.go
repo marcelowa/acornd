@@ -128,6 +128,9 @@ func (c *Control) provisionSandbox(ctx context.Context) SandboxState {
 	policy := c.opts.Workspace.SandboxPolicy(c.opts.DataDir, c.opts.UserHome)
 	policy.OnStage = c.stage
 	policy.Secrets = resolved.delivered
+	// The proxy starts before the sandbox: pasta's forward is part of the sandbox's argv, so a
+	// proxy that arrived afterwards would need a new sandbox to be reachable at all.
+	c.applyProxyToPolicy(&policy, manager, delivery, &resolved)
 	if _, err := manager.Produce(ctx, policy, filepath.Dir(c.opts.StoragePath)); err != nil {
 		state.Problem = err.Error()
 		workerpool.Log("sandbox for %s: %v", c.opts.Workspace.Name, err)
@@ -158,6 +161,33 @@ func (c *Control) sandboxRefusal() SandboxState {
 		return SandboxState{Problem: problem.Error()}
 	}
 	return SandboxState{Problem: "no sandbox is configured: tool execution is disabled"}
+}
+
+// applyProxyToPolicy starts this workspace's proxy and puts it in the policy the engine is about to
+// read. A proxy that cannot start is a workspace whose secrets cannot be used: saying so beats a
+// placeholder that nothing substitutes.
+func (c *Control) applyProxyToPolicy(policy *sandbox.Policy, manager *sandbox.Manager, delivery sandbox.Delivery, resolved *sandboxSecrets) {
+	if resolved.problem != "" || !manager.SecretProxyInControl() {
+		return
+	}
+	if !policy.Egress {
+		// The proxy is reached through pasta, and a workspace with no network has no pasta. A
+		// placeholder with nothing behind it is a command that fails with "connection refused"
+		// for a reason nothing in the transcript explains, so the secrets are not delivered and
+		// the state says why.
+		resolved.problem = "not delivered: a workspace with its network off has no proxy to reach"
+		policy.Secrets = nil
+		return
+	}
+	proxy, err := c.startSecretsProxy(delivery, resolved.delivered)
+	if err != nil {
+		resolved.problem = err.Error()
+		policy.Secrets = nil
+		return
+	}
+	if proxy != nil {
+		policy.SecretProxy = c.secretProxyPolicy(proxy)
+	}
 }
 
 // reconcileStoredSecrets brings a sandbox that was here before a secret changed up to date. No

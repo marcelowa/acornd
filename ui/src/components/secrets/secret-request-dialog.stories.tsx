@@ -29,7 +29,7 @@ const noop = async (): Promise<void> => undefined;
 export const Open: Story = {
 	args: {
 		request,
-		engine: "microsandbox",
+		substitutes: true,
 		onAnswer: noop,
 		onCancel: noop,
 	},
@@ -39,7 +39,7 @@ export const Open: Story = {
 export const InTheSandbox: Story = {
 	args: {
 		...Open.args,
-		engine: "host",
+		substitutes: false,
 	},
 };
 

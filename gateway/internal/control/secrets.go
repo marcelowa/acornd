@@ -6,12 +6,16 @@ package control
 
 import (
 	"context"
+	"fmt"
+	"hash/fnv"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/protocol"
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+	"github.com/acornfall/acornfall/gateway/internal/secretsproxy"
 	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 )
 
@@ -63,6 +67,85 @@ func secretPlaceholder(delivery sandbox.Delivery, name string) string {
 		return ""
 	}
 	return "$MSB_" + name
+}
+
+// startSecretsProxy makes sure this workspace has a proxy for its secrets, and answers nil when it
+// has none to serve: an engine that substitutes nothing, or a vault that resolved to nothing. A
+// proxy that is already listening is given the new grants instead of a second listener, which is
+// what makes a rotation live rather than a restart.
+func (c *Control) startSecretsProxy(delivery sandbox.Delivery, delivered []sandbox.Secret) (*secretsproxy.Proxy, error) {
+	if delivery != sandbox.DeliverySubstitute || len(delivered) == 0 {
+		return nil, nil
+	}
+	grants := grantsFor(delivered)
+	c.mu.Lock()
+	running := c.proxy
+	c.mu.Unlock()
+	if running != nil {
+		running.SetGrants(grants)
+		return running, nil
+	}
+	dir := filepath.Join(c.opts.DataDir, "proxy")
+	name := c.opts.Workspace.Name
+	proxy, err := secretsproxy.New(dir, secretsproxy.Config{
+		Grants: grants,
+		Addr:   fmt.Sprintf("127.0.0.1:%d", proxyPort(c.opts.Workspace.Path)),
+		Logf: func(format string, args ...any) {
+			workerpool.Log("secrets %s: "+format, append([]any{name}, args...)...)
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Its own context, not the caller's: the caller is one request, and a proxy that stopped with
+	// it would leave the sandbox's forward pointing at a closed port (G1).
+	serve, stop := context.WithCancel(context.Background())
+	go func() {
+		// A proxy that stops is the control's own shutdown, not a failure to report here.
+		_ = proxy.Serve(serve)
+	}()
+	c.mu.Lock()
+	c.proxy, c.proxyStop = proxy, stop
+	c.mu.Unlock()
+	return proxy, nil
+}
+
+// secretProxyPolicy is what the engine needs to carry the proxy: the URL a command puts in
+// HTTPS_PROXY, and the CA a client inside has to trust.
+func (c *Control) secretProxyPolicy(proxy *secretsproxy.Proxy) *sandbox.SecretProxy {
+	credential := url.UserPassword("acornfall", proxy.Token())
+	return &sandbox.SecretProxy{
+		URL:    "http://" + credential.String() + "@" + proxy.Addr(),
+		CAFile: secretsproxy.CAPath(filepath.Join(c.opts.DataDir, "proxy")),
+	}
+}
+
+// grantsFor is the vault's resolved set in the shape the proxy decides with. The placeholder is
+// the same literal a microVM workspace shows, so the agent is told one story about a secret.
+func grantsFor(delivered []sandbox.Secret) []secretsproxy.Grant {
+	grants := make([]secretsproxy.Grant, 0, len(delivered))
+	for _, secret := range delivered {
+		grants = append(grants, secretsproxy.Grant{
+			Name:        secret.Name,
+			Value:       secret.Value,
+			Placeholder: secretPlaceholder(sandbox.DeliverySubstitute, secret.Name),
+			Hosts:       secret.Hosts,
+			Headers:     secret.Headers,
+			Query:       secret.Query,
+			Body:        secret.Body,
+		})
+	}
+	return grants
+}
+
+// proxyPort is where a workspace's proxy listens. Derived from the workspace rather than picked,
+// because pasta's forward is baked into a sandbox's argv: a gateway that restarts must bind the
+// port the sandbox it adopts was booted with, or that workspace's secrets are dead until it is
+// recreated.
+func proxyPort(workspace string) int {
+	sum := fnv.New32a()
+	_, _ = sum.Write([]byte(workspace))
+	return 20000 + int(sum.Sum32()%40000)
 }
 
 // SecretDelivery is the engine's way of delivering a secret, for the card's validation.
@@ -148,6 +231,15 @@ func (c *Control) ApplySecrets(ctx context.Context, deferRestart bool) error {
 	if delivery == sandbox.DeliveryEnvironment && manager.SecretEnvInWorker() {
 		return c.applyWorkerSecrets(ctx, resolved, deferRestart)
 	}
+	if delivery == sandbox.DeliverySubstitute && manager.SecretProxyInControl() {
+		return c.applyProxySecrets(resolved)
+	}
+	return c.applyEngineSecrets(ctx, manager, resolved, deferRestart)
+}
+
+// applyEngineSecrets is the answer for an engine whose own surface takes a change: ask it, record
+// what it said, and apply a deferred restart now when nobody is running.
+func (c *Control) applyEngineSecrets(ctx context.Context, manager *sandbox.Manager, resolved sandboxSecrets, deferRestart bool) error {
 	change, err := manager.SecretsChanged(ctx, c.opts.Workspace.Path, resolved.delivered)
 	if err != nil {
 		return err
@@ -157,6 +249,17 @@ func (c *Control) ApplySecrets(ctx context.Context, deferRestart bool) error {
 		// Nobody is running: apply it now instead of waiting for a submission that may be
 		// hours away. A run in flight, or a card answered during one, waits for that run.
 		c.applyPendingSecretRestart(ctx)
+	}
+	return nil
+}
+
+// applyProxySecrets is the proxy engine's answer: the grants are swapped under a running proxy, so a
+// rotation is live and a command that is running is not interrupted for it. A proxy that cannot
+// start is a change that never landed, and the person who saved the value hears about it.
+func (c *Control) applyProxySecrets(resolved sandboxSecrets) error {
+	if _, err := c.startSecretsProxy(sandbox.DeliverySubstitute, resolved.delivered); err != nil {
+		c.recordSecrets(resolved.state, err.Error(), nil)
+		return err
 	}
 	return nil
 }

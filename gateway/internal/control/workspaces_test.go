@@ -213,3 +213,20 @@ func TestTheEngineListNoticesAnEngineInstalledWhileRunning(t *testing.T) {
 		t.Fatal("after a workspace start the chooser should see the engine that landed")
 	}
 }
+
+// The engine list carries the domain's answer to "does this engine substitute?", because the
+// interface's copy and its host requirement follow it. Without it the interface would keep its own
+// list of engine names, which is wrong the day a third engine arrives.
+func TestTheEngineListSaysWhichEnginesSubstitute(t *testing.T) {
+	t.Parallel()
+	tier := sandbox.NewTier(t.TempDir(), "", nil)
+	manager, err := tier.For("bwrap")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspaces := NewWorkspaces(WorkspacesOptions{WorkspacesDir: t.TempDir(), Sandbox: manager, Sandboxes: tier})
+	info := workspaces.engineInfo("bwrap", false)
+	if !info.Substitutes {
+		t.Error("bwrap substitutes: the value stays on the host and a placeholder goes in")
+	}
+}

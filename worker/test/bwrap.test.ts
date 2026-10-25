@@ -35,7 +35,7 @@ interface Opened {
 /** A workspace, its config, and a supervisor to talk to. */
 async function open(
 	network: "pasta" | "off" = "off",
-	options: { ignoreKill?: boolean } = {},
+	options: { ignoreKill?: boolean; secretProxy?: { url: string; bundle: string } } = {},
 ): Promise<Opened> {
 	const root = await realpath(await mkdtemp(join(tmpdir(), "acornfall-bwrap-")));
 	opened.push(root);
@@ -59,6 +59,7 @@ async function open(
 			hidden: join(root, "hidden"),
 			readOnly: [],
 			socket: fake.socket,
+			...(options.secretProxy === undefined ? {} : { secretProxy: options.secretProxy }),
 		}),
 	);
 	process.env.ACORNFALL_BWRAP_STATE = state;
@@ -214,6 +215,62 @@ test("an attached worker tells its sandbox it is still here", async () => {
 			await Bun.sleep(10);
 		}
 		expect(fake.keepalives.length).toBeGreaterThan(0);
+	} finally {
+		await fake.close();
+	}
+});
+
+test("a workspace with a proxy puts it in the environment its commands get", async () => {
+	const proxy = {
+		url: "http://acornfall:a-token@127.0.0.1:41234",
+		bundle: "/etc/ssl/certs/ca-certificates.crt",
+	};
+	const { client, fake } = await open("pasta", { secretProxy: proxy });
+	try {
+		await client.exec("true", {});
+		const env = fake.captured.at(-1)?.env;
+		expect(env?.["HTTPS_PROXY"]).toBe(proxy.url);
+		expect(env?.["HTTP_PROXY"]).toBe(proxy.url);
+		// The sandbox's own loopback is not an API call.
+		expect(env?.["NO_PROXY"]).toBe("127.0.0.1,localhost,::1");
+		// Node reads its own root list from here; the bundle is the one the CA was added to.
+		expect(env?.["NODE_EXTRA_CA_CERTS"]).toBe(proxy.bundle);
+		// The credential is the proxy's, not a secret's: no value is anywhere in the environment.
+		expect(Object.values(env ?? {}).some((value) => value.includes("sk-"))).toBe(false);
+	} finally {
+		await fake.close();
+	}
+});
+
+test("a command does not inherit the gateway's environment", async () => {
+	const { client, fake } = await open();
+	const before = process.env.TERM;
+	process.env.ACORNFALL_AMBIENT_TOKEN = "a-token-the-gateway-was-started-with";
+	process.env.TERM = "a-term-from-the-shell";
+	try {
+		await client.exec("true", {});
+		const env = fake.captured.at(-1)?.env;
+		// The worker was started with acornfall's own environment, and a command that inherited it
+		// inherited whatever the gateway was holding. Only the handful a shell needs crosses over.
+		expect(env?.["ACORNFALL_AMBIENT_TOKEN"]).toBeUndefined();
+		expect(env?.["TERM"]).toBe("a-term-from-the-shell");
+		expect(env?.["HOME"]).toBe("/root");
+	} finally {
+		delete process.env.ACORNFALL_AMBIENT_TOKEN;
+		if (before === undefined) delete process.env.TERM;
+		else process.env.TERM = before;
+		await fake.close();
+	}
+});
+
+test("a command holds the placeholder for a secret it may use", async () => {
+	const { client, fake } = await open("pasta");
+	try {
+		await client.exec("true", { secrets: { GITHUB_TOKEN: "$MSB_GITHUB_TOKEN" } });
+		const env = fake.captured.at(-1)?.env;
+		// The value never reaches the guest: the proxy swaps this literal for the host the secret
+		// names, and a command that prints its environment prints the placeholder.
+		expect(env?.["GITHUB_TOKEN"]).toBe("$MSB_GITHUB_TOKEN");
 	} finally {
 		await fake.close();
 	}

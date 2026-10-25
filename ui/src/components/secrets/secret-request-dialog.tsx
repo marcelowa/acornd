@@ -19,7 +19,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 export interface SecretRequestDialogProps {
 	/** The open request, if any. The value arrives only from this card. */
 	request?: WireSecretEvent | undefined;
-	engine?: string | undefined;
+	/** Whether this workspace's engine substitutes, which decides whether a host is required. */
+	substitutes?: boolean;
 	onAnswer: (requestId: string, input: SecretAnswerInput) => Promise<void>;
 	onCancel: (requestId: string) => Promise<void>;
 }
@@ -31,7 +32,7 @@ export interface SecretRequestDialogProps {
  */
 export function SecretRequestDialog({
 	request,
-	engine,
+	substitutes = false,
 	onAnswer,
 	onCancel,
 }: SecretRequestDialogProps) {
@@ -41,7 +42,7 @@ export function SecretRequestDialog({
 	return (
 		<SecretRequestCard
 			request={request}
-			engine={engine}
+			substitutes={substitutes}
 			onAnswer={onAnswer}
 			onCancel={onCancel}
 		/>
@@ -50,12 +51,12 @@ export function SecretRequestDialog({
 
 function SecretRequestCard({
 	request,
-	engine,
+	substitutes,
 	onAnswer,
 	onCancel,
 }: {
 	request: WireSecretEvent;
-	engine?: string | undefined;
+	substitutes: boolean;
 	onAnswer: SecretRequestDialogProps["onAnswer"];
 	onCancel: SecretRequestDialogProps["onCancel"];
 }) {
@@ -71,9 +72,7 @@ function SecretRequestCard({
 		.map((host) => host.trim().toLowerCase())
 		.filter((host) => host !== "");
 	const valid =
-		value !== "" &&
-		description.trim() !== "" &&
-		(engine !== "microsandbox" || hostList.length > 0);
+		value !== "" && description.trim() !== "" && (!substitutes || hostList.length > 0);
 
 	const answer = async (): Promise<void> => {
 		if (!valid || saving) return;
@@ -101,10 +100,9 @@ function SecretRequestCard({
 		}
 	};
 
-	const engineCopy =
-		engine === "microsandbox"
-			? "The value stays on the host and is substituted only for the hosts below."
-			: "The value enters this sandbox's environment, where a command can read it.";
+	const engineCopy = substitutes
+		? "The value stays on the host and is substituted only for the hosts below."
+		: "The value enters this sandbox's environment, where a command can read it.";
 
 	return (
 		<Dialog
@@ -155,7 +153,7 @@ function SecretRequestCard({
 					</label>
 					<label className="flex flex-col gap-1">
 						<Text size="2xs" tone="muted">
-							allowed hosts{engine === "microsandbox" ? " (required)" : ""}
+							allowed hosts{substitutes ? " (required)" : ""}
 						</Text>
 						<Input
 							inputSize="sm"
@@ -199,7 +197,7 @@ function SecretRequestCard({
 					</div>
 					<Text size="2xs" tone="muted">
 						{engineCopy}
-						{engine === "microsandbox" && hostList.length === 0
+						{substitutes && hostList.length === 0
 							? " A secret with no hosts cannot be used on this engine."
 							: ""}
 					</Text>

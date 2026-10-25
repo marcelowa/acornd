@@ -16,6 +16,7 @@ import (
 
 	"github.com/acornfall/acornfall/gateway/internal/protocol"
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+	"github.com/acornfall/acornfall/gateway/internal/secretsproxy"
 	"github.com/acornfall/acornfall/gateway/internal/vault"
 	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 )
@@ -225,6 +226,12 @@ type Control struct {
 	// first request finishes never supervises anything. Close is what ends it.
 	lifetime context.Context
 	stop     context.CancelFunc
+	// proxy serves this workspace's secrets, and proxyStop ends it. It is the control's lifetime,
+	// not a request's: a proxy that stopped when the request that started it finished would leave
+	// a running sandbox with a forward into a closed port. Nil when the engine substitutes nothing
+	// or the vault resolved to no secret. See docs/adr/0031-a-proxy-for-bwrap-secrets.md.
+	proxy     *secretsproxy.Proxy
+	proxyStop context.CancelFunc
 	// bindings holds only explicit choices, made in a conversation. A conversation
 	// with no entry here follows the definition's model or defaultModel.
 	bindings map[string]protocol.ModelBinding
@@ -436,6 +443,14 @@ func (c *Control) Close() {
 	// storage as its replacement.
 	if c.stop != nil {
 		c.stop()
+	}
+	// After the loops: a worker that is still settling must not find its proxy gone.
+	c.mu.Lock()
+	stopProxy := c.proxyStop
+	c.proxy, c.proxyStop = nil, nil
+	c.mu.Unlock()
+	if stopProxy != nil {
+		stopProxy()
 	}
 	// The flag goes with the process. stopWorker has always cleared it; this path did not, so a
 	// closed workspace went on reporting itself as running — and a list built after a shutdown

@@ -30,6 +30,7 @@ var Allowed = map[string][]string{
 	"internal/control": {
 		"internal/protocol",
 		"internal/sandbox",
+		"internal/secretsproxy",
 		"internal/vault",
 		"internal/workerpool",
 	},
@@ -48,14 +49,17 @@ var Allowed = map[string][]string{
 		"internal/vault",
 	},
 
-	"internal/arch":       {},
-	"internal/netns":      {},
-	"internal/protocol":   {},
-	"internal/ready":      {"internal/update"},
-	"internal/sandbox":    {"internal/supervise"},
-	"internal/supervise":  {},
-	"internal/update":     {},
-	"internal/vault":      {},
-	"internal/workerpool": {"internal/protocol"},
-	"web":                 {},
+	"internal/arch":     {},
+	"internal/netns":    {},
+	"internal/protocol": {},
+	"internal/ready":    {"internal/update"},
+	// One workspace's secrets proxy: loopback, the vault's grants handed in, nothing of this
+	// project imported. It is a leaf on purpose — the package that knows the vault stays control.
+	"internal/secretsproxy": {},
+	"internal/sandbox":      {"internal/supervise"},
+	"internal/supervise":    {},
+	"internal/update":       {},
+	"internal/vault":        {},
+	"internal/workerpool":   {"internal/protocol"},
+	"web":                   {},
 }

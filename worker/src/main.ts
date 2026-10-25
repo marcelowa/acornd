@@ -247,7 +247,7 @@ const settings: HarnessSettings = { toolExecution: "parallel" };
 // One environment per tool call, all of them over the same sandbox: the id is the sandbox's,
 // which is how the harness knows two calls see the same files.
 const env = ({ cwd }: { readonly cwd?: string }) =>
-	new SandboxExecutionEnv(sandbox, cwd ?? args.workspace);
+	new SandboxExecutionEnv(sandbox, cwd ?? args.workspace, args.secrets);
 
 const storage = await openNodeSqliteStorage(args.storage);
 const harness = await Harness.open(

@@ -47,11 +47,10 @@ func TestAStoredSecretRestartsTheSandboxBeforeTheFirstTurn(t *testing.T) {
 	}
 }
 
-// A sandbox that has to restart and cannot be brought back leaves the restart owed: the next turn
-// would otherwise run with an environment that predates the vault. The image reference is invalid
-// on purpose, so the produce fails at the parse rather than at a registry — a unit test that
-// reached docker.io would be a test that needs the network and a rate limit.
-func TestASandboxThatCannotBeReproducedLeavesTheRestartOwed(t *testing.T) {
+// A stored secret on a bwrap workspace needs no restart: the grants live in the proxy control runs
+// for the workspace, and the sandbox is untouched. The invalid image is the proof that no sandbox
+// was produced — if one had been, the failure would be reported and a restart owed.
+func TestAStoredSecretOnABwrapWorkspaceNeedsNoRestart(t *testing.T) {
 	tier := sandbox.NewTier(t.TempDir(), "", nil)
 	manager, err := tier.For("bwrap")
 	if err != nil {
@@ -69,8 +68,11 @@ func TestASandboxThatCannotBeReproducedLeavesTheRestartOwed(t *testing.T) {
 
 	control.reconcileStoredSecrets(context.Background(), manager, policy, sandboxSecrets{}, &state)
 
-	if !state.SecretsRestart {
-		t.Fatal("a sandbox that could not be brought back owes the restart to the next turn")
+	if state.SecretsProblem != "" {
+		t.Fatalf("a grant swap touches no sandbox, so nothing should fail: %s", state.SecretsProblem)
+	}
+	if state.SecretsRestart {
+		t.Fatal("a grant swap needs no restart")
 	}
 }
 

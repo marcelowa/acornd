@@ -19,6 +19,7 @@ import {
 	type WatchTarget,
 } from "@earendil-works/pi-durable/env";
 import type { ExecResult, SandboxClient } from "./sandbox.ts";
+import type { SecretInfo } from "./secrets.ts";
 
 /**
  * The harness's execution environment, over a sandbox.
@@ -36,11 +37,22 @@ export class SandboxExecutionEnv implements ExecutionEnv {
 	readonly id: string;
 	cwd: string;
 	private readonly sandbox: SandboxClient;
+	/**
+	 * The literal each substitution secret is held as, by name. Empty for an environment engine: it
+	 * puts the value in the guest and there is nothing to swap.
+	 */
+	private readonly placeholders: Record<string, string>;
 
-	constructor(sandbox: SandboxClient, cwd: string) {
+	constructor(sandbox: SandboxClient, cwd: string, secrets: readonly SecretInfo[] = []) {
 		this.sandbox = sandbox;
 		this.id = `sandbox:${sandbox.name}`;
 		this.cwd = cwd;
+		this.placeholders = {};
+		for (const secret of secrets) {
+			if (secret.delivery === "substitute" && secret.placeholder !== "") {
+				this.placeholders[secret.name] = secret.placeholder;
+			}
+		}
 	}
 
 	// -- paths ------------------------------------------------------------------------
@@ -108,6 +120,9 @@ export class SandboxExecutionEnv implements ExecutionEnv {
 			.exec(command, {
 				cwd,
 				...(options?.env === undefined ? {} : { env: options.env }),
+				...(Object.keys(this.placeholders).length === 0
+					? {}
+					: { secrets: this.placeholders }),
 				...(options?.inheritEnv === false ? { clearEnv: true } : {}),
 				...(timeoutMs === undefined ? {} : { timeoutMs }),
 				signal: stop.signal,
