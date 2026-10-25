@@ -258,11 +258,21 @@ func (m *Manager) Report() Report {
 	return report
 }
 
+// prepared is an engine whose config can be written for the next start without starting or
+// recreating the sandbox. It is optional because only an argv-shaped engine has a config to
+// rewrite; the microVM's shape is the sandbox itself, and a changed policy there is a new
+// sandbox rather than a refreshed file.
+type prepared interface {
+	Prepare(ctx context.Context, policy Policy, dir string) error
+}
+
 // Produce makes sure a workspace's sandbox exists and is running, and returns its name.
 //
 // It never recreates an existing sandbox: the sandbox is where a workspace's dependencies
-// and caches live, so replacing it would throw away work. A changed policy applies to the
-// next sandbox, which is the price of not deleting the user's environment.
+// and caches live, so replacing it would throw away work. A running guest cannot change the
+// shape it booted with. What can change is the config the next start reads: an engine that
+// has one is refreshed before the running check, so a binary that changes a baked setting
+// does not leave an upgrade needing the sandbox removed by hand.
 func (m *Manager) Produce(ctx context.Context, policy Policy, dir string) (string, error) {
 	// First use is what installs the engine, so a gateway starts fast and a machine that
 	// cannot sandbox says so when it matters.
@@ -282,6 +292,12 @@ func (m *Manager) Produce(ctx context.Context, policy Policy, dir string) (strin
 		if instance.Name != name {
 			continue
 		}
+		// The guest keeps the shape it booted with; the file must not. A stopped sandbox
+		// reads it on Start below, and a running one reads it at its next start after an
+		// upgrade, a stop, or an idle eviction.
+		if err := m.prepare(ctx, policy, dir); err != nil {
+			return "", err
+		}
 		if instance.Running() {
 			return name, nil
 		}
@@ -296,6 +312,16 @@ func (m *Manager) Produce(ctx context.Context, policy Policy, dir string) (strin
 		return "", err
 	}
 	return name, nil
+}
+
+// prepare refreshes an engine's config for the next start when it has one. The optional
+// interface is what keeps this a bwrap concern without adding a no-op to every other engine.
+func (m *Manager) prepare(ctx context.Context, policy Policy, dir string) error {
+	engine, ok := m.driver.(prepared)
+	if !ok {
+		return nil
+	}
+	return engine.Prepare(ctx, policy, dir)
 }
 
 // SecretDelivery is the engine's way of delivering a tool secret. It is a capability, not a

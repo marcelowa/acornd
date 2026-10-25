@@ -81,10 +81,12 @@ pasta already made, not another unshare inside it.
 ## Consequences
 
 - The working version can be developed and run with its real bwrap engine, not `host`.
-- An existing workspace keeps its old sandbox until it is recreated: the gateway restart
-  stops it, and the next start writes the new config. The device grant is baked at creation,
-  so a change to `disable_devices` rebuilds the sandbox and stops the worker rather than
-  leaving a guest with devices the record says it does not have.
+- A running sandbox keeps the shape it booted with. `Produce` now refreshes the config for
+  the next start before it adopts a running sandbox, so an upgrade that changes a baked
+  setting no longer needs the sandbox removed by hand; a stopped sandbox starts from the new
+  config. The device grant is baked at creation, so a change to `disable_devices` rebuilds
+  the sandbox and stops the worker rather than leaving a guest with devices the record says
+  it does not have.
 - Nested rootfs copies still cost disk; the bwrap image copy remains the largest gap
   (ADR 0023).
 - The UI does not expose `disable_devices` yet; the CLI, API, and registry do.
@@ -102,5 +104,6 @@ pasta already made, not another unshare inside it.
 - `TestSatisfiedInstallIsQuiet` with the hypervisor fact in its input
 - `TestAMicroVMStartsInsideABwrapSandbox` (sandbox tier: a real microVM, the host's `msb` and
   store)
+- `TestProduceRefreshesTheConfigOfAnExistingSandbox`, `TestBwrapPrepareWritesTheCurrentConfig`
 
 The live chain on `the host` is the evidence behind the table above.

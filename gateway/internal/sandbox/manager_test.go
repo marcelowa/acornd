@@ -55,6 +55,11 @@ func (f *fakeDriver) Create(_ context.Context, policy Policy, _ string) error {
 	f.policy = policy
 	return f.err
 }
+func (f *fakeDriver) Prepare(_ context.Context, policy Policy, _ string) error {
+	f.calls = append(f.calls, "prepare")
+	f.policy = policy
+	return f.err
+}
 func (f *fakeDriver) Start(context.Context, string, []Secret) error {
 	f.calls = append(f.calls, "start")
 	return f.err
@@ -85,6 +90,43 @@ func openWith(t *testing.T, driver Driver) *Manager {
 		t.Fatal(err)
 	}
 	return manager
+}
+
+// An existing sandbox is never recreated, but its config is refreshed before the running
+// check: an upgrade that changes a baked setting must be written for the next start, and a
+// stopped sandbox must start from the new config rather than the old one.
+func TestProduceRefreshesTheConfigOfAnExistingSandbox(t *testing.T) {
+	cases := []struct {
+		name      string
+		status    string
+		wantStart bool
+	}{
+		{"running", "running", false},
+		{"stopped", "stopped", true},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			workspace := "/home/me/work"
+			driver := &fakeDriver{listed: []Instance{{Name: Name(workspace), Status: test.status}}}
+			manager := openWith(t, driver)
+			policy := Policy{Workspace: workspace, Devices: true}
+			if _, err := manager.Produce(context.Background(), policy, t.TempDir()); err != nil {
+				t.Fatal(err)
+			}
+			if !driver.ran("prepare") {
+				t.Error("an existing sandbox must have its config refreshed")
+			}
+			if !driver.policy.Devices {
+				t.Error("the refreshed config should carry the current policy")
+			}
+			if driver.ran("start") != test.wantStart {
+				t.Errorf("start called = %t, want %t", driver.ran("start"), test.wantStart)
+			}
+			if driver.ran("create") {
+				t.Error("Produce must not recreate an existing sandbox")
+			}
+		})
+	}
 }
 
 // Creating a sandbox is the only thing that needs the engine installed, so that is when the

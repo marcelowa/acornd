@@ -109,6 +109,7 @@ The chain is **conversation → its definition → this workspace → the instal
 | W14 | A bwrap engine inside another bwrap workspace reuses pasta's user namespace for a network-on sandbox instead of creating a third one; the inner network is its own, and pasta's printed user-namespace failure is a refusal even when it exits 0. | `TestBwrapNestedEgressReusesPastaUserNamespace`, `TestBwrapConfigRecordsNestedFromTheParent`, `TestAPastaThatCannotMapItsUserNamespaceIsRefused` |
 | W15 | Removing a sandbox stops it before deleting its files; a test that removes a started sandbox leaves no process. | `TestBwrapHasALifecycleLikeEveryOtherEngine` |
 | W16 | A real microVM boots inside a bwrap workspace with the granted `/dev/kvm`, `/dev/net/tun`, and caps; the host's microsandbox engine runs a command in it. | `TestAMicroVMStartsInsideABwrapSandbox` |
+| W17 | An existing sandbox is never recreated, but its config is refreshed before the running check: an upgrade that changes a baked setting is written for the next start, and a stopped sandbox starts from the new config. | `TestProduceRefreshesTheConfigOfAnExistingSandbox`, `TestBwrapPrepareWritesTheCurrentConfig` |
 
 ## Resources: rules, agents, skills
 
@@ -222,6 +223,9 @@ workaround:
 13. Nested pasta printed `Couldn't configure user mappings` and exited 0, so the probe called a
     network that never existed healthy — and the inner acornfall would have chosen bwrap and lost
     its egress.
+14. A binary upgrade adopted a running bwrap sandbox and never wrote the new config: the only
+    way to get the device grant was to remove the sandbox by hand. `Produce` now writes the
+    config before the running check.
 
 ## Not covered, and why
 

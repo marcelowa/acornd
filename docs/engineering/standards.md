@@ -232,6 +232,7 @@ with a deadline:
 | `Bwrap.Remove` deleted a running sandbox's files but left its supervisor, bubblewrap, and commands; the lifecycle test passed because `List` reads only configs, and two runs were still alive on a real machine. | G16, S2 — the test removed what it created, but not the processes it created |
 | Nested pasta printed `Couldn't configure user mappings` and exited 0, so the probe called a network that never existed healthy. | S2 — an exit status is not the whole answer when the tool prints its own failure |
 | `TestSatisfiedInstallIsQuiet` read `/dev/kvm` from the machine, so the fast tier failed in the very bwrap workspace this project develops in. | G11 — a unit test has to answer on the machine that runs it, and the machine fact belongs in the input |
+| A binary upgrade adopted a running bwrap sandbox and never wrote the new config; the device grant only appeared after removing the sandbox by hand. | S2 — the config the next start reads is part of the state, and it was never refreshed |
 
 ## Convention (not enforced)
 

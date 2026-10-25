@@ -356,10 +356,19 @@ const refusePrivate = "--refuse-private"
 // It is idempotent: creating twice rewrites the same config, which is what makes a changed policy
 // apply at the next sandbox rather than to a copy nobody updates.
 func (b *Bwrap) Create(ctx context.Context, policy Policy, dir string) error {
-	if _, err := b.writeConfig(policy, dir); err != nil {
+	if err := b.Prepare(ctx, policy, dir); err != nil {
 		return err
 	}
 	return b.Start(ctx, Name(policy.Workspace), policy.Secrets)
+}
+
+// Prepare writes the config the next start will read, without starting, stopping, or
+// recreating anything. Produce calls it for an existing sandbox so an upgrade that changes
+// a baked setting (the device grant, the user namespace) is written into the next start;
+// the running guest keeps the shape it booted with.
+func (b *Bwrap) Prepare(_ context.Context, policy Policy, dir string) error {
+	_, err := b.writeConfig(policy, dir)
+	return err
 }
 
 // writeConfig is Create without the boot: what the workspace runs under, written where a person

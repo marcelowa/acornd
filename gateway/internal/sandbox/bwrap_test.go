@@ -631,6 +631,21 @@ func TestBwrapClaimsNestingWhenKVMIsBound(t *testing.T) {
 	}
 }
 
+func TestBwrapPrepareWritesTheCurrentConfig(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	policy := Policy{Workspace: t.TempDir(), Devices: true}
+	if err := driver.Prepare(context.Background(), policy, t.TempDir()); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	config, err := driver.readConfig(Name(policy.Workspace))
+	if err != nil {
+		t.Fatalf("read the config Prepare wrote: %v", err)
+	}
+	if !config.Devices {
+		t.Fatal("Prepare wrote a config without the device grant")
+	}
+}
+
 func TestBwrapBindsDevicesAndGrantsNestedEnginesTheCaps(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
 	tun := filepath.Join(t.TempDir(), "tun")
