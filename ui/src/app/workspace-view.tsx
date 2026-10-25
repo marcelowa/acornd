@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { PanelRight, Plus, Settings, X } from "lucide-react";
+import { Plus, Settings, X } from "lucide-react";
 import type { DefaultScope, ProviderAuthType, UploadedAttachment } from "./client";
 import type { ConversationSummary, ProviderSummary } from "./view-models";
 import { MAX_ATTACHMENT_BYTES, refuseAttachments } from "@/lib/attachments";
@@ -7,12 +7,6 @@ import { ConversationList } from "@/components/conversation/conversation-list";
 import { BrandMark } from "@/components/layout/brand-mark";
 import { Composer } from "@/components/composer/composer";
 import { SlashMenu } from "@/components/composer/slash-menu";
-import { AgentPanel } from "@/components/inspector/agent-panel";
-import { ContextPanel } from "@/components/inspector/context-panel";
-import { Inspector } from "@/components/inspector/inspector";
-import { InspectorPanel } from "@/components/inspector/inspector-panel";
-import { RunPanel } from "@/components/inspector/run-panel";
-import { SandboxPanel } from "@/components/inspector/sandbox-panel";
 import { Stack } from "@/components/layout/stack";
 import { Rail } from "@/components/layout/rail";
 import { Measure } from "@/components/layout/measure";
@@ -70,21 +64,6 @@ function chipOf(file: UploadedAttachment): DraftAttachment {
 	};
 }
 
-/** True at 2xl, where the inspector docks beside the transcript instead of overlaying it. */
-function useWide(): boolean {
-	const [wide, setWide] = useState(
-		() => typeof window !== "undefined" && window.matchMedia("(min-width: 1536px)").matches,
-	);
-	useEffect(() => {
-		const query = window.matchMedia("(min-width: 1536px)");
-		const update = (): void => setWide(query.matches);
-		update();
-		query.addEventListener("change", update);
-		return () => query.removeEventListener("change", update);
-	}, []);
-	return wide;
-}
-
 /**
  * The composition, with no data of its own: the platform hook's view models and callbacks
  * applied to the dumb screen. `App` is this plus the hook, and Storybook renders this with
@@ -116,10 +95,6 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	const [renaming, setRenaming] = useState<ConversationSummary | undefined>(undefined);
 	/** The provider being connected: the dialog's method choice, before a flow starts. */
 	const [connecting, setConnecting] = useState<ProviderSummary | undefined>(undefined);
-	/** The inspector, asked or not: a dialog below 2xl, a docked column where it fits. */
-	const [inspectorOpen, setInspectorOpen] = useState(false);
-	const wide = useWide();
-
 	// The draft belongs to the room, not to this visit: the workspace keeps the words, and the
 	// composer shows them with whatever this machine has typed on top. Switching rooms starts
 	// from the room's own draft, and a reload lands on what was typed a second ago.
@@ -438,88 +413,6 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		</span>
 	);
 
-	// The inspector: the answer to "why did it see that", from the fold — one request, what
-	// changed since the one before it, and which layer set what.
-	const latest = platform.context.at(-1);
-	const inspectorSections = [
-		{
-			key: "context",
-			title: "Context",
-			hint:
-				latest === undefined
-					? "nothing sent yet"
-					: `${latest.sections.size} sections · ${latest.tools.size} tools`,
-			body: <ContextPanel requests={platform.context} usage={platform.usage} />,
-		},
-		{
-			key: "agent",
-			title: "Agent",
-			hint: platform.agent.value,
-			body: (
-				<AgentPanel
-					resolved={platform.resolved}
-					model={platform.model.value}
-					thinking={platform.thinking.value}
-					thinkingRequested={platform.thinkingRequested}
-					sandbox={platform.sandbox?.engine}
-					harness={platform.harness}
-				/>
-			),
-		},
-		{
-			key: "sandbox",
-			title: "Sandbox",
-			hint:
-				platform.sandbox === undefined
-					? "unknown"
-					: `${platform.sandbox.engine} · ${platform.sandbox.status}`,
-			body: (
-				<SandboxPanel
-					sandbox={platform.sandbox}
-					workspacePath={platform.workspaces.find((workspace) => workspace.active)?.path}
-				/>
-			),
-		},
-		{
-			key: "run",
-			title: "Run",
-			hint: platform.active?.running === true ? "running" : "idle",
-			body: (
-				<RunPanel
-					running={platform.active?.running === true}
-					queued={platform.entries.filter((entry) => entry.kind === "pending").length}
-					model={platform.model.value}
-					thinking={platform.thinking.value}
-				/>
-			),
-		},
-	];
-	// One toggle in the top bar: the bar is in the DOM on every width, so the
-	// inspector stays in reach on a phone without a second twin in a header.
-	const inspectorToggle = (
-		<Button
-			type="button"
-			variant="ghost"
-			size="icon-sm"
-			aria-label="Inspector"
-			aria-expanded={inspectorOpen}
-			data-slot="inspector-toggle"
-			onClick={() => setInspectorOpen((open) => !open)}
-		>
-			<PanelRight />
-		</Button>
-	);
-	const inspectorDialog = (
-		<Inspector
-			sections={inspectorSections}
-			open={inspectorOpen && !wide}
-			onOpenChange={setInspectorOpen}
-		/>
-	);
-	const dockedInspector = inspectorOpen ? (
-		<InspectorPanel sections={inspectorSections} />
-	) : undefined;
-
 	const scoped = scope === "workspace" ? platform.defaults.workspace : platform.defaults.global;
 
 	// The provider's own count, shared by the composer line and the compact dialog.
@@ -679,7 +572,6 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			{brand}
 			<div className="flex min-w-0 flex-1 items-center">{barTitle}</div>
 			{updateMark}
-			{screen === undefined ? inspectorToggle : null}
 		</>
 	);
 
@@ -688,7 +580,6 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			<Shell
 				rail={rail}
 				topbar={topbar}
-				inspector={screen === undefined ? dockedInspector : undefined}
 				railOpen={platform.railOpen}
 				onRailOpenChange={(open) => {
 					// Opening is opening; closing is the stack's: back to the conversations
@@ -802,9 +693,6 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					) : undefined
 				}
 			/>
-			{/* The inspector is about the conversation in front of you, so it is only there
-			 * when one is: on a screen, it would be answering a question nobody asked. */}
-			{screen === undefined ? inspectorDialog : null}
 			<RenameDialog
 				open={renaming !== undefined}
 				title="Rename conversation"

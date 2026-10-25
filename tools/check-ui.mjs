@@ -7,8 +7,8 @@
 // need a DOM, not a browser, and the host parser is the thing that varies. This suite only
 // has to prove the pane renders through the real bundle.
 //
-// The inspector's overlay is not here yet; it arrives with #13, and the assertions that
-// covered the old client's version of it belong there.
+// The inspector is drawn and storied, but this build has no door to it, so nothing here asks
+// for one: the checks that did are in the history, with the toggle they pressed.
 //
 // Needs a gateway on --addr; run with: bun run tools/check-ui.mjs [url]
 import { rmSync } from "node:fs";
@@ -1340,113 +1340,9 @@ try {
 	await page.keyboard.up("Control");
 	await page.keyboard.press("Backspace");
 
-	// 7. The inspector: an overlay behind the header toggle in the top-right corner, closed
-	// by default, and not remembered — opening it is a question asked now, not a preference.
-	await page.setViewport({ width: 1400, height: 900 });
-	// The toggle exists twice — the desktop header and the small-screen bar, one hidden —
-	// so the suite asks for the one a reader can see.
-	const visibleToggleBox = () =>
-		inPage(page, () => {
-			const element = [...document.querySelectorAll("[data-slot=inspector-toggle]")].find(
-				(candidate) => candidate.getClientRects().length > 0,
-			);
-			if (element === undefined) return null;
-			const box = element.getBoundingClientRect();
-			return {
-				fromTop: box.top,
-				fromRight: window.innerWidth - box.right,
-				bottom: box.bottom,
-			};
-		});
-	const pressVisibleToggle = () =>
-		inPage(page, () => {
-			[...document.querySelectorAll("[data-slot=inspector-toggle]")
-			].find((candidate) => candidate.getClientRects().length > 0)?.click();
-		});
-	const corner = await visibleToggleBox();
-	check("the inspector has a toggle in the corner", corner !== null);
-	if (corner !== null) {
-		check(
-			"the toggle sits in the top-right corner",
-			corner.fromTop < 40 && corner.fromRight < 40,
-			`${Math.round(corner.fromTop)}px from the top, ${Math.round(corner.fromRight)}px from the right`,
-		);
-		check(
-			"the inspector starts closed",
-			await page.evaluate(() => document.querySelector("[data-slot=inspector]") === null),
-		);
-
-		await pressVisibleToggle();
-		const overlay = await page
-			.waitForSelector("[data-slot=inspector]", { timeout: 5000 })
-			.catch(() => null);
-		check("the toggle opens the inspector", overlay !== null);
-		if (overlay !== null) {
-			const coverage = await overlay.evaluate((element) => {
-				const box = element.getBoundingClientRect();
-				return {
-					width: box.width / window.innerWidth,
-					height: box.height / window.innerHeight,
-				};
-			});
-			check(
-				"the inspector covers the screen it was asked about",
-				coverage.width > 0.9 && coverage.height > 0.9,
-				`${Math.round(coverage.width * 100)}% wide, ${Math.round(coverage.height * 100)}% tall`,
-			);
-			const sectionCount = await page.evaluate(
-				() => document.querySelectorAll("[data-slot=inspector] [data-section]").length,
-			);
-			check("the inspector has sections", sectionCount >= 3, `${sectionCount} sections`);
-			const openSections = () =>
-				page.evaluate(() =>
-					[
-						...document.querySelectorAll(
-							'[data-slot=inspector] [data-section] button[aria-expanded]',
-						),
-					].filter((element) => element.getAttribute("aria-expanded") === "true").length,
-				);
-			check(
-				"every section is readable when the overlay opens",
-				(await openSections()) === sectionCount,
-				`${await openSections()} of ${sectionCount} open`,
-			);
-			const sandboxText = await page.evaluate(
-				() =>
-					document.querySelector("[data-slot=inspector] [data-section=sandbox]")
-						?.textContent ?? "",
-				);
-			check(
-				"the inspector says where the tools run",
-				/engine/.test(sandboxText) && /tools/.test(sandboxText),
-				sandboxText.replace(/\s+/g, " ").slice(0, 90),
-			);
-
-			await press(page, "[data-slot=inspector] [data-section] button[aria-expanded]");
-			check(
-				"a section can be put away while you read another",
-				(await openSections()) === sectionCount - 1,
-				`${await openSections()} of ${sectionCount} open`,
-			);
-
-			await page.keyboard.press("Escape");
-			await page.waitForFunction(
-				() => document.querySelector("[data-slot=inspector]") === null,
-				{ timeout: 5000 },
-			);
-			check("the inspector closes", true);
-
-			// Not remembered: the reload is the point of the check, so it comes after a visit.
-			await pressVisibleToggle();
-			await page.waitForSelector("[data-slot=inspector]", { timeout: 5000 });
-			await page.reload({ waitUntil: "domcontentloaded" });
-			await page.waitForSelector("[data-slot=inspector-toggle]", { timeout: 15000 });
-			check(
-				"the inspector is not remembered across a reload",
-				await page.evaluate(() => document.querySelector("[data-slot=inspector]") === null),
-			);
-		}
-	}
+	// 7. The inspector has no door in this build: the panel, its sections and its stories are
+	// still in `ui/`, and the top bar no longer offers them. A future version decides where the
+	// door goes; the checks that opened it are in this file's history.
 
 	// 8. The phone gets the transcript, not a rail eating it; the drawer is how the rail opens.
 	await page.setViewport({ width: 390, height: 844 });
