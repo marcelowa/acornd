@@ -703,7 +703,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 				onRailWidthChange={platform.setRailWidth}
 				notice={
 					platform.failure === undefined ? undefined : (
-						<Measure size="wide" padding="md">
+						<Measure size="full" padding="md">
 							<ErrorStrip
 								message={platform.failure}
 								onDismiss={platform.clearFailure}

@@ -5,9 +5,9 @@ import { Stack } from "@/components/layout/stack";
 
 /**
  * The shape of every screen and nothing else: a rail, a transcript, and a composer. It has no
- * state, no data, and no classes. Each slot owns its own alignment: the transcript centres
- * itself on a readable measure, and the composer is expected to do the same, which is why
- * nothing here wraps them.
+ * state, no data, and no classes. Each slot owns its own alignment: the transcript and the
+ * composer both fill the pane's width and keep the same gutter, which is why nothing here
+ * wraps them.
  *
  * The rail is a drawer below `lg`, and the app can control it when selecting a conversation
  * should close it.

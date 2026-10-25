@@ -319,7 +319,7 @@ export function Composer({
 			data-folded={collapsed}
 			className={cn("w-full shrink-0 border-t border-border", className)}
 		>
-			<Measure size="wide" padding="md">
+			<Measure size="full" padding="md">
 				{above}
 				{ambient}
 				{collapsed ? (

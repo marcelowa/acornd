@@ -5,9 +5,11 @@ import { cn } from "cn";
 /**
  * A readable measure. Text that runs the full width of a 27-inch screen is harder to read,
  * but this interface is mostly code, tool output, and diffs — content that a prose column
- * wastes space on. Three widths, then: `prose` for a text-only context, `wide` for the
- * transcript and the composer, `page` for a surface that owns its whole screen. The pane
- * constrains whichever one is asked for, so a phone just gets the full width.
+ * wastes space on. Four widths, then: `prose` for a text-only context, `wide` for a columned
+ * page, `page` for a surface that owns its whole screen, and `full` for the conversation pane,
+ * where a tool's output is the thing being read and a capped column would hold back the one
+ * content that wants the room. The pane constrains whichever one is asked for, so a phone just
+ * gets the full width either way.
  */
 const measureVariants = cva("mx-auto flex w-full shrink-0 flex-col", {
 	variants: {
@@ -15,6 +17,7 @@ const measureVariants = cva("mx-auto flex w-full shrink-0 flex-col", {
 			prose: "max-w-3xl",
 			wide: "max-w-5xl",
 			page: "max-w-page",
+			full: "",
 		},
 		padding: {
 			none: "",

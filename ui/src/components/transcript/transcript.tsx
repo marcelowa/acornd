@@ -156,7 +156,7 @@ export function Transcript({
 				}}
 				className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden [&>*]:shrink-0"
 			>
-				<Measure size="wide" padding="lg">
+				<Measure size="full" padding="lg">
 					{opening !== undefined ? (
 						<Stack gap="sm" align="center" className="py-16 text-center">
 							<span className="flex items-center gap-2">
