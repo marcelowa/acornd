@@ -8,7 +8,7 @@ const meta = {
 	parameters: { layout: "centered" },
 	decorators: [
 		(Story) => (
-			<div className="w-80 rounded-md border border-border bg-background p-2">
+			<div className="w-(--rail-width) rounded-md border border-border bg-background p-2">
 				<Story />
 			</div>
 		),
@@ -94,4 +94,42 @@ export const Grouped: Story = {
 		deleted,
 		activeId: "3",
 	},
+};
+
+/**
+ * The window, at the size it exists for: five hundred conversations, dated across months so
+ * the date groups are real and the undated tail is empty. A rail that drew all of them paid
+ * for every row on every scroll, whether or not it was on screen.
+ */
+const many = (count: number): ConversationSummary[] => {
+	// Today, not the fixed date above: the four groups only exist relative to now.
+	const base = Date.now();
+	return Array.from({ length: count }, (_, index) => ({
+		id: `${index + 10}`,
+		title:
+			index % 9 === 0
+				? `Investigate the reconciler's lock order, run ${index}`
+				: `Conversation ${index}`,
+		root: index === 0,
+		hidden: false,
+		running: index % 37 === 0 && index !== 0,
+		unread: index % 11 === 0,
+		tokens: index * 120,
+		cost: index * 0.001,
+		updatedAt: new Date(base - index * 6 * 3_600_000),
+	}));
+};
+
+export const Long: Story = {
+	args: { conversations: many(500), deleted, activeId: "12" },
+	decorators: [
+		(Story) => (
+			<div
+				className="flex w-(--rail-width) flex-col rounded-md border border-border bg-background p-2"
+				style={{ height: 640 }}
+			>
+				<Story />
+			</div>
+		),
+	],
 };
