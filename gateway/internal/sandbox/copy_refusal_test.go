@@ -30,30 +30,75 @@ func TestACopyThatCannotWriteReportsIt(t *testing.T) {
 // copyFile is the per-file half, and the same rule holds: a target it cannot open is reported,
 // rather than the file being silently absent from the tree.
 func TestAFileThatCannotBeWrittenReportsIt(t *testing.T) {
-	source := filepath.Join(t.TempDir(), "f")
-	if err := os.WriteFile(source, []byte("content"), 0o644); err != nil {
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "f"), []byte("content"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	info, err := os.Stat(source)
+	info, err := os.Stat(filepath.Join(source, "f"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The destination is a folder: opening it for writing fails even as root.
-	dest := filepath.Join(t.TempDir(), "dest")
-	if err := os.MkdirAll(dest, 0o755); err != nil {
+	dest := t.TempDir()
+	// The destination name is a folder: opening it for writing fails even as root.
+	if err := os.MkdirAll(filepath.Join(dest, "dest"), 0o755); err != nil {
 		t.Fatal(err)
-	}
-	if err := copyFile(source, dest, info); err == nil {
-		t.Fatal("writing a file over a folder should fail")
 	}
 	// And a folder that cannot be made, because a file is in its place.
-	blocked := filepath.Join(t.TempDir(), "parent")
-	if err := os.WriteFile(blocked, nil, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dest, "parent"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := copyFile(source, filepath.Join(blocked, "f"), info); err == nil {
+	in, out := rootsOf(t, source, dest)
+	if err := copyFile(in, out, "dest", info); err == nil {
+		t.Fatal("writing a file over a folder should fail")
+	}
+	if err := copyFile(in, out, "parent/f", info); err == nil {
 		t.Fatal("a file where the folder should be should fail")
 	}
+}
+
+// A link in the image is reproduced, not followed: an image that ships a link to a path on the
+// host gets a link of the same shape in the workspace, and the host's file is left alone. The
+// copy runs as the owner of the install folder, so following it would be a write outside the
+// sandbox — which is the whole reason both trees are opened as roots.
+func TestALinkInTheImageIsCopiedNotFollowed(t *testing.T) {
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(outside, []byte("host"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(source, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	dest := t.TempDir()
+	if err := copyTree(source, dest); err != nil {
+		t.Fatal(err)
+	}
+	copied, err := os.Lstat(filepath.Join(dest, "escape"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if copied.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("the link was followed and became a file")
+	}
+	if data, err := os.ReadFile(outside); err != nil || string(data) != "host" {
+		t.Fatalf("the file outside the tree changed: %q %v", data, err)
+	}
+}
+
+// rootsOf opens the two trees a copy reads from and writes to, and takes them down with the test.
+func rootsOf(t *testing.T, source, dest string) (in, out *os.Root) {
+	t.Helper()
+	in, err := os.OpenRoot(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { in.Close() })
+	out, err = os.OpenRoot(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { out.Close() })
+	return in, out
 }
 
 // A layer entry is written the same way, and the same refusal applies: an image that cannot be
