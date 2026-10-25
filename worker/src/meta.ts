@@ -31,6 +31,8 @@ export const ConversationMetaDoc = defineDoc<ConversationMeta>({
 	history: "latest",
 	fork: "initial",
 	initial: () => ({ title: "", hidden: false, children: [] }),
+	// 1.4 made the predicate required: never write a base, which is what 1.3 did.
+	checkpointWhen: () => false,
 });
 
 export function conversationIdOf(id: string): ConversationId {

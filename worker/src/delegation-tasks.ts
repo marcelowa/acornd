@@ -75,6 +75,8 @@ export const MessagesDoc = defineDoc<MessagesState>({
 	// A fork inherits who said what: the messages are inherited with it.
 	fork: "initial",
 	initial: () => ({ senders: {} }),
+	// 1.4 made the predicate required: never write a base, which is what 1.3 did.
+	checkpointWhen: () => false,
 });
 
 export const DelegationDoc = defineDoc<DelegationState>({
@@ -85,6 +87,8 @@ export const DelegationDoc = defineDoc<DelegationState>({
 	// A fork starts without its parent's subagents; it is a different conversation.
 	fork: "initial",
 	initial: () => ({ agents: {}, reporters: {}, wakes: 0 }),
+	// 1.4 made the predicate required: never write a base, which is what 1.3 did.
+	checkpointWhen: () => false,
 });
 
 export const Anchor = defineTask<null, { phase: "done" }, null>({
