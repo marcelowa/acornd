@@ -71,7 +71,7 @@ split would hide exactly that.
 | S7 | Storage is the truth, frames are complete views, a reconnect is safe. | The client must be able to throw its state away. | `TestTheStreamSendsStateViewsAndKeepalives` |
 | S8 | One path for one thing: if a second entry point needs what the first does, extract it. | Recovery reimplemented start and got it wrong (a duplicate conversation, no model). | `make lint` → `make analyze` fails on a duplicated block; the extraction itself is Convention |
 | S9 | An exception carries its reason on the same line — a lint disable, an entry in `.coverageignore`, a floor with a clause. | An unexplained `nolint`/`disable` is a rule losing quietly. | `make lint`, `make cover` |
-| S10 | Coverage and mutation floors are **ratchets**: they may only move up, and a number that looks worse while the work under it grew says so next to the number. | A bar that can be lowered to make a run green is a wish. Efficacy is killed over *reachable* mutants, so covering new code lowers the ratio while nothing gets worse — the **killed count** is what may not fall. | `make cover` (`FLOOR=0` reports without failing), `make mutations PKG=…` |
+| S10 | Coverage and mutation floors are **ratchets**: they may only move up, and a number that looks worse while the work under it grew says so next to the number. | A bar that can be lowered to make a run green is a wish. Efficacy is killed over *reachable* mutants, so covering new code lowers the ratio while nothing gets worse — the **killed count** is what may not fall. | `make floors` against `origin/main`, `make cover` (`FLOOR=0` reports without failing), `make mutations PKG=…` |
 | S11 | A package that cannot reach the target says why **on its floor line**, and the report prints it as excepted rather than as work left to do. | An exception that reads like a to-do stops being exceptional, and a reason nobody writes down is a reason nobody can argue with. | `make cover` — `excepted at N%: …` |
 
 ## Go
@@ -172,18 +172,26 @@ found. `make test-sandbox` is the microVM engine boundary: the live driver, the 
 suite, and the e2e tests that exercise execution and the mounts. `make tools` installs the
 linters.
 
-Four reports sit beside the gate, and a floor with no command that runs it is decoration:
+Five reports sit beside the gate, and a floor with no command that runs it is decoration:
 
 | What | Command | Where it runs |
 |---|---|---|
 | coverage across both processes, merged, per package | `make cover` — fails below a floor; `FLOOR=0` reports without failing | `verify`, on every push |
-| mutation efficacy per package | `make mutations PKG=./internal/control` — fails below a floor of efficacy **or** of killed mutants | nightly, for `control` and `sandbox`; on demand for the rest |
+| mutation efficacy per package | `make mutations PKG=./internal/control` — fails below a floor of efficacy **or** of killed mutants | `verify`, for the packages a change touches; weekly for all of them |
+| the ratchet itself: no floor steps down | `make floors` — fails on a decrease, or on a floor line that disappears with its package still in the tree | `verify`, on every push |
 | complexity, duplication, dead code, unreachable code | `make analyze` — **fails on any finding**; 0 today | `make lint`, so on every push |
 | known vulnerabilities and the security rules staticcheck does not carry | `make security` — `govulncheck`, `make sast` | the `security` workflow, weekly and on a release tag |
 
-Mutation testing is minutes per package, which is why it is not on a pull request: a slow gate is
-a gate people learn to skip. The nightly run covers the two packages with the most behaviour
-behind them, and a red run means a test stopped proving something.
+Mutation testing is minutes per package, so a pull request pays for the packages its diff touches
+and no others: `scripts/mutation-targets.mjs` maps changed files to the packages that have a floor
+line, ranks them by changed lines, and takes the top two. A refactor spread over six packages
+sweeps two of them and says which four it left, with the command that runs each. The weekly run
+still covers all seven, because a package nobody changed can still lose an assertion to a
+dependency.
+
+The floors are the one standard that a pull request is most tempted to edit rather than meet, so
+`make floors` compares both files with `origin/main` rather than with their own promise: a number
+that moves down fails, and so does a floor line deleted while its package is still in the tree.
 
 None of this is enforced by a machine unless it runs on every change: `.github/workflows/ci.yml`
 runs on every push, in jobs that share one setup action (`.github/actions/setup`), and `verify` is
@@ -197,8 +205,14 @@ anyone editing the rule.
 | `worker` | `make js-test` | the harness and interface unit tests: seconds, and they need no bundle |
 | `browser` | `make ui-check` | a real gateway and a real browser, which nothing else has |
 | `commits` | `scripts/check-commits.mjs` | needs the commit range, not the tree |
+| `floors` | `make floors` | compares the tree with the base branch, so it needs history and nothing else |
+| `mutations` | `make mutations` for the packages the diff touches | minutes per package, bounded by `--max 2`, and skipped when the diff touches none |
 | `sandbox` | `make test-sandbox` | boots real microVMs; the slowest and the only one that needs `/dev/kvm` |
 | `bwrap` | `make test-bwrap` | real bubblewrap and pasta, and an image from a registry |
+
+Every job above is a `needs` of `verify`, the two engine tiers included. They ran on every push
+without being able to stop a merge until 2026-10-29, which is a gate that says the thing it was
+asked not to.
 
 `main` is protected: `verify` is required, administration is not exempt, and history cannot be
 rewritten. A run that files something rather than failing it — a surviving mutant — opens an issue

@@ -139,9 +139,9 @@ coverage-report: ## merge what the last run wrote, and judge it against the floo
 	bun scripts/coverage.mjs report $(COVER_DIR)/merged.cover --floor $(FLOOR) \
 		--floors .coveragefloors --ignore .coverageignore --root $(CURDIR)
 
-# The complexity and maintainability half of the bar (#102): a report, not a gate. A gate that is
-# red from the day it lands is one nobody runs, so this prints the backlog and leaves the exit
-# code alone; it joins `make lint` when the queue is empty.
+# The complexity and maintainability half of the bar (#102). It was a report while the backlog
+# was 400 findings; it has been a gate since the queue emptied, and `make lint` runs it, because a
+# rule nothing runs is a preference. The thresholds live in gateway/.golangci.yml.
 analyze: ## complexity, duplication, dead code, error shape: fails on any finding
 	@# A report nobody reads is how this drifted: the numbers in standards.md said 0 while the
 	@# tree had three, because nothing ran it. It is a gate now, and it is cheap — five seconds

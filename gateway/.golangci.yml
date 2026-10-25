@@ -4,9 +4,9 @@
 # wire: a recommended set that changes under you is a gate nobody agreed to. Each entry here is
 # a decision with a reason beside it, and removing one is as reviewable as adding one.
 #
-# This is not yet `make lint`. It reports the backlog instead of failing the build, because a
-# gate that is red from the day it lands is a gate that gets switched off; it joins `lint` when
-# the packages have been brought to the bar (#102).
+# It was a report while the backlog was 400 findings; it has been a gate since the queue emptied
+# (#102) and `make lint` runs it, so a finding fails the build on every push. A gate that starts
+# red is one nobody runs, which is the only reason it was a report first.
 version: "2"
 
 run:
