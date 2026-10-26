@@ -60,6 +60,7 @@ var commands = map[string]func([]string){
 	"secret":    secretCommand,
 	"provider":  providers,
 	"model":     modelCommand,
+	"people":    peopleCommand,
 	"token":     tokenCommand,
 	"update":    updateCommand,
 	"version":   versionCommand,
@@ -99,6 +100,7 @@ func usage(w io.Writer) {
   secret     list, add, show, rotate, and remove secrets
   provider   list, add, and remove model provider keys
   model      list or choose the default model
+  people     who may use this install, and what they may do
   token      print the token that proves you own this install
   update     check for a release, and install it
   version    print the running version
@@ -160,11 +162,11 @@ func serve(argv []string) error {
 
 	logReadiness(ready.Check(readyInputForBoot(dir, updates, engine)))
 
-	door, err := identityDoor(dir, *host)
+	gate, err := openGate(dir, *host)
 	if err != nil {
 		return err
 	}
-	return listen(ctx, *host, *port, httpapi.New(workspaces, web.Files, updates, door).Handler(), dir)
+	return listen(ctx, *host, *port, httpapi.New(workspaces, web.Files, updates, gate).Handler(), dir)
 }
 
 // newWorkspaces is the workspace layer as this boot configured it: where its folders are, what

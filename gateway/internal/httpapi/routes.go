@@ -35,7 +35,7 @@ func (s *Server) Handler() http.Handler {
 
 	// The door is in front of everything, which is what makes "no path reaches a handler unproven" true
 	// by construction rather than by each handler remembering.
-	if s.door != nil {
+	if s.gate.Door != nil {
 		return s.admit(mux)
 	}
 	return mux

@@ -18,6 +18,7 @@ var Allowed = map[string][]string{
 		"internal/httpapi",
 		"internal/identity",
 		"internal/netns",
+		"internal/people",
 		"internal/protocol",
 		"internal/ready",
 		"internal/sandbox",
@@ -46,6 +47,7 @@ var Allowed = map[string][]string{
 	"internal/httpapi": {
 		"internal/control",
 		"internal/identity",
+		"internal/people",
 		"internal/protocol",
 		"internal/update",
 		"internal/vault",
@@ -56,6 +58,9 @@ var Allowed = map[string][]string{
 	// fact about a request and knows nothing about workspaces or engines (ADR 0032).
 	"internal/identity": {},
 	"internal/netns":    {},
+	// Who may use the install: a list of people, a file, and the rule that nobody unnamed gets in. A
+	// leaf: it knows nothing about a workspace or an engine (ADR 0032 §3).
+	"internal/people":   {},
 	"internal/protocol": {},
 	"internal/ready":    {"internal/update"},
 	// One workspace's secrets proxy: loopback, the vault's grants handed in, nothing of this

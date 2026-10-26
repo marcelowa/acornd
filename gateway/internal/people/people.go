@@ -1,0 +1,387 @@
+// Package people is who may use this install: one record per person, exactly one owner, and the rule
+// that nobody the owner has not named reaches the process at all. See
+// docs/adr/0032-who-may-call-the-console.md.
+//
+// The file is the authority and the door only enforces it. A second list — an Access policy edited by
+// hand, a group somebody added an address to — is a second place to forget a revocation, so the door's
+// list is derived from this one rather than maintained beside it.
+package people
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+)
+
+// File is the book inside the install folder. ADR 0014 keeps the install folder out of every sandbox
+// mount, which is what makes an owner's list of people a file an agent cannot read.
+const File = "people.json"
+
+// Role is what a record may do at the install level. There are two, deliberately: a viewer or an
+// operator is a sharing model nobody has asked for, and a role added before its case exists is a
+// permission nobody has thought about (ADR 0032 decision 5).
+type Role string
+
+const (
+	// RoleOwner is the install's owner: lifecycle, credentials, policy. Deliberately not a member of
+	// anyone else's workspace.
+	RoleOwner Role = "owner"
+	// RolePerson is everybody else: their own personal workspace, and the rooms they were added to.
+	RolePerson Role = "person"
+)
+
+// State is where a record is in its life. There is no pending: a stranger never gets a record, and an
+// address the owner named becomes active on its first sign-in.
+type State string
+
+const (
+	// Invited is an address the owner added that has not signed in yet.
+	Invited State = "invited"
+	// Active is someone who has signed in.
+	Active State = "active"
+	// Revoked is someone the owner removed. Every request from them refuses from the next one.
+	Revoked State = "revoked"
+)
+
+// Person is one record. Email is the identity: it is what the door proves, so it is what everything
+// downstream keys on.
+type Person struct {
+	Email string `json:"email"`
+	Name  string `json:"name,omitempty"`
+	Role  Role   `json:"role"`
+	State State  `json:"state"`
+	// Models is what this person may run. Empty means any model, which is the owner's default.
+	Models []string `json:"models,omitempty"`
+	// CanCreate is whether they may create workspaces of their own.
+	CanCreate bool `json:"can_create,omitempty"`
+	// Created and LastSeen are dates, not timestamps: the question they answer is "did this happen at
+	// all", and a clock in a file two processes write is a merge nobody needs.
+	Created  string `json:"created,omitempty"`
+	LastSeen string `json:"last_seen,omitempty"`
+}
+
+// The refusals. Each is a sentence the person reads, because the people behind this file are family
+// and friends rather than operators with a log to check.
+var (
+	ErrNoOwner  = errors.New("this install has no owner yet: run `acornfall people claim you@example.com` on the machine that runs it")
+	ErrHasOwner = errors.New("this install already has an owner")
+	ErrExists   = errors.New("that address is already in the list")
+)
+
+// ErrUnknown is the refusal for an address the door proved and the book does not know.
+type ErrUnknown struct{ Email string }
+
+func (e ErrUnknown) Error() string {
+	return fmt.Sprintf("this install has no record of %s: ask the owner to add you", e.Email)
+}
+
+// ErrRevoked is the refusal for someone the owner removed. It says so rather than pretending the
+// address is unknown, because being told "ask again" after being removed is a lie.
+type ErrRevoked struct{ Email string }
+
+func (e ErrRevoked) Error() string {
+	return fmt.Sprintf("%s no longer has access to this install: ask the owner", e.Email)
+}
+
+// Book is the file. The zero value is not usable: Open sets the path.
+type Book struct {
+	path string
+	// mu serialises this process's writers. Two processes are serialised by the lock file beside it,
+	// because the command line and a running gateway both write here (ADR 0032 §3).
+	mu sync.Mutex
+	// Now is the clock, so a test can write a date without waiting for one. Nil means time.Now.
+	Now func() time.Time
+}
+
+// document is the file's shape: one key, so a version can be added without guessing what came before.
+type document struct {
+	People []Person `json:"people"`
+}
+
+// Open reads a book, or starts an empty one when the file is not there. An install with no book is the
+// single owner ADR 0020 describes rather than an error: the file appears the first time somebody is
+// named.
+func Open(path string) (*Book, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, errors.New("people: a book needs a path")
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(abs), 0o700); err != nil {
+		return nil, err
+	}
+	return &Book{path: abs}, nil
+}
+
+// List answers every record, owner first and then by address, so two runs of the same book print the
+// same list.
+func (b *Book) List() ([]Person, error) {
+	records, err := b.read()
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(records, func(i, j int) bool {
+		if records[i].Role != records[j].Role {
+			return records[i].Role == RoleOwner
+		}
+		return records[i].Email < records[j].Email
+	})
+	return records, nil
+}
+
+// Owner answers the install's owner.
+func (b *Book) Owner() (Person, bool, error) {
+	records, err := b.read()
+	if err != nil {
+		return Person{}, false, err
+	}
+	for _, record := range records {
+		if record.Role == RoleOwner {
+			return record, true, nil
+		}
+	}
+	return Person{}, false, nil
+}
+
+// Claim names the install's owner, once. It is a command-line operation on purpose: the token already
+// proves ownership, so there is no first-come race through the API and no self-promotion (ADR 0032 §3).
+func (b *Book) Claim(email, name string) (Person, error) {
+	address, err := address(email)
+	if err != nil {
+		return Person{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	release, records, err := b.lock()
+	if err != nil {
+		return Person{}, err
+	}
+	defer release()
+	for _, record := range records {
+		if record.Role == RoleOwner {
+			return Person{}, ErrHasOwner
+		}
+	}
+	claimed := Person{
+		Email:   address,
+		Name:    strings.TrimSpace(name),
+		Role:    RoleOwner,
+		State:   Active,
+		Created: b.today(),
+	}
+	if err := b.write(append(records, claimed)); err != nil {
+		return Person{}, err
+	}
+	return claimed, nil
+}
+
+// Add names a person. They are invited until they first sign in, so a typo in an address costs nothing
+// and nobody holds a workspace they never visited.
+func (b *Book) Add(email, name string) (Person, error) {
+	address, err := address(email)
+	if err != nil {
+		return Person{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	release, records, err := b.lock()
+	if err != nil {
+		return Person{}, err
+	}
+	defer release()
+	for _, record := range records {
+		if record.Email == address {
+			return Person{}, fmt.Errorf("%w: %s", ErrExists, address)
+		}
+	}
+	added := Person{
+		Email:   address,
+		Name:    strings.TrimSpace(name),
+		Role:    RolePerson,
+		State:   Invited,
+		Created: b.today(),
+	}
+	if err := b.write(append(records, added)); err != nil {
+		return Person{}, err
+	}
+	return added, nil
+}
+
+// Revoke takes access away. The record stays: "who was here" is a question the owner asks later, and a
+// deletion answers it wrong. Their workspace is not touched — ADR 0011 keeps removal a separate,
+// explicit command.
+func (b *Book) Revoke(email string) error {
+	address, err := address(email)
+	if err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	release, records, err := b.lock()
+	if err != nil {
+		return err
+	}
+	defer release()
+	for index := range records {
+		if records[index].Email != address {
+			continue
+		}
+		if records[index].Role == RoleOwner {
+			// Revoking the owner is how an install locks itself out of the door it needs to add anybody,
+			// and there is no recovery command that does not start with the token.
+			return errors.New("the owner cannot be revoked: there would be no one left to add anybody")
+		}
+		records[index].State = Revoked
+		return b.write(records)
+	}
+	return ErrUnknown{Email: address}
+}
+
+// SignIn is the door's question, asked after it proved an address: may this person in, and it counts as
+// a visit. An invited record becomes active here, which is the moment their personal workspace is
+// created (ADR 0032 §3), so the answer carries the record the caller needs.
+func (b *Book) SignIn(email string) (Person, error) {
+	address, err := address(email)
+	if err != nil {
+		return Person{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	release, records, err := b.lock()
+	if err != nil {
+		return Person{}, err
+	}
+	defer release()
+	for index := range records {
+		if records[index].Email != address {
+			continue
+		}
+		if records[index].State == Revoked {
+			return Person{}, ErrRevoked{Email: address}
+		}
+		records[index].State = Active
+		records[index].LastSeen = b.today()
+		if err := b.write(records); err != nil {
+			return Person{}, err
+		}
+		return records[index], nil
+	}
+	return Person{}, ErrUnknown{Email: address}
+}
+
+// address normalises an address, because an identity compared case-sensitively admits one person twice.
+func address(email string) (string, error) {
+	address := strings.ToLower(strings.TrimSpace(email))
+	local, domain, found := strings.Cut(address, "@")
+	// Enough of an address to catch the typo a person makes, and no more: a full RFC parser here would
+	// refuse an address the door has already proved, which is the one thing this must never do.
+	if !found || local == "" || domain == "" || !strings.Contains(domain, ".") {
+		return "", fmt.Errorf("%q is not an email address", email)
+	}
+	return address, nil
+}
+
+func (b *Book) today() string {
+	if b.Now != nil {
+		return b.Now().Format("2006-01-02")
+	}
+	return time.Now().Format("2006-01-02")
+}
+
+// read answers the document and its records under a shared lock, so a read never sees a half-written
+// file and never blocks a reader.
+func (b *Book) read() ([]Person, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	release, records, err := b.lock()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return records, nil
+}
+
+// load reads and parses the file. The caller holds the lock.
+func (b *Book) load() ([]Person, error) {
+	payload, err := os.ReadFile(b.path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var parsed document
+	if err := json.Unmarshal(payload, &parsed); err != nil {
+		// A file nobody can parse is reported by name: rewriting it would delete the list, and starting
+		// empty would admit nobody while looking like it worked.
+		return nil, fmt.Errorf("%s is not a people file: %w", b.path, err)
+	}
+	return parsed.People, nil
+}
+
+// write replaces the file atomically with 0600, which is the vault's discipline for the same reason: a
+// half-written list is a list of the wrong people, and one world-readable moment is a leak.
+func (b *Book) write(records []Person) error {
+	if records == nil {
+		records = []Person{}
+	}
+	payload, err := json.MarshalIndent(document{People: records}, "", "  ")
+	if err != nil {
+		return err
+	}
+	payload = append(payload, '\n')
+	temp, err := os.CreateTemp(filepath.Dir(b.path), ".people-*")
+	if err != nil {
+		return err
+	}
+	path := temp.Name()
+	defer func() { _ = os.Remove(path) }()
+	if err := temp.Chmod(0o600); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if _, err := temp.Write(payload); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(path, b.path)
+}
+
+// lock is held across the read-modify-write of one change, so the command line and a running gateway
+// cannot lose each other's edit. The lock file holds nothing; it exists to be locked.
+func (b *Book) lock() (func(), []Person, error) {
+	file, err := os.OpenFile(b.path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+		_ = file.Close()
+		return nil, nil, err
+	}
+	records, err := b.load()
+	release := func() {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = file.Close()
+	}
+	if err != nil {
+		release()
+		return nil, nil, err
+	}
+	return release, records, nil
+}

@@ -7,9 +7,12 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/acornfall/acornfall/gateway/internal/httpapi"
 	"github.com/acornfall/acornfall/gateway/internal/identity"
+	"github.com/acornfall/acornfall/gateway/internal/people"
 )
 
 // tokenCommand prints the install's token, minting one on first use.
@@ -54,6 +57,31 @@ func printToken(out, notes io.Writer, dir string, rotate bool) error {
 	}
 	fmt.Fprintln(out, token)
 	return nil
+}
+
+// openGate builds what this run admits by: the door that proves who is calling, and the book of people
+// it must then know. Both are nil for the single-owner install ADR 0020 describes, because a door
+// nothing configured is how a switched-off guard comes back.
+func openGate(dir, host string) (httpapi.Gate, error) {
+	door, err := identityDoor(dir, host)
+	if err != nil {
+		return httpapi.Gate{}, err
+	}
+	if door == nil {
+		return httpapi.Gate{}, nil
+	}
+	book, err := people.Open(filepath.Join(dir, people.File))
+	if err != nil {
+		return httpapi.Gate{}, err
+	}
+	if _, claimed, err := book.Owner(); err != nil {
+		return httpapi.Gate{}, err
+	} else if !claimed {
+		// Loud at boot rather than at the first browser: a console with a door and no owner is one only
+		// the machine can get into, and the fix is one command.
+		fmt.Fprintln(os.Stderr, "acornfall: this install has people but no owner yet; `acornfall people claim you@example.com` names one")
+	}
+	return httpapi.Gate{Door: door, People: book}, nil
 }
 
 // identityDoor builds the proof this run requires, or nil for the single-owner install ADR 0020

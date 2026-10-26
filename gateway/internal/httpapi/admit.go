@@ -24,14 +24,23 @@ func (s *Server) admit(next http.Handler) http.Handler {
 			http.Error(w, "this request came from another site, and the console refuses to act on one", http.StatusForbidden)
 			return
 		}
-		// Who it is, proven; the handlers that must scope what they show will read it from the door
-		// again until the workspace ACL lands (ADR 0032 decision 4). What this file guarantees is the
-		// part that is already true: no route runs for a request nothing proved.
-		if _, err := s.door.Prove(r); err != nil {
+		caller, err := s.gate.Door.Prove(r)
+		if err != nil {
 			// 401 and the sentence the door wrote. There is no login page to send anyone to: the edge
 			// does the signing in, before the request gets here (ADR 0033).
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
+		}
+		// A proof of an address is not permission to use this install: the owner names people, and the
+		// ones not named are refused before a handler runs and before anything is written. The token is
+		// the owner, and does not need a record to be let in (ADR 0032 §3).
+		if !caller.Owner {
+			if _, err := s.gate.People.SignIn(caller.Email); err != nil {
+				// 403 rather than 401: the proof was good and this person may not come in. Signing in
+				// again would not help, and a page that says so only sends them round the loop.
+				http.Error(w, err.Error(), http.StatusForbidden)
+				return
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
