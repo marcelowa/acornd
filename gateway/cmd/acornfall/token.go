@@ -4,6 +4,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -26,24 +27,33 @@ func tokenCommand(argv []string) {
 	if err != nil {
 		logFatal(err)
 	}
-	if *rotate {
+	if err := printToken(os.Stdout, os.Stderr, dir, *rotate); err != nil {
+		logFatal(err)
+	}
+}
+
+// printToken is the command's whole job in a function a test can call: the token on stdout, so it can be
+// piped, and every note on stderr, so a pipe never becomes part of a credential.
+func printToken(out, notes io.Writer, dir string, rotate bool) error {
+	if rotate {
 		token, err := identity.RotateToken(dir)
 		if err != nil {
-			logFatal(err)
+			return err
 		}
-		fmt.Fprintln(os.Stderr, "acornfall: the previous token no longer works")
-		fmt.Println(token)
-		return
+		fmt.Fprintln(notes, "acornfall: the previous token no longer works")
+		fmt.Fprintln(out, token)
+		return nil
 	}
 	token, minted, err := identity.EnsureToken(dir)
 	if err != nil {
-		logFatal(err)
+		return err
 	}
 	if minted {
 		// Said out loud, because the file appearing is otherwise a credential nobody asked for.
-		fmt.Fprintln(os.Stderr, "acornfall: this install had no token; a new one is in the install folder")
+		fmt.Fprintln(notes, "acornfall: this install had no token; a new one is in the install folder")
 	}
-	fmt.Println(token)
+	fmt.Fprintln(out, token)
+	return nil
 }
 
 // identityDoor builds the proof this run requires, or nil for the single-owner install ADR 0020
