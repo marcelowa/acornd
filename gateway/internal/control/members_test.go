@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -166,4 +167,109 @@ func registryIn(t *testing.T, dataDir, owner string, list []Workspace) *Workspac
 		t.Fatalf("load registry: %v", err)
 	}
 	return workspaces
+}
+
+// A person's own workspace is named after their address, has exactly one member, and is labelled as theirs
+// rather than named as it: the console shows "Personal", and the name exists because one registry needs one.
+func TestAPersonsOwnWorkspaceIsNamedAfterThem(t *testing.T) {
+	workspaces := registry(t, []Workspace{{Name: "general", Path: "/w/general", General: true}})
+	created, err := workspaces.CreatePersonal("Ana.Silva+acorn@Example.com")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.Name != "ana.silva+acorn" {
+		t.Errorf("name = %q, want the readable part of the address", created.Name)
+	}
+	if created.Title != "Personal" {
+		t.Errorf("title = %q, want the label the console shows", created.Title)
+	}
+	if !slices.Equal(created.Members, []string{"ana.silva+acorn@example.com"}) {
+		t.Errorf("members = %v, want just them, lowercased", created.Members)
+	}
+	// And it is a real workspace: the folder exists, because the agent works in it.
+	if info, err := os.Stat(created.Path); err != nil || !info.IsDir() {
+		t.Errorf("the workspace has no folder: %v", err)
+	}
+}
+
+// Two people whose addresses start the same way get two workspaces, not one. The second Ana is ana-2, and
+// neither of them loses their history to a collision.
+func TestASecondAnaGetsANumber(t *testing.T) {
+	workspaces := registry(t, nil)
+	first, err := workspaces.CreatePersonal("ana@example.com")
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	second, err := workspaces.CreatePersonal("ana@another.example.com")
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if first.Name != "ana" || second.Name != "ana-2" {
+		t.Errorf("names = %q, %q; want ana then ana-2", first.Name, second.Name)
+	}
+	if len(second.Members) != 1 || second.Members[0] != "ana@another.example.com" {
+		t.Errorf("the second workspace's members = %v", second.Members)
+	}
+}
+
+// The workspace is found, not made again: every request a person makes lands on the same one, and a registry
+// with a new Ana in it for each request would be a workspace per page load.
+func TestAPersonsOwnWorkspaceIsFoundRatherThanMadeAgain(t *testing.T) {
+	workspaces := registry(t, []Workspace{{Name: "general", Path: "/w/general", General: true}})
+	caller := Caller{Email: "ana@example.com"}
+	first, err := workspaces.personal(caller)
+	if err != nil {
+		t.Fatalf("personal: %v", err)
+	}
+	second, err := workspaces.personal(caller)
+	if err != nil {
+		t.Fatalf("personal again: %v", err)
+	}
+	if first != second {
+		t.Errorf("the second request made %q, and the first made %q", second, first)
+	}
+	owned := 0
+	for _, workspace := range workspaces.List() {
+		if slices.Contains(workspace.Members, "ana@example.com") {
+			owned++
+		}
+	}
+	if owned != 1 {
+		t.Errorf("%d workspaces belong to one person, want 1", owned)
+	}
+}
+
+// The owner's default stays the general workspace until the rename in ADR 0032 §9 lands: this slice is about
+// a person having somewhere to land, not about what the install's own workspace is called.
+func TestTheOwnerStillLandsOnTheGeneralWorkspace(t *testing.T) {
+	workspaces := registry(t, nil)
+	for _, caller := range []Caller{{Owner: true}, {Owner: true, Email: "me@example.com"}} {
+		name, err := workspaces.personal(caller)
+		if err != nil {
+			t.Fatalf("personal: %v", err)
+		}
+		if name != GeneralWorkspaceName {
+			t.Errorf("the owner's default = %q, want %q", name, GeneralWorkspaceName)
+		}
+	}
+}
+
+// A handle is a folder name, so everything a folder cannot hold becomes a dash and an address that reduces to
+// nothing still gets a workspace.
+func TestAHandleIsAFolderName(t *testing.T) {
+	cases := map[string]string{
+		"ana@example.com":           "ana",
+		"Ana.Silva@example.com":     "ana.silva",
+		"a b/c@example.com":         "a-b-c",
+		"ünïcode@example.com":       "n-code",
+		"@example.com":              "personal",
+		"":                          "personal",
+		"+tag@example.com":          "+tag",
+		"dots.and-dashes_x@test.io": "dots.and-dashes_x",
+	}
+	for email, want := range cases {
+		if got := handle(email); got != want {
+			t.Errorf("handle(%q) = %q, want %q", email, got, want)
+		}
+	}
 }

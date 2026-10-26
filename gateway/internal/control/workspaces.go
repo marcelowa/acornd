@@ -388,6 +388,89 @@ func (w *Workspaces) ListFor(caller Caller) []Workspace {
 	return visible
 }
 
+// personal answers the name of the caller's own workspace, making it if they have none.
+//
+// It is made on the first request rather than at sign-in because that request is the sign-in: nobody gets a
+// workspace they never showed up for, and nothing has to remember that the making was owed.
+func (w *Workspaces) personal(caller Caller) (string, error) {
+	if caller.Owner || strings.TrimSpace(caller.Email) == "" {
+		return GeneralWorkspaceName, nil
+	}
+	// One workspace with exactly one member, that member being this person. It is derived rather than
+	// flagged, because a membership list is a fact and a flag is a claim that can disagree with it.
+	for _, workspace := range w.List() {
+		if len(workspace.Members) == 1 && workspace.Members[0] == strings.ToLower(caller.Email) {
+			return workspace.Name, nil
+		}
+	}
+	created, err := w.CreatePersonal(caller.Email)
+	if err != nil {
+		return "", err
+	}
+	return created.Name, nil
+}
+
+// CreatePersonal makes somebody's own workspace: named after their address, one member, in the workspaces
+// folder like any other.
+//
+// The name is theirs and the console never shows it — the label is "Personal" — but a name has to be unique
+// in one registry, so a second Ana becomes ana-2 rather than somebody's workspace going missing.
+func (w *Workspaces) CreatePersonal(email string) (Workspace, error) {
+	address := strings.ToLower(strings.TrimSpace(email))
+	if address == "" {
+		return Workspace{}, errors.New("a personal workspace needs an owner's address")
+	}
+	name, err := w.freeName(handle(address))
+	if err != nil {
+		return Workspace{}, err
+	}
+	path := filepath.Join(w.Dir(), name)
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return Workspace{}, err
+	}
+	workspace := Workspace{Name: name, Path: path, Title: "Personal", Members: []string{address}}
+	if err := w.Add(workspace); err != nil {
+		return Workspace{}, err
+	}
+	return workspace, nil
+}
+
+// freeName is the first name that is not taken: ana, then ana-2, then ana-3. A cap rather than a loop that
+// might not end, because a registry with a thousand Anas is a problem to look at rather than to keep trying.
+func (w *Workspaces) freeName(base string) (string, error) {
+	for attempt := 1; attempt <= 100; attempt++ {
+		name := base
+		if attempt > 1 {
+			name = fmt.Sprintf("%s-%d", base, attempt)
+		}
+		if _, taken := w.Get(name); !taken {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("no free workspace name for %q after 100 tries", base)
+}
+
+// handle is the readable part of an address, reduced to what a folder name and a workspace name allow. It is
+// derived rather than asked for: the owner names people, and a form field for "what should my folder be
+// called" is a question nobody wants to answer twice.
+func handle(email string) string {
+	local, _, _ := strings.Cut(email, "@")
+	var cleaned strings.Builder
+	for _, r := range strings.ToLower(local) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '-', r == '_', r == '+':
+			cleaned.WriteRune(r)
+		default:
+			cleaned.WriteRune('-')
+		}
+	}
+	name := strings.Trim(cleaned.String(), "-.")
+	if name == "" {
+		return "personal"
+	}
+	return name
+}
+
 // Get returns one workspace by name.
 func (w *Workspaces) Get(name string) (Workspace, bool) {
 	w.mu.RLock()
@@ -848,7 +931,13 @@ func (w *Workspaces) noDefinition(name string) bool {
 func (w *Workspaces) Route(ctx context.Context, caller Caller, workspaceName string) (Workspace, *Control, error) {
 	name := workspaceName
 	if name == "" {
-		name = GeneralWorkspaceName
+		// "The workspace" meant one workspace when there was one owner. Now it means the caller's own, and
+		// for a person that is their personal workspace, made the first time they ask (ADR 0032 §3, §9).
+		own, err := w.personal(caller)
+		if err != nil {
+			return Workspace{}, nil, err
+		}
+		name = own
 	}
 	workspace, ok := w.Get(name)
 	// One refusal for both, deliberately: a caller who is not a member learns nothing about whether the
