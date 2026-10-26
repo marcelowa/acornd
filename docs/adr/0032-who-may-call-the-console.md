@@ -1,6 +1,6 @@
 # ADR 0032 — Who may call the console
 
-Status: proposed — awaiting the owner's sign-off
+Status: accepted (2026-10-30), not built
 Date: 2026-10-30
 
 ## Context
@@ -28,8 +28,9 @@ Three facts in the code make the design narrower than it first looks:
   **every agent in every workspace the owner** — the agent has `bash`, so it can `curl` the API
   and add a provider key or read a transcript.
 
-The reachability of the console from outside the machine is ADR 0033's problem, and that ADR is
-not written yet. This ADR is only: who is calling, and what may they touch.
+The reachability of the console from outside the machine is
+[ADR 0033](0033-remote-access.md)'s problem. This ADR is only: who is calling, and what may they
+touch.
 
 ## Decision
 
@@ -97,9 +98,9 @@ codebase does not otherwise use. One record per identity:
 | `revoked` | the owner | nothing; every request refuses from the next one |
 
 **Nobody the owner has not named reaches the process at all.** There is no waiting room and no
-`pending`: the door's allowlist is the same list, pushed to it whenever a person changes (ADR 0033),
-so a stranger's request is refused before a handler runs and before anything is written. The console
-owns the list; the door enforces it. Two lists would be two places to forget a revocation, so there
+`pending`: the door's allowlist is the same list, pushed to it whenever a person changes
+([ADR 0033](0033-remote-access.md)), so a stranger's request is refused before a handler runs and
+before anything is written. The console owns the list; the door enforces it. Two lists would be two places to forget a revocation, so there
 is one, and a person's state is the only input to it.
 
 The reconciliation runs the other way too: an email the door still admits but `people.json` no
@@ -108,8 +109,8 @@ That is the one state a drift between the two can produce, and it fails closed.
 
 **Exactly one owner**, and it is claimed from the CLI: `acornfall people claim you@example.com`.
 The token already proves ownership, so there is no first-come race and no self-promotion through
-the API. An install with no `people.json` behaves as it does today — one owner, no people — except for the
-one rename in decision 9.
+the API. An install with no `people.json` behaves as it does today — one owner, no people — except
+for the one rename in decision 9.
 
 When a person first becomes `active`, their personal workspace is created then, with the install's
 default model if it is in their allowlist and the first allowed model if it is not. Nobody gets a
@@ -203,8 +204,8 @@ need.
 ### 8. When the console can be a lock, it is one
 
 `start` refuses a non-loopback `--host` on an install that has people, and the refusal names both
-ways out: the tunnel (ADR 0033) does the reachability, and `127.0.0.1` is the only address it
-forwards to. A door that only matters on one address is not a door.
+ways out: the tunnel ([ADR 0033](0033-remote-access.md)) does the reachability, and `127.0.0.1` is
+the only address it forwards to. A door that only matters on one address is not a door.
 
 An install with no people is untouched: `0.0.0.0:7777`, no token, no assertion — ADR 0020 stands
 for the single owner it was written about, and ADR 0012's known limit stays true for exactly that
@@ -265,8 +266,8 @@ cheapest of all of them technically, and it asks every family member to install 
 here because it becomes the right answer the day the people involved already have it.
 
 **Invite links as the only proof.** Rejected: the link is then the credential, a forwarded message
-is a full account, and there is nothing to verify. It survives as the fallback in ADR 0033 for a
-person who cannot reach the door at all.
+is a full account, and there is nothing to verify. It survives as the fallback in
+[ADR 0033](0033-remote-access.md) for a person who cannot reach the door at all.
 
 **A session table in control.** Rejected: a second answer to "who am I", a revocation lag, and
 storage for something the door re-asserts on every request anyway.
@@ -305,7 +306,7 @@ The naming is the plan; each of these is a test that must exist before this is c
 ## Not in this ADR
 
 - **How a browser reaches the machine.** The tunnel, its provisioning, and what the owner pastes
-  into the console: ADR 0033, unwritten.
+  into the console: [ADR 0033](0033-remote-access.md).
 - **Per-person provider credentials.** One `credentials.json` is spent by everyone, and this ADR
   accepts that: a person is trusted to spend the install's key, within an allowlist of models. A
   per-person key changes `credentials.json`, the vault's scope, and usage accounting, and it is its
