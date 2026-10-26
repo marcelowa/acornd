@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -95,7 +96,9 @@ func TestAWorkspaceBodyChangesOnlyWhatItNames(t *testing.T) {
 	if updated.DisableDevices == nil || !*updated.DisableDevices {
 		t.Errorf("the device opt-out was not kept: %+v", updated)
 	}
-	if changed := (workspaceBody{}).apply(existing); changed != existing {
+	// Compared field by field through the registry's own view: a workspace carries a member list now, so
+	// it is no longer a value Go can compare with ==.
+	if changed := (workspaceBody{}).apply(existing); !reflect.DeepEqual(changed, existing) {
 		t.Errorf("an empty body should change nothing: %+v", changed)
 	}
 }

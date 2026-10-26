@@ -3,9 +3,13 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/acornfall/acornfall/gateway/internal/control"
+	"github.com/acornfall/acornfall/gateway/internal/identity"
 )
 
 // admit refuses a request no door proved, refuses a state-changing one that came from another site,
@@ -42,7 +46,7 @@ func (s *Server) admit(next http.Handler) http.Handler {
 				return
 			}
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(withCaller(r.Context(), s.who(caller))))
 	})
 }
 
@@ -67,4 +71,46 @@ func sameSite(r *http.Request) bool {
 		return false
 	}
 	return strings.EqualFold(parsed.Host, r.Host)
+}
+
+// callerKey carries who a proven request is from, in control's words, from the edge to the handlers that
+// have to ask. Unexported, so the only way a caller gets there is a door proving it.
+type callerKey struct{}
+
+func withCaller(ctx context.Context, caller control.Caller) context.Context {
+	return context.WithValue(ctx, callerKey{}, caller)
+}
+
+// callerOf is who this request is from. A request nothing proved is the single owner ADR 0020 describes:
+// the gate is off, there is nobody to tell apart, and every path answers as it always did.
+func callerOf(r *http.Request) control.Caller {
+	if caller, ok := r.Context().Value(callerKey{}).(control.Caller); ok {
+		return caller
+	}
+	return control.Caller{Owner: true}
+}
+
+// who turns a proof into control's own caller. The token proves the owner but not which address they are,
+// and membership is written in terms of an address, so the book answers that one question.
+func (s *Server) who(caller identity.Caller) control.Caller {
+	who := control.Caller{Owner: caller.Owner, Email: caller.Email}
+	if who.Owner && who.Email == "" && s.gate.People != nil {
+		if owner, ok, err := s.gate.People.Owner(); err == nil && ok {
+			who.Email = owner.Email
+		}
+	}
+	return who
+}
+
+// owner wraps a route that is the install's own: its workspaces' lifecycle, its credentials, its policy. A
+// person is refused with 403 here rather than the 404 a workspace answers, because these routes are not
+// about a workspace somebody might be a member of — they are about an install they do not own.
+func (s *Server) owner(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !callerOf(r).Owner {
+			http.Error(w, "this is the install's own business, and only its owner may do it", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
 }

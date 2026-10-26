@@ -233,29 +233,29 @@ func TestEveryWorkspaceRouteRefusesAWorkspaceThatIsNotThere(t *testing.T) {
 		method string
 		path   string
 		body   any
-		// want is 409 everywhere but the status route, which answers 404: it is the one route that
-		// is *about* a workspace existing, so "not found" is its own answer rather than a conflict
-		// with something else.
+		// want is 404 everywhere: a workspace that is not there and one the caller may not see answer the
+		// same thing, so a status cannot be used to enumerate what exists (ADR 0032 §4). The status route
+		// answered 404 before this for the same reason.
 		want int
 	}{
-		{"GET", "/api/workspaces/nowhere/state", nil, 409},
+		{"GET", "/api/workspaces/nowhere/state", nil, 404},
 		{"GET", "/api/workspaces/nowhere/status", nil, 404},
-		{"GET", "/api/workspaces/nowhere/conversations", nil, 409},
-		{"POST", "/api/workspaces/nowhere/conversations", nil, 409},
-		{"GET", "/api/workspaces/nowhere/agents", nil, 409},
-		{"GET", "/api/workspaces/nowhere/commands", nil, 409},
-		{"GET", "/api/workspaces/nowhere/usage", nil, 409},
-		{"POST", "/api/workspaces/nowhere/conversations/1/messages", map[string]any{"text": "hello"}, 409},
-		{"POST", "/api/workspaces/nowhere/conversations/1/draft", map[string]any{"text": "hi"}, 409},
-		{"POST", "/api/workspaces/nowhere/conversations/1/abort", nil, 409},
-		{"POST", "/api/workspaces/nowhere/attachments", nil, 409},
-		{"POST", "/api/workspaces/nowhere/providers/login", map[string]any{"providerId": "faux", "authType": "api_key"}, 409},
-		{"POST", "/api/workspaces/nowhere/providers/logout", map[string]any{"providerId": "faux"}, 409},
-		{"POST", "/api/workspaces/nowhere/providers/refresh", nil, 409},
-		{"POST", "/api/workspaces/nowhere/auth/answer", map[string]any{"promptId": "p", "value": "v"}, 409},
-		{"POST", "/api/workspaces/nowhere/auth/cancel", map[string]any{"promptId": "p"}, 409},
-		{"POST", "/api/workspaces/nowhere/default-model", map[string]any{"provider": "faux", "modelId": "m"}, 409},
-		{"GET", "/api/workspaces/nowhere/conversations/1/policy", nil, 409},
+		{"GET", "/api/workspaces/nowhere/conversations", nil, 404},
+		{"POST", "/api/workspaces/nowhere/conversations", nil, 404},
+		{"GET", "/api/workspaces/nowhere/agents", nil, 404},
+		{"GET", "/api/workspaces/nowhere/commands", nil, 404},
+		{"GET", "/api/workspaces/nowhere/usage", nil, 404},
+		{"POST", "/api/workspaces/nowhere/conversations/1/messages", map[string]any{"text": "hello"}, 404},
+		{"POST", "/api/workspaces/nowhere/conversations/1/draft", map[string]any{"text": "hi"}, 404},
+		{"POST", "/api/workspaces/nowhere/conversations/1/abort", nil, 404},
+		{"POST", "/api/workspaces/nowhere/attachments", nil, 404},
+		{"POST", "/api/workspaces/nowhere/providers/login", map[string]any{"providerId": "faux", "authType": "api_key"}, 404},
+		{"POST", "/api/workspaces/nowhere/providers/logout", map[string]any{"providerId": "faux"}, 404},
+		{"POST", "/api/workspaces/nowhere/providers/refresh", nil, 404},
+		{"POST", "/api/workspaces/nowhere/auth/answer", map[string]any{"promptId": "p", "value": "v"}, 404},
+		{"POST", "/api/workspaces/nowhere/auth/cancel", map[string]any{"promptId": "p"}, 404},
+		{"POST", "/api/workspaces/nowhere/default-model", map[string]any{"provider": "faux", "modelId": "m"}, 404},
+		{"GET", "/api/workspaces/nowhere/conversations/1/policy", nil, 404},
 	}
 	for _, route := range routes {
 		status, body := c.do(route.method, route.path, route.body)

@@ -152,7 +152,14 @@ func serve(argv []string) error {
 
 	go updates.StartLoop(ctx)
 
-	workspaces := newWorkspaces(dir, userHome, *workspacesDir, command, worker, updates, secrets, engine, tier)
+	// The gate is opened before the registry, because the registry needs one answer out of it: whose the
+	// workspaces that predate people are. Control is told an address, not a file — it knows what a
+	// workspace is and not what a people file is.
+	gate, err := openGate(dir, *host)
+	if err != nil {
+		return err
+	}
+	workspaces := newWorkspaces(dir, userHome, *workspacesDir, command, worker, updates, secrets, engine, tier, ownerEmail(gate.People))
 	if err := workspaces.Open(ctx); err != nil {
 		return err
 	}
@@ -162,10 +169,6 @@ func serve(argv []string) error {
 
 	logReadiness(ready.Check(readyInputForBoot(dir, updates, engine)))
 
-	gate, err := openGate(dir, *host)
-	if err != nil {
-		return err
-	}
 	return listen(ctx, *host, *port, httpapi.New(workspaces, web.Files, updates, gate).Handler(), dir)
 }
 
@@ -178,6 +181,7 @@ func newWorkspaces(
 	secrets *vault.Store,
 	engine *sandbox.Manager,
 	tier *sandbox.Tier,
+	owner string,
 ) *control.Workspaces {
 	return control.NewWorkspaces(control.WorkspacesOptions{
 		DataDir:       dir,
@@ -195,10 +199,11 @@ func newWorkspaces(
 				RestartRequired: status.RestartRequired,
 			}
 		},
-		Model:     os.Getenv("ACORNFALL_MODEL"),
-		Sandbox:   engine,
-		Sandboxes: tier,
-		Vault:     secrets,
+		Model:      os.Getenv("ACORNFALL_MODEL"),
+		Sandbox:    engine,
+		Sandboxes:  tier,
+		Vault:      secrets,
+		OwnerEmail: owner,
 	})
 }
 

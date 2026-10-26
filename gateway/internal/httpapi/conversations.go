@@ -14,13 +14,13 @@ import (
 func (s *Server) conversations(w http.ResponseWriter, r *http.Request) {
 	ctl, err := s.controlFor(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	// Refreshed, not cached: the cached list is kept current by a poll that only runs
 	// while a client is attached, so a script would otherwise read stale state.
 	if err := ctl.RefreshConversations(r.Context()); err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	writeJSON(w, http.StatusOK, ctl.State().Conversations)

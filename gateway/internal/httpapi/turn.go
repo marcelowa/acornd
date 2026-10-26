@@ -31,7 +31,7 @@ func (s *Server) reload(w http.ResponseWriter, r *http.Request) {
 func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	ctl, err := s.controlFor(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	var body struct {
@@ -52,7 +52,7 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := ctl.Prompt(r.Context(), r.PathValue("id"), strings.TrimSpace(body.Text), when, body.Attachments); err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
@@ -83,11 +83,11 @@ func (s *Server) draft(w http.ResponseWriter, r *http.Request) {
 func (s *Server) abort(w http.ResponseWriter, r *http.Request) {
 	ctl, err := s.controlFor(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	if err := ctl.Abort(r.Context(), r.PathValue("id")); err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "aborted"})
@@ -96,7 +96,7 @@ func (s *Server) abort(w http.ResponseWriter, r *http.Request) {
 func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 	ctl, err := s.controlFor(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	// Pointers, so "absent" and "set to empty" are different requests. A plain
@@ -116,7 +116,7 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 		ThinkingLevel: body.ThinkingLevel,
 		Definition:    body.Definition,
 	}); err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	writeJSON(w, http.StatusOK, ctl.State())

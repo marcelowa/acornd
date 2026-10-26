@@ -18,7 +18,7 @@ const maxAttachmentBytes = 10 << 20
 func (s *Server) attachments(w http.ResponseWriter, r *http.Request) {
 	ctl, err := s.controlFor(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
@@ -53,7 +53,7 @@ func (s *Server) attachments(w http.ResponseWriter, r *http.Request) {
 	}
 	attached, err := ctl.UploadAttachment(r.Context(), stagedPath, header.Filename, mimeOf(stagedPath, header), written)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	writeJSON(w, http.StatusCreated, attached)

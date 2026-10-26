@@ -93,7 +93,7 @@ func TestAnEmailTheOwnerNeverNamedIsRefused(t *testing.T) {
 	opened := book(t)
 	handler := admitted(t, Gate{Door: stubDoor{caller: identity.Caller{Email: "stranger@example.com"}}, People: opened})
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/update/status", nil))
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", recorder.Code)
 	}
@@ -118,9 +118,9 @@ func TestAnInvitedPersonIsActiveAfterTheirFirstRequest(t *testing.T) {
 	}
 	handler := admitted(t, Gate{Door: stubDoor{caller: identity.Caller{Email: "ana@example.com"}}, People: opened})
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/update/status", nil))
-	if recorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want the handler's 503", recorder.Code)
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want the client the handler serves", recorder.Code)
 	}
 	list, err := opened.List()
 	if err != nil || len(list) != 1 {
@@ -143,7 +143,7 @@ func TestARevokedPersonIsRefused(t *testing.T) {
 	}
 	handler := admitted(t, Gate{Door: stubDoor{caller: identity.Caller{Email: "ana@example.com"}}, People: opened})
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/update/status", nil))
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", recorder.Code)
 	}
@@ -211,5 +211,35 @@ func TestACrossSiteReadIsAllowed(t *testing.T) {
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want the handler's 503", recorder.Code)
+	}
+}
+
+// The install's own routes — its workspaces' lifecycle, its credentials, its updates — are the owner's.
+// A person gets 403 rather than the 404 a workspace answers: these routes are not about a workspace they
+// might be a member of, they are about an install they do not own.
+func TestAnInstallRouteIsTheOwnersOnly(t *testing.T) {
+	opened := book(t)
+	if _, err := opened.Add("ana@example.com", "Ana"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	cases := []struct {
+		name   string
+		caller identity.Caller
+		want   int
+	}{
+		{"a person", identity.Caller{Email: "ana@example.com"}, http.StatusForbidden},
+		// The owner passes the check and reaches the handler, which answers 503 because this build has no
+		// update tier.
+		{"the owner", identity.Caller{Owner: true}, http.StatusServiceUnavailable},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			handler := admitted(t, Gate{Door: stubDoor{caller: test.caller}, People: opened})
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/update/check", strings.NewReader("{}")))
+			if recorder.Code != test.want {
+				t.Fatalf("status = %d, want %d (%s)", recorder.Code, test.want, recorder.Body.String())
+			}
+		})
 	}
 }

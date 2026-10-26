@@ -169,3 +169,16 @@ func loopback(host string) bool {
 	address := net.ParseIP(host)
 	return address != nil && address.IsLoopback()
 }
+
+// ownerEmail is the install owner's address, or empty when nobody has claimed it. It is the one answer
+// control needs out of the book: whose the workspaces that predate people are.
+func ownerEmail(book *people.Book) string {
+	if book == nil {
+		return ""
+	}
+	owner, ok, err := book.Owner()
+	if err != nil || !ok {
+		return ""
+	}
+	return owner.Email
+}

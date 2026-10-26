@@ -15,6 +15,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -84,9 +85,40 @@ type Workspace struct {
 	// workspace can run another acornfall with its own bwrap engine and network. A
 	// pointer because true is a decision and absent is not.
 	DisableDevices *bool `json:"disable_devices,omitempty"`
+	// Members is who may use this workspace: email addresses, lowercase. Being a member is the whole of it
+	// — there are no roles inside one, because ADR 0032 gives two and both are install-level. A workspace
+	// with no members belongs to nobody, which is the state every workspace was in before there were
+	// people, and which the owner's own claim fills in.
+	Members []string `json:"members,omitempty"`
 	// Running is runtime state, never stored: a persisted `true` would be a claim about a
 	// process that does not exist after a restart.
 	Running bool `json:"-"`
+}
+
+// ErrNoWorkspace is "there is no workspace here for you": it does not exist, or it is not one you are a
+// member of. The edge answers 404 for both, because a status that told them apart would let a person
+// enumerate the workspaces they cannot see (ADR 0032 §4).
+var ErrNoWorkspace = errors.New("no workspace")
+
+// Caller is who a request is from, in control's own words: the install's owner, or a person. The edge
+// translates the proof it obtained into this shape, because ADR 0002 keeps the transport's types out of
+// the domain and control is what owns identity, resources and policy (ADR 0001).
+type Caller struct {
+	Owner bool
+	Email string
+}
+
+// Allows reports whether a caller may use this workspace.
+//
+// Being a member is the whole of it: it is not a read where a member writes, and it is not a role. The
+// owner is not special here — ADR 0032 has them own the install, not other people's conversations — and
+// the one exception is an install where no owner has been claimed, which is the machine talking to
+// itself before anybody is named.
+func (w Workspace) Allows(caller Caller) bool {
+	if strings.TrimSpace(caller.Email) == "" {
+		return caller.Owner
+	}
+	return slices.Contains(w.Members, strings.ToLower(caller.Email))
 }
 
 // NetworkOff is the one non-default value Network has today.
@@ -208,6 +240,10 @@ type WorkspacesOptions struct {
 	// DisableVMNesting is the install default from --disable-vm-nesting: a workspace's
 	// sandbox nests when the engine and the machine can, unless a workspace refuses it.
 	DisableVMNesting bool
+	// OwnerEmail is the install owner's address, from the book of people, or empty when nobody has claimed
+	// it. It exists for one decision: a workspace that predates people is the owner's, and recording that
+	// is what stops turning people on from locking the owner out of everything they had.
+	OwnerEmail string
 }
 
 // Workspaces is the install: a registry of workspaces and their started Controls.
@@ -279,6 +315,9 @@ func (w *Workspaces) Open(ctx context.Context) error {
 	if err := w.migrate(); err != nil {
 		return err
 	}
+	if err := w.nameTheOwnersWorkspaces(); err != nil {
+		return err
+	}
 	if _, err := w.Ensure(ctx, GeneralWorkspaceName); err != nil {
 		// Logged, not fatal: the general workspace is where a client lands, but a client can
 		// still be told what is wrong with it. Exiting here would leave nothing to talk to.
@@ -331,6 +370,22 @@ func (w *Workspaces) List() []Workspace {
 		return list[i].Name < list[j].Name
 	})
 	return list
+}
+
+// ListFor answers the workspaces a caller may see: every one of them for the owner, and only their own for
+// a person. The owner sees the install because they administer it; that is a list of names, not a
+// transcript from inside any of them.
+func (w *Workspaces) ListFor(caller Caller) []Workspace {
+	if caller.Owner {
+		return w.List()
+	}
+	visible := make([]Workspace, 0)
+	for _, workspace := range w.List() {
+		if workspace.Allows(caller) {
+			visible = append(visible, workspace)
+		}
+	}
+	return visible
 }
 
 // Get returns one workspace by name.
@@ -790,14 +845,16 @@ func (w *Workspaces) noDefinition(name string) bool {
 }
 
 // Route finds the workspace a request is about and the control that serves it.
-func (w *Workspaces) Route(ctx context.Context, workspaceName string) (Workspace, *Control, error) {
+func (w *Workspaces) Route(ctx context.Context, caller Caller, workspaceName string) (Workspace, *Control, error) {
 	name := workspaceName
 	if name == "" {
 		name = GeneralWorkspaceName
 	}
 	workspace, ok := w.Get(name)
-	if !ok {
-		return Workspace{}, nil, fmt.Errorf("no workspace %q", name)
+	// One refusal for both, deliberately: a caller who is not a member learns nothing about whether the
+	// workspace exists.
+	if !ok || !workspace.Allows(caller) {
+		return Workspace{}, nil, fmt.Errorf("%w %q", ErrNoWorkspace, name)
 	}
 	control, err := w.Ensure(ctx, name)
 	if err != nil {
@@ -1165,6 +1222,33 @@ func (w *Workspaces) persist() error {
 	}
 	w.mu.RUnlock()
 	return SaveRegistryFile(file)
+}
+
+// nameTheOwnersWorkspaces gives an unnamed workspace to the install's owner.
+//
+// Before there were people, every conversation in this registry was the owner's, so this records a fact
+// rather than making a grant. Without it, the first boot with a door would hide every existing workspace
+// from the person at the keyboard — the one outcome nobody would guess from an upgrade.
+func (w *Workspaces) nameTheOwnersWorkspaces() error {
+	owner := strings.ToLower(strings.TrimSpace(w.opts.OwnerEmail))
+	if owner == "" {
+		return nil
+	}
+	w.mu.Lock()
+	changed := false
+	for name, workspace := range w.registry {
+		if len(workspace.Members) > 0 {
+			continue
+		}
+		workspace.Members = []string{owner}
+		w.registry[name] = workspace
+		changed = true
+	}
+	w.mu.Unlock()
+	if !changed {
+		return nil
+	}
+	return w.persist()
 }
 
 // migrate moves a single-workspace install onto the workspace layout: one storage and one

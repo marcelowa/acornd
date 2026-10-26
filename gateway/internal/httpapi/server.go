@@ -6,6 +6,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"github.com/acornfall/acornfall/gateway/internal/control"
 	"github.com/acornfall/acornfall/gateway/internal/identity"
 	"github.com/acornfall/acornfall/gateway/internal/people"
@@ -43,7 +44,7 @@ func (s *Server) controlFor(r *http.Request) (*control.Control, error) {
 	if name == "" {
 		name = r.URL.Query().Get("workspace")
 	}
-	_, ctl, err := s.workspaces.Route(r.Context(), name)
+	_, ctl, err := s.workspaces.Route(r.Context(), callerOf(r), name)
 	if err != nil {
 		return nil, err
 	}
@@ -62,10 +63,20 @@ func (s *Server) controlFor(r *http.Request) (*control.Control, error) {
 func (s *Server) withControl(w http.ResponseWriter, r *http.Request) (*control.Control, bool) {
 	ctl, err := s.controlFor(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return nil, false
 	}
 	return ctl, true
+}
+
+// statusFor is the status a failed lookup gets. A workspace that does not exist and one the caller is not
+// a member of answer the same thing, so a status cannot be used to enumerate the workspaces somebody cannot
+// see (ADR 0032 §4); everything else that refuses a workspace is a conflict, as it always was.
+func statusFor(err error) int {
+	if errors.Is(err, control.ErrNoWorkspace) {
+		return http.StatusNotFound
+	}
+	return http.StatusConflict
 }
 
 // stateChange runs one mutation on the workspace and answers with its state.
@@ -75,7 +86,7 @@ func (s *Server) stateChange(w http.ResponseWriter, r *http.Request, change func
 		return
 	}
 	if err := change(ctl); err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	writeJSON(w, http.StatusOK, ctl.State())
@@ -115,7 +126,7 @@ func bodyChange[B any](s *Server, w http.ResponseWriter, r *http.Request, change
 		return
 	}
 	if _, err := change(ctl, body); err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 	}
 }
 
@@ -127,7 +138,7 @@ func view[T any](s *Server, w http.ResponseWriter, r *http.Request, read func(*c
 	}
 	result, err := read(ctl)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -136,15 +147,21 @@ func view[T any](s *Server, w http.ResponseWriter, r *http.Request, read func(*c
 func (s *Server) workspaceList(w http.ResponseWriter, r *http.Request) {
 	// The folder is reported with the list, so the interface can say where a new workspace
 	// will be created instead of asking for a path it should not be given.
-	writeJSON(w, http.StatusOK, s.listing())
+	writeJSON(w, http.StatusOK, s.listingFor(callerOf(r)))
 }
 
 // listing is the one shape every workspace endpoint answers with, so a caller never has to
 // know which operation produced it.
 func (s *Server) listing() map[string]any {
+	return s.listingFor(control.Caller{Owner: true})
+}
+
+// listingFor is the list a caller may see: the whole install for its owner, their own workspaces for a
+// person. A person's rail showing rooms they cannot open would be worse than one that shows nothing.
+func (s *Server) listingFor(caller control.Caller) map[string]any {
 	return map[string]any{
 		"workspacesDir": s.workspaces.Dir(),
-		"workspaces":    control.Views(s.workspaces.List(), s.workspaces.Progress),
+		"workspaces":    control.Views(s.workspaces.ListFor(caller), s.workspaces.Progress),
 		// Every engine this build can run and whether this machine can: the chooser shows all
 		// of them, with the sentence that says why one cannot be used here.
 		"engines": s.workspaces.Engines(),
@@ -179,7 +196,7 @@ func noCache(next http.Handler) http.Handler {
 func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 	ctl, err := s.controlFor(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	writeJSON(w, http.StatusOK, ctl.StateFor(r.URL.Query().Get("conversation")))

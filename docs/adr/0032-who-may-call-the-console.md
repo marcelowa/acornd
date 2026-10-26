@@ -1,6 +1,6 @@
 # ADR 0032 — Who may call the console
 
-Status: accepted (2026-10-30), not built
+Status: accepted (2026-10-30), built except the model allowlist and the speakers line
 Date: 2026-10-30
 
 ## Context
