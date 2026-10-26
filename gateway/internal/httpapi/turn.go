@@ -110,6 +110,10 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
+	provider, model := derefString(body.Provider), derefString(body.ModelID)
+	if !s.mayRun(w, r, provider, model) {
+		return
+	}
 	if err := ctl.SetAgent(r.Context(), r.PathValue("id"), control.AgentChange{
 		Provider:      body.Provider,
 		ModelID:       body.ModelID,

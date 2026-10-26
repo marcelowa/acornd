@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -288,5 +289,67 @@ func TestABookNeedsAPlaceItCanWrite(t *testing.T) {
 	}
 	if _, err := Open(filepath.Join(file, File)); err == nil {
 		t.Error("a book was opened under a file")
+	}
+}
+
+// The allowlist is "provider/modelId", and an empty list means every model the install has. A person is bound
+// by theirs; nothing here decides who the owner is, because the owner has no list at all.
+func TestAModelsListIsWhatTheyMayRun(t *testing.T) {
+	narrowed := Person{Email: "ana@example.com", Models: []string{"anthropic/claude-sonnet-4", " faux / faux-1 "}}
+	cases := []struct {
+		name     string
+		person   Person
+		provider string
+		model    string
+		want     bool
+	}{
+		{"a listed model", narrowed, "anthropic", "claude-sonnet-4", true},
+		{"a listed model written with spaces", narrowed, "faux", "faux-1", true},
+		{"a model they were not given", narrowed, "anthropic", "claude-opus-4", false},
+		{"another provider's model of the same name", narrowed, "other", "claude-sonnet-4", false},
+		{"every model, because the list is empty", Person{Email: "bo@example.com"}, "anything", "at-all", true},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := test.person.Allows(test.provider, test.model); got != test.want {
+				t.Errorf("Allows(%q, %q) = %v, want %v", test.provider, test.model, got, test.want)
+			}
+		})
+	}
+	if got := narrowed.ModelsText(); !strings.Contains(got, "claude-sonnet-4") || !strings.Contains(got, "faux-1") {
+		t.Errorf("ModelsText = %q, want the list a refusal can quote", got)
+	}
+}
+
+// The owner narrows what somebody may run, and the book says so: a list, written down, that the door can read.
+// The owner has no list to narrow, because the install is theirs.
+func TestTheOwnerNarrowsWhatSomebodyMayRun(t *testing.T) {
+	b := book(t)
+	if _, err := b.Claim("me@example.com", "Me"); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if _, err := b.Add("ana@example.com", "Ana"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	narrowed, err := b.SetModels("ana@example.com", []string{"faux/faux-1", " Anthropic/Claude-Sonnet-4 "})
+	if err != nil {
+		t.Fatalf("set models: %v", err)
+	}
+	if !slices.Equal(narrowed.Models, []string{"faux/faux-1", "anthropic/Claude-Sonnet-4"}) {
+		t.Errorf("models = %v, want them normalised", narrowed.Models)
+	}
+	if _, err := b.SetModels("me@example.com", []string{"faux/faux-1"}); err == nil {
+		t.Error("the owner was narrowed")
+	}
+	if _, err := b.SetModels("ana@example.com", []string{"not-a-model"}); err == nil {
+		t.Error("a model without a provider was accepted")
+	}
+	if _, err := b.SetModels("nobody@example.com", nil); !errors.As(err, &ErrUnknown{}) {
+		t.Errorf("err = %v, want unknown", err)
+	}
+	// An empty list is every model, which is how a narrowing is taken back.
+	restored, err := b.SetModels("ana@example.com", nil)
+	if err != nil || len(restored.Models) != 0 {
+		t.Errorf("models = %v, %v; want the list cleared", restored.Models, err)
 	}
 }

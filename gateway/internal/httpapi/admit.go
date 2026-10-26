@@ -4,6 +4,7 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -113,4 +114,39 @@ func (s *Server) owner(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// mayRun reports whether the caller may run a model, and writes the refusal when they may not.
+//
+// The owner has no list: the whole install is theirs. A person is bound by theirs, and the refusal names what
+// they may run rather than saying "forbidden" — the person is family, and the fix is a sentence they can act
+// on (ADR 0032 §6). An empty list is every model, which is what a person has until the owner narrows it.
+//
+// This is the control, not the whole of it: the picker still offers every model the install has, and filtering
+// it is the convenience that comes after the refusal rather than instead of it.
+func (s *Server) mayRun(w http.ResponseWriter, r *http.Request, provider, model string) bool {
+	if provider == "" || model == "" {
+		// Nothing is being assigned: an empty pair means "leave it alone", which is not a choice to check.
+		return true
+	}
+	caller := callerOf(r)
+	if caller.Owner || s.gate.People == nil {
+		return true
+	}
+	person, found, err := s.gate.People.Find(caller.Email)
+	if err != nil || !found {
+		// They got through the book a moment ago, so this is a record that changed under the request. Refused
+		// rather than allowed: an allowlist nobody can read is not an allowlist.
+		http.Error(w, "your access could not be read: ask the owner to look at it", http.StatusForbidden)
+		return false
+	}
+	if person.Allows(provider, model) {
+		return true
+	}
+	allowed := person.ModelsText()
+	if allowed == "" {
+		allowed = "no models at all"
+	}
+	http.Error(w, fmt.Sprintf("you may not run %s/%s here; your models are %s", provider, model, allowed), http.StatusForbidden)
+	return false
 }

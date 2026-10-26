@@ -28,6 +28,9 @@ func peopleCommand(argv []string) {
 		case "revoke":
 			peopleRevoke(argv[1:])
 			return
+		case "models":
+			peopleModels(argv[1:])
+			return
 		case "help", "-h", "--help":
 			peopleUsage(os.Stdout)
 			return
@@ -44,6 +47,7 @@ func peopleUsage(w *os.File) {
   claim <email>             name this install's owner, once; --name "Their Name"
   add <email>               invite someone; they become active on their first sign-in
   revoke <email>            take access away; their record stays
+  models <email> [a/b ...]  what they may run; with no models, every model the install has
 
 acornfall people <command> -h    explains that command's flags
 
@@ -108,6 +112,32 @@ func peopleAdd(argv []string) {
 	fmt.Printf("%s may sign in from now on; they become active the first time they do\n", added.Email)
 }
 
+// peopleModels prints or sets what somebody may run. A model is "provider/modelId", and no models at all is
+// every model this install has, which is where a person starts.
+func peopleModels(argv []string) {
+	request := parseModels("people models", argv)
+	person, found, err := request.book.Find(request.address)
+	if err != nil {
+		logFatal(err)
+	}
+	if !found {
+		logFatal(people.ErrUnknown{Email: request.address})
+	}
+	if len(request.models) == 0 {
+		if len(person.Models) == 0 {
+			fmt.Printf("%s may run any model this install has\n", person.Email)
+			return
+		}
+		fmt.Printf("%s may run %s\n", person.Email, person.ModelsText())
+		return
+	}
+	updated, err := request.book.SetModels(request.address, request.models)
+	if err != nil {
+		logFatal(err)
+	}
+	fmt.Printf("%s may run %s\n", updated.Email, updated.ModelsText())
+}
+
 func peopleRevoke(argv []string) {
 	request := parse("people revoke", argv, true, false)
 	if err := request.book.Revoke(request.address); err != nil {
@@ -150,4 +180,28 @@ func parse(verb string, argv []string, withAddress, withName bool) request {
 		parsed.address = flags.Arg(0)
 	}
 	return parsed
+}
+
+// modelsRequest is a verb that takes an address and then any number of models.
+type modelsRequest struct {
+	book    *people.Book
+	address string
+	models  []string
+}
+
+func parseModels(verb string, argv []string) modelsRequest {
+	flags := flag.NewFlagSet(verb, flag.ContinueOnError)
+	dataDir := flags.String("data-dir", "", "the acornfall folder (default: ~/.acornfall)")
+	if err := flags.Parse(argv); err != nil {
+		os.Exit(2)
+	}
+	if flags.NArg() < 1 {
+		fmt.Fprintf(os.Stderr, "acornfall: %s needs one email address, and any models after it\n", verb)
+		os.Exit(2)
+	}
+	book, err := openBook(*dataDir)
+	if err != nil {
+		logFatal(err)
+	}
+	return modelsRequest{book: book, address: flags.Arg(0), models: flags.Args()[1:]}
 }

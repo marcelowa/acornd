@@ -9,6 +9,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/acornfall/acornfall/gateway/internal/control"
 	"github.com/acornfall/acornfall/gateway/internal/identity"
 	"github.com/acornfall/acornfall/gateway/internal/people"
 )
@@ -241,5 +242,48 @@ func TestAnInstallRouteIsTheOwnersOnly(t *testing.T) {
 				t.Fatalf("status = %d, want %d (%s)", recorder.Code, test.want, recorder.Body.String())
 			}
 		})
+	}
+}
+
+// A person may run the models the owner gave them and no others, and the refusal says which ones those are:
+// the person is family, and "forbidden" is not a sentence anybody can act on (ADR 0032 §6).
+func TestAModelOutsideTheAllowlistIsRefusedOnAssignment(t *testing.T) {
+	opened := book(t)
+	if _, err := opened.Add("ana@example.com", "Ana"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if _, err := opened.SetModels("ana@example.com", []string{"faux/faux-1"}); err != nil {
+		t.Fatalf("set models: %v", err)
+	}
+
+	server := New(nil, nil, nil, Gate{People: opened})
+	as := func(email string) *http.Request {
+		r := httptest.NewRequest(http.MethodPost, "/api/agent", nil)
+		return r.WithContext(withCaller(r.Context(), control.Caller{Email: email}))
+	}
+
+	if recorder := httptest.NewRecorder(); !server.mayRun(recorder, as("ana@example.com"), "faux", "faux-1") {
+		t.Fatalf("a listed model was refused: %s", recorder.Body.String())
+	}
+	recorder := httptest.NewRecorder()
+	if server.mayRun(recorder, as("ana@example.com"), "faux", "faux-2") {
+		t.Fatal("a model outside the allowlist was allowed")
+	}
+	if recorder.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", recorder.Code)
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, "faux-1") || !strings.Contains(body, "your models are") {
+		t.Errorf("the refusal does not say what they may run: %q", body)
+	}
+
+	// The owner has no list, and neither does an install with nobody in it.
+	owner := httptest.NewRequest(http.MethodPost, "/api/agent", nil)
+	owner = owner.WithContext(withCaller(owner.Context(), control.Caller{Owner: true}))
+	if recorder := httptest.NewRecorder(); !server.mayRun(recorder, owner, "faux", "anything") {
+		t.Error("the owner was refused a model")
+	}
+	if recorder := httptest.NewRecorder(); !server.mayRun(recorder, as("ana@example.com"), "", "") {
+		t.Error("a request that named no model was checked against the list")
 	}
 }

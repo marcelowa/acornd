@@ -90,6 +90,40 @@ func (e ErrRevoked) Error() string {
 	return fmt.Sprintf("%s no longer has access to this install: ask the owner", e.Email)
 }
 
+// Allows reports whether this person may run a model, named as "provider/modelId".
+//
+// An empty list is "any model this install has", which is the owner's default and what a person has until the
+// owner narrows it. The list is a proxy for cost rather than a ceiling — a cheap model in a runaway loop still
+// spends — which is why spend is shown per person and a cap is a separate decision (ADR 0032 §6).
+func (p Person) Allows(provider, model string) bool {
+	if len(p.Models) == 0 {
+		return true
+	}
+	want := modelKey(provider, model)
+	for _, allowed := range p.Models {
+		named, id, found := strings.Cut(allowed, "/")
+		if !found {
+			// A list entry without a provider names nothing this install can run, and guessing the provider
+			// would be a permission nobody granted.
+			continue
+		}
+		if modelKey(named, id) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// modelKey is one model's name, whatever spaces somebody left around its two halves.
+func modelKey(provider, model string) string {
+	return strings.ToLower(strings.TrimSpace(provider)) + "/" + strings.ToLower(strings.TrimSpace(model))
+}
+
+// ModelsText is what the refusal quotes: the models this person may run, as they were written down.
+func (p Person) ModelsText() string {
+	return strings.Join(p.Models, ", ")
+}
+
 // Book is the file. The zero value is not usable: Open sets the path.
 type Book struct {
 	path string
@@ -146,6 +180,25 @@ func (b *Book) Owner() (Person, bool, error) {
 	}
 	for _, record := range records {
 		if record.Role == RoleOwner {
+			return record, true, nil
+		}
+	}
+	return Person{}, false, nil
+}
+
+// Find answers one record by address, because a door that proved somebody has to be answered about rather than
+// looked up by scanning a list.
+func (b *Book) Find(email string) (Person, bool, error) {
+	address, err := address(email)
+	if err != nil {
+		return Person{}, false, err
+	}
+	records, err := b.read()
+	if err != nil {
+		return Person{}, false, err
+	}
+	for _, record := range records {
+		if record.Email == address {
 			return record, true, nil
 		}
 	}
@@ -244,6 +297,55 @@ func (b *Book) Revoke(email string) error {
 		return b.write(records)
 	}
 	return ErrUnknown{Email: address}
+}
+
+// SetModels narrows what somebody may run. An empty list is every model this install has, which is where a
+// person starts; the owner is never narrowed, because the install is theirs.
+func (b *Book) SetModels(email string, models []string) (Person, error) {
+	address, err := address(email)
+	if err != nil {
+		return Person{}, err
+	}
+	cleaned, err := modelList(models)
+	if err != nil {
+		return Person{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	release, records, err := b.lock()
+	if err != nil {
+		return Person{}, err
+	}
+	defer release()
+	for index := range records {
+		if records[index].Email != address {
+			continue
+		}
+		if records[index].Role == RoleOwner {
+			return Person{}, errors.New("the owner runs any model this install has: there is nobody to narrow it")
+		}
+		records[index].Models = cleaned
+		if err := b.write(records); err != nil {
+			return Person{}, err
+		}
+		return records[index], nil
+	}
+	return Person{}, ErrUnknown{Email: address}
+}
+
+// modelList is a list of models as the book stores it: "provider/modelId", provider lowercased, and every
+// entry refused rather than dropped, because a list with a typo in it is a permission nobody meant to grant.
+func modelList(models []string) ([]string, error) {
+	cleaned := make([]string, 0, len(models))
+	for _, model := range models {
+		provider, id, found := strings.Cut(strings.TrimSpace(model), "/")
+		provider, id = strings.TrimSpace(provider), strings.TrimSpace(id)
+		if !found || provider == "" || id == "" {
+			return nil, fmt.Errorf("%q is not a model: write it as provider/modelId", model)
+		}
+		cleaned = append(cleaned, strings.ToLower(provider)+"/"+id)
+	}
+	return cleaned, nil
 }
 
 // SignIn is the door's question, asked after it proved an address: may this person in, and it counts as
