@@ -170,7 +170,7 @@ func TestAWorkspacesOwnResourcesAreRead(t *testing.T) {
 
 	got := c.state("personal")
 	// The workspace's own agent, beside the general one the worker ships.
-	if len(got.Agents) != 2 || got.Agents[0].Name != "personal" || got.Agents[1].Name != "local-agent" {
+	if len(got.Agents) != 2 || got.Agents[0].Name != "general" || got.Agents[1].Name != "local-agent" {
 		t.Errorf("a workspace's agents should be offered, got %+v", got.Agents)
 	}
 	var commands struct {

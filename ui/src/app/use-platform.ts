@@ -449,7 +449,7 @@ export function usePlatform(): Platform {
 
 	const clearFailure = useCallback((): void => setFailure(undefined), []);
 
-	const workspace = route.workspace === "" ? "general" : route.workspace;
+	const workspace = route.workspace === "" ? (state?.workspace.name ?? "") : route.workspace;
 	const activeId =
 		route.conversation === "" ? (state?.conversation?.id ?? "") : route.conversation;
 
@@ -1154,11 +1154,11 @@ export function usePlatform(): Platform {
 				// Forgetting the workspace in view leaves nowhere to stand, so the general one
 				// takes over rather than an error about a workspace that just went away.
 				if (name === workspace) {
-					window.history.pushState(null, "", "/w/general");
+					window.history.pushState(null, "", `/w/${name}`);
 					setView(undefined);
 					setRoute({
 						screen: "conversation",
-						workspace: "general",
+						workspace: name,
 						conversation: "",
 						settingsTab: "general",
 						updateTag: "",
