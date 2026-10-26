@@ -149,10 +149,21 @@ connector, bill) reaches a machine at home worse than a tunnel does.
 **Tailscale, as the technical best.** Rejected on friction, recorded because it becomes the right
 answer the day the people involved already have it installed.
 
-**An OAuth app instead of a pasted token.** Possibly better: Cloudflare runs an OAuth flow for
-`wrangler login`, and if a third-party client may request the four scopes above, the paste disappears
-and setup becomes one "Allow" click. Open question, one spike; the pasted token is the fallback and
-the rest of the design is unchanged either way.
+**An OAuth app instead of a pasted token — spiked 2026-10-30, real but not first.** Cloudflare
+supports third-party OAuth clients on the free plan, created in the dashboard or through
+`POST /accounts/{id}/oauth_clients`; they are **private by default**, and a private client may only
+be authorized by members of the same account, so none of them needs the domain-ownership check.
+Scopes are API token permission names and are listed by `GET /oauth/scopes`. Only the authorization
+code flow is supported — no device flow, no client credentials — with PKCE and
+`token_endpoint_auth_method: none` for a client that cannot keep a secret, which is what a desktop
+tool is. The grant is then revocable from the owner's own authorization list, which is a better story
+than a standing API token.
+
+It is not first for one reason: **a reconciler needs a credential that outlives an hour.** Cloudflare's
+pages do not say whether an OAuth grant issues a refresh token, and a tunnel that reconciles at boot
+and after every change cannot depend on a browser re-authorization. So the paste ships, the OAuth
+path is a later addition behind the same client interface, and the one thing to measure before
+building it is the token's lifetime and its refresh behaviour.
 
 ## Verification
 
