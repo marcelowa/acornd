@@ -17,6 +17,7 @@ internal/update      90  258
 internal/vault       95  114
 internal/workerpool  87    7
 internal/ready       97   40
+internal/identity    98   69
 #
 # What a survivor means, read from control's last sweep (169 killed, 10 lived):
 #   six are log-only conditions — auth.go:32, auth.go:35, turn.go:269, workspaces.go:1006,

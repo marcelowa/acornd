@@ -128,27 +128,33 @@ func parseKeys(body []byte, source string) (map[string]*rsa.PublicKey, error) {
 	}
 	keys := make(map[string]*rsa.PublicKey, len(document.Keys))
 	for _, key := range document.Keys {
-		if key.Kty != "RSA" || key.N == "" || key.E == "" {
+		if key.Kty != "RSA" || (key.Use != "" && key.Use != "sig") {
 			continue
 		}
-		if key.Use != "" && key.Use != "sig" {
-			continue
-		}
-		modulus, err := base64.RawURLEncoding.DecodeString(key.N)
-		if err != nil {
-			continue
-		}
-		exponent, err := base64.RawURLEncoding.DecodeString(key.E)
-		if err != nil {
-			continue
-		}
-		keys[key.Kid] = &rsa.PublicKey{
-			N: new(big.Int).SetBytes(modulus),
-			E: int(new(big.Int).SetBytes(exponent).Int64()),
+		if public, ok := publicKey(key.N, key.E); ok {
+			keys[key.Kid] = public
 		}
 	}
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("signing keys from %s: no RSA signing key with an id", source)
 	}
 	return keys, nil
+}
+
+// publicKey builds one RSA key from its modulus and exponent, base64url-encoded as a JWKS carries them.
+// A key this build cannot read is skipped rather than refused: a publisher may legitimately publish more
+// than one algorithm, and the refusal belongs to the key id the assertion names.
+func publicKey(modulus, exponent string) (*rsa.PublicKey, bool) {
+	n, err := base64.RawURLEncoding.DecodeString(modulus)
+	if err != nil || modulus == "" {
+		return nil, false
+	}
+	e, err := base64.RawURLEncoding.DecodeString(exponent)
+	if err != nil || exponent == "" {
+		return nil, false
+	}
+	return &rsa.PublicKey{
+		N: new(big.Int).SetBytes(n),
+		E: int(new(big.Int).SetBytes(e).Int64()),
+	}, true
 }

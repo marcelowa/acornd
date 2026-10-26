@@ -86,48 +86,72 @@ type assertionHeaderClaims struct {
 	KeyID     string `json:"kid"`
 }
 
-// verify checks the signature and then the claims, in that order: a claim read out of an unverified
-// payload is what the whole design exists to avoid.
-func (a Assertion) verify(raw string) (assertionClaims, error) {
+// signed is an assertion taken apart far enough to check its signature, and no further: the claims
+// are held as bytes until the signature over them is verified.
+type signed struct {
+	header       assertionHeaderClaims
+	signingInput string
+	signature    []byte
+	payload      []byte
+}
+
+// parse takes the three parts of a JWT apart. It decodes nothing it does not have to, so a malformed
+// signature is reported as a malformed signature rather than as a JSON error somewhere else.
+func parse(raw string) (signed, error) {
 	parts := strings.Split(raw, ".")
 	if len(parts) != 3 {
-		return assertionClaims{}, errors.New("the assertion is not a signed JWT")
+		return signed{}, errors.New("the assertion is not a signed JWT")
 	}
 	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
-		return assertionClaims{}, errors.New("the assertion's header is not base64url")
+		return signed{}, errors.New("the assertion's header is not base64url")
 	}
 	var header assertionHeaderClaims
 	if err := json.Unmarshal(headerBytes, &header); err != nil {
-		return assertionClaims{}, errors.New("the assertion's header is not JSON")
+		return signed{}, errors.New("the assertion's header is not JSON")
 	}
-	// A fixed algorithm, never the one the token asks for: "alg: none" and "alg: HS256 signed with
-	// the public key" are the two classic ways a verifier is talked into not verifying.
-	if header.Algorithm != "RS256" {
-		return assertionClaims{}, fmt.Errorf("the assertion is signed with %q, and only RS256 is accepted", header.Algorithm)
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return signed{}, errors.New("the assertion's payload is not base64url")
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return signed{}, errors.New("the assertion's signature is not base64url")
+	}
+	return signed{
+		header:       header,
+		signingInput: parts[0] + "." + parts[1],
+		signature:    signature,
+		payload:      payload,
+	}, nil
+}
+
+// verify checks the signature and only then reads a claim: a claim read out of an unverified payload is
+// what the whole design exists to avoid.
+func (a Assertion) verify(raw string) (assertionClaims, error) {
+	assertion, err := parse(raw)
+	if err != nil {
+		return assertionClaims{}, err
+	}
+	// A fixed algorithm, never the one the token asks for: "alg: none" and "alg: HS256 signed with the
+	// public key" are the two classic ways a verifier is talked into not verifying.
+	if assertion.header.Algorithm != "RS256" {
+		return assertionClaims{}, fmt.Errorf("the assertion is signed with %q, and only RS256 is accepted", assertion.header.Algorithm)
 	}
 	if a.Keys == nil {
 		return assertionClaims{}, errors.New("this console has no signing keys configured for the assertion")
 	}
-	key, err := a.Keys.Key(header.KeyID)
+	key, err := a.Keys.Key(assertion.header.KeyID)
 	if err != nil {
 		return assertionClaims{}, err
 	}
-	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if err != nil {
-		return assertionClaims{}, errors.New("the assertion's signature is not base64url")
-	}
-	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
-	if err := rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], signature); err != nil {
+	digest := sha256.Sum256([]byte(assertion.signingInput))
+	if err := rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], assertion.signature); err != nil {
 		return assertionClaims{}, errors.New("the assertion's signature does not match the key it names")
 	}
 
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return assertionClaims{}, errors.New("the assertion's payload is not base64url")
-	}
 	var claims assertionClaims
-	if err := json.Unmarshal(payload, &claims); err != nil {
+	if err := json.Unmarshal(assertion.payload, &claims); err != nil {
 		return assertionClaims{}, errors.New("the assertion's payload is not JSON")
 	}
 	if err := a.checkClaims(claims); err != nil {
@@ -139,15 +163,26 @@ func (a Assertion) verify(raw string) (assertionClaims, error) {
 // checkClaims is the part that is the same for every publisher: who issued it, who it was issued
 // for, and whether it is in its lifetime.
 func (a Assertion) checkClaims(claims assertionClaims) error {
-	now := time.Now()
-	if a.Now != nil {
-		now = a.Now()
+	if err := a.checkIssuer(claims); err != nil {
+		return err
 	}
+	return a.checkLifetime(claims)
+}
+
+func (a Assertion) checkIssuer(claims assertionClaims) error {
 	if a.Issuer != "" && claims.Issuer != a.Issuer {
 		return fmt.Errorf("the assertion was issued by %q, not %q", claims.Issuer, a.Issuer)
 	}
 	if a.Audience != "" && !audienceContains(claims.Audience, a.Audience) {
 		return fmt.Errorf("the assertion was issued for %s, not for this console", audienceText(claims.Audience))
+	}
+	return nil
+}
+
+func (a Assertion) checkLifetime(claims assertionClaims) error {
+	now := time.Now()
+	if a.Now != nil {
+		now = a.Now()
 	}
 	if claims.Expires == 0 {
 		return errors.New("the assertion has no expiry, so it is not one")

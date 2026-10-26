@@ -71,38 +71,57 @@ func identityDoor(dir, host string) (identity.Door, error) {
 		fmt.Fprintln(os.Stderr, "acornfall: this install had no token; `acornfall token` prints the new one")
 	}
 
-	doors := []identity.Door{identity.Token{Dir: dir}}
+	remote, err := remoteDoor(kind)
+	if err != nil {
+		return nil, err
+	}
+	if remote == nil {
+		return identity.Any(identity.Token{Dir: dir}), nil
+	}
+	return identity.Any(identity.Token{Dir: dir}, remote), nil
+}
+
+// remoteDoor is the door a publisher's name builds, or nil for a console only the command line opens.
+func remoteDoor(kind string) (identity.Door, error) {
 	switch kind {
 	case "token":
-		// The command line only.
+		return nil, nil
 	case "access":
-		audience := os.Getenv("ACORNFALL_IDENTITY_AUDIENCE")
-		issuer := os.Getenv("ACORNFALL_IDENTITY_ISSUER")
-		keys := os.Getenv("ACORNFALL_IDENTITY_KEYS")
-		var missing []string
-		if audience == "" {
-			missing = append(missing, "ACORNFALL_IDENTITY_AUDIENCE")
+		audience, issuer, keys, err := accessValues()
+		if err != nil {
+			return nil, err
 		}
-		if issuer == "" {
-			missing = append(missing, "ACORNFALL_IDENTITY_ISSUER")
-		}
-		if keys == "" {
-			missing = append(missing, "ACORNFALL_IDENTITY_KEYS")
-		}
-		if len(missing) > 0 {
-			// Loud at startup rather than at the first browser: an assertion door with no audience
-			// accepts an assertion minted for anything at the same edge.
-			return nil, fmt.Errorf("ACORNFALL_IDENTITY=access needs %s", strings.Join(missing, ", "))
-		}
-		doors = append(doors, identity.Assertion{
+		return identity.Assertion{
 			Audience: audience,
 			Issuer:   issuer,
 			Keys:     &identity.Keys{URL: keys},
-		})
+		}, nil
 	default:
 		return nil, fmt.Errorf("ACORNFALL_IDENTITY=%q is not a door this build has: access or token", kind)
 	}
-	return identity.Any(doors...), nil
+}
+
+// accessValues reads the three values the assertion door checks. All three are required and the refusal
+// is at boot rather than at the first browser: an assertion door with no audience accepts an assertion
+// minted for anything else at the same edge.
+func accessValues() (audience, issuer, keys string, err error) {
+	audience = os.Getenv("ACORNFALL_IDENTITY_AUDIENCE")
+	issuer = os.Getenv("ACORNFALL_IDENTITY_ISSUER")
+	keys = os.Getenv("ACORNFALL_IDENTITY_KEYS")
+	var missing []string
+	for _, value := range []struct{ name, value string }{
+		{"ACORNFALL_IDENTITY_AUDIENCE", audience},
+		{"ACORNFALL_IDENTITY_ISSUER", issuer},
+		{"ACORNFALL_IDENTITY_KEYS", keys},
+	} {
+		if value.value == "" {
+			missing = append(missing, value.name)
+		}
+	}
+	if len(missing) > 0 {
+		return "", "", "", fmt.Errorf("ACORNFALL_IDENTITY=access needs %s", strings.Join(missing, ", "))
+	}
+	return audience, issuer, keys, nil
 }
 
 func loopback(host string) bool {

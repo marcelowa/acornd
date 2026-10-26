@@ -44,7 +44,7 @@ func (s signer) jwks() []byte {
 		"kty": "RSA",
 		"alg": "RS256",
 		"use": "sig",
-		"n":   base64.RawURLEncoding.EncodeToString(s.key.PublicKey.N.Bytes()),
+		"n":   base64.RawURLEncoding.EncodeToString(s.key.N.Bytes()),
 		"e":   base64.RawURLEncoding.EncodeToString(exponent),
 	}}}
 	encoded, _ := json.Marshal(document)
@@ -160,6 +160,10 @@ func TestTheRefusals(t *testing.T) {
 		{
 			name: "expired", want: "expired",
 			raw: s.assertion(t, "RS256", claims(map[string]any{"exp": time.Now().Add(-2 * time.Minute).Unix()})),
+		},
+		{
+			name: "not valid yet", want: "not valid yet",
+			raw: s.assertion(t, "RS256", claims(map[string]any{"nbf": time.Now().Add(time.Hour).Unix()})),
 		},
 		{
 			name: "issued in the future", want: "in the future",
@@ -297,5 +301,175 @@ func TestADoorWithNoKeysSaysSo(t *testing.T) {
 	_, err := d.Prove(withAssertion(s.assertion(t, "RS256", claims(nil))))
 	if err == nil || !strings.Contains(err.Error(), "no signing keys") {
 		t.Fatalf("err = %v, want it to name the missing configuration", err)
+	}
+}
+
+// A key this build cannot read is skipped rather than crashing the door, and a set that has nothing
+// readable left is reported as that: a publisher may publish more than one algorithm, and a malformed
+// entry is not a reason to refuse the key beside it.
+func TestKeyMaterialThisBuildCannotReadIsSkipped(t *testing.T) {
+	good := newSigner(t, "good")
+	var published struct {
+		Keys []map[string]any `json:"keys"`
+	}
+	if err := json.Unmarshal(good.jwks(), &published); err != nil {
+		t.Fatalf("the test's own key set is not JSON: %v", err)
+	}
+	unreadable := []map[string]any{
+		{"kid": "bad", "kty": "RSA", "n": "!!!", "e": "AQAB"},
+		{"kid": "ec", "kty": "EC", "n": "x", "e": "AQAB"},
+		{"kid": "other-use", "kty": "RSA", "use": "enc", "n": "x", "e": "AQAB"},
+		{"kid": "no-exponent", "kty": "RSA", "n": "AQAB", "e": ""},
+	}
+	mixed, _ := json.Marshal(map[string]any{"keys": append(unreadable, published.Keys...)})
+	only, _ := json.Marshal(map[string]any{"keys": unreadable})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/only" {
+			_, _ = w.Write(only)
+			return
+		}
+		_, _ = w.Write(mixed)
+	}))
+	defer server.Close()
+
+	readable := Assertion{Audience: testAudience, Issuer: testIssuer, Keys: &Keys{URL: server.URL}}
+	if _, err := readable.Prove(withAssertion(good.assertion(t, "RS256", claims(nil)))); err != nil {
+		t.Fatalf("a readable key beside an unreadable one was not used: %v", err)
+	}
+
+	nothing := Assertion{Audience: testAudience, Issuer: testIssuer, Keys: &Keys{URL: server.URL + "/only"}}
+	_, err := nothing.Prove(withAssertion(good.assertion(t, "RS256", claims(nil))))
+	if err == nil || !strings.Contains(err.Error(), "no RSA signing key") {
+		t.Fatalf("err = %v, want the key set reported as unreadable", err)
+	}
+}
+
+// A publisher answering with an error is reported with the status, because "the keys are broken" and
+// "you are being rate limited" have different fixes and only one of them is the publisher's.
+func TestAPublisherAnsweringWithAnErrorIsReported(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "nope", http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+	s := newSigner(t, "k1")
+	d := Assertion{Audience: testAudience, Issuer: testIssuer, Keys: &Keys{URL: server.URL}}
+	_, err := d.Prove(withAssertion(s.assertion(t, "RS256", claims(nil))))
+	if err == nil || !strings.Contains(err.Error(), "429") {
+		t.Fatalf("err = %v, want the status in it", err)
+	}
+}
+
+// A key set that is not JSON is a refusal that names the publisher, not a nil map dereference.
+func TestAKeySetThatIsNotJSONIsRefused(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("<html>maintenance</html>"))
+	}))
+	defer server.Close()
+	keys := &Keys{URL: server.URL}
+	if _, err := keys.Key("k1"); err == nil || !strings.Contains(err.Error(), "reading signing keys") {
+		t.Fatalf("err = %v, want the unreadable key set reported", err)
+	}
+}
+
+// No URL is a misconfiguration, and saying so is cheaper than a dial to "" with a stranger's error.
+func TestKeysWithNoURLSaySo(t *testing.T) {
+	if _, err := (&Keys{}).Key("k1"); err == nil || !strings.Contains(err.Error(), "no key URL") {
+		t.Fatalf("err = %v, want the missing URL named", err)
+	}
+}
+
+// An audience that is neither a string nor a list is not this console's, and the refusal says what it
+// saw rather than failing to describe it.
+func TestAnAudienceThisBuildCannotReadIsRefused(t *testing.T) {
+	s := newSigner(t, "k1")
+	server := served(t, s)
+	raw := s.assertion(t, "RS256", claims(map[string]any{"aud": 42}))
+	_, err := door(server).Prove(withAssertion(raw))
+	if err == nil || !strings.Contains(err.Error(), "issued for nothing") {
+		t.Fatalf("err = %v, want it to say the audience could not be read", err)
+	}
+}
+
+// The email is lowercased so one person is one record: a door that answered both `Ana@…` and `ana@…`
+// would be two people to everything downstream.
+func TestTheEmailIsOneRecordWhateverTheCase(t *testing.T) {
+	s := newSigner(t, "k1")
+	server := served(t, s)
+	raw := s.assertion(t, "RS256", claims(map[string]any{"email": "Ana@Example.COM"}))
+	caller, err := door(server).Prove(withAssertion(raw))
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if caller.Email != testEmail {
+		t.Errorf("email = %q, want %q", caller.Email, testEmail)
+	}
+}
+
+// A key the publisher marked for another use is not a signing key, even when its material is perfectly
+// readable. Accepting it would verify a signature made with a key that was never meant to make one.
+func TestAKeyMarkedForAnotherUseIsNotUsed(t *testing.T) {
+	s := newSigner(t, "enc")
+	document := string(s.jwks())
+	document = strings.Replace(document, `"use":"sig"`, `"use":"enc"`, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(document))
+	}))
+	defer server.Close()
+	d := Assertion{Audience: testAudience, Issuer: testIssuer, Keys: &Keys{URL: server.URL}}
+	_, err := d.Prove(withAssertion(s.assertion(t, "RS256", claims(nil))))
+	if err == nil {
+		t.Fatal("a key published for encryption verified a signature")
+	}
+}
+
+// The cache is the reason a stream's every reconnect does not fetch someone else's keys: within its own
+// lifetime a second assertion must be answered from what this process holds.
+func TestACachedKeySetIsNotFetchedAgainWithinItsLifetime(t *testing.T) {
+	s := newSigner(t, "k1")
+	var fetches int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetches++
+		_, _ = w.Write(s.jwks())
+	}))
+	defer server.Close()
+	keys := &Keys{URL: server.URL}
+	d := Assertion{Audience: testAudience, Issuer: testIssuer, Keys: keys}
+	for range 3 {
+		if _, err := d.Prove(withAssertion(s.assertion(t, "RS256", claims(nil)))); err != nil {
+			t.Fatalf("a valid assertion was refused: %v", err)
+		}
+	}
+	if fetches != 1 {
+		t.Errorf("the key set was fetched %d times, want once: the cache is not doing its job", fetches)
+	}
+}
+
+// The end of the cache's lifetime is the one moment the boundary matters: at exactly an hour the key is
+// stale and is fetched again, which is the difference between a cache and a key nothing ever rotates.
+func TestAKeySetIsFetchedAgainAtTheEndOfItsLifetime(t *testing.T) {
+	s := newSigner(t, "k1")
+	fetchedAt := time.Now()
+	var fetches int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetches++
+		_, _ = w.Write(s.jwks())
+	}))
+	defer server.Close()
+
+	now := fetchedAt
+	keys := &Keys{URL: server.URL, Now: func() time.Time { return now }}
+	d := Assertion{Audience: testAudience, Issuer: testIssuer, Keys: keys}
+	raw := func() string {
+		return s.assertion(t, "RS256", claims(map[string]any{"exp": now.Add(time.Hour).Unix()}))
+	}
+	if _, err := d.Prove(withAssertion(raw())); err != nil {
+		t.Fatalf("the first assertion was refused: %v", err)
+	}
+	now = fetchedAt.Add(keyTTL)
+	if _, err := d.Prove(withAssertion(raw())); err != nil {
+		t.Fatalf("the assertion at the end of the lifetime was refused: %v", err)
+	}
+	if fetches != 2 {
+		t.Errorf("fetches = %d at the end of the lifetime, want 2", fetches)
 	}
 }

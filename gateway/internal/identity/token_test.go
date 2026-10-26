@@ -156,3 +156,31 @@ func TestEnsureTokenDoesNotOverwriteAFileItCannotUse(t *testing.T) {
 		t.Error("the file was rewritten")
 	}
 }
+
+// A token path that exists and is not a readable file is reported as itself. Reading it as "no token
+// yet" would mint over whatever is there and send the owner looking in the wrong place.
+func TestATokenPathThatIsNotAFileIsReported(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, TokenFile), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if _, err := ReadToken(dir); err == nil || errors.Is(err, ErrNoToken) {
+		t.Fatalf("err = %v, want a problem rather than a first run", err)
+	}
+	if _, _, err := EnsureToken(dir); err == nil {
+		t.Error("EnsureToken minted over a directory")
+	}
+}
+
+// An install folder that cannot be created is a refusal with a cause, not a panic: the folder is named
+// by the caller, and a name under a file is a typo the tool can point at.
+func TestAnInstallFolderThatCannotBeCreatedIsReported(t *testing.T) {
+	base := t.TempDir()
+	file := filepath.Join(base, "acornfall")
+	if err := os.WriteFile(file, []byte("not a folder"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := RotateToken(file); err == nil {
+		t.Fatal("a token was minted under a file")
+	}
+}
