@@ -53,10 +53,10 @@ func TestABwrapWorkspaceSubstitutesASecretAtItsProxy(t *testing.T) {
 		),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	c.prompt("general", root, "use the token")
-	got := c.waitForText("general", root, "the request ran")
+	c.prompt("personal", root, "use the token")
+	got := c.waitForText("personal", root, "the request ran")
 	output := got.lastToolResult()
 
 	if !strings.Contains(output, "in-the-sandbox:["+placeholder+"]") {

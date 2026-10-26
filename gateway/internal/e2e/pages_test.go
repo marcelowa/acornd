@@ -17,11 +17,11 @@ func TestEveryPageAddressAnswersWithTheClient(t *testing.T) {
 	s := start(t)
 	c := s.client()
 	clientBuilt(t, c)
-	created := c.create("general")
+	created := c.create("personal")
 
 	addresses := []string{
 		"/",
-		"/w/general",
+		"/w/personal",
 		"/c/general/" + created.ID,
 		"/c/" + created.ID,
 		"/settings",
@@ -104,7 +104,7 @@ func TestAnUploadIsReadAsTheTypeItIs(t *testing.T) {
 		{"blob.bin", "application/octet-stream", []byte{0x00, 0x01, 0x02, 0x03}, "application/octet-stream"},
 	}
 	for _, one := range cases {
-		status, payload := c.uploadStatus("general", one.name, one.claimed, one.payload)
+		status, payload := c.uploadStatus("personal", one.name, one.claimed, one.payload)
 		if status != 201 {
 			t.Errorf("%s: status %d %s", one.name, status, payload)
 			continue
@@ -128,14 +128,14 @@ func TestAnUploadIsReadAsTheTypeItIs(t *testing.T) {
 // failure of the page routes.
 func clientBuilt(t *testing.T, c *client) {
 	t.Helper()
-	response, err := c.http.Get(c.base + "/w/general")
+	response, err := c.http.Get(c.base + "/w/personal")
 	if err != nil {
-		t.Fatalf("GET /w/general: %v", err)
+		t.Fatalf("GET /w/personal: %v", err)
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		t.Fatalf("GET /w/general: %v", err)
+		t.Fatalf("GET /w/personal: %v", err)
 	}
 	// The probe is a page route, not the root: an embedded folder without a client lists itself at
 	// "/" with a 200, so the root cannot tell a built interface from an empty folder. The page
@@ -144,6 +144,6 @@ func clientBuilt(t *testing.T, c *client) {
 		t.Skip("this binary does not serve the interface (make ui-build)")
 	}
 	if response.StatusCode != http.StatusOK {
-		t.Fatalf("GET /w/general = %d: %s", response.StatusCode, body)
+		t.Fatalf("GET /w/personal = %d: %s", response.StatusCode, body)
 	}
 }

@@ -29,7 +29,7 @@ func TestTheEdgeRefusesWhatItCannotDoAndSaysWhy(t *testing.T) {
 		{"rotating in a workspace that is not there", "POST", "/api/workspaces/nowhere/secrets/K/rotate", map[string]any{"value": "v"}, 404, "no such workspace"},
 		{"updating a workspace that is not there", "POST", "/api/workspaces/nowhere/update", map[string]any{"title": "x"}, 404, "no workspace"},
 		// A secret request nobody is waiting for: the answer would go nowhere.
-		{"an answer to no secret request", "POST", "/api/workspaces/general/conversations/1/secrets/nope", map[string]any{"value": "v"}, 404, "no secret request"},
+		{"an answer to no secret request", "POST", "/api/workspaces/personal/conversations/1/secrets/nope", map[string]any{"value": "v"}, 404, "no secret request"},
 
 		// Providers: a login needs to say which provider and how.
 		{"a login with no provider", "POST", "/api/providers/login", map[string]any{"authType": "api_key"}, 400, "providerId"},
@@ -38,8 +38,8 @@ func TestTheEdgeRefusesWhatItCannotDoAndSaysWhy(t *testing.T) {
 		{"an auth answer with no prompt", "POST", "/api/auth/answer", map[string]any{"value": "v"}, 400, "promptId"},
 
 		// A message to a conversation that does not exist is not a queue nobody drains.
-		{"a message to a conversation that is not there", "POST", "/api/workspaces/general/conversations/nope/messages", map[string]any{"text": "hello"}, 409, ""},
-		{"an abort of a conversation that is not there", "POST", "/api/workspaces/general/conversations/nope/abort", nil, 409, ""},
+		{"a message to a conversation that is not there", "POST", "/api/workspaces/personal/conversations/nope/messages", map[string]any{"text": "hello"}, 409, ""},
+		{"an abort of a conversation that is not there", "POST", "/api/workspaces/personal/conversations/nope/abort", nil, 409, ""},
 
 		// Body decoding: a body that is not JSON, and one that is JSON of the wrong shape.
 		{"a body that is not JSON", "POST", "/api/defaults/model", "not json at all", 400, ""},
@@ -67,7 +67,7 @@ func TestAWorkspaceSecretIsWrittenListedRotatedAndDeleted(t *testing.T) {
 	c := s.client()
 
 	var written map[string]any
-	c.post("/api/workspaces/general/secrets", map[string]any{
+	c.post("/api/workspaces/personal/secrets", map[string]any{
 		"name":        "TOKEN",
 		"description": "for the api",
 		"value":       "s3cret",
@@ -82,7 +82,7 @@ func TestAWorkspaceSecretIsWrittenListedRotatedAndDeleted(t *testing.T) {
 		Own       []map[string]any `json:"own"`
 		Effective []map[string]any `json:"effective"`
 	}
-	c.get("/api/workspaces/general/secrets", &listed)
+	c.get("/api/workspaces/personal/secrets", &listed)
 	if len(listed.Own) != 1 || listed.Own[0]["name"] != "TOKEN" {
 		t.Fatalf("own = %v", listed.Own)
 	}
@@ -97,7 +97,7 @@ func TestAWorkspaceSecretIsWrittenListedRotatedAndDeleted(t *testing.T) {
 			Hosts []string
 		} `json:"secret"`
 	}
-	c.post("/api/workspaces/general/secrets/TOKEN/rotate", map[string]any{"value": "n3w"}, &rotated)
+	c.post("/api/workspaces/personal/secrets/TOKEN/rotate", map[string]any{"value": "n3w"}, &rotated)
 	if rotated.Secret.Name != "TOKEN" {
 		t.Errorf("rotation answered %+v", rotated)
 	}
@@ -108,16 +108,16 @@ func TestAWorkspaceSecretIsWrittenListedRotatedAndDeleted(t *testing.T) {
 	// The same name at the install's scope shadows nothing here and appears in both lists, which
 	// is the difference the screen draws.
 	c.post("/api/secrets", map[string]any{"name": "GLOBAL", "description": "d", "value": "v"}, nil)
-	c.get("/api/workspaces/general/secrets", &listed)
+	c.get("/api/workspaces/personal/secrets", &listed)
 	if len(listed.Global) != 1 || len(listed.Own) != 1 || len(listed.Effective) != 2 {
 		t.Errorf("global %d, own %d, effective %d", len(listed.Global), len(listed.Own), len(listed.Effective))
 	}
 
-	status, body := c.do("DELETE", "/api/workspaces/general/secrets/TOKEN", nil)
+	status, body := c.do("DELETE", "/api/workspaces/personal/secrets/TOKEN", nil)
 	if status != 200 && status != 204 {
 		t.Errorf("delete = %d %s", status, body)
 	}
-	c.get("/api/workspaces/general/secrets", &listed)
+	c.get("/api/workspaces/personal/secrets", &listed)
 	if len(listed.Own) != 0 {
 		t.Errorf("after the delete, own = %v", listed.Own)
 	}
@@ -160,7 +160,7 @@ func TestEditingAWorkspaceChecksEveryField(t *testing.T) {
 		{"a trust flag this build does not have", map[string]any{"trusted": true}, "trust"},
 	}
 	for _, one := range refusals {
-		status, body := c.do("POST", "/api/workspaces/general/update", one.body)
+		status, body := c.do("POST", "/api/workspaces/personal/update", one.body)
 		if status != 400 {
 			t.Errorf("%s: %d %s", one.why, status, body)
 			continue
@@ -179,10 +179,10 @@ func TestEditingAWorkspaceChecksEveryField(t *testing.T) {
 			Image string `json:"image"`
 		} `json:"workspaces"`
 	}
-	c.post("/api/workspaces/general/update", map[string]any{"title": "The general one", "image": "alpine:3.20"}, &listed)
+	c.post("/api/workspaces/personal/update", map[string]any{"title": "The general one", "image": "alpine:3.20"}, &listed)
 	found := false
 	for _, workspace := range listed.Workspaces {
-		if workspace.Name == "general" {
+		if workspace.Name == "personal" {
 			found = true
 			if workspace.Title != "The general one" {
 				t.Errorf("title = %q", workspace.Title)
@@ -204,12 +204,12 @@ func TestAnUpdateWaitsForRuns(t *testing.T) {
 	source := withUpdateSource(t)
 	s := start(t, source, withSlowModel(), withScript(scriptRule{Match: "keep going", Reply: "a long answer"}))
 	c := s.client()
-	root := c.waitForConversation("general")
-	defer c.watch("general", root)()
-	c.prompt("general", root, "keep going")
+	root := c.waitForConversation("personal")
+	defer c.watch("personal", root)()
+	c.prompt("personal", root, "keep going")
 	// The run has to be running before the update is asked for: the gate reads what is running now,
 	// and a prompt that has been accepted but not started is not a run yet.
-	c.waitRunning("general", root, 30*time.Second)
+	c.waitRunning("personal", root, 30*time.Second)
 
 	status, body := c.do("POST", "/api/update/apply", map[string]any{})
 	if status != 409 {
@@ -272,8 +272,8 @@ func TestTheTurnVerbsRefuseWhatTheyCannotDo(t *testing.T) {
 	t.Parallel()
 	s := start(t)
 	c := s.client()
-	root := c.waitForConversation("general")
-	path := c.conversationPath("general", root)
+	root := c.waitForConversation("personal")
+	path := c.conversationPath("personal", root)
 
 	// Nothing to send: a message needs words or files, and the answer says so rather than queueing
 	// an empty turn the model would be charged for.
@@ -321,8 +321,8 @@ func TestAMessageOfFilesAloneIsAccepted(t *testing.T) {
 	workspaceResources(t)
 	s := start(t, withScript(scriptRule{Match: "", Reply: "seen"}))
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	attached := c.upload("general", "shot.txt", "text/plain", []byte("a file with no words beside it"))
-	c.post(c.conversationPath("general", root)+"/messages", map[string]any{"attachments": []string{attached}}, nil)
+	attached := c.upload("personal", "shot.txt", "text/plain", []byte("a file with no words beside it"))
+	c.post(c.conversationPath("personal", root)+"/messages", map[string]any{"attachments": []string{attached}}, nil)
 }

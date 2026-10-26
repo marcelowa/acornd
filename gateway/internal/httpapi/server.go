@@ -38,7 +38,7 @@ func New(workspaces *control.Workspaces, static fs.FS, updates *update.Manager, 
 }
 
 // controlFor finds the workspace a request is about. The workspace-scoped routes name it;
-// the earlier paths do not, and mean the general workspace.
+// the earlier paths do not, and mean the caller's own workspace.
 func (s *Server) controlFor(r *http.Request) (*control.Control, error) {
 	name := r.PathValue("ws")
 	if name == "" {
@@ -211,7 +211,7 @@ func (s *Server) workspaceStatus(w http.ResponseWriter, r *http.Request) {
 		name = r.URL.Query().Get("workspace")
 	}
 	if name == "" {
-		name = control.GeneralWorkspaceName
+		name = control.PersonalWorkspaceName
 	}
 	if _, known := s.workspaces.Get(name); !known {
 		http.Error(w, "no workspace "+name, http.StatusNotFound)

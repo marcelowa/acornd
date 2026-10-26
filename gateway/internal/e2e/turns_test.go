@@ -24,10 +24,10 @@ func TestCommandExpansionIsWhatTheModelSees(t *testing.T) {
 		}),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	c.prompt("general", root, "/summarize the notes")
-	got := c.waitForText("general", root, "on it")
+	c.prompt("personal", root, "/summarize the notes")
+	got := c.waitForText("personal", root, "on it")
 
 	user := lastEntryOfKind(got, "pi.user")
 	if !strings.Contains(user, "EXPANDED: summarize the notes, briefly.") {
@@ -53,10 +53,10 @@ func TestCommandArgumentsAreAppendedWhenThereIsNoPlaceholder(t *testing.T) {
 		}),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	c.prompt("general", root, "/status everything please")
-	got := c.waitForText("general", root, "pong")
+	c.prompt("personal", root, "/status everything please")
+	got := c.waitForText("personal", root, "pong")
 	user := lastEntryOfKind(got, "pi.user")
 	if !strings.Contains(user, "PING the status.") || !strings.Contains(user, "everything please") {
 		t.Errorf("the body and the arguments should both be in the message, got %q", user)
@@ -69,10 +69,10 @@ func TestAnUnknownCommandIsSentAsWritten(t *testing.T) {
 	notSandbox(t)
 	s := start(t, withScript(scriptRule{Match: "/not-a-command", Reply: "understood"}))
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	c.prompt("general", root, "/not-a-command does not exist")
-	got := c.waitForText("general", root, "understood")
+	c.prompt("personal", root, "/not-a-command does not exist")
+	got := c.waitForText("personal", root, "understood")
 	user := lastEntryOfKind(got, "pi.user")
 	if !strings.Contains(user, "/not-a-command does not exist") {
 		t.Errorf("an unknown command should be sent as written, got %q", user)
@@ -98,7 +98,7 @@ func TestCommandsComeFromBothLayersAndTheWorkspaceWins(t *testing.T) {
 			Source      string `json:"source"`
 		} `json:"commands"`
 	}
-	c.get("/api/workspaces/general/commands", &listing)
+	c.get("/api/workspaces/personal/commands", &listing)
 
 	byName := map[string]string{}
 	files, builtins := 0, 0
@@ -137,14 +137,14 @@ func TestSteeringJoinsTheRunningTurn(t *testing.T) {
 		),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
-	defer c.watch("general", root)()
+	root := c.waitForConversation("personal")
+	defer c.watch("personal", root)()
 
-	c.prompt("general", root, "start the long job")
-	c.waitRunning("general", root, 30*time.Second)
-	c.promptWhenBusy("general", root, "actually, also do this", "steer")
+	c.prompt("personal", root, "start the long job")
+	c.waitRunning("personal", root, 30*time.Second)
+	c.promptWhenBusy("personal", root, "actually, also do this", "steer")
 
-	got := c.waitView("general", root, func(v view) bool {
+	got := c.waitView("personal", root, func(v view) bool {
 		text := v.all()
 		return strings.Contains(text, "and the steered part is done too")
 	}, 120*time.Second)
@@ -157,7 +157,7 @@ func TestSteeringJoinsTheRunningTurn(t *testing.T) {
 	if users := len(got.entriesOf("pi.user")); users != 2 {
 		t.Errorf("expected exactly the two user messages, got %d:\n%s", users, all)
 	}
-	c.waitIdle("general", root, 60*time.Second)
+	c.waitIdle("personal", root, 60*time.Second)
 }
 
 // Abort stops what is running. The partial answer is not the whole answer, and the
@@ -173,15 +173,15 @@ func TestAbortStopsTheRun(t *testing.T) {
 		),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
-	defer c.watch("general", root)()
+	root := c.waitForConversation("personal")
+	defer c.watch("personal", root)()
 
-	c.prompt("general", root, "the long one")
-	c.waitRunning("general", root, 30*time.Second)
-	c.post(c.conversationPath("general", root)+"/abort", nil, nil)
+	c.prompt("personal", root, "the long one")
+	c.waitRunning("personal", root, 30*time.Second)
+	c.post(c.conversationPath("personal", root)+"/abort", nil, nil)
 
-	c.waitIdle("general", root, 30*time.Second)
-	aborted := c.view("general", root)
+	c.waitIdle("personal", root, 30*time.Second)
+	aborted := c.view("personal", root)
 	if strings.Contains(aborted.all(), "FINISHED") {
 		t.Errorf("the answer should not have finished after an abort:\n%s", aborted.all())
 	}
@@ -190,8 +190,8 @@ func TestAbortStopsTheRun(t *testing.T) {
 	}
 
 	// And the conversation still works.
-	c.prompt("general", root, "the short one")
-	c.waitForText("general", root, "quick")
+	c.prompt("personal", root, "the short one")
+	c.waitForText("personal", root, "quick")
 }
 
 // The stream is the interface's only live channel, so its contract is a feature: a full state
@@ -206,11 +206,11 @@ func TestTheStreamSendsStateViewsAndKeepalives(t *testing.T) {
 	notSandbox(t)
 	s := start(t, withScript(scriptRule{Match: "hello stream", Reply: "streamed"}))
 	c := s.client()
-	root := c.waitForConversation("general")
-	c.prompt("general", root, "hello stream")
-	c.waitForText("general", root, "streamed")
+	root := c.waitForConversation("personal")
+	c.prompt("personal", root, "hello stream")
+	c.waitForText("personal", root, "streamed")
 
-	counts := c.streamEvents("general", root, 4*time.Second)
+	counts := c.streamEvents("personal", root, 4*time.Second)
 	if counts["state"] == 0 {
 		t.Errorf("a client that attaches should be told the state: %v", counts)
 	}
@@ -231,13 +231,13 @@ func TestTheStreamAnnouncesStateChanges(t *testing.T) {
 	notSandbox(t)
 	s := start(t, withScript(scriptRule{Match: "hello state", Reply: "stated"}))
 	c := s.client()
-	root := c.waitForConversation("general")
-	defer c.watch("general", root)()
+	root := c.waitForConversation("personal")
+	defer c.watch("personal", root)()
 
 	// The run starts and settles inside the window, so the attach state is one event and
 	// the change is the second.
-	c.prompt("general", root, "hello state")
-	counts := c.streamEvents("general", root, 4*time.Second)
+	c.prompt("personal", root, "hello state")
+	counts := c.streamEvents("personal", root, 4*time.Second)
 	if counts["state"] < 2 {
 		t.Errorf("a state change should be announced to an attached client: %v", counts)
 	}
@@ -260,13 +260,13 @@ func TestAPromptIsAnnouncedToEveryAttachedTab(t *testing.T) {
 		withSlowModel(),
 		withScript(scriptRule{Match: "hello tabs", Reply: "hi tabs and take your time saying it again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again and again"}))
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
 	// The second tab, attached before the prompt. Its attach state is old news.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		fmt.Sprintf("%s/api/stream?workspace=%s&conversation=%s", c.base, "general", root), nil)
+		fmt.Sprintf("%s/api/stream?workspace=%s&conversation=%s", c.base, "personal", root), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestAPromptIsAnnouncedToEveryAttachedTab(t *testing.T) {
 		t.Fatal("the second tab never got its attach state")
 	}
 
-	c.prompt("general", root, "hello tabs")
+	c.prompt("personal", root, "hello tabs")
 	select {
 	case <-states:
 	case <-time.After(2 * time.Second):
@@ -309,11 +309,11 @@ func TestUsageIsReportedForAWorkspace(t *testing.T) {
 	notSandbox(t)
 	s := start(t, withScript(scriptRule{Match: "spend something", Reply: "spent"}))
 	c := s.client()
-	root := c.waitForConversation("general")
-	c.prompt("general", root, "spend something")
-	c.waitForText("general", root, "spent")
+	root := c.waitForConversation("personal")
+	c.prompt("personal", root, "spend something")
+	c.waitForText("personal", root, "spent")
 
-	status, payload := c.do("GET", "/api/workspaces/general/usage", nil)
+	status, payload := c.do("GET", "/api/workspaces/personal/usage", nil)
 	if status != 200 {
 		t.Fatalf("usage: %d %s", status, payload)
 	}
@@ -324,7 +324,7 @@ func TestUsageIsReportedForAWorkspace(t *testing.T) {
 		t.Errorf("usage should be about the conversations that ran: %s", truncate(payload, 300))
 	}
 
-	conversation, _ := c.conversationIn("general", root)
+	conversation, _ := c.conversationIn("personal", root)
 	if conversation.Tokens <= 0 {
 		t.Errorf("the conversation should report its spend, got %v", conversation.Tokens)
 	}

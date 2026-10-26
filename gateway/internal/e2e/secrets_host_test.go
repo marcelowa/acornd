@@ -78,9 +78,9 @@ func TestHostEngineDeliversSecretsIntoTheWorkerEnvironment(t *testing.T) {
 		),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
-	c.prompt("general", root, "read the environment token")
-	first := c.waitForText("general", root, "read it")
+	root := c.waitForConversation("personal")
+	c.prompt("personal", root, "read the environment token")
+	first := c.waitForText("personal", root, "read it")
 	if !strings.Contains(first.all(), "seen=[host-engine-value]") {
 		t.Fatalf("the host engine should put the value in the worker environment:\n%s", first.all())
 	}
@@ -88,7 +88,7 @@ func TestHostEngineDeliversSecretsIntoTheWorkerEnvironment(t *testing.T) {
 		t.Fatalf("a secret that may not enter the sandbox was delivered:\n%s", first.all())
 	}
 
-	state := c.state("general")
+	state := c.state("personal")
 	if state.Sandbox.Engine != "host" || state.Sandbox.Isolated {
 		t.Fatalf("this test should be on the host engine, got %+v", state.Sandbox)
 	}
@@ -107,8 +107,8 @@ func TestHostEngineDeliversSecretsIntoTheWorkerEnvironment(t *testing.T) {
 
 	// A rotation restarts the worker, because a running process's environment cannot change.
 	c.post("/api/secrets/ENV_TOKEN/rotate", map[string]any{"value": "rotated-host-value"}, nil)
-	c.prompt("general", root, "read it again")
-	second := c.waitForText("general", root, "seen=[rotated-host-value]")
+	c.prompt("personal", root, "read it again")
+	second := c.waitForText("personal", root, "seen=[rotated-host-value]")
 	if !strings.Contains(second.all(), "seen=[rotated-host-value]") {
 		t.Fatalf("the restarted worker should have the new value:\n%s", second.all())
 	}
@@ -116,16 +116,16 @@ func TestHostEngineDeliversSecretsIntoTheWorkerEnvironment(t *testing.T) {
 	// A card answer must not restart the worker under the turn that asked for it: the value
 	// is stored and the state says the next start is what will have it.
 	requests := make(chan string, 1)
-	go func() { requests <- c.waitForSecretRequest("general", root) }()
+	go func() { requests <- c.waitForSecretRequest("personal", root) }()
 	time.Sleep(200 * time.Millisecond)
-	c.prompt("general", root, "ask for a host card token")
+	c.prompt("personal", root, "ask for a host card token")
 	var requestID string
 	select {
 	case requestID = <-requests:
 	case <-time.After(10 * time.Second):
 		t.Fatal("the host card request never reached the stream")
 	}
-	path := fmt.Sprintf("/api/workspaces/general/conversations/%s/secrets/%s", root, requestID)
+	path := fmt.Sprintf("/api/workspaces/personal/conversations/%s/secrets/%s", root, requestID)
 	status, body := c.do("POST", path, map[string]any{
 		"value":       "host-card-value",
 		"description": "a host card token",
@@ -135,7 +135,7 @@ func TestHostEngineDeliversSecretsIntoTheWorkerEnvironment(t *testing.T) {
 	if status != 200 {
 		t.Fatalf("answer the host card: %d %s", status, body)
 	}
-	finished := c.waitForText("general", root, "the host card finished")
+	finished := c.waitForText("personal", root, "the host card finished")
 	if strings.Contains(finished.all(), "host-card-value") {
 		t.Fatalf("the host card value reached the transcript:\n%s", finished.all())
 	}
@@ -147,7 +147,7 @@ func TestHostEngineDeliversSecretsIntoTheWorkerEnvironment(t *testing.T) {
 	// process environment. A prompt after it reads the value from the host sandbox.
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		after := c.state("general")
+		after := c.state("personal")
 		if !after.Sandbox.SecretsRestart {
 			break
 		}
@@ -156,10 +156,10 @@ func TestHostEngineDeliversSecretsIntoTheWorkerEnvironment(t *testing.T) {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	c.waitForText("general", root, "continued after the host secret")
-	c.waitIdle("general", root, 60*time.Second)
-	c.prompt("general", root, "read the host card token")
-	read := c.waitForText("general", root, "the host card is readable")
+	c.waitForText("personal", root, "continued after the host secret")
+	c.waitIdle("personal", root, 60*time.Second)
+	c.prompt("personal", root, "read the host card token")
+	read := c.waitForText("personal", root, "the host card is readable")
 	if !strings.Contains(read.all(), "card=[host-card-value]") {
 		t.Errorf("the restarted worker should have the card's value:\n%s", read.all())
 	}

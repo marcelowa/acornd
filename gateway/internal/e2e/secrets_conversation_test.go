@@ -31,12 +31,12 @@ func TestTheConversationAsksForASecretWithoutShowingItsValue(t *testing.T) {
 		Reply: "The token is ready.",
 	}))
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
 	requests := make(chan string, 1)
-	go func() { requests <- c.waitForSecretRequest("general", root) }()
+	go func() { requests <- c.waitForSecretRequest("personal", root) }()
 	time.Sleep(200 * time.Millisecond)
-	c.prompt("general", root, "ask for the card token")
+	c.prompt("personal", root, "ask for the card token")
 
 	var requestID string
 	select {
@@ -48,7 +48,7 @@ func TestTheConversationAsksForASecretWithoutShowingItsValue(t *testing.T) {
 		t.Fatal("the secret request had no id")
 	}
 
-	path := fmt.Sprintf("/api/workspaces/general/conversations/%s/secrets/%s", root, requestID)
+	path := fmt.Sprintf("/api/workspaces/personal/conversations/%s/secrets/%s", root, requestID)
 	status, body := c.do(http.MethodPost, path, map[string]any{
 		"value":       value,
 		"description": "a token set from the card",
@@ -59,7 +59,7 @@ func TestTheConversationAsksForASecretWithoutShowingItsValue(t *testing.T) {
 		t.Fatalf("answer the card: %d %s", status, body)
 	}
 
-	view := c.waitForText("general", root, "The token is ready.")
+	view := c.waitForText("personal", root, "The token is ready.")
 	if strings.Contains(view.all(), value) {
 		t.Fatalf("the value reached the transcript:\n%s", view.all())
 	}
@@ -67,7 +67,7 @@ func TestTheConversationAsksForASecretWithoutShowingItsValue(t *testing.T) {
 		t.Errorf("the request should be visible by name and description:\n%s", view.all())
 	}
 
-	status, body = c.do(http.MethodGet, "/api/workspaces/general/secrets", nil)
+	status, body = c.do(http.MethodGet, "/api/workspaces/personal/secrets", nil)
 	if status != http.StatusOK {
 		t.Fatalf("read the workspace's secrets: %d %s", status, body)
 	}
@@ -122,9 +122,9 @@ func TestTheConversationListsSecretsWithoutValues(t *testing.T) {
 		}),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
-	c.prompt("general", root, "what secrets are there")
-	view := c.waitForText("general", root, "That is the list.")
+	root := c.waitForConversation("personal")
+	c.prompt("personal", root, "what secrets are there")
+	view := c.waitForText("personal", root, "That is the list.")
 	if strings.Contains(view.all(), value) {
 		t.Fatalf("the value reached the transcript:\n%s", view.all())
 	}
@@ -154,18 +154,18 @@ func TestACardRefusesASecretWithoutHosts(t *testing.T) {
 		Reply: "the hostless card finished",
 	}))
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 	requests := make(chan string, 1)
-	go func() { requests <- c.waitForSecretRequest("general", root) }()
+	go func() { requests <- c.waitForSecretRequest("personal", root) }()
 	time.Sleep(200 * time.Millisecond)
-	c.prompt("general", root, "ask for a hostless token")
+	c.prompt("personal", root, "ask for a hostless token")
 	var requestID string
 	select {
 	case requestID = <-requests:
 	case <-time.After(10 * time.Second):
 		t.Fatal("the hostless request never reached the stream")
 	}
-	path := fmt.Sprintf("/api/workspaces/general/conversations/%s/secrets/%s", root, requestID)
+	path := fmt.Sprintf("/api/workspaces/personal/conversations/%s/secrets/%s", root, requestID)
 	status, body := c.do(http.MethodPost, path, map[string]any{
 		"value":       "hostless-value",
 		"description": "a token with nowhere to go",
@@ -179,12 +179,12 @@ func TestACardRefusesASecretWithoutHosts(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("cancel the hostless card: %d %s", status, body)
 	}
-	view := c.waitForText("general", root, "the hostless card finished")
+	view := c.waitForText("personal", root, "the hostless card finished")
 	if strings.Contains(view.all(), "hostless-value") {
 		t.Fatalf("the rejected value reached the transcript:\n%s", view.all())
 	}
 	listed := vaultWorkspace{}
-	c.get("/api/workspaces/general/secrets", &listed)
+	c.get("/api/workspaces/personal/secrets", &listed)
 	for _, secret := range listed.Own {
 		if secret.Name == "NOHOST_TOKEN" {
 			t.Error("a rejected secret must not be stored")
@@ -203,9 +203,9 @@ func TestTheConversationListsNoSecrets(t *testing.T) {
 		Reply: "nothing to use",
 	}))
 	c := s.client()
-	root := c.waitForConversation("general")
-	c.prompt("general", root, "is anything here")
-	view := c.waitForText("general", root, "nothing to use")
+	root := c.waitForConversation("personal")
+	c.prompt("personal", root, "is anything here")
+	view := c.waitForText("personal", root, "nothing to use")
 	if !strings.Contains(view.all(), "No secrets are available") {
 		t.Errorf("the tool should answer with an empty list:\n%s", view.all())
 	}

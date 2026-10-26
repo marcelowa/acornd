@@ -23,10 +23,10 @@ func TestDelegateWaitsForTheChildAndReturnsItsAnswer(t *testing.T) {
 		scriptRule{Match: "child task", Reply: "CHILD ANSWER MARKER"},
 	))
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	c.prompt("general", root, "delegate this")
-	got := c.waitForText("general", root, "the child answered")
+	c.prompt("personal", root, "delegate this")
+	got := c.waitForText("personal", root, "the child answered")
 
 	// The answer is delivered as the result of the call, which is what "waits for it" means.
 	if !strings.Contains(got.all(), "CHILD ANSWER MARKER") {
@@ -34,13 +34,13 @@ func TestDelegateWaitsForTheChildAndReturnsItsAnswer(t *testing.T) {
 	}
 
 	// The child is a conversation in its own right, owned by the conversation that made it.
-	child := c.waitForConversationMatching("general", func(candidate conversation) bool {
+	child := c.waitForConversationMatching("personal", func(candidate conversation) bool {
 		return candidate.Parent == root && candidate.ID != root
 	})
 	if child.Root {
 		t.Error("a subagent is not the root conversation")
 	}
-	childView := c.view("general", child.ID)
+	childView := c.view("personal", child.ID)
 	if !strings.Contains(childView.all(), "child task: say the marker") {
 		t.Errorf("the subagent should have been given the task:\n%s", childView.all())
 	}
@@ -65,12 +65,12 @@ func TestAPeerIsANormalConversation(t *testing.T) {
 		scriptRule{Match: "peer task", Reply: "PEER ANSWER MARKER"},
 	))
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	c.prompt("general", root, "make a peer")
-	c.waitForText("general", root, "the peer is running")
+	c.prompt("personal", root, "make a peer")
+	c.waitForText("personal", root, "the peer is running")
 
-	peer := c.waitForConversationMatching("general", func(candidate conversation) bool {
+	peer := c.waitForConversationMatching("personal", func(candidate conversation) bool {
 		return candidate.CreatedBy == root && candidate.ID != root
 	})
 	if peer.Parent != "" {
@@ -79,7 +79,7 @@ func TestAPeerIsANormalConversation(t *testing.T) {
 	if peer.CreatedBy != root {
 		t.Errorf("the peer should record who made it, got %q", peer.CreatedBy)
 	}
-	c.waitForText("general", peer.ID, "PEER ANSWER MARKER")
+	c.waitForText("personal", peer.ID, "PEER ANSWER MARKER")
 }
 
 // The subagent tool's own actions answer in the tool result rather than in the rail: the listing
@@ -103,16 +103,16 @@ func TestSubagentListNamesWhatEachChildSpent(t *testing.T) {
 		},
 	))
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	c.prompt("general", root, "start a helper")
-	c.waitForText("general", root, "the helper is running")
-	child := c.waitForConversationMatching("general", func(candidate conversation) bool {
+	c.prompt("personal", root, "start a helper")
+	c.waitForText("personal", root, "the helper is running")
+	child := c.waitForConversationMatching("personal", func(candidate conversation) bool {
 		return candidate.Parent == root && candidate.ID != root
 	})
 
-	c.prompt("general", root, "list the helpers")
-	got := c.waitForText("general", root, "listed them")
+	c.prompt("personal", root, "list the helpers")
+	got := c.waitForText("personal", root, "listed them")
 	transcript := got.all()
 	for _, want := range []string{"helper", "conversation " + child.ID, "tokens"} {
 		if !strings.Contains(transcript, want) {
@@ -152,22 +152,22 @@ func TestASpawnedChildsLevelFollowsTheDocumentedOrder(t *testing.T) {
 		}),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	c.prompt("general", root, "spawn one")
-	c.waitForText("general", root, "started one")
+	c.prompt("personal", root, "spawn one")
+	c.waitForText("personal", root, "started one")
 	// The task arrives with its attribution, so the title is "[from conversation 1] helper task
 	// one": the delegation says where a message came from, which is the point of it.
-	fromDefinition := c.waitForConversationMatching("general", func(candidate conversation) bool {
+	fromDefinition := c.waitForConversationMatching("personal", func(candidate conversation) bool {
 		return strings.Contains(candidate.Title, "helper task one")
 	})
 	if fromDefinition.Thinking != "high" {
 		t.Errorf("the definition's level should apply to the child, got %q", fromDefinition.Thinking)
 	}
 
-	c.prompt("general", root, "spawn two")
-	c.waitForText("general", root, "started two")
-	fromCaller := c.waitForConversationMatching("general", func(candidate conversation) bool {
+	c.prompt("personal", root, "spawn two")
+	c.waitForText("personal", root, "started two")
+	fromCaller := c.waitForConversationMatching("personal", func(candidate conversation) bool {
 		return strings.Contains(candidate.Title, "helper task two")
 	})
 	if fromCaller.Thinking != "low" {
@@ -209,20 +209,20 @@ func TestASendByConversationIdReportsItsAnswer(t *testing.T) {
 		scriptRule{Match: "second task", Reply: "SECOND ANSWER"},
 	))
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	c.prompt("general", root, "start a helper")
-	c.waitForText("general", root, "started it")
-	c.prompt("general", root, "list the helpers")
-	c.waitForText("general", root, "listed them")
-	c.prompt("general", root, "send it another task by id")
-	c.waitForText("general", root, "sent by id")
+	c.prompt("personal", root, "start a helper")
+	c.waitForText("personal", root, "started it")
+	c.prompt("personal", root, "list the helpers")
+	c.waitForText("personal", root, "listed them")
+	c.prompt("personal", root, "send it another task by id")
+	c.waitForText("personal", root, "sent by id")
 
 	// The wake itself, and the label on it: the answer is attributed to the name this
 	// conversation knows, not to the id it happened to address.
 	// A wake either arrives within a second or never does, so a short window here keeps a
 	// regression from taking a minute to say so.
-	woken := c.waitView("general", root, func(v view) bool {
+	woken := c.waitView("personal", root, func(v view) bool {
 		return strings.Contains(v.all(), "SECOND ANSWER")
 	}, 20*time.Second)
 	if !strings.Contains(woken.all(), "[from subagent helper]") {
@@ -259,22 +259,22 @@ func TestAnUnknownThinkingLevelIsRefusedNotPassedOn(t *testing.T) {
 		}),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	c.prompt("general", root, "spawn with a bad level")
-	first := c.waitForText("general", root, "I was refused")
+	c.prompt("personal", root, "spawn with a bad level")
+	first := c.waitForText("personal", root, "I was refused")
 	if !strings.Contains(first.all(), `unknown thinking level "banana"`) {
 		t.Errorf("the refusal should name the level the model asked for:\n%s", first.all())
 	}
 
-	c.prompt("general", root, "delegate to the broken agent")
-	second := c.waitForText("general", root, "that was refused too")
+	c.prompt("personal", root, "delegate to the broken agent")
+	second := c.waitForText("personal", root, "that was refused too")
 	if !strings.Contains(second.all(), `unknown thinking level "banana"`) {
 		t.Errorf("a definition's level should be refused too:\n%s", second.all())
 	}
 
 	// Neither refusal created anything: the check happens before the commit, not inside it.
-	if listing := c.conversations("general"); len(listing) != 1 {
+	if listing := c.conversations("personal"); len(listing) != 1 {
 		t.Errorf("a refused spawn should create no conversation, got %+v", listing)
 	}
 }
@@ -295,23 +295,23 @@ func TestDelegationPolicyCanForbidSpawning(t *testing.T) {
 		}),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
 	var policy struct {
 		CanSpawn bool `json:"canSpawn"`
 	}
-	c.get(c.conversationPath("general", root)+"/policy", &policy)
+	c.get(c.conversationPath("personal", root)+"/policy", &policy)
 	if policy.CanSpawn {
 		t.Error("the workspace config forbids spawning, so the policy should say so")
 	}
 
-	c.prompt("general", root, "delegate this")
-	got := c.waitForText("general", root, "I could not delegate")
+	c.prompt("personal", root, "delegate this")
+	got := c.waitForText("personal", root, "I could not delegate")
 	if !strings.Contains(got.all(), "Cannot delegate from here") {
 		t.Errorf("the refusal should be told to the model:\n%s", got.all())
 	}
 	// Nothing was created.
-	for _, candidate := range c.state("general").Conversations {
+	for _, candidate := range c.state("personal").Conversations {
 		if candidate.Parent == root || candidate.CreatedBy == root {
 			t.Errorf("a forbidden subagent must not exist: %+v", candidate)
 		}
@@ -329,9 +329,9 @@ func TestTheHarnessRestartsAndKeepsItsHistory(t *testing.T) {
 		scriptRule{Match: "after the crash", Reply: "AFTER MARKER"},
 	))
 	c := s.client()
-	root := c.waitForConversation("general")
-	c.prompt("general", root, "before the crash")
-	c.waitForText("general", root, "BEFORE MARKER")
+	root := c.waitForConversation("personal")
+	c.prompt("personal", root, "before the crash")
+	c.waitForText("personal", root, "BEFORE MARKER")
 
 	killWorker(t, s)
 
@@ -341,7 +341,7 @@ func TestTheHarnessRestartsAndKeepsItsHistory(t *testing.T) {
 	deadline := time.Now().Add(60 * time.Second)
 	down, back := false, false
 	for time.Now().Before(deadline) && !back {
-		got := c.state("general")
+		got := c.state("personal")
 		if !got.WorkerUp {
 			down = true
 		} else if down {
@@ -355,17 +355,17 @@ func TestTheHarnessRestartsAndKeepsItsHistory(t *testing.T) {
 		t.Fatalf("the kill was never reported: the worker still reads as up")
 	}
 	if !back {
-		t.Fatalf("the harness should be restarted, got %q", c.state("general").WorkerError)
+		t.Fatalf("the harness should be restarted, got %q", c.state("personal").WorkerError)
 	}
 
 	// The conversation and its transcript are the harness's storage, not the process.
-	after := c.state("general")
+	after := c.state("personal")
 	if after.Conversation == nil || after.Conversation.ID != root {
 		t.Fatalf("the workspace should land on the same conversation, got %+v", after.Conversation)
 	}
 	// Waited for rather than read once: the first frame after a restart is the empty view a
 	// fresh attachment starts from, and the replay arrives with the next one.
-	view := c.waitView("general", root, func(v view) bool {
+	view := c.waitView("personal", root, func(v view) bool {
 		return strings.Contains(v.all(), "BEFORE MARKER")
 	}, 60*time.Second)
 	if !strings.Contains(view.all(), "BEFORE MARKER") {
@@ -373,8 +373,8 @@ func TestTheHarnessRestartsAndKeepsItsHistory(t *testing.T) {
 	}
 
 	// And it still works.
-	c.prompt("general", root, "after the crash")
-	c.waitForText("general", root, "AFTER MARKER")
+	c.prompt("personal", root, "after the crash")
+	c.waitForText("personal", root, "AFTER MARKER")
 }
 
 // A run that was interrupted by the crash finishes afterwards: work is committed before it is
@@ -387,16 +387,16 @@ func TestAnInterruptedRunFinishesAfterARestart(t *testing.T) {
 		withScript(scriptRule{Match: "the long one", Reply: "a slow answer that goes on and on and on and on and on and finally says FINISHED"}),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
-	defer c.watch("general", root)()
+	root := c.waitForConversation("personal")
+	defer c.watch("personal", root)()
 
-	c.prompt("general", root, "the long one")
-	c.waitRunning("general", root, 30*time.Second)
+	c.prompt("personal", root, "the long one")
+	c.waitRunning("personal", root, 30*time.Second)
 
 	killWorker(t, s)
 	// FINISHED is the last word of the answer: seeing it means the run completed, not that a
 	// partial transcript was replayed.
-	c.waitView("general", root, func(v view) bool {
+	c.waitView("personal", root, func(v view) bool {
 		return strings.Contains(v.all(), "FINISHED")
 	}, 180*time.Second)
 }

@@ -88,7 +88,7 @@ func TestSecretsAreStoredAndListedWithoutValues(t *testing.T) {
 	}
 
 	// A workspace entry with the same name wins, and both lists say so.
-	c.post("/api/workspaces/general/secrets", map[string]any{
+	c.post("/api/workspaces/personal/secrets", map[string]any{
 		"name":         "GITHUB_TOKEN",
 		"description":  "this workspace's token",
 		"value":        "workspace-value",
@@ -96,7 +96,7 @@ func TestSecretsAreStoredAndListedWithoutValues(t *testing.T) {
 		"substitution": map[string]bool{"headers": true},
 		"allowEnv":     false,
 	}, nil)
-	status, body = c.do(http.MethodGet, "/api/workspaces/general/secrets", nil)
+	status, body = c.do(http.MethodGet, "/api/workspaces/personal/secrets", nil)
 	if status != http.StatusOK {
 		t.Fatalf("GET workspace secrets: %d %s", status, body)
 	}
@@ -133,12 +133,12 @@ func TestSecretsAreStoredAndListedWithoutValues(t *testing.T) {
 	}
 
 	// Deleting the workspace entry uncovers the global one; deleting that empties the list.
-	status, body = c.do(http.MethodDelete, "/api/workspaces/general/secrets/GITHUB_TOKEN", nil)
+	status, body = c.do(http.MethodDelete, "/api/workspaces/personal/secrets/GITHUB_TOKEN", nil)
 	if status != http.StatusOK {
 		t.Fatalf("DELETE workspace secret: %d %s", status, body)
 	}
 	view = vaultWorkspace{}
-	c.get("/api/workspaces/general/secrets", &view)
+	c.get("/api/workspaces/personal/secrets", &view)
 	if len(view.Effective) != 1 || view.Effective[0].Source != "global" {
 		t.Errorf("the global entry should be visible after the override is gone: %+v", view.Effective)
 	}

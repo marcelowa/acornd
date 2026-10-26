@@ -21,17 +21,17 @@ func TestWorkspaceRulesReachThePrompt(t *testing.T) {
 		}),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
 	// A resource test runs on the host engine — the fast option, no hypervisor — and the state
 	// has to say so instead of implying a sandbox. The microVM boundary is covered by
 	// `make test-sandbox`.
-	if engine := c.state("general").Sandbox; engine.Engine != "host" || engine.Isolated || !engine.Tools {
+	if engine := c.state("personal").Sandbox; engine.Engine != "host" || engine.Isolated || !engine.Tools {
 		t.Fatalf("this test should run on the host engine and say it is not isolated, got %+v", engine)
 	}
 
-	c.prompt("general", root, "get to work")
-	got := c.waitForText("general", root, "working")
+	c.prompt("personal", root, "get to work")
+	got := c.waitForText("personal", root, "working")
 	rules := got.systemSections()["workspace-rules"]
 	if !strings.Contains(rules, "RULES MARKER") {
 		t.Errorf("the workspace's rules should reach the prompt, got %q", rules)
@@ -56,7 +56,7 @@ func TestAgentDefinitionsOverlayByLayer(t *testing.T) {
 	)
 	c := s.client()
 
-	got := c.state("general")
+	got := c.state("personal")
 	byName := map[string]struct {
 		description string
 		layer       string
@@ -87,10 +87,10 @@ func TestAgentDefinitionsOverlayByLayer(t *testing.T) {
 	}
 
 	// A conversation can be pointed at one, and the state says which it runs.
-	root := c.waitForConversation("general")
-	c.post(c.conversationPath("general", root)+"/agent",
+	root := c.waitForConversation("personal")
+	c.post(c.conversationPath("personal", root)+"/agent",
 		map[string]any{"definition": "researcher"}, nil)
-	got = c.state("general")
+	got = c.state("personal")
 	if got.Agent.Definition != "researcher" {
 		t.Errorf("the conversation should run the chosen definition, got %+v", got.Agent)
 	}
@@ -118,10 +118,10 @@ func TestConfigLayersFoldIntoOneAgent(t *testing.T) {
 		}),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	c.prompt("general", root, "fold")
-	got := c.waitForText("general", root, "folded")
+	c.prompt("personal", root, "fold")
+	got := c.waitForText("personal", root, "folded")
 	instructions := got.systemSections()["instructions"]
 	globalAt := strings.Index(instructions, "GLOBAL MARKER")
 	workspaceAt := strings.Index(instructions, "WORKSPACE MARKER")
@@ -133,7 +133,7 @@ func TestConfigLayersFoldIntoOneAgent(t *testing.T) {
 	}
 
 	// The layer traces are what the inspector shows instead of asking anyone to guess.
-	traces := c.state("general").Defaults
+	traces := c.state("personal").Defaults
 	layers := map[string]bool{}
 	for _, trace := range traces {
 		layers[trace.Layer] = true
@@ -167,7 +167,7 @@ func TestTheEcosystemAgentsFolderIsRead(t *testing.T) {
 	)
 	c := s.client()
 
-	listed := c.state("general")
+	listed := c.state("personal")
 	// `eco` from both folders, plus the general agent the worker ships.
 	if len(listed.Agents) != 2 {
 		t.Fatalf("expected the one definition, in both folders, got %+v", listed.Agents)
@@ -192,7 +192,7 @@ func TestTheEcosystemAgentsFolderIsRead(t *testing.T) {
 			Source      string `json:"source"`
 		} `json:"commands"`
 	}
-	c.get("/api/workspaces/general/commands", &listing)
+	c.get("/api/workspaces/personal/commands", &listing)
 	files := 0
 	for _, command := range listing.Commands {
 		if command.Source != "builtin" {
@@ -224,9 +224,9 @@ func TestTheEcosystemAgentsFolderIsRead(t *testing.T) {
 	}
 
 	// The skill and the rule reach the prompt, which is where they matter.
-	root := c.waitForConversation("general")
-	c.prompt("general", root, "what are the rules")
-	view := c.waitForText("general", root, "answered")
+	root := c.waitForConversation("personal")
+	c.prompt("personal", root, "what are the rules")
+	view := c.waitForText("personal", root, "answered")
 	sections := strings.Join(sectionValues(view.systemSections()), "\n")
 	for _, want := range []string{"ECOSYSTEM MARKER", "eco-skill"} {
 		if !strings.Contains(sections, want) {
@@ -241,13 +241,13 @@ func TestReloadPicksUpANewDefinition(t *testing.T) {
 	workspaceResources(t)
 	s := start(t)
 	c := s.client()
-	root := c.waitForConversation("general")
-	before := c.view("general", root)
+	root := c.waitForConversation("personal")
+	before := c.view("personal", root)
 
 	s.writeWorkspace(t, ".acornfall/agents/late.md", "---\nname: late\ndescription: written after startup\n---\nBody.")
-	c.post("/api/workspaces/general/agents/reload", nil, nil)
+	c.post("/api/workspaces/personal/agents/reload", nil, nil)
 
-	got := c.state("general")
+	got := c.state("personal")
 	for _, agent := range got.Agents {
 		if agent.Name == "late" {
 			if before.systemSections() == nil {
@@ -275,10 +275,10 @@ func TestSkillsAreOfferedAndFilteredByAgent(t *testing.T) {
 		}),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	c.prompt("general", root, "with skills")
-	offered := c.waitForText("general", root, "offered")
+	c.prompt("personal", root, "with skills")
+	offered := c.waitForText("personal", root, "offered")
 	all := strings.Join(sectionValues(offered.systemSections()), "\n")
 	if !strings.Contains(all, "acorn-notes") {
 		t.Errorf("the skill should be offered by name, got %q", all)
@@ -287,9 +287,9 @@ func TestSkillsAreOfferedAndFilteredByAgent(t *testing.T) {
 		t.Error("a skill's body should load only when the model asks for it")
 	}
 
-	c.post(c.conversationPath("general", root)+"/agent", map[string]any{"definition": "picky"}, nil)
-	c.prompt("general", root, "without skills")
-	restricted := c.waitForText("general", root, "restricted")
+	c.post(c.conversationPath("personal", root)+"/agent", map[string]any{"definition": "picky"}, nil)
+	c.prompt("personal", root, "without skills")
+	restricted := c.waitForText("personal", root, "restricted")
 	if strings.Contains(strings.Join(sectionValues(restricted.systemSections()), "\n"), "acorn-notes") {
 		t.Error("an agent that names its skills should not be offered the others")
 	}
@@ -320,15 +320,15 @@ func TestASpawnedChildIsOfferedItsDefinitionsSkills(t *testing.T) {
 		}),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	c.prompt("general", root, "spawn a picky one")
-	c.waitForText("general", root, "started it")
-	child := c.waitForConversationMatching("general", func(candidate conversation) bool {
+	c.prompt("personal", root, "spawn a picky one")
+	c.waitForText("personal", root, "started it")
+	child := c.waitForConversationMatching("personal", func(candidate conversation) bool {
 		return strings.Contains(candidate.Title, "picky task")
 	})
 
-	got := c.waitForText("general", child.ID, "PICKY ANSWERED")
+	got := c.waitForText("personal", child.ID, "PICKY ANSWERED")
 	offered := got.systemSections()["skills"]
 	if !strings.Contains(offered, "one") {
 		t.Errorf("the child should be offered the skill its definition names:\n%q", offered)
@@ -355,13 +355,13 @@ func TestABrokenWorkspaceFileIsReportedAndHeals(t *testing.T) {
 
 	// The gateway is serving, and this workspace explains itself instead of refusing to
 	// answer: a state a client can render, not an error it cannot.
-	status, payload := c.do("GET", "/api/workspaces/general/state", nil)
+	status, payload := c.do("GET", "/api/workspaces/personal/state", nil)
 	if status != 200 {
 		t.Fatalf("a workspace whose harness is down should still answer with its state, got %d %s", status, truncate(payload, 200))
 	}
 	var got state
 	decodeInto(t, "state", payload, &got)
-	if got.Workspace.Name != "general" {
+	if got.Workspace.Name != "personal" {
 		t.Errorf("the state should be about the workspace asked for, got %+v", got.Workspace)
 	}
 	if got.WorkerUp {
@@ -373,7 +373,7 @@ func TestABrokenWorkspaceFileIsReportedAndHeals(t *testing.T) {
 	// "describe worker: worker stdout closed" instead of the file at fault.
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		got = c.state("general")
+		got = c.state("personal")
 		if strings.Contains(got.WorkerError, "reason") && strings.Contains(got.WorkerError, "config.json") {
 			break
 		}
@@ -388,17 +388,17 @@ func TestABrokenWorkspaceFileIsReportedAndHeals(t *testing.T) {
 		`{"defaults":{"hooks":{"guards":[{"tool":"bash","arg":"command","pattern":"rm -rf","reason":"now it has one"}]}}}`)
 	deadline = time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
-		if c.state("general").WorkerUp {
+		if c.state("personal").WorkerUp {
 			break
 		}
 		time.Sleep(time.Second)
 	}
-	if !c.state("general").WorkerUp {
-		t.Fatalf("the harness should come back once the file is fixed, still: %q", c.state("general").WorkerError)
+	if !c.state("personal").WorkerUp {
+		t.Fatalf("the harness should come back once the file is fixed, still: %q", c.state("personal").WorkerError)
 	}
-	root := c.waitForConversation("general")
-	c.prompt("general", root, "after the fix")
-	c.waitForText("general", root, "fixed")
+	root := c.waitForConversation("personal")
+	c.prompt("personal", root, "after the fix")
+	c.waitForText("personal", root, "fixed")
 }
 
 // A global skill is read from the host, so its body arrives as text — and the directory it
@@ -437,19 +437,19 @@ func TestAGlobalSkillsScriptRunsInsideTheWorkspace(t *testing.T) {
 		}),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	c.prompt("general", root, "load the global skill")
-	loaded := c.waitForText("general", root, "loaded the skill")
+	c.prompt("personal", root, "load the global skill")
+	loaded := c.waitForText("personal", root, "loaded the skill")
 	skillResult := loaded.toolResults()[0]
 	directory := skillDirectory(t, skillResult)
 	if _, err := os.Stat(filepath.Join(directory, "run.sh")); err != nil {
 		t.Fatalf("the skill should report where its instructions are: %v", err)
 	}
 
-	c.prompt("general", root, fmt.Sprintf("run the script \u2014 RUN: sh %s && cat %s",
+	c.prompt("personal", root, fmt.Sprintf("run the script \u2014 RUN: sh %s && cat %s",
 		filepath.Join(directory, "run.sh"), filepath.Join(s.DataDir, "config.json")))
-	got := c.waitForText("general", root, "ran the global script")
+	got := c.waitForText("personal", root, "ran the global script")
 
 	ran := got.lastToolResult()
 	if !strings.Contains(ran, "GLOBAL-SCRIPT-RAN") {

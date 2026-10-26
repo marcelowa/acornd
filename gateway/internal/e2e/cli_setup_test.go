@@ -77,7 +77,7 @@ func TestASecretScopeMustBeNamedOnce(t *testing.T) {
 		t.Errorf("the refusal should ask for one: %q", stderr)
 	}
 
-	if _, stderr, code := cli(t, dir, "value\n", "secret", "add", "X", "--global", "--workspace", "general", "--description", "d", "--data-dir", dir); code == 0 {
+	if _, stderr, code := cli(t, dir, "value\n", "secret", "add", "X", "--global", "--workspace", "personal", "--description", "d", "--data-dir", dir); code == 0 {
 		t.Errorf("two scopes: exit 0\n%s", stderr)
 	} else if !strings.Contains(stderr, "not both") {
 		t.Errorf("the refusal should say not both: %q", stderr)

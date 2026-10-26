@@ -44,7 +44,7 @@ func TestAMemberIsTheWholeOfWhatAWorkspaceAllows(t *testing.T) {
 // administering it means, and not a transcript from inside any of them.
 func TestAListShowsAPersonOnlyTheirOwn(t *testing.T) {
 	workspaces := registry(t, []Workspace{
-		{Name: "general", Path: "/w/general", General: true, Members: []string{"me@example.com"}},
+		{Name: "personal", Path: "/w/personal", General: true, Members: []string{"me@example.com"}},
 		{Name: "house", Path: "/w/house", Members: []string{"me@example.com", "ana@example.com"}},
 		{Name: "ana", Path: "/w/ana", Members: []string{"ana@example.com"}},
 	})
@@ -73,11 +73,11 @@ func TestAListShowsAPersonOnlyTheirOwn(t *testing.T) {
 // "not yours" apart is how somebody enumerates the workspaces they cannot see.
 func TestARouteRefusesWithoutSayingWhichRefusalItIs(t *testing.T) {
 	workspaces := registry(t, []Workspace{
-		{Name: "general", Path: "/w/general", General: true, Members: []string{"ana@example.com"}},
+		{Name: "personal", Path: "/w/personal", General: true, Members: []string{"ana@example.com"}},
 	})
 	ctx := context.Background()
 	_, _, missing := workspaces.Route(ctx, Caller{Email: "ana@example.com"}, "nowhere")
-	_, _, forbidden := workspaces.Route(ctx, Caller{Email: "eve@example.com"}, "general")
+	_, _, forbidden := workspaces.Route(ctx, Caller{Email: "eve@example.com"}, "personal")
 	for _, err := range []error{missing, forbidden} {
 		if !errors.Is(err, ErrNoWorkspace) {
 			t.Fatalf("err = %v, want ErrNoWorkspace", err)
@@ -108,13 +108,13 @@ func equalApartFromName(a, b string) bool {
 func TestAWorkspaceThatPredatesPeopleIsTheOwners(t *testing.T) {
 	dataDir := t.TempDir()
 	workspaces := registryIn(t, dataDir, "me@example.com", []Workspace{
-		{Name: "general", Path: "/w/general", General: true},
+		{Name: "personal", Path: "/w/personal", General: true},
 		{Name: "house", Path: "/w/house", Members: []string{"ana@example.com"}},
 	})
 	if err := workspaces.nameTheOwnersWorkspaces(); err != nil {
 		t.Fatalf("name: %v", err)
 	}
-	if got := workspaces.registry["general"].Members; !slices.Equal(got, []string{"me@example.com"}) {
+	if got := workspaces.registry["personal"].Members; !slices.Equal(got, []string{"me@example.com"}) {
 		t.Errorf("general members = %v, want the owner", got)
 	}
 	// A workspace that already names somebody is not touched: the migration fills what nobody decided.
@@ -126,7 +126,7 @@ func TestAWorkspaceThatPredatesPeopleIsTheOwners(t *testing.T) {
 	if err := reloaded.loadRegistry(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if got := reloaded.registry["general"].Members; !slices.Equal(got, []string{"me@example.com"}) {
+	if got := reloaded.registry["personal"].Members; !slices.Equal(got, []string{"me@example.com"}) {
 		t.Errorf("after a reload general members = %v, want the owner", got)
 	}
 }
@@ -134,11 +134,11 @@ func TestAWorkspaceThatPredatesPeopleIsTheOwners(t *testing.T) {
 // With no owner claimed there is nobody to name a workspace for, and the migration says nothing rather
 // than inventing an address.
 func TestTheMigrationSaysNothingWithoutAnOwner(t *testing.T) {
-	workspaces := registryWithOwners(t, "", []Workspace{{Name: "general", Path: "/w/general", General: true}})
+	workspaces := registryWithOwners(t, "", []Workspace{{Name: "personal", Path: "/w/personal", General: true}})
 	if err := workspaces.nameTheOwnersWorkspaces(); err != nil {
 		t.Fatalf("name: %v", err)
 	}
-	if got := workspaces.registry["general"].Members; len(got) != 0 {
+	if got := workspaces.registry["personal"].Members; len(got) != 0 {
 		t.Errorf("members = %v, want nobody", got)
 	}
 }
@@ -172,7 +172,7 @@ func registryIn(t *testing.T, dataDir, owner string, list []Workspace) *Workspac
 // A person's own workspace is named after their address, has exactly one member, and is labelled as theirs
 // rather than named as it: the console shows "Personal", and the name exists because one registry needs one.
 func TestAPersonsOwnWorkspaceIsNamedAfterThem(t *testing.T) {
-	workspaces := registry(t, []Workspace{{Name: "general", Path: "/w/general", General: true}})
+	workspaces := registry(t, []Workspace{{Name: "personal", Path: "/w/personal", General: true}})
 	created, err := workspaces.CreatePersonal("Ana.Silva+acorn@Example.com")
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -215,7 +215,7 @@ func TestASecondAnaGetsANumber(t *testing.T) {
 // The workspace is found, not made again: every request a person makes lands on the same one, and a registry
 // with a new Ana in it for each request would be a workspace per page load.
 func TestAPersonsOwnWorkspaceIsFoundRatherThanMadeAgain(t *testing.T) {
-	workspaces := registry(t, []Workspace{{Name: "general", Path: "/w/general", General: true}})
+	workspaces := registry(t, []Workspace{{Name: "personal", Path: "/w/personal", General: true}})
 	caller := Caller{Email: "ana@example.com"}
 	first, err := workspaces.personal(caller)
 	if err != nil {
@@ -248,8 +248,8 @@ func TestTheOwnerStillLandsOnTheGeneralWorkspace(t *testing.T) {
 		if err != nil {
 			t.Fatalf("personal: %v", err)
 		}
-		if name != GeneralWorkspaceName {
-			t.Errorf("the owner's default = %q, want %q", name, GeneralWorkspaceName)
+		if name != PersonalWorkspaceName {
+			t.Errorf("the owner's default = %q, want %q", name, PersonalWorkspaceName)
 		}
 	}
 }

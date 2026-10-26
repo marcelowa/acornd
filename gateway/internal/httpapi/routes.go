@@ -44,7 +44,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 // conversationRoutes is everything scoped to one conversation, under a base path. Two bases are
-// registered: the workspace-scoped one, and the older one that means the general workspace.
+// registered: the workspace-scoped one, and the older one that means the caller's own workspace.
 func (s *Server) conversationRoutes(mux *http.ServeMux, base string) {
 	mux.HandleFunc("GET "+base+"/state", s.state)
 	mux.HandleFunc("GET "+base+"/status", s.workspaceStatus)

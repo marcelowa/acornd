@@ -26,7 +26,7 @@ func TestAFreshInstallHasARootConversation(t *testing.T) {
 	s := start(t)
 	c := s.client()
 
-	got := c.state("general")
+	got := c.state("personal")
 	if len(got.Conversations) != 1 {
 		t.Fatalf("a fresh install should have one conversation, got %d", len(got.Conversations))
 	}
@@ -36,7 +36,7 @@ func TestAFreshInstallHasARootConversation(t *testing.T) {
 	if got.Conversation == nil || got.Conversation.ID != got.Conversations[0].ID {
 		t.Errorf("the state should name the conversation it lands on, got %+v", got.Conversation)
 	}
-	if got.Workspace.Name != "general" || len(got.Workspaces) != 1 {
+	if got.Workspace.Name != "personal" || len(got.Workspaces) != 1 {
 		t.Errorf("a fresh install should have only the general workspace, got %+v", got.Workspaces)
 	}
 	if !got.WorkerUp {
@@ -62,7 +62,7 @@ func TestConversationLifecycle(t *testing.T) {
 	s := start(t, withScript(scriptRule{Match: "remember this", Reply: "I will remember."}))
 	c := s.client()
 
-	created := c.create("general")
+	created := c.create("personal")
 	if created.Title != "New conversation" {
 		t.Errorf("a new conversation is unnamed, got %q", created.Title)
 	}
@@ -73,17 +73,17 @@ func TestConversationLifecycle(t *testing.T) {
 		t.Errorf("a conversation that has not moved has no activity to report, got %d", created.UpdatedAt)
 	}
 
-	c.prompt("general", created.ID, "remember this")
-	before := c.waitForText("general", created.ID, "I will remember.")
+	c.prompt("personal", created.ID, "remember this")
+	before := c.waitForText("personal", created.ID, "I will remember.")
 
-	c.rename("general", created.ID, "Renamed by a test")
-	renamed, found := c.conversationIn("general", created.ID)
+	c.rename("personal", created.ID, "Renamed by a test")
+	renamed, found := c.conversationIn("personal", created.ID)
 	if !found || renamed.Title != "Renamed by a test" {
 		t.Fatalf("rename did not take: %+v (found %v)", renamed, found)
 	}
 
-	c.hide("general", created.ID, true)
-	hidden, found := c.conversationIn("general", created.ID)
+	c.hide("personal", created.ID, true)
+	hidden, found := c.conversationIn("personal", created.ID)
 	if !found {
 		t.Fatal("a hidden conversation must still be listed, or it can never be restored")
 	}
@@ -95,12 +95,12 @@ func TestConversationLifecycle(t *testing.T) {
 	}
 
 	// Restoring it brings back the same conversation, with the transcript it had.
-	c.hide("general", created.ID, false)
-	restored, _ := c.conversationIn("general", created.ID)
+	c.hide("personal", created.ID, false)
+	restored, _ := c.conversationIn("personal", created.ID)
 	if restored.Hidden {
 		t.Error("the conversation should be visible again")
 	}
-	after := c.view("general", created.ID)
+	after := c.view("personal", created.ID)
 	if !strings.Contains(after.all(), "remember this") || !strings.Contains(after.all(), "I will remember.") {
 		t.Errorf("the transcript did not survive the tombstone:\n%s", after.all())
 	}
@@ -119,16 +119,16 @@ func TestSelectingLandsWithNoProvider(t *testing.T) {
 
 	// The listing is refreshed before answering, so the root is here even though no state
 	// was ever announced for it.
-	listed := c.conversations("general")
+	listed := c.conversations("personal")
 	if len(listed) != 1 {
 		t.Fatalf("a fresh install should have one conversation, got %d", len(listed))
 	}
-	status, body := c.postStatus(c.conversationPath("general", listed[0].ID)+"/select", nil)
+	status, body := c.postStatus(c.conversationPath("personal", listed[0].ID)+"/select", nil)
 	if status != 200 {
 		t.Fatalf("selecting with no provider should land, got %d: %s", status, body)
 	}
 
-	status, body = c.postStatus(c.conversationPath("general", listed[0].ID)+"/messages", map[string]any{"text": "hello"})
+	status, body = c.postStatus(c.conversationPath("personal", listed[0].ID)+"/messages", map[string]any{"text": "hello"})
 	if status == 200 {
 		t.Error("sending with no provider should be refused")
 	}
@@ -148,13 +148,13 @@ func TestConversationTitleComesFromTheFirstMessage(t *testing.T) {
 	))
 	c := s.client()
 
-	created := c.create("general")
-	c.prompt("general", created.ID, "what is the capital of France, and please be brief about it")
-	c.waitForText("general", created.ID, "Paris.")
+	created := c.create("personal")
+	c.prompt("personal", created.ID, "what is the capital of France, and please be brief about it")
+	c.waitForText("personal", created.ID, "Paris.")
 
 	// The name is derived by the harness and arrives with the next conversation listing, so
 	// waiting for it is waiting for the run to be reflected, not for a fixed delay.
-	titled := c.waitForTitle("general", created.ID, "what is the capital")
+	titled := c.waitForTitle("personal", created.ID, "what is the capital")
 	if !strings.HasPrefix(titled.Title, "what is the capital") {
 		t.Errorf("expected the title to come from the first message, got %q", titled.Title)
 	}
@@ -163,9 +163,9 @@ func TestConversationTitleComesFromTheFirstMessage(t *testing.T) {
 	}
 
 	// A later message must not rename the row: the name froze on the first prompt.
-	c.prompt("general", created.ID, "and now in detail")
-	c.waitForText("general", created.ID, "Paris, in detail.")
-	still := c.waitForTitle("general", created.ID, "what is the capital")
+	c.prompt("personal", created.ID, "and now in detail")
+	c.waitForText("personal", created.ID, "Paris, in detail.")
+	still := c.waitForTitle("personal", created.ID, "what is the capital")
 	if still.Title != titled.Title {
 		t.Errorf("the title moved from %q to %q", titled.Title, still.Title)
 	}
@@ -182,11 +182,11 @@ func TestForkBranchesBeforeATurn(t *testing.T) {
 	))
 	c := s.client()
 
-	created := c.create("general")
-	c.prompt("general", created.ID, "first question")
-	c.waitForText("general", created.ID, "first answer")
-	c.prompt("general", created.ID, "second question")
-	full := c.waitForText("general", created.ID, "second answer")
+	created := c.create("personal")
+	c.prompt("personal", created.ID, "first question")
+	c.waitForText("personal", created.ID, "first answer")
+	c.prompt("personal", created.ID, "second question")
+	full := c.waitForText("personal", created.ID, "second answer")
 
 	// A branch point is the entry *before* a user turn: durable's fork sees everything up to
 	// and including the id it is given, so branching before a message means passing the entry
@@ -204,7 +204,7 @@ func TestForkBranchesBeforeATurn(t *testing.T) {
 		t.Fatal("the second user message is not in the transcript")
 	}
 
-	child := c.fork("general", created.ID, at)
+	child := c.fork("personal", created.ID, at)
 	if child.ID == created.ID {
 		t.Fatal("fork should create a conversation, not return the same one")
 	}
@@ -212,7 +212,7 @@ func TestForkBranchesBeforeATurn(t *testing.T) {
 		t.Error("a fork is not the root conversation")
 	}
 
-	branch := c.view("general", child.ID)
+	branch := c.view("personal", child.ID)
 	if strings.Contains(branch.all(), "second question") {
 		t.Errorf("the branch should stop before the message it branched from:\n%s", branch.all())
 	}
@@ -220,7 +220,7 @@ func TestForkBranchesBeforeATurn(t *testing.T) {
 		t.Errorf("the branch should keep the history before it:\n%s", branch.all())
 	}
 	// The parent is untouched: forking is not moving.
-	parent := c.view("general", created.ID)
+	parent := c.view("personal", created.ID)
 	if !strings.Contains(parent.all(), "second answer") {
 		t.Errorf("forking changed the conversation it forked from:\n%s", parent.all())
 	}
@@ -235,12 +235,12 @@ func TestCompactKeepsAShortTranscript(t *testing.T) {
 	s := start(t, withScript(scriptRule{Match: "remember this", Reply: "I will remember."}))
 	c := s.client()
 
-	created := c.create("general")
-	c.prompt("general", created.ID, "remember this")
-	before := c.waitForText("general", created.ID, "I will remember.")
+	created := c.create("personal")
+	c.prompt("personal", created.ID, "remember this")
+	before := c.waitForText("personal", created.ID, "I will remember.")
 
-	c.compact("general", created.ID)
-	after := c.view("general", created.ID)
+	c.compact("personal", created.ID)
+	after := c.view("personal", created.ID)
 	if len(before.Entries) != len(after.Entries) {
 		t.Errorf("compacting a short talk should change nothing: %d entries then, %d now", len(before.Entries), len(after.Entries))
 	}
@@ -260,13 +260,13 @@ func TestCompactPreviewCountsTheTalk(t *testing.T) {
 	))
 	c := s.client()
 
-	created := c.create("general")
-	c.prompt("general", created.ID, "first question")
-	c.waitForText("general", created.ID, "first answer")
-	c.prompt("general", created.ID, "second question")
-	c.waitForText("general", created.ID, "second answer")
+	created := c.create("personal")
+	c.prompt("personal", created.ID, "first question")
+	c.waitForText("personal", created.ID, "first answer")
+	c.prompt("personal", created.ID, "second question")
+	c.waitForText("personal", created.ID, "second answer")
 
-	preview := c.compactPreview("general", created.ID)
+	preview := c.compactPreview("personal", created.ID)
 	if preview["turns"] != 2.0 {
 		t.Errorf("two user turns should preview as two, got %v", preview["turns"])
 	}
@@ -284,13 +284,13 @@ func TestSlashClearResetsTheContext(t *testing.T) {
 	s := start(t, withScript(scriptRule{Match: "remember this", Reply: "I will remember."}))
 	c := s.client()
 
-	created := c.create("general")
-	c.prompt("general", created.ID, "remember this")
-	c.waitForText("general", created.ID, "I will remember.")
+	created := c.create("personal")
+	c.prompt("personal", created.ID, "remember this")
+	c.waitForText("personal", created.ID, "I will remember.")
 
-	c.prompt("general", created.ID, "/clear")
-	c.waitForText("general", created.ID, "/clear")
-	c.waitView("general", created.ID, func(v view) bool {
+	c.prompt("personal", created.ID, "/clear")
+	c.waitForText("personal", created.ID, "/clear")
+	c.waitView("personal", created.ID, func(v view) bool {
 		return slices.Contains(v.kinds(), "pi.reset")
 	}, 2*time.Minute)
 }
@@ -303,12 +303,12 @@ func TestSlashCompactIsAccepted(t *testing.T) {
 	s := start(t, withScript(scriptRule{Match: "remember this", Reply: "I will remember."}))
 	c := s.client()
 
-	created := c.create("general")
-	c.prompt("general", created.ID, "remember this")
-	before := c.waitForText("general", created.ID, "I will remember.")
+	created := c.create("personal")
+	c.prompt("personal", created.ID, "remember this")
+	before := c.waitForText("personal", created.ID, "I will remember.")
 
-	c.prompt("general", created.ID, "/compact")
-	after := c.waitForText("general", created.ID, "Nothing to compact")
+	c.prompt("personal", created.ID, "/compact")
+	after := c.waitForText("personal", created.ID, "Nothing to compact")
 	if len(after.Entries) != len(before.Entries)+2 {
 		t.Errorf("/compact on a short talk should record itself and say so: %d entries then, %d now", len(before.Entries), len(after.Entries))
 	}
@@ -323,20 +323,20 @@ func TestSlashCompactReportsTheFold(t *testing.T) {
 	s := start(t, withScript(scriptRule{Match: "fill the context", Reply: "filled"}))
 	c := s.client()
 
-	created := c.create("general")
+	created := c.create("personal")
 	bulk := strings.Repeat("abcdefghij ", 2500)
 	for i := range 4 {
-		c.prompt("general", created.ID, "fill the context "+bulk)
+		c.prompt("personal", created.ID, "fill the context "+bulk)
 		// Count replies, not text: every reply says the same word, so waiting
 		// for the word matches the last turn's leftover and fires the next
 		// prompt early — and a /compact sent mid-turn folds a short prefix.
-		c.waitView("general", created.ID, func(v view) bool {
+		c.waitView("personal", created.ID, func(v view) bool {
 			return len(v.entriesOf("pi.assistant")) == i+1
 		}, 2*time.Minute)
 	}
 
-	c.prompt("general", created.ID, "/compact")
-	after := c.waitForText("general", created.ID, "Folded")
+	c.prompt("personal", created.ID, "/compact")
+	after := c.waitForText("personal", created.ID, "Folded")
 	matched, err := regexp.MatchString(`Folded [0-9]+ entr(y|ies) \([0-9]+ turns?\) into one note\.`, after.all())
 	if err != nil || !matched {
 		t.Errorf("the fold should report entries and turns, got transcript start:\n%s", truncate([]byte(after.all()), 600))
@@ -406,19 +406,19 @@ func TestAttachmentsRideAlong(t *testing.T) {
 	s := start(t, withScript(scriptRule{Match: "look at this", Reply: "seen"}))
 	c := s.client()
 
-	created := c.create("general")
+	created := c.create("personal")
 	shot, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
 	if err != nil {
 		t.Fatal(err)
 	}
-	id := c.upload("general", "shot.png", "image/png", shot)
+	id := c.upload("personal", "shot.png", "image/png", shot)
 	// SVG is text: it rides inline, never as an image part the provider refuses.
-	logo := c.upload("general", "logo.svg", "image/svg+xml", []byte(`<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"/></svg>`))
-	c.post(c.conversationPath("general", created.ID)+"/messages", map[string]any{
+	logo := c.upload("personal", "logo.svg", "image/svg+xml", []byte(`<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"/></svg>`))
+	c.post(c.conversationPath("personal", created.ID)+"/messages", map[string]any{
 		"text":        "look at this",
 		"attachments": []string{id, logo},
 	}, nil)
-	got := c.waitForText("general", created.ID, "seen")
+	got := c.waitForText("personal", created.ID, "seen")
 	if !strings.Contains(got.all(), "Attached: shot.png") {
 		t.Errorf("the sent message should name its file, got transcript:\n%s", truncate([]byte(got.all()), 600))
 	}
@@ -434,7 +434,7 @@ func TestAttachmentsRefuseOversize(t *testing.T) {
 	s := start(t)
 	c := s.client()
 
-	status, payload := c.uploadStatus("general", "big.bin", "application/octet-stream", make([]byte, 11<<20))
+	status, payload := c.uploadStatus("personal", "big.bin", "application/octet-stream", make([]byte, 11<<20))
 	if status != http.StatusRequestEntityTooLarge {
 		t.Errorf("an 11 MB file should refuse with 413, got %d %s", status, truncate(payload, 200))
 	}
@@ -449,31 +449,31 @@ func TestADraftWaitsInTheRoomItWasWrittenIn(t *testing.T) {
 	s := start(t, withScript(scriptRule{Match: "send me", Reply: "sent."}))
 	c := s.client()
 
-	root := c.waitForConversation("general")
-	other := c.create("general")
+	root := c.waitForConversation("personal")
+	other := c.create("personal")
 
-	c.saveDraft("general", root, "half a thought")
-	if got := c.draftIn("general", root); got == nil || got.Text != "half a thought" {
+	c.saveDraft("personal", root, "half a thought")
+	if got := c.draftIn("personal", root); got == nil || got.Text != "half a thought" {
 		t.Fatalf("the room should keep the half-typed message, got %+v", got)
 	}
-	if got := c.draftIn("general", other.ID); got != nil && got.Text != "" {
+	if got := c.draftIn("personal", other.ID); got != nil && got.Text != "" {
 		t.Errorf("a draft belongs to one room, got %+v", got)
 	}
 
 	// Sending consumes it: the words are in the transcript now, not in the composer.
-	c.prompt("general", root, "send me")
-	c.waitForText("general", root, "sent.")
-	if got := c.draftIn("general", root); got != nil && (got.Text != "" || len(got.Attachments) != 0) {
+	c.prompt("personal", root, "send me")
+	c.waitForText("personal", root, "sent.")
+	if got := c.draftIn("personal", root); got != nil && (got.Text != "" || len(got.Attachments) != 0) {
 		t.Errorf("a sent message should leave no draft behind, got %+v", got)
 	}
 
 	// A refused send is not a send: what was typed stays where it was.
-	c.saveDraft("general", other.ID, "still mine")
-	status, payload := c.postStatus(c.conversationPath("general", other.ID)+"/messages", map[string]any{"text": ""})
+	c.saveDraft("personal", other.ID, "still mine")
+	status, payload := c.postStatus(c.conversationPath("personal", other.ID)+"/messages", map[string]any{"text": ""})
 	if status == http.StatusAccepted {
 		t.Fatal("an empty message should be refused")
 	}
-	if got := c.draftIn("general", other.ID); got == nil || got.Text != "still mine" {
+	if got := c.draftIn("personal", other.ID); got == nil || got.Text != "still mine" {
 		t.Errorf("a refused send keeps the draft (status %d %s), got %+v", status, truncate([]byte(payload), 120), got)
 	}
 }
@@ -485,10 +485,10 @@ func TestPromptRoundTrip(t *testing.T) {
 	notSandbox(t)
 	s := start(t, withScript(scriptRule{Match: "say hello", Reply: "Hello from the script."}))
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	c.prompt("general", root, "say hello")
-	got := c.waitForText("general", root, "Hello from the script.")
+	c.prompt("personal", root, "say hello")
+	got := c.waitForText("personal", root, "Hello from the script.")
 
 	for _, want := range []string{"pi.user", "pi.system", "pi.assistant"} {
 		if len(got.entriesOf(want)) == 0 {
@@ -498,9 +498,9 @@ func TestPromptRoundTrip(t *testing.T) {
 	if sections := got.systemSections(); len(sections) == 0 {
 		t.Error("the transcript should carry the prompt that was sent")
 	}
-	c.waitIdle("general", root, 30*time.Second)
+	c.waitIdle("personal", root, 30*time.Second)
 
-	idle := conversationByID(t, c.conversations("general"), root)
+	idle := conversationByID(t, c.conversations("personal"), root)
 	if idle.Running {
 		t.Error("the conversation should be idle once the answer is in")
 	}
@@ -517,7 +517,7 @@ func TestPromptRoundTrip(t *testing.T) {
 	if idle.Model != "faux/faux-1" {
 		t.Errorf("the conversation should report the model it ran, got %q", idle.Model)
 	}
-	spend := c.state("general")
+	spend := c.state("personal")
 	if spend.Agent.Provider != "faux" || spend.Agent.ModelID != "faux-1" {
 		t.Errorf("the state should report the binding that will run, got %+v", spend.Agent)
 	}
@@ -535,13 +535,13 @@ func TestAToolCallRunsAndIsRecorded(t *testing.T) {
 		Reply: "Listed.",
 	}))
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 	if err := os.WriteFile(filepath.Join(s.General, "a-file-only-here.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	c.prompt("general", root, "list the files")
-	got := c.waitForText("general", root, "Listed.")
+	c.prompt("personal", root, "list the files")
+	got := c.waitForText("personal", root, "Listed.")
 
 	transcript := got.all()
 	if !strings.Contains(transcript, "a-file-only-here.txt") {
@@ -587,11 +587,11 @@ func TestThinkingIsClampedButTheRequestIsRemembered(t *testing.T) {
 	notSandbox(t)
 	s := start(t, withScript(scriptRule{Match: "think hard", Reply: "Thought."}))
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	c.post(c.conversationPath("general", root)+"/agent", map[string]any{"thinkingLevel": "max"}, nil)
+	c.post(c.conversationPath("personal", root)+"/agent", map[string]any{"thinkingLevel": "max"}, nil)
 
-	got := c.state("general")
+	got := c.state("personal")
 	if got.Conversation == nil {
 		t.Fatal("no conversation in the state")
 	}
@@ -600,7 +600,7 @@ func TestThinkingIsClampedButTheRequestIsRemembered(t *testing.T) {
 	}
 	// Through the refreshed listing, not the state: what a conversation records is committed by
 	// the harness, and the state is the cached view that a watching client is pushed.
-	recorded := conversationByID(t, c.conversations("general"), root)
+	recorded := conversationByID(t, c.conversations("personal"), root)
 	if recorded.Thinking != "off" {
 		t.Errorf("the conversation should record the level it runs, got %q", recorded.Thinking)
 	}
@@ -609,9 +609,9 @@ func TestThinkingIsClampedButTheRequestIsRemembered(t *testing.T) {
 	}
 
 	// The request is kept, so switching to a model that can honour it restores the choice.
-	c.prompt("general", root, "think hard")
-	c.waitForText("general", root, "Thought.")
-	after := c.state("general")
+	c.prompt("personal", root, "think hard")
+	c.waitForText("personal", root, "Thought.")
+	after := c.state("personal")
 	if after.Agent.ThinkingLevel != "off" {
 		t.Errorf("the applied level should still be off, got %q", after.Agent.ThinkingLevel)
 	}
@@ -624,8 +624,8 @@ func TestUnusableChoicesAreRefused(t *testing.T) {
 	notSandbox(t)
 	s := start(t)
 	c := s.client()
-	root := c.waitForConversation("general")
-	path := c.conversationPath("general", root) + "/agent"
+	root := c.waitForConversation("personal")
+	path := c.conversationPath("personal", root) + "/agent"
 
 	status, body := c.postStatus(path, map[string]any{"provider": "anthropic", "modelId": "claude-sonnet-4"})
 	if status == 200 {
@@ -644,7 +644,7 @@ func TestUnusableChoicesAreRefused(t *testing.T) {
 	}
 
 	// And the conversation is unchanged by either refusal.
-	after := c.state("general")
+	after := c.state("personal")
 	if after.Agent.ModelID != "faux-1" {
 		t.Errorf("a refused change must not take effect, got %+v", after.Agent)
 	}

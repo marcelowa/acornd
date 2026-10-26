@@ -35,7 +35,7 @@ func (s *Server) secretStore(w http.ResponseWriter) (*vault.Store, bool) {
 func (s *Server) workspaceAt(r *http.Request) (control.Workspace, bool) {
 	name := r.PathValue("ws")
 	if name == "" {
-		name = control.GeneralWorkspaceName
+		name = control.PersonalWorkspaceName
 	}
 	return s.workspaces.Get(name)
 }

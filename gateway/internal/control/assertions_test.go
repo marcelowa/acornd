@@ -38,12 +38,12 @@ func TestTheStateSaysWhichPartsOfTheBindingWereChosen(t *testing.T) {
 		},
 		{
 			name:     "an agent chosen",
-			binding:  protocol.ModelBinding{Definition: "general"},
+			binding:  protocol.ModelBinding{Definition: "personal"},
 			inherits: Inherited{Model: true, Thinking: true, Agent: false},
 		},
 		{
 			name:     "everything chosen",
-			binding:  protocol.ModelBinding{Provider: "p", ModelID: "m", ThinkingLevel: "high", Definition: "general"},
+			binding:  protocol.ModelBinding{Provider: "p", ModelID: "m", ThinkingLevel: "high", Definition: "personal"},
 			inherits: Inherited{Model: false, Thinking: false, Agent: false},
 		},
 	}
@@ -70,7 +70,7 @@ func TestABlankBindingIsNotWrittenDown(t *testing.T) {
 	})
 	control.bindings["chose"] = protocol.ModelBinding{Provider: "p", ModelID: "m"}
 	control.bindings["blank"] = protocol.ModelBinding{}
-	control.bindings["agent-only"] = protocol.ModelBinding{Definition: "general"}
+	control.bindings["agent-only"] = protocol.ModelBinding{Definition: "personal"}
 	control.persist()
 
 	payload, err := os.ReadFile(path)

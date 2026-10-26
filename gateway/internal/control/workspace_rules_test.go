@@ -14,16 +14,16 @@ import (
 // name because a list that reorders itself is a list nobody can learn.
 func TestTheWorkspaceListPutsGeneralFirstThenNames(t *testing.T) {
 	workspaces := &Workspaces{registry: map[string]Workspace{
-		"zulu":    {Name: "zulu"},
-		"general": {Name: "general", General: true},
-		"alpha":   {Name: "alpha"},
-		"mike":    {Name: "mike"},
+		"zulu":     {Name: "zulu"},
+		"personal": {Name: "personal", General: true},
+		"alpha":    {Name: "alpha"},
+		"mike":     {Name: "mike"},
 	}}
 	got := make([]string, 0, 4)
 	for _, workspace := range workspaces.List() {
 		got = append(got, workspace.Name)
 	}
-	want := []string{"general", "alpha", "mike", "zulu"}
+	want := []string{"personal", "alpha", "mike", "zulu"}
 	for index := range want {
 		if index >= len(got) || got[index] != want[index] {
 			t.Fatalf("order = %v, want %v", got, want)
