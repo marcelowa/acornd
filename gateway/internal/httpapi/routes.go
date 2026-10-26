@@ -32,6 +32,12 @@ func (s *Server) Handler() http.Handler {
 	// release pages — so a path outside them is a 404 rather than a document the client cannot
 	// route anywhere.
 	mux.Handle("GET /", noCache(http.FileServerFS(s.static)))
+
+	// The door is in front of everything, which is what makes "no path reaches a handler unproven" true
+	// by construction rather than by each handler remembering.
+	if s.door != nil {
+		return s.admit(mux)
+	}
 	return mux
 }
 

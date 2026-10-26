@@ -108,7 +108,7 @@ func TestAGatewayAnswerBecomesAStatusOrAReason(t *testing.T) {
 				_, _ = w.Write([]byte(test.body))
 			}))
 			defer server.Close()
-			got, err := gatewayUpdate(strings.TrimPrefix(server.URL, "http://"), "/api/update/check", nil)
+			got, err := gatewayUpdate("", strings.TrimPrefix(server.URL, "http://"), "/api/update/check", nil)
 			if test.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
 					t.Fatalf("err = %v, want it to say %q", err, test.wantErr)
@@ -142,7 +142,7 @@ func TestAnApplySendsItsBodyAsJSON(t *testing.T) {
 		_, _ = w.Write([]byte(`{"current":"v1.1.0","available":false}`))
 	}))
 	defer server.Close()
-	if _, err := gatewayUpdate(strings.TrimPrefix(server.URL, "http://"), "/api/update/apply",
+	if _, err := gatewayUpdate("", strings.TrimPrefix(server.URL, "http://"), "/api/update/apply",
 		map[string]string{"tag": "v1.1.0", "drain": "stop"}); err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestNothingListeningIsNotAGateway(t *testing.T) {
 	}
 	address := listener.Addr().String()
 	listener.Close()
-	if gatewayAnswers(address) {
+	if gatewayAnswers("", address) {
 		t.Errorf("%s answers, and nothing is listening there", address)
 	}
 }
@@ -192,7 +192,7 @@ func TestApplyUpdateAsksTheGatewayToInstall(t *testing.T) {
 	}))
 	defer server.Close()
 	out := captureStdout(t, func() {
-		applyUpdate(strings.TrimPrefix(server.URL, "http://"), "v1.1.0", true)
+		applyUpdate("", strings.TrimPrefix(server.URL, "http://"), "v1.1.0", true)
 	})
 	if asked["tag"] != "v1.1.0" || asked["drain"] != "stop" {
 		t.Errorf("asked for %v, want tag with drain=stop", asked)

@@ -12,7 +12,7 @@ import (
 // rather than a nil dereference or an empty page that looks like "no updates". The check is in
 // every handler for a reason, and a state nobody exercises is a state that rots.
 func TestWithoutAnUpdateTierEveryUpdateRouteSaysSo(t *testing.T) {
-	server := New(nil, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<!doctype html>")}}, nil)
+	server := New(nil, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<!doctype html>")}}, nil, nil)
 	handler := server.Handler()
 
 	routes := []struct{ method, path string }{

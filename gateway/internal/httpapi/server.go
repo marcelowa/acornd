@@ -7,6 +7,7 @@ package httpapi
 import (
 	"encoding/json"
 	"github.com/acornfall/acornfall/gateway/internal/control"
+	"github.com/acornfall/acornfall/gateway/internal/identity"
 	"github.com/acornfall/acornfall/gateway/internal/update"
 	"io"
 	"io/fs"
@@ -17,10 +18,14 @@ type Server struct {
 	workspaces *control.Workspaces
 	static     fs.FS
 	update     *update.Manager
+	// door proves who is calling, or is nil for the single owner ADR 0020 describes: an install with
+	// no people has no caller to tell apart, and a door nothing configured is how a switched-off
+	// guard comes back.
+	door identity.Door
 }
 
-func New(workspaces *control.Workspaces, static fs.FS, updates *update.Manager) *Server {
-	return &Server{workspaces: workspaces, static: static, update: updates}
+func New(workspaces *control.Workspaces, static fs.FS, updates *update.Manager, door identity.Door) *Server {
+	return &Server{workspaces: workspaces, static: static, update: updates, door: door}
 }
 
 // controlFor finds the workspace a request is about. The workspace-scoped routes name it;

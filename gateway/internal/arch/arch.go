@@ -16,6 +16,7 @@ var Allowed = map[string][]string{
 	"cmd/acornfall": {
 		"internal/control",
 		"internal/httpapi",
+		"internal/identity",
 		"internal/netns",
 		"internal/protocol",
 		"internal/ready",
@@ -44,12 +45,16 @@ var Allowed = map[string][]string{
 	// control is the rule, and a second copy of "which engines exist" is how the two drift apart.
 	"internal/httpapi": {
 		"internal/control",
+		"internal/identity",
 		"internal/protocol",
 		"internal/update",
 		"internal/vault",
 	},
 
-	"internal/arch":     {},
+	"internal/arch": {},
+	// Who is calling, proven: the token file or a signed assertion. A leaf, because the door is a
+	// fact about a request and knows nothing about workspaces or engines (ADR 0032).
+	"internal/identity": {},
 	"internal/netns":    {},
 	"internal/protocol": {},
 	"internal/ready":    {"internal/update"},
