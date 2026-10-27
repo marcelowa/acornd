@@ -188,6 +188,37 @@ func (b *Book) Owner() (Person, bool, error) {
 
 // Find answers one record by address, because a door that proved somebody has to be answered about rather than
 // looked up by scanning a list.
+// promote is Claim's decision, apart from the file: the address keeps the record it already had, becomes the
+// owner, and any twin of it is dropped. Two records for one address make "who is this" a question about line
+// order, and an owner whose first line says "person" is locked out of their own install.
+func promote(records []Person, address, name, today string) (Person, []Person, error) {
+	var claimed Person
+	found := false
+	kept := make([]Person, 0, len(records)+1)
+	for _, record := range records {
+		if record.Role == RoleOwner && record.Email != address {
+			return Person{}, nil, ErrHasOwner
+		}
+		if record.Email != address {
+			kept = append(kept, record)
+			continue
+		}
+		if !found {
+			claimed, found = record, true
+		}
+	}
+	claimed.Email = address
+	claimed.Role = RoleOwner
+	claimed.State = Active
+	if name != "" {
+		claimed.Name = name
+	}
+	if claimed.Created == "" {
+		claimed.Created = today
+	}
+	return claimed, append(kept, claimed), nil
+}
+
 func (b *Book) Find(email string) (Person, bool, error) {
 	address, err := address(email)
 	if err != nil {
@@ -197,12 +228,20 @@ func (b *Book) Find(email string) (Person, bool, error) {
 	if err != nil {
 		return Person{}, false, err
 	}
+	var found Person
+	matched := false
 	for _, record := range records {
-		if record.Email == address {
-			return record, true, nil
+		if record.Email != address {
+			continue
+		}
+		// An address should appear once, and Claim is what keeps it that way. A book written before that was
+		// true can still hold two records for one address, and the answer then must not depend on line order:
+		// the strongest record wins, because the door proved the address and the owner is the same person.
+		if !matched || (record.Role == RoleOwner && found.Role != RoleOwner) {
+			found, matched = record, true
 		}
 	}
-	return Person{}, false, nil
+	return found, matched, nil
 }
 
 // Claim names the install's owner, once. It is a command-line operation on purpose: the token already
@@ -219,19 +258,11 @@ func (b *Book) Claim(email, name string) (Person, error) {
 		return Person{}, err
 	}
 	defer release()
-	for _, record := range records {
-		if record.Role == RoleOwner {
-			return Person{}, ErrHasOwner
-		}
+	claimed, kept, err := promote(records, address, strings.TrimSpace(name), b.today())
+	if err != nil {
+		return Person{}, err
 	}
-	claimed := Person{
-		Email:   address,
-		Name:    strings.TrimSpace(name),
-		Role:    RoleOwner,
-		State:   Active,
-		Created: b.today(),
-	}
-	if err := b.write(append(records, claimed)); err != nil {
+	if err := b.write(kept); err != nil {
 		return Person{}, err
 	}
 	return claimed, nil
