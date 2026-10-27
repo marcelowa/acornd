@@ -113,6 +113,36 @@ func (c *Client) TunnelToken(ctx context.Context, account, tunnel string) (strin
 	return token, nil
 }
 
+// TunnelIngress answers the service a remotely-managed tunnel forwards to, or "" when it has no route: a tunnel
+// that exists and goes nowhere is the state this step exists to find.
+func (c *Client) TunnelIngress(ctx context.Context, account, tunnel string) (string, error) {
+	var configuration struct {
+		Config *struct {
+			Ingress []struct {
+				Service string `json:"service"`
+			} `json:"ingress"`
+		} `json:"config"`
+	}
+	if err := c.call(ctx, scopeTunnel, http.MethodGet, "/accounts/"+account+"/cfd_tunnel/"+tunnel+"/configurations", nil, &configuration); err != nil {
+		return "", err
+	}
+	if configuration.Config == nil || len(configuration.Config.Ingress) == 0 {
+		return "", nil
+	}
+	return configuration.Config.Ingress[0].Service, nil
+}
+
+// SetTunnelIngress writes the route: this console, and a 404 for anything else. The catch-all is required — a
+// tunnel whose rules do not end in one is refused by Cloudflare — and it is also the honest answer for a path
+// this install does not serve.
+func (c *Client) SetTunnelIngress(ctx context.Context, account, tunnel, hostname, service string) error {
+	body := map[string]any{"config": map[string]any{"ingress": []any{
+		map[string]any{"hostname": hostname, "service": service},
+		map[string]any{"service": "http_status:404"},
+	}}}
+	return c.call(ctx, scopeTunnel, http.MethodPut, "/accounts/"+account+"/cfd_tunnel/"+tunnel+"/configurations", body, nil)
+}
+
 func (c *Client) DNSRecords(ctx context.Context, zone, hostname string) ([]DNSRecord, error) {
 	var records []struct {
 		ID      string `json:"id"`

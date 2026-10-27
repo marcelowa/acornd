@@ -28,6 +28,7 @@ type fake struct {
 	failOn    string
 	nextID    int
 	accountID string
+	ingress   string
 }
 
 func newFake() *fake { return &fake{accountID: "acc"} }
@@ -48,7 +49,9 @@ func (f *fake) record(call string) error {
 func (f *fake) created() []string {
 	out := make([]string, 0, len(f.calls))
 	for _, call := range f.calls {
-		if strings.HasPrefix(call, "create") || strings.HasPrefix(call, "update") {
+		// Anything that changes the account, whatever its verb: a route written is as much a write as a
+		// tunnel created, and a helper that only knew about "create" would have missed it.
+		if strings.HasPrefix(call, "create") || strings.HasPrefix(call, "update") || strings.HasPrefix(call, "set") {
 			out = append(out, call)
 		}
 	}
@@ -76,6 +79,22 @@ func (f *fake) TunnelToken(_ context.Context, _, id string) (string, error) {
 		return "", err
 	}
 	return "token-for-" + id, nil
+}
+
+func (f *fake) TunnelIngress(context.Context, string, string) (string, error) {
+	if err := f.record("tunnelIngress"); err != nil {
+		return "", err
+	}
+	return f.ingress, nil
+}
+
+func (f *fake) SetTunnelIngress(_ context.Context, _, _, hostname, service string) error {
+	if err := f.record("setTunnelIngress"); err != nil {
+		return err
+	}
+	f.ingress = service
+	f.calls = append(f.calls, "hostname="+hostname)
+	return nil
 }
 
 func (f *fake) DNSRecords(context.Context, string, string) ([]DNSRecord, error) {
@@ -183,7 +202,7 @@ func TestTheFirstApplyCreatesEverything(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
-	want := []string{"createTunnel", "createCNAME", "createOneTimePIN", "createAccessGroup", "createAccessApp", "createAccessPolicy"}
+	want := []string{"createTunnel", "setTunnelIngress", "createCNAME", "createOneTimePIN", "createAccessGroup", "createAccessApp", "createAccessPolicy"}
 	if got := api.created(); !reflect.DeepEqual(got, want) {
 		t.Errorf("created %v, want %v", got, want)
 	}
@@ -196,7 +215,7 @@ func TestTheFirstApplyCreatesEverything(t *testing.T) {
 	if state.Audience == "" {
 		t.Error("the application's audience tag was not recorded, and an assertion is checked against it")
 	}
-	if len(steps) != 6 {
+	if len(steps) != 7 {
 		t.Fatalf("%d steps, want one per piece", len(steps))
 	}
 	for _, step := range steps {
@@ -222,7 +241,8 @@ func TestASecondApplyCreatesNothing(t *testing.T) {
 		t.Fatalf("second: %v", err)
 	}
 	// The group is the one thing rewritten every time: it follows the book, so writing it again with the same
-	// addresses is how a change in the book is noticed at all.
+	// addresses is how a change in the book is noticed at all. The route is read before it is written, so a
+	// second apply leaves it alone.
 	if got := api.created(); !reflect.DeepEqual(got, []string{"updateAccessGroup"}) {
 		t.Errorf("the second apply created %v, want only the group rewritten", got)
 	}
@@ -244,6 +264,7 @@ func TestAnApplyResumesFromTheIdsItWrote(t *testing.T) {
 	api := newFake()
 	prior := State{TunnelID: "t-existing", TunnelToken: "kept", DNSRecordID: "r-existing"}
 	api.tunnels = []Tunnel{{ID: "t-existing", Name: TunnelName}}
+	api.ingress = DefaultLocal
 	api.records = []DNSRecord{{ID: "r-existing", Name: "testing.acornd.app", Type: "CNAME"}}
 
 	state, steps, err := (&Provisioner{API: api}).Apply(context.Background(), desired(), prior, nil)
@@ -287,6 +308,7 @@ func TestTheGroupFollowsTheBook(t *testing.T) {
 func TestWhatAlreadyExistsIsAdopted(t *testing.T) {
 	api := newFake()
 	api.tunnels = []Tunnel{{ID: "made-by-hand", Name: TunnelName}}
+	api.ingress = DefaultLocal
 	api.records = []DNSRecord{{ID: "r-hand", Name: "testing.acornd.app", Type: "CNAME"}}
 	api.idps = []IdentityProvider{{ID: "pin", Type: "onetimepin"}}
 	api.groups = []Group{{ID: "g-hand", Name: GroupName}}
@@ -340,8 +362,8 @@ func TestAFailureKeepsWhatItHadAlreadyWritten(t *testing.T) {
 	if state.AppID != "" {
 		t.Errorf("the failed step recorded an id: %+v", state)
 	}
-	if len(steps) != 4 {
-		t.Errorf("%d steps reported, want the four that finished", len(steps))
+	if len(steps) != 5 {
+		t.Errorf("%d steps reported, want the five that finished", len(steps))
 	}
 }
 
@@ -522,5 +544,40 @@ func TestTheSetupNamesTheIdentityConfiguration(t *testing.T) {
 		if env[name] != want {
 			t.Errorf("%s = %q, want %q", name, env[name], want)
 		}
+	}
+}
+
+// A tunnel that exists and goes nowhere is a door into a wall: the route is written on the first apply, left
+// alone when it already points at this console, and rewritten when the console moves.
+func TestTheTunnelIsPointedAtThisConsole(t *testing.T) {
+	api := newFake()
+	provisioner := &Provisioner{API: api}
+	state, steps, err := provisioner.Apply(context.Background(), desired(), State{}, []string{"ana@example.com"})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if api.ingress != DefaultLocal {
+		t.Errorf("the tunnel points at %q, want %q", api.ingress, DefaultLocal)
+	}
+	found := false
+	for _, step := range steps {
+		if step.Name == "ingress" {
+			found = step.Created && step.Detail == DefaultLocal
+		}
+	}
+	if !found {
+		t.Errorf("the route was not reported: %+v", steps)
+	}
+
+	// Pointed somewhere else, the next apply moves it.
+	desire := desired()
+	desire.Local = "http://127.0.0.1:9000"
+	if _, steps, err := provisioner.Apply(context.Background(), desire, state, []string{"ana@example.com"}); err != nil {
+		t.Fatalf("second apply: %v", err)
+	} else if steps[1].Name != "ingress" || !steps[1].Created {
+		t.Errorf("the route was not rewritten: %+v", steps)
+	}
+	if api.ingress != "http://127.0.0.1:9000" {
+		t.Errorf("the tunnel points at %q", api.ingress)
 	}
 }
