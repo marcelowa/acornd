@@ -439,10 +439,17 @@ func (w *Workspaces) CreatePersonal(email string) (Workspace, error) {
 // freeName is the first name that is not taken: ana, then ana-2, then ana-3. A cap rather than a loop that
 // might not end, because a registry with a thousand Anas is a problem to look at rather than to keep trying.
 func (w *Workspaces) freeName(base string) (string, error) {
-	for attempt := 1; attempt <= 100; attempt++ {
+	// A range rather than a counter, and that is not a style choice: mutation testing turns `++` into
+	// `--`, the counter then falls away from the cap instead of towards it, and the loop ends only when
+	// an assertion fails — which one never does, so every `make mutations` on this package waits out the
+	// per-mutant timeout to learn nothing. Counting by assignment (`attempt += 1`) removes the `++`, and
+	// it is one setting away from the same hang: gremlins maps `+=` to its assignment-inverter
+	// (engine/mappings.go), which is off by default today. A range has no increment to invert and no
+	// condition of its own, so the mutants left change which name is tried and never whether it ends.
+	for attempt := range 100 {
 		name := base
-		if attempt > 1 {
-			name = fmt.Sprintf("%s-%d", base, attempt)
+		if attempt > 0 {
+			name = fmt.Sprintf("%s-%d", base, attempt+1)
 		}
 		if _, taken := w.Get(name); !taken {
 			return name, nil
