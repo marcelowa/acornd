@@ -20,6 +20,7 @@ var Allowed = map[string][]string{
 		"internal/netns",
 		"internal/people",
 		"internal/protocol",
+		"internal/remote",
 		"internal/ready",
 		"internal/sandbox",
 		"internal/supervise",
@@ -63,6 +64,9 @@ var Allowed = map[string][]string{
 	"internal/people":   {},
 	"internal/protocol": {},
 	"internal/ready":    {"internal/update"},
+	// What carries a browser to the console: the tunnel, its record, and the Access application that admits the
+	// book. A leaf — it talks to Cloudflare and to nothing else (ADR 0033).
+	"internal/remote": {},
 	// One workspace's secrets proxy: loopback, the vault's grants handed in, nothing of this
 	// project imported. It is a leaf on purpose — the package that knows the vault stays control.
 	"internal/secretsproxy": {},
