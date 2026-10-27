@@ -188,6 +188,37 @@ func (b *Book) Owner() (Person, bool, error) {
 
 // Find answers one record by address, because a door that proved somebody has to be answered about rather than
 // looked up by scanning a list.
+// promote is Claim's decision, apart from the file: the address keeps the record it already had, becomes the
+// owner, and any twin of it is dropped. Two records for one address make "who is this" a question about line
+// order, and an owner whose first line says "person" is locked out of their own install.
+func promote(records []Person, address, name, today string) (Person, []Person, error) {
+	var claimed Person
+	found := false
+	kept := make([]Person, 0, len(records)+1)
+	for _, record := range records {
+		if record.Role == RoleOwner && record.Email != address {
+			return Person{}, nil, ErrHasOwner
+		}
+		if record.Email != address {
+			kept = append(kept, record)
+			continue
+		}
+		if !found {
+			claimed, found = record, true
+		}
+	}
+	claimed.Email = address
+	claimed.Role = RoleOwner
+	claimed.State = Active
+	if name != "" {
+		claimed.Name = name
+	}
+	if claimed.Created == "" {
+		claimed.Created = today
+	}
+	return claimed, append(kept, claimed), nil
+}
+
 func (b *Book) Find(email string) (Person, bool, error) {
 	address, err := address(email)
 	if err != nil {
@@ -197,12 +228,20 @@ func (b *Book) Find(email string) (Person, bool, error) {
 	if err != nil {
 		return Person{}, false, err
 	}
+	var found Person
+	matched := false
 	for _, record := range records {
-		if record.Email == address {
-			return record, true, nil
+		if record.Email != address {
+			continue
+		}
+		// An address should appear once, and Claim is what keeps it that way. A book written before that was
+		// true can still hold two records for one address, and the answer then must not depend on line order:
+		// the strongest record wins, because the door proved the address and the owner is the same person.
+		if !matched || (record.Role == RoleOwner && found.Role != RoleOwner) {
+			found, matched = record, true
 		}
 	}
-	return Person{}, false, nil
+	return found, matched, nil
 }
 
 // Claim names the install's owner, once. It is a command-line operation on purpose: the token already
@@ -219,19 +258,11 @@ func (b *Book) Claim(email, name string) (Person, error) {
 		return Person{}, err
 	}
 	defer release()
-	for _, record := range records {
-		if record.Role == RoleOwner {
-			return Person{}, ErrHasOwner
-		}
+	claimed, kept, err := promote(records, address, strings.TrimSpace(name), b.today())
+	if err != nil {
+		return Person{}, err
 	}
-	claimed := Person{
-		Email:   address,
-		Name:    strings.TrimSpace(name),
-		Role:    RoleOwner,
-		State:   Active,
-		Created: b.today(),
-	}
-	if err := b.write(append(records, claimed)); err != nil {
+	if err := b.write(kept); err != nil {
 		return Person{}, err
 	}
 	return claimed, nil
@@ -467,12 +498,21 @@ func (b *Book) write(records []Person) error {
 
 // lock is held across the read-modify-write of one change, so the command line and a running gateway
 // cannot lose each other's edit. The lock file holds nothing; it exists to be locked.
+// The wait for another process is bounded on purpose. Flock is released when its holder ends, so what a caller
+// waits for is a write in progress, and that is a moment; a wait that outlives this budget means the other
+// process is wedged, and being told so beats hanging — by the command line, and by every test run, where a hang
+// costs the whole timeout to learn nothing.
+const (
+	lockBudget = 2 * time.Second
+	lockRetry  = 25 * time.Millisecond
+)
+
 func (b *Book) lock() (func(), []Person, error) {
 	file, err := os.OpenFile(b.path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+	if err := waitFor(file); err != nil {
 		_ = file.Close()
 		return nil, nil, err
 	}
@@ -486,4 +526,22 @@ func (b *Book) lock() (func(), []Person, error) {
 		return nil, nil, err
 	}
 	return release, records, nil
+}
+
+// waitFor is the exclusive lock, asked for without blocking and retried until the budget is spent.
+func waitFor(file *os.File) error {
+	deadline := time.Now().Add(lockBudget)
+	for {
+		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("another acornfall process has been writing the book of people for over %s: try again", lockBudget)
+		}
+		time.Sleep(lockRetry)
+	}
 }

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -351,5 +352,144 @@ func TestTheOwnerNarrowsWhatSomebodyMayRun(t *testing.T) {
 	restored, err := b.SetModels("ana@example.com", nil)
 	if err != nil || len(restored.Models) != 0 {
 		t.Errorf("models = %v, %v; want the list cleared", restored.Models, err)
+	}
+}
+
+// Adding somebody and then claiming them is the order the setup screen invites — the list fills the door's
+// group, and the owner names themselves after. The second step must promote the record the first one wrote,
+// not write a twin beside it: with two records for one address, "who is this" depends on line order, and an
+// owner whose first line says "person" is locked out of their own install.
+func TestClaimingSomebodyAlreadyInTheBookPromotesThem(t *testing.T) {
+	path := filepath.Join(t.TempDir(), File)
+	opened, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := opened.Add("marcelo@example.com", ""); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	claimed, err := opened.Claim("marcelo@example.com", "")
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if claimed.Role != RoleOwner || claimed.State != Active {
+		t.Errorf("claimed record is %q/%q, want owner and active", claimed.Role, claimed.State)
+	}
+	if records, err := opened.read(); err != nil || len(records) != 1 {
+		t.Fatalf("%d records for one address (%v): %+v", len(records), err, records)
+	} else if records[0].Role != RoleOwner {
+		t.Errorf("the record is %+v, want the same address as owner", records[0])
+	}
+
+	// Claiming again is the same answer, not ErrHasOwner: it is the same person, and they may run the command
+	// twice without being told their own install belongs to somebody else.
+	if _, err := opened.Claim("marcelo@example.com", ""); err != nil {
+		t.Fatalf("second claim: %v", err)
+	}
+	if records, _ := opened.read(); len(records) != 1 {
+		t.Errorf("%d records after a second claim", len(records))
+	}
+
+	// A name already in the book survives a claim that does not give one: the record is promoted, not
+	// replaced, and a command that forgot the name must not erase it.
+	named := filepath.Join(t.TempDir(), File)
+	other, err := Open(named)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := other.Add("bea@example.com", "Bea"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if claimed, err := other.Claim("bea@example.com", ""); err != nil {
+		t.Fatalf("claim: %v", err)
+	} else if claimed.Name != "Bea" {
+		t.Errorf("the claim erased the name: %q", claimed.Name)
+	}
+
+	// A different address is still refused, because that is a different owner.
+	if _, err := opened.Claim("ana@example.com", ""); !errors.Is(err, ErrHasOwner) {
+		t.Errorf("a second address claimed the install: %v", err)
+	}
+}
+
+// A book that already holds two records for one address — written before Claim learned to promote — must not
+// lock the owner out: the strongest record answers, whatever order the lines are in.
+func TestAnAddressWrittenTwiceAnswersAsItsOwner(t *testing.T) {
+	path := filepath.Join(t.TempDir(), File)
+	written := `{"people":[
+	  {"email":"ana@example.com","role":"person","state":"active","created":"2026-01-01"},
+	  {"email":"ana@example.com","role":"owner","state":"active","created":"2026-01-02"}]}`
+	if err := os.WriteFile(path, []byte(written), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	opened, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	person, found, err := opened.Find("ana@example.com")
+	if err != nil || !found {
+		t.Fatalf("find: %v, found %v", err, found)
+	}
+	if person.Role != RoleOwner {
+		t.Errorf("the answer is %q, want the owner record", person.Role)
+	}
+	// And claiming heals the file rather than adding to it.
+	if _, err := opened.Claim("ana@example.com", ""); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if records, _ := opened.read(); len(records) != 1 || records[0].Role != RoleOwner {
+		t.Errorf("the book still holds %+v", records)
+	}
+
+	// A duplicate is not the only way to be locked out: the record that answers may be the one with no role
+	// written down at all, and an install that predates roles would then have nobody able to administer it.
+	path = filepath.Join(t.TempDir(), File)
+	written = `{"people":[{"email":"ana@example.com","state":"active"},{"email":"ana@example.com"}]}`
+	if err := os.WriteFile(path, []byte(written), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	opened, err = Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if person, _, err := opened.Find("ana@example.com"); err != nil || person.Role == RoleOwner {
+		t.Errorf("a roleless record answered as %q (%v)", person.Role, err)
+	}
+	if _, err := opened.Claim("ana@example.com", ""); err != nil {
+		t.Fatalf("claim over roleless records: %v", err)
+	}
+	if records, _ := opened.read(); len(records) != 1 || records[0].Role != RoleOwner {
+		t.Errorf("the roleless book still holds %+v", records)
+	}
+}
+
+// A wait that never ends is the worst answer: the command line looks hung, and a test run spends its whole
+// timeout to learn nothing. Flock is released when its holder ends, so what a caller waits for is a write in
+// progress — and when that outlives the budget, the caller is told rather than kept.
+func TestAWedgedLockIsRefusedRatherThanWaitedOn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), File)
+	opened, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	// Somebody else holds the file, as another process would.
+	held, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatalf("open lock: %v", err)
+	}
+	defer held.Close()
+	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatalf("hold the lock: %v", err)
+	}
+	start := time.Now()
+	_, err = opened.Add("ana@example.com", "")
+	if err == nil {
+		t.Fatal("a held lock did not stop the write")
+	}
+	if !strings.Contains(err.Error(), "another acornfall process") {
+		t.Errorf("the refusal does not say what is happening: %v", err)
+	}
+	if waited := time.Since(start); waited > 3*lockBudget {
+		t.Errorf("it waited %s, which is longer than the budget it was given", waited)
 	}
 }
