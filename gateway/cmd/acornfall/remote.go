@@ -130,22 +130,9 @@ func remoteApply(argv []string) {
 
 // applyRemote is the whole of the work, so the command above is flags and one failure path.
 func applyRemote(ctx context.Context, dir, hostname, zoneName, apiToken string) error {
-	setup, err := remote.Load(dir)
+	setup, admitted, err := remoteInputs(dir)
 	if err != nil {
 		return err
-	}
-	book, err := people.Open(filepath.Join(dir, people.File))
-	if err != nil {
-		return err
-	}
-	admitted, err := admittedAddresses(book)
-	if err != nil {
-		return err
-	}
-	if len(admitted) == 0 {
-		// A door that admits nobody is a door nobody can open, and an Access application with an empty policy is
-		// the kind of half-setup that looks finished. Said before anything is created.
-		return errors.New("there is nobody to admit yet: `acornfall people claim you@example.com` names the owner, and `people add` names the rest")
 	}
 
 	client := &remote.Client{Token: apiToken}
@@ -176,6 +163,29 @@ func applyRemote(ctx context.Context, dir, hostname, zoneName, apiToken string) 
 	}
 	fmt.Printf("\n%s now reaches this machine; the door needs ACORNFALL_IDENTITY=access and the audience %s\n", desire.Hostname, state.Audience)
 	return nil
+}
+
+// remoteInputs is what an apply needs before it can talk to Cloudflare: what the install recorded, and the
+// addresses the door admits.
+func remoteInputs(dir string) (remote.Setup, []string, error) {
+	setup, err := remote.Load(dir)
+	if err != nil {
+		return remote.Setup{}, nil, err
+	}
+	book, err := people.Open(filepath.Join(dir, people.File))
+	if err != nil {
+		return remote.Setup{}, nil, err
+	}
+	admitted, err := admittedAddresses(book)
+	if err != nil {
+		return remote.Setup{}, nil, err
+	}
+	if len(admitted) == 0 {
+		// A door that admits nobody is a door nobody can open, and an Access application with an empty policy is
+		// the kind of half-setup that looks finished. Said before anything is created.
+		return remote.Setup{}, nil, errors.New("there is nobody to admit yet: `acornfall people claim you@example.com` names the owner, and `people add` names the rest")
+	}
+	return setup, admitted, nil
 }
 
 // admittedAddresses is who the door lets in: everyone the owner named and has not revoked. The group is derived
