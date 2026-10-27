@@ -1,6 +1,6 @@
 # ADR 0033 — A browser reaches the machine through a tunnel we configure
 
-Status: proposed — awaiting the owner's sign-off
+Status: accepted (2026-10-30), the provisioner built; cloudflared's supervision and the boot-time reconcile are not
 Date: 2026-10-30
 
 ## Context

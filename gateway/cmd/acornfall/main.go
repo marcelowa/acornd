@@ -61,6 +61,7 @@ var commands = map[string]func([]string){
 	"provider":  providers,
 	"model":     modelCommand,
 	"people":    peopleCommand,
+	"remote":    remoteCommand,
 	"token":     tokenCommand,
 	"update":    updateCommand,
 	"version":   versionCommand,
@@ -101,6 +102,7 @@ func usage(w io.Writer) {
   provider   list, add, and remove model provider keys
   model      list or choose the default model
   people     who may use this install, and what they may do
+  remote     the tunnel a browser comes through, and who it admits
   token      print the token that proves you own this install
   update     check for a release, and install it
   version    print the running version

@@ -1,0 +1,190 @@
+// Remote access: the tunnel a browser comes through, and the Access application that admits only the people
+// the owner named. See docs/adr/0033-remote-access.md.
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"text/tabwriter"
+	"time"
+
+	"github.com/acornfall/acornfall/gateway/internal/people"
+	"github.com/acornfall/acornfall/gateway/internal/remote"
+)
+
+func remoteCommand(argv []string) {
+	if len(argv) > 0 {
+		switch argv[0] {
+		case "status":
+			remoteStatus(argv[1:])
+			return
+		case "apply":
+			remoteApply(argv[1:])
+			return
+		case "help", "-h", "--help":
+			remoteUsage(os.Stdout)
+			return
+		}
+	}
+	remoteUsage(os.Stderr)
+	os.Exit(2)
+}
+
+func remoteUsage(w *os.File) {
+	fmt.Fprint(w, `usage: acornfall remote <command>
+
+  status                  what this install recorded, and whether it is ready
+  apply --zone DOMAIN     make Cloudflare match it, for --hostname HOST
+                          --token T, or ACORNFALL_CLOUDFLARE_TOKEN
+
+The API token needs Account · Cloudflare Tunnel · Edit, Zone · DNS · Edit, and
+Access: Apps and Policies · Edit plus Organizations, IdP and Groups · Edit.
+Its ids are written to remote.json in the install folder, so a second apply
+creates nothing and a run that died halfway resumes.
+`)
+}
+
+func remoteStatus(argv []string) {
+	flags := flag.NewFlagSet("remote status", flag.ContinueOnError)
+	dataDir := flags.String("data-dir", "", "the acornfall folder (default: ~/.acornfall)")
+	if err := flags.Parse(argv); err != nil {
+		os.Exit(2)
+	}
+	dir, err := resolveDataDir(*dataDir)
+	if err != nil {
+		logFatal(err)
+	}
+	setup, err := remote.Load(dir)
+	if err != nil {
+		logFatal(err)
+	}
+	if !setup.Configured() {
+		fmt.Println("no remote access yet: `acornfall remote apply --zone DOMAIN --hostname HOST` sets it up")
+		return
+	}
+	rows := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(rows, "hostname\t%s\n", setup.Desired.Hostname)
+	fmt.Fprintf(rows, "zone\t%s\n", setup.Desired.ZoneID)
+	fmt.Fprintf(rows, "account\t%s\n", setup.Desired.AccountID)
+	for _, line := range []struct{ name, value string }{
+		{"tunnel", setup.State.TunnelID},
+		{"dns record", setup.State.DNSRecordID},
+		{"identity provider", setup.State.IdentityID},
+		{"access group", setup.State.GroupID},
+		{"access app", setup.State.AppID},
+		{"audience", setup.State.Audience},
+		{"policy", setup.State.PolicyID},
+	} {
+		value := line.value
+		if value == "" {
+			value = "missing"
+		}
+		fmt.Fprintf(rows, "%s\t%s\n", line.name, value)
+	}
+	fmt.Fprintf(rows, "updated\t%s\n", setup.Updated)
+	if err := rows.Flush(); err != nil {
+		logFatal(err)
+	}
+	if !setup.State.Ready() {
+		fmt.Println("\nnot ready: run `acornfall remote apply` again once the missing pieces can be made")
+	}
+}
+
+func remoteApply(argv []string) {
+	flags := flag.NewFlagSet("remote apply", flag.ContinueOnError)
+	dataDir := flags.String("data-dir", "", "the acornfall folder (default: ~/.acornfall)")
+	hostname := flags.String("hostname", "", "the hostname the console answers on")
+	zoneName := flags.String("zone", "", "the Cloudflare zone the hostname belongs to")
+	token := flags.String("token", "", "the Cloudflare API token (default: ACORNFALL_CLOUDFLARE_TOKEN)")
+	if err := flags.Parse(argv); err != nil {
+		os.Exit(2)
+	}
+	dir, err := resolveDataDir(*dataDir)
+	if err != nil {
+		logFatal(err)
+	}
+	if *hostname == "" || *zoneName == "" {
+		logFatal(fmt.Errorf("remote apply needs --hostname and --zone"))
+	}
+	apiToken := *token
+	if apiToken == "" {
+		apiToken = os.Getenv("ACORNFALL_CLOUDFLARE_TOKEN")
+	}
+	if apiToken == "" {
+		logFatal(remote.ErrNoToken)
+	}
+
+	// A command that changes somebody else's account stops when the owner presses Ctrl-C, and the apply reads
+	// the same context so a cancelled run does not keep creating things.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if err := applyRemote(ctx, dir, *hostname, *zoneName, apiToken); err != nil {
+		logFatal(err)
+	}
+}
+
+// applyRemote is the whole of the work, so the command above is flags and one failure path.
+func applyRemote(ctx context.Context, dir, hostname, zoneName, apiToken string) error {
+	setup, err := remote.Load(dir)
+	if err != nil {
+		return err
+	}
+	book, err := people.Open(filepath.Join(dir, people.File))
+	if err != nil {
+		return err
+	}
+	admitted, err := admittedAddresses(book)
+	if err != nil {
+		return err
+	}
+
+	client := &remote.Client{Token: apiToken}
+	zone, err := client.ZoneByName(ctx, zoneName)
+	if err != nil {
+		return err
+	}
+	desire := remote.Desired{Hostname: hostname, ZoneID: zone.ID, AccountID: zone.Account}
+	state, steps, applyErr := (&remote.Provisioner{API: client}).Apply(ctx, desire, setup.State, admitted)
+	// Written whatever happened: what an apply made before it failed is the ids a resume reads instead of
+	// starting over, and losing them is how a second tunnel appears.
+	if err := remote.Save(dir, remote.Setup{Desired: desire, State: state}, time.Now()); err != nil {
+		return fmt.Errorf("%w (and the ids it made could not be written: %w)", applyErr, err)
+	}
+	if applyErr != nil {
+		return fmt.Errorf("%w (the ids it made are kept; run it again to finish)", applyErr)
+	}
+	for _, step := range steps {
+		verb := "kept"
+		if step.Created {
+			verb = "created"
+		}
+		detail := ""
+		if step.Detail != "" {
+			detail = " (" + step.Detail + ")"
+		}
+		fmt.Printf("%-8s %s%s\n", verb, step.Name, detail)
+	}
+	fmt.Printf("\n%s now reaches this machine; the door needs ACORNFALL_IDENTITY=access and the audience %s\n", desire.Hostname, state.Audience)
+	return nil
+}
+
+// admittedAddresses is who the door lets in: everyone the owner named and has not revoked. The group is derived
+// from the book on every apply, which is what makes the book the only allowlist there is (ADR 0033 §3).
+func admittedAddresses(book *people.Book) ([]string, error) {
+	records, err := book.List()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(records))
+	for _, record := range records {
+		if record.State == people.Revoked {
+			continue
+		}
+		out = append(out, record.Email)
+	}
+	return out, nil
+}
