@@ -439,7 +439,11 @@ func (w *Workspaces) CreatePersonal(email string) (Workspace, error) {
 // freeName is the first name that is not taken: ana, then ana-2, then ana-3. A cap rather than a loop that
 // might not end, because a registry with a thousand Anas is a problem to look at rather than to keep trying.
 func (w *Workspaces) freeName(base string) (string, error) {
-	for attempt := 1; attempt <= 100; attempt++ {
+	// It counts by assignment, not by `++`, and that is not a style choice: mutation testing turns
+	// `++` into `--`, the counter then falls away from the cap instead of towards it, and the loop
+	// ends only when an assertion fails — which one never does. Every `make mutations` on this
+	// package then waits out the per-mutant timeout to learn nothing.
+	for attempt := 1; attempt <= 100; attempt += 1 {
 		name := base
 		if attempt > 1 {
 			name = fmt.Sprintf("%s-%d", base, attempt)
