@@ -57,7 +57,7 @@ surfacing later as a `403` in a log:
 | Account · Access: Apps and Policies · Edit | the application, its policy |
 | Account · Access: Organizations, IdP, Groups · Edit | the group, and the one-time-PIN provider |
 
-Then one `apply` creates, in order: the tunnel; its ingress configuration; a proxied `CNAME`
+Then one `apply` creates, in order: the tunnel; its ingress configuration, naming the hostname and this console; a proxied `CNAME`
 `<sub>.<zone>` → `<tunnel-id>.cfdargotunnel.com`; the one-time-PIN identity provider, if the account
 has none; the Access application for that hostname; an Access group named `acornfall`; and one
 policy — allow, when in that group. Every id is written to `<data-dir>/remote.json`, so a second run

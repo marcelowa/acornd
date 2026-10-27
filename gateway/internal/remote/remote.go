@@ -31,6 +31,20 @@ type Desired struct {
 	Hostname  string `json:"hostname"`
 	ZoneID    string `json:"zone_id"`
 	AccountID string `json:"account_id"`
+	// Local is the service the tunnel forwards to: this console, on the loopback port it listens on. Empty
+	// means the default, because a tunnel with no route to anything is a door into a wall.
+	Local string `json:"local,omitempty"`
+}
+
+// DefaultLocal is where the console listens: loopback only, which is what a run with a door enforces.
+const DefaultLocal = "http://127.0.0.1:7777"
+
+// local is the service the ingress points at.
+func (d Desired) local() string {
+	if strings.TrimSpace(d.Local) == "" {
+		return DefaultLocal
+	}
+	return strings.TrimSpace(d.Local)
 }
 
 // Validate is the refusal a setup screen shows before anything is created.
@@ -90,6 +104,8 @@ type API interface {
 	Tunnels(ctx context.Context, account string) ([]Tunnel, error)
 	CreateTunnel(ctx context.Context, account, name string) (Tunnel, error)
 	TunnelToken(ctx context.Context, account, tunnel string) (string, error)
+	TunnelIngress(ctx context.Context, account, tunnel string) (string, error)
+	SetTunnelIngress(ctx context.Context, account, tunnel, hostname, service string) error
 	DNSRecords(ctx context.Context, zone, hostname string) ([]DNSRecord, error)
 	CreateCNAME(ctx context.Context, zone, hostname, target string) (DNSRecord, error)
 	IdentityProviders(ctx context.Context, account string) ([]IdentityProvider, error)
@@ -175,6 +191,12 @@ func (p *Provisioner) Apply(ctx context.Context, desired Desired, prior State, p
 		return state, steps, err
 	}
 
+	step, err = p.ingress(ctx, desired, tunnel.ID)
+	if err != nil {
+		return state, steps, err
+	}
+	steps = append(steps, step)
+
 	record, step, err := p.record(ctx, desired, prior, tunnel.ID)
 	if err != nil {
 		return state, steps, err
@@ -240,6 +262,28 @@ func (p *Provisioner) token(ctx context.Context, desired Desired, prior State, t
 		return "", fmt.Errorf("reading the tunnel's token: %w", err)
 	}
 	return token, nil
+}
+
+// ingress points the tunnel at this console. A remotely-managed tunnel keeps its route in Cloudflare, so this is
+// the step that turns a tunnel into a way in: without it the edge has a hostname and nowhere to send it, and the
+// browser gets a 404 after signing in.
+//
+// It is read before it is written, so a second apply leaves it alone and the reconcile stays a no-op.
+func (p *Provisioner) ingress(ctx context.Context, desired Desired, tunnel string) (Step, error) {
+	want := desired.local()
+	current, err := p.API.TunnelIngress(ctx, desired.AccountID, tunnel)
+	if err != nil {
+		return Step{}, fmt.Errorf("reading the tunnel's route: %w", err)
+	}
+	if current == want {
+		return Step{Name: "ingress", Detail: want}, nil
+	}
+	// The rule names the hostname rather than matching everything: Cloudflare refuses a catch-all first rule,
+	// and a tunnel that answered to any name would be a door this install does not know it has.
+	if err := p.API.SetTunnelIngress(ctx, desired.AccountID, tunnel, desired.Hostname, want); err != nil {
+		return Step{}, fmt.Errorf("pointing the tunnel at this console: %w", err)
+	}
+	return Step{Name: "ingress", Created: true, Detail: want}, nil
 }
 
 func (p *Provisioner) record(ctx context.Context, desired Desired, prior State, tunnelID string) (DNSRecord, Step, error) {
