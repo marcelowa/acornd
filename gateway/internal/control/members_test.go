@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -271,5 +272,22 @@ func TestAHandleIsAFolderName(t *testing.T) {
 		if got := handle(email); got != want {
 			t.Errorf("handle(%q) = %q, want %q", email, got, want)
 		}
+	}
+}
+
+// The name search ends whatever the registry holds, and it is written so that no mutant can stop it ending: a
+// range has no increment to invert and no condition to negate, so a busy registry gives a refusal rather than a
+// loop that never returns. This pins the refusal, which is the half a hang would have hidden.
+func TestANameSearchThatFindsNothingRefuses(t *testing.T) {
+	workspaces := registry(t, nil)
+	for attempt := range 100 {
+		name := "ana"
+		if attempt > 0 {
+			name = fmt.Sprintf("ana-%d", attempt+1)
+		}
+		workspaces.registry[name] = Workspace{Name: name, Path: "/w/" + name}
+	}
+	if _, err := workspaces.CreatePersonal("ana@example.com"); err == nil {
+		t.Fatal("a full registry produced a name")
 	}
 }
