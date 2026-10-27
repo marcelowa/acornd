@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -140,6 +141,11 @@ func applyRemote(ctx context.Context, dir, hostname, zoneName, apiToken string) 
 	admitted, err := admittedAddresses(book)
 	if err != nil {
 		return err
+	}
+	if len(admitted) == 0 {
+		// A door that admits nobody is a door nobody can open, and an Access application with an empty policy is
+		// the kind of half-setup that looks finished. Said before anything is created.
+		return errors.New("there is nobody to admit yet: `acornfall people claim you@example.com` names the owner, and `people add` names the rest")
 	}
 
 	client := &remote.Client{Token: apiToken}
