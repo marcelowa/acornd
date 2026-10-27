@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -459,5 +460,36 @@ func TestAnAddressWrittenTwiceAnswersAsItsOwner(t *testing.T) {
 	}
 	if records, _ := opened.read(); len(records) != 1 || records[0].Role != RoleOwner {
 		t.Errorf("the roleless book still holds %+v", records)
+	}
+}
+
+// A wait that never ends is the worst answer: the command line looks hung, and a test run spends its whole
+// timeout to learn nothing. Flock is released when its holder ends, so what a caller waits for is a write in
+// progress — and when that outlives the budget, the caller is told rather than kept.
+func TestAWedgedLockIsRefusedRatherThanWaitedOn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), File)
+	opened, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	// Somebody else holds the file, as another process would.
+	held, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatalf("open lock: %v", err)
+	}
+	defer held.Close()
+	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatalf("hold the lock: %v", err)
+	}
+	start := time.Now()
+	_, err = opened.Add("ana@example.com", "")
+	if err == nil {
+		t.Fatal("a held lock did not stop the write")
+	}
+	if !strings.Contains(err.Error(), "another acornfall process") {
+		t.Errorf("the refusal does not say what is happening: %v", err)
+	}
+	if waited := time.Since(start); waited > 3*lockBudget {
+		t.Errorf("it waited %s, which is longer than the budget it was given", waited)
 	}
 }
