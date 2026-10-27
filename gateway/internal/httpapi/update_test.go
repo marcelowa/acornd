@@ -23,7 +23,7 @@ func updateServer(t *testing.T) (*Server, *update.Manager) {
 	if err := manager.SetCurrentVersion("v0.8.0"); err != nil {
 		t.Fatal(err)
 	}
-	return New(nil, nil, manager), manager
+	return New(nil, nil, manager, Gate{}), manager
 }
 
 func TestUpdateStatusNamesCurrentAndLatest(t *testing.T) {

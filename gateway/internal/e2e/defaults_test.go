@@ -22,8 +22,8 @@ func TestWorkspaceDefaultsApplyAndSayWhereTheyCameFrom(t *testing.T) {
 
 	// The scripted model offers only "off", which makes the clamping visible: the default is
 	// what was asked for, and what runs is what the model can do.
-	c.post("/api/workspaces/general/default-thinking", map[string]any{"level": "high"}, nil)
-	got := c.state("general")
+	c.post("/api/workspaces/personal/default-thinking", map[string]any{"level": "high"}, nil)
+	got := c.state("personal")
 	if got.DefaultThinking != "high" {
 		t.Errorf("the workspace default should be what was set, got %q", got.DefaultThinking)
 	}
@@ -38,8 +38,8 @@ func TestWorkspaceDefaultsApplyAndSayWhereTheyCameFrom(t *testing.T) {
 	}
 
 	// Clearing it falls through rather than leaving nothing.
-	c.post("/api/workspaces/general/default-thinking", map[string]any{"level": ""}, nil)
-	cleared := c.state("general")
+	c.post("/api/workspaces/personal/default-thinking", map[string]any{"level": ""}, nil)
+	cleared := c.state("personal")
 	if cleared.DefaultThinking != "" || cleared.DefaultsOrigin["thinking"] != "" {
 		t.Errorf("a cleared default should have no origin, got %q / %q",
 			cleared.DefaultThinking, cleared.DefaultsOrigin["thinking"])
@@ -48,8 +48,8 @@ func TestWorkspaceDefaultsApplyAndSayWhereTheyCameFrom(t *testing.T) {
 	// The agent default is the same mechanism, and it shapes the conversations that come
 	// after it: a conversation pins what it was created with (ADR 0017), and the one that
 	// predates this default keeps the general agent it was pinned to.
-	c.post("/api/workspaces/general/default-agent", map[string]any{"definition": "reviewer"}, nil)
-	withAgent := c.state("general")
+	c.post("/api/workspaces/personal/default-agent", map[string]any{"definition": "reviewer"}, nil)
+	withAgent := c.state("personal")
 	if withAgent.DefaultAgent != "reviewer" || withAgent.DefaultsOrigin["agent"] != "workspace" {
 		t.Errorf("the workspace default agent should be reported, got %q from %q",
 			withAgent.DefaultAgent, withAgent.DefaultsOrigin["agent"])
@@ -58,13 +58,13 @@ func TestWorkspaceDefaultsApplyAndSayWhereTheyCameFrom(t *testing.T) {
 		t.Errorf("a conversation created before the default keeps what it pinned, got %+v", withAgent.Agent)
 	}
 
-	created := c.create("general")
-	if got := c.state("general"); got.Conversation.ID != created.ID || got.Agent.Definition != "reviewer" {
+	created := c.create("personal")
+	if got := c.state("personal"); got.Conversation.ID != created.ID || got.Agent.Definition != "reviewer" {
 		t.Errorf("a conversation created after the default should run it, got %+v", got.Agent)
 	}
 
-	c.post("/api/workspaces/general/default-agent", map[string]any{"definition": ""}, nil)
-	back := c.state("general")
+	c.post("/api/workspaces/personal/default-agent", map[string]any{"definition": ""}, nil)
+	back := c.state("personal")
 	if back.DefaultAgent != "" || back.DefaultsOrigin["agent"] != "" {
 		t.Errorf("clearing the agent default should leave no origin, got %q / %q",
 			back.DefaultAgent, back.DefaultsOrigin["agent"])
@@ -84,7 +84,7 @@ func TestInstallDefaultsApplyToEveryWorkspace(t *testing.T) {
 	c.createWorkspace("second")
 
 	c.post("/api/defaults/thinking", map[string]any{"level": "low"}, nil)
-	for _, workspace := range []string{"general", "second"} {
+	for _, workspace := range []string{"personal", "second"} {
 		got := c.state(workspace)
 		if got.DefaultThinking != "low" || got.DefaultsOrigin["thinking"] != "install" {
 			t.Errorf("%s should follow the install default, got %q from %q",
@@ -93,8 +93,8 @@ func TestInstallDefaultsApplyToEveryWorkspace(t *testing.T) {
 	}
 
 	// A workspace that decides for itself keeps it, and the other is unaffected.
-	c.post("/api/workspaces/general/default-thinking", map[string]any{"level": "high"}, nil)
-	if got := c.state("general"); got.DefaultsOrigin["thinking"] != "workspace" || got.DefaultThinking != "high" {
+	c.post("/api/workspaces/personal/default-thinking", map[string]any{"level": "high"}, nil)
+	if got := c.state("personal"); got.DefaultsOrigin["thinking"] != "workspace" || got.DefaultThinking != "high" {
 		t.Errorf("the workspace's own default should win, got %q from %q", got.DefaultThinking, got.DefaultsOrigin["thinking"])
 	}
 	if got := c.state("second"); got.DefaultsOrigin["thinking"] != "install" {
@@ -119,7 +119,7 @@ func TestTheLastResortRunsWhenNothingIsSet(t *testing.T) {
 	s := start(t)
 	c := s.client()
 
-	got := c.state("general")
+	got := c.state("personal")
 	if got.DefaultModel.Provider == "" || got.DefaultModel.ModelID == "" {
 		t.Fatalf("an install with a provider should always have a model, got %+v", got.DefaultModel)
 	}
@@ -133,7 +133,7 @@ func TestTheLastResortRunsWhenNothingIsSet(t *testing.T) {
 
 	// The install's own model wins over the last resort, and says so.
 	c.post("/api/defaults/model", map[string]any{"provider": got.DefaultModel.Provider, "modelId": got.DefaultModel.ModelID}, nil)
-	after := c.state("general")
+	after := c.state("personal")
 	if after.DefaultsOrigin["model"] != "install" {
 		t.Errorf("an install default should be reported as one, got %q", after.DefaultsOrigin["model"])
 	}

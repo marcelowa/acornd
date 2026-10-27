@@ -35,9 +35,9 @@ func TestBwrapWorkspaceRunsItsToolsInNamespaces(t *testing.T) {
 		),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	general := c.state("general")
+	general := c.state("personal")
 	engine := general.Sandbox
 	if engine.Engine != "bwrap" {
 		t.Fatalf("the workspace should run on bwrap, got %+v", engine)
@@ -46,8 +46,8 @@ func TestBwrapWorkspaceRunsItsToolsInNamespaces(t *testing.T) {
 		t.Fatalf("a bwrap workspace is isolated and its tools run, got %+v", engine)
 	}
 
-	c.prompt("general", root, "who am i")
-	got := c.waitForText("general", root, "the command ran")
+	c.prompt("personal", root, "who am i")
+	got := c.waitForText("personal", root, "the command ran")
 	output := got.lastToolResult()
 	for _, want := range []string{"uid:0", "os:debian", "image-writable"} {
 		if !strings.Contains(output, want) {
@@ -70,7 +70,7 @@ func TestAWorkspaceKeepsTheEngineItWasCreatedWith(t *testing.T) {
 	bwrapEngine(t)
 	s := start(t)
 	c := s.client()
-	c.waitForConversation("general")
+	c.waitForConversation("personal")
 
 	// The gateway's registry is the record the interface writes through; a second workspace
 	// with its own engine is what the create form posts.
@@ -99,9 +99,9 @@ func TestOneInstallRunsTwoEngines(t *testing.T) {
 	bwrapAvailable(t)
 	s := start(t)
 	c := s.client()
-	c.waitForConversation("general")
+	c.waitForConversation("personal")
 
-	if engine := c.state("general").Sandbox.Engine; engine != "host" {
+	if engine := c.state("personal").Sandbox.Engine; engine != "host" {
 		t.Fatalf("the general workspace should follow the install default, got %q", engine)
 	}
 	c.createWorkspaceWith("wrapped", map[string]any{"engine": "bwrap"})
@@ -113,7 +113,7 @@ func TestOneInstallRunsTwoEngines(t *testing.T) {
 		t.Fatalf("a bwrap workspace is isolated and its tools run, got %+v", wrapped)
 	}
 	// The default is unchanged by one workspace's choice.
-	if engine := c.state("general").Sandbox.Engine; engine != "host" {
+	if engine := c.state("personal").Sandbox.Engine; engine != "host" {
 		t.Fatalf("creating a bwrap workspace changed the general one to %q", engine)
 	}
 }
@@ -150,10 +150,10 @@ func TestBwrapWorkspaceInstallsIntoItsOwnImage(t *testing.T) {
 		),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	c.prompt("general", root, "install it")
-	view := c.waitForText("general", root, "first-turn-done")
+	c.prompt("personal", root, "install it")
+	view := c.waitForText("personal", root, "first-turn-done")
 	first := view.lastToolResult()
 	if !strings.Contains(first, "installed:/usr/bin/less") {
 		t.Fatalf("the install should have landed inside the sandbox, got %q\ntranscript:\n%s", first, view.all())
@@ -164,8 +164,8 @@ func TestBwrapWorkspaceInstallsIntoItsOwnImage(t *testing.T) {
 
 	// A second command is a second sandbox, and an install that did not survive it would make the
 	// image a decoration.
-	c.prompt("general", root, "still there")
-	second := c.waitForText("general", root, "second-turn-done").lastToolResult()
+	c.prompt("personal", root, "still there")
+	second := c.waitForText("personal", root, "second-turn-done").lastToolResult()
 	if !strings.Contains(second, "alive:yes") {
 		t.Fatalf("the install did not survive the command that made it, got %q", second)
 	}
@@ -214,9 +214,9 @@ func TestABwrapSandboxCannotReachTheMachinesLoopback(t *testing.T) {
 		),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
-	c.prompt("general", root, "reach the host")
-	output := c.waitForText("general", root, "probed").lastToolResult()
+	root := c.waitForConversation("personal")
+	c.prompt("personal", root, "reach the host")
+	output := c.waitForText("personal", root, "probed").lastToolResult()
 
 	for _, want := range []string{
 		fmt.Sprintf("127.0.0.1:%d closed", port),
@@ -272,9 +272,9 @@ func TestABwrapSandboxCannotReachPrivateNetworks(t *testing.T) {
 		),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
-	c.prompt("general", root, "reach the private network")
-	output := c.waitForText("general", root, "probed-private").lastToolResult()
+	root := c.waitForConversation("personal")
+	c.prompt("personal", root, "reach the private network")
+	output := c.waitForText("personal", root, "probed-private").lastToolResult()
 	if want := fmt.Sprintf("%s:%d closed", address, port); !strings.Contains(output, want) {
 		t.Fatalf("the sandbox reached this machine's private address, want %q in %q", want, output)
 	}

@@ -24,7 +24,7 @@ func TestARegistryWithTwoGeneralWorkspacesIsRepaired(t *testing.T) {
 		Path:          filepath.Join(dataDir, "workspaces.json"),
 		WorkspacesDir: dir,
 		Workspaces: []Workspace{
-			{Name: "general", Path: filepath.Join(dir, "general"), General: true},
+			{Name: "personal", Path: filepath.Join(dir, "personal"), General: true},
 			{Name: "second", Path: filepath.Join(dir, "second"), General: true},
 			{Name: "third", Path: filepath.Join(dir, "third"), General: true},
 		},
@@ -47,7 +47,7 @@ func TestARegistryWithTwoGeneralWorkspacesIsRepaired(t *testing.T) {
 		t.Errorf("%d general workspaces after the repair, want 1", generals)
 	}
 	// The first one in the file is the one kept: the repair is not a guess about which is best.
-	if !workspaces.registry["general"].General {
+	if !workspaces.registry["personal"].General {
 		t.Error("the first general workspace should be the one kept")
 	}
 }
@@ -61,11 +61,11 @@ func TestAFirstRunMakesTheGeneralWorkspace(t *testing.T) {
 	if err := workspaces.loadRegistry(); err != nil {
 		t.Fatal(err)
 	}
-	general, ok := workspaces.registry[GeneralWorkspaceName]
+	general, ok := workspaces.registry[PersonalWorkspaceName]
 	if !ok {
 		t.Fatal("a first run should create the general workspace")
 	}
-	if general.Path != filepath.Join(dir, GeneralWorkspaceName) {
+	if general.Path != filepath.Join(dir, PersonalWorkspaceName) {
 		t.Errorf("its folder is %q", general.Path)
 	}
 	if !general.General {
@@ -102,7 +102,7 @@ func TestAFolderNobodyCanWriteIsRefused(t *testing.T) {
 		// The registry file itself lives in dataDir, so writing it still works; what must fail is
 		// the general workspace's folder. Either way, the load must not claim success and leave no
 		// general workspace.
-		if _, ok := workspaces.registry[GeneralWorkspaceName]; !ok {
+		if _, ok := workspaces.registry[PersonalWorkspaceName]; !ok {
 			t.Error("the load succeeded without a general workspace")
 		}
 	}

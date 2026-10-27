@@ -39,10 +39,10 @@ func TestEvictionStopsOnlyIdleUnwatchedWorkspaces(t *testing.T) {
 	recent := start("recent")
 	keptAlive := start("daemon")
 	workspaces.registry["daemon"] = Workspace{Name: "daemon", Path: t.TempDir(), KeepAlive: true}
-	general := start(GeneralWorkspaceName)
+	general := start(PersonalWorkspaceName)
 
 	longAgo := time.Now().Add(-2 * idleEviction)
-	for _, name := range []string{"idle", "watched", "busy", "daemon", GeneralWorkspaceName} {
+	for _, name := range []string{"idle", "watched", "busy", "daemon", PersonalWorkspaceName} {
 		workspaces.used[name] = longAgo
 	}
 	workspaces.used["recent"] = time.Now()
@@ -57,7 +57,7 @@ func TestEvictionStopsOnlyIdleUnwatchedWorkspaces(t *testing.T) {
 	}
 	// A workspace that keeps a daemon running is never idle: stopping it would kill what it is
 	// for, and its next cron run would not happen.
-	for _, name := range []string{"watched", "busy", "recent", "daemon", GeneralWorkspaceName} {
+	for _, name := range []string{"watched", "busy", "recent", "daemon", PersonalWorkspaceName} {
 		if stopped[name] {
 			t.Errorf("%s should not be stopped", name)
 		}
@@ -86,10 +86,10 @@ func TestTheGeneralWorkspaceIsNeverEvicted(t *testing.T) {
 	if err := workspaces.loadRegistry(); err != nil {
 		t.Fatal(err)
 	}
-	workspace := Workspace{Name: GeneralWorkspaceName, Path: t.TempDir(), General: true}
-	workspaces.registry[GeneralWorkspaceName] = workspace
-	workspaces.controls[GeneralWorkspaceName] = New(Options{Workspace: workspace, Registry: workspaces.List})
-	workspaces.used[GeneralWorkspaceName] = time.Now().Add(-10 * idleEviction)
+	workspace := Workspace{Name: PersonalWorkspaceName, Path: t.TempDir(), General: true}
+	workspaces.registry[PersonalWorkspaceName] = workspace
+	workspaces.controls[PersonalWorkspaceName] = New(Options{Workspace: workspace, Registry: workspaces.List})
+	workspaces.used[PersonalWorkspaceName] = time.Now().Add(-10 * idleEviction)
 
 	if stopped := workspaces.evictCandidates(); len(stopped) != 0 {
 		t.Errorf("the general workspace must never be stopped, stopped %d", len(stopped))

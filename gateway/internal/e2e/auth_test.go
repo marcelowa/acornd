@@ -51,11 +51,11 @@ func TestTheProviderVerbsReachTheHarness(t *testing.T) {
 		} `json:"workspace"`
 	}
 	c.post("/api/providers/logout", map[string]any{"providerId": "faux"}, &state)
-	if state.Workspace.Name != "general" {
+	if state.Workspace.Name != "personal" {
 		t.Errorf("logout answered %+v", state)
 	}
 	c.post("/api/providers/refresh", map[string]any{}, &state)
-	if state.Workspace.Name != "general" {
+	if state.Workspace.Name != "personal" {
 		t.Errorf("refresh answered %+v", state)
 	}
 }
@@ -71,7 +71,7 @@ func TestAStreamForAConversationThatIsNotThereSaysSoAndCloses(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		c.base+"/api/stream?workspace=general&conversation=not-a-conversation", nil)
+		c.base+"/api/stream?workspace=personal&conversation=not-a-conversation", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

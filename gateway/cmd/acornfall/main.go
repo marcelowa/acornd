@@ -60,6 +60,8 @@ var commands = map[string]func([]string){
 	"secret":    secretCommand,
 	"provider":  providers,
 	"model":     modelCommand,
+	"people":    peopleCommand,
+	"token":     tokenCommand,
 	"update":    updateCommand,
 	"version":   versionCommand,
 	"internal":  internalCommand,
@@ -98,6 +100,8 @@ func usage(w io.Writer) {
   secret     list, add, show, rotate, and remove secrets
   provider   list, add, and remove model provider keys
   model      list or choose the default model
+  people     who may use this install, and what they may do
+  token      print the token that proves you own this install
   update     check for a release, and install it
   version    print the running version
 
@@ -148,7 +152,14 @@ func serve(argv []string) error {
 
 	go updates.StartLoop(ctx)
 
-	workspaces := newWorkspaces(dir, userHome, *workspacesDir, command, worker, updates, secrets, engine, tier)
+	// The gate is opened before the registry, because the registry needs one answer out of it: whose the
+	// workspaces that predate people are. Control is told an address, not a file — it knows what a
+	// workspace is and not what a people file is.
+	gate, err := openGate(dir, *host)
+	if err != nil {
+		return err
+	}
+	workspaces := newWorkspaces(dir, userHome, *workspacesDir, command, worker, updates, secrets, engine, tier, ownerEmail(gate.People))
 	if err := workspaces.Open(ctx); err != nil {
 		return err
 	}
@@ -158,7 +169,7 @@ func serve(argv []string) error {
 
 	logReadiness(ready.Check(readyInputForBoot(dir, updates, engine)))
 
-	return listen(ctx, *host, *port, httpapi.New(workspaces, web.Files, updates).Handler(), dir)
+	return listen(ctx, *host, *port, httpapi.New(workspaces, web.Files, updates, gate).Handler(), dir)
 }
 
 // newWorkspaces is the workspace layer as this boot configured it: where its folders are, what
@@ -170,6 +181,7 @@ func newWorkspaces(
 	secrets *vault.Store,
 	engine *sandbox.Manager,
 	tier *sandbox.Tier,
+	owner string,
 ) *control.Workspaces {
 	return control.NewWorkspaces(control.WorkspacesOptions{
 		DataDir:       dir,
@@ -187,10 +199,11 @@ func newWorkspaces(
 				RestartRequired: status.RestartRequired,
 			}
 		},
-		Model:     os.Getenv("ACORNFALL_MODEL"),
-		Sandbox:   engine,
-		Sandboxes: tier,
-		Vault:     secrets,
+		Model:      os.Getenv("ACORNFALL_MODEL"),
+		Sandbox:    engine,
+		Sandboxes:  tier,
+		Vault:      secrets,
+		OwnerEmail: owner,
 	})
 }
 

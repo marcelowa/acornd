@@ -18,7 +18,9 @@
 cmd/acornfall                     76  -- 77 statements need root: probeAs runs the probe as another account, runPlanAsRoot applies the plan through sudo, configureNamespace is the sandbox's first process inside a namespace. No privileged job runs, and a test here would prove the kernel's permissions rather than this code.
 internal/control                     85
 internal/httpapi                   84
+internal/identity                  90  -- what is left is the os and network failure paths (CreateTemp, Chmod, Write, Rename, a body that stops mid-read), each needing a seam that would exist only to be broken
 internal/netns                      51  -- the write half needs CAP_NET_ADMIN in a namespace; what can be read without it (framing, the answer, the refusals) is tested
+internal/people                     84  -- what is left is the write's own failure paths (Chmod, Sync, Close, Rename) and one flock error, each needing a seam that would exist only to be broken
 internal/protocol   100
 internal/ready       83
 internal/sandbox                  77

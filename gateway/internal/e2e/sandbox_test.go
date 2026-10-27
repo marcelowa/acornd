@@ -23,9 +23,9 @@ func TestForcedNoSandboxRefusesInsteadOfFallingBack(t *testing.T) {
 	notSandbox(t)
 	s := start(t)
 	c := s.client()
-	c.waitForConversation("general")
+	c.waitForConversation("personal")
 
-	got := c.state("general")
+	got := c.state("personal")
 	if got.Sandbox.Tools {
 		t.Errorf("tools must not be available when the sandbox tier is forced off, got %+v", got.Sandbox)
 	}
@@ -53,9 +53,9 @@ func TestAMicroVMSandboxCannotReachPrivateNetworks(t *testing.T) {
 
 	s := start(t, withScript(privateProbeRule(address, port, "probed-private")))
 	c := s.client()
-	root := c.waitForConversation("general")
-	c.prompt("general", root, "reach the private network")
-	output := c.waitForText("general", root, "probed-private").lastToolResult()
+	root := c.waitForConversation("personal")
+	c.prompt("personal", root, "reach the private network")
+	output := c.waitForText("personal", root, "probed-private").lastToolResult()
 
 	if want := fmt.Sprintf("%s:%d closed", address, port); !strings.Contains(output, want) {
 		t.Fatalf("the microVM reached this machine's private address, want %q in %q", want, output)
@@ -84,10 +84,10 @@ func TestAMicroVMSandboxWithTheGrantReachesPrivateNetworks(t *testing.T) {
 	c := s.client()
 	// The grant is recorded before the first prompt, so the sandbox that runs the probe is the one
 	// built with it: a grant applied later is a restart, and this is about the policy itself.
-	c.post("/api/workspaces/general/update", map[string]any{"private": true}, nil)
-	root := c.waitForConversation("general")
-	c.prompt("general", root, "reach the private network")
-	output := c.waitForText("general", root, "probed-private").lastToolResult()
+	c.post("/api/workspaces/personal/update", map[string]any{"private": true}, nil)
+	root := c.waitForConversation("personal")
+	c.prompt("personal", root, "reach the private network")
+	output := c.waitForText("personal", root, "probed-private").lastToolResult()
 
 	if want := fmt.Sprintf("%s:%d open", address, port); !strings.Contains(output, want) {
 		t.Fatalf("the grant was recorded and the sandbox still cannot reach it, want %q in %q", want, output)

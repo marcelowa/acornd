@@ -15,6 +15,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -26,9 +27,10 @@ import (
 	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 )
 
-// GeneralWorkspaceName is where conversations land when nothing else is chosen. It exists
-// in every install.
-const GeneralWorkspaceName = "general"
+// PersonalWorkspaceName is the install's own workspace: the one the owner lands on when nothing else is
+// chosen, the one that cannot be removed, and the name every install has exactly one of. It was called
+// "general" because there was one workspace; ADR 0032 §9 renamed it when there was more than one person.
+const PersonalWorkspaceName = "personal"
 
 // DefaultWorkspacesDir is where workspaces are created. It is deliberately outside the
 // hidden installation folder: this is the reader's own content, and it should be somewhere
@@ -84,9 +86,40 @@ type Workspace struct {
 	// workspace can run another acornfall with its own bwrap engine and network. A
 	// pointer because true is a decision and absent is not.
 	DisableDevices *bool `json:"disable_devices,omitempty"`
+	// Members is who may use this workspace: email addresses, lowercase. Being a member is the whole of it
+	// — there are no roles inside one, because ADR 0032 gives two and both are install-level. A workspace
+	// with no members belongs to nobody, which is the state every workspace was in before there were
+	// people, and which the owner's own claim fills in.
+	Members []string `json:"members,omitempty"`
 	// Running is runtime state, never stored: a persisted `true` would be a claim about a
 	// process that does not exist after a restart.
 	Running bool `json:"-"`
+}
+
+// ErrNoWorkspace is "there is no workspace here for you": it does not exist, or it is not one you are a
+// member of. The edge answers 404 for both, because a status that told them apart would let a person
+// enumerate the workspaces they cannot see (ADR 0032 §4).
+var ErrNoWorkspace = errors.New("no workspace")
+
+// Caller is who a request is from, in control's own words: the install's owner, or a person. The edge
+// translates the proof it obtained into this shape, because ADR 0002 keeps the transport's types out of
+// the domain and control is what owns identity, resources and policy (ADR 0001).
+type Caller struct {
+	Owner bool
+	Email string
+}
+
+// Allows reports whether a caller may use this workspace.
+//
+// Being a member is the whole of it: it is not a read where a member writes, and it is not a role. The
+// owner is not special here — ADR 0032 has them own the install, not other people's conversations — and
+// the one exception is an install where no owner has been claimed, which is the machine talking to
+// itself before anybody is named.
+func (w Workspace) Allows(caller Caller) bool {
+	if strings.TrimSpace(caller.Email) == "" {
+		return caller.Owner
+	}
+	return slices.Contains(w.Members, strings.ToLower(caller.Email))
 }
 
 // NetworkOff is the one non-default value Network has today.
@@ -208,6 +241,10 @@ type WorkspacesOptions struct {
 	// DisableVMNesting is the install default from --disable-vm-nesting: a workspace's
 	// sandbox nests when the engine and the machine can, unless a workspace refuses it.
 	DisableVMNesting bool
+	// OwnerEmail is the install owner's address, from the book of people, or empty when nobody has claimed
+	// it. It exists for one decision: a workspace that predates people is the owner's, and recording that
+	// is what stops turning people on from locking the owner out of everything they had.
+	OwnerEmail string
 }
 
 // Workspaces is the install: a registry of workspaces and their started Controls.
@@ -267,7 +304,7 @@ func (w *Workspaces) Dir() string {
 	return w.dir
 }
 
-// Open loads the registry, seeding the general workspace on first run, and starts it so
+// Open loads the registry, seeding the install's own workspace on first run, and starts it so
 // the interface has somewhere to land.
 func (w *Workspaces) Open(ctx context.Context) error {
 	if err := w.loadRegistry(); err != nil {
@@ -279,10 +316,13 @@ func (w *Workspaces) Open(ctx context.Context) error {
 	if err := w.migrate(); err != nil {
 		return err
 	}
-	if _, err := w.Ensure(ctx, GeneralWorkspaceName); err != nil {
-		// Logged, not fatal: the general workspace is where a client lands, but a client can
+	if err := w.nameTheOwnersWorkspaces(); err != nil {
+		return err
+	}
+	if _, err := w.Ensure(ctx, PersonalWorkspaceName); err != nil {
+		// Logged, not fatal: the install's own workspace is where a client lands, but a client can
 		// still be told what is wrong with it. Exiting here would leave nothing to talk to.
-		workerpool.Log("general workspace: %v", err)
+		workerpool.Log("%s workspace: %v", PersonalWorkspaceName, err)
 	}
 	go w.evictIdle(ctx)
 	return nil
@@ -331,6 +371,105 @@ func (w *Workspaces) List() []Workspace {
 		return list[i].Name < list[j].Name
 	})
 	return list
+}
+
+// ListFor answers the workspaces a caller may see: every one of them for the owner, and only their own for
+// a person. The owner sees the install because they administer it; that is a list of names, not a
+// transcript from inside any of them.
+func (w *Workspaces) ListFor(caller Caller) []Workspace {
+	if caller.Owner {
+		return w.List()
+	}
+	visible := make([]Workspace, 0)
+	for _, workspace := range w.List() {
+		if workspace.Allows(caller) {
+			visible = append(visible, workspace)
+		}
+	}
+	return visible
+}
+
+// personal answers the name of the caller's own workspace, making it if they have none.
+//
+// It is made on the first request rather than at sign-in because that request is the sign-in: nobody gets a
+// workspace they never showed up for, and nothing has to remember that the making was owed.
+func (w *Workspaces) personal(caller Caller) (string, error) {
+	if caller.Owner || strings.TrimSpace(caller.Email) == "" {
+		return PersonalWorkspaceName, nil
+	}
+	// One workspace with exactly one member, that member being this person. It is derived rather than
+	// flagged, because a membership list is a fact and a flag is a claim that can disagree with it.
+	for _, workspace := range w.List() {
+		if len(workspace.Members) == 1 && workspace.Members[0] == strings.ToLower(caller.Email) {
+			return workspace.Name, nil
+		}
+	}
+	created, err := w.CreatePersonal(caller.Email)
+	if err != nil {
+		return "", err
+	}
+	return created.Name, nil
+}
+
+// CreatePersonal makes somebody's own workspace: named after their address, one member, in the workspaces
+// folder like any other.
+//
+// The name is theirs and the console never shows it — the label is "Personal" — but a name has to be unique
+// in one registry, so a second Ana becomes ana-2 rather than somebody's workspace going missing.
+func (w *Workspaces) CreatePersonal(email string) (Workspace, error) {
+	address := strings.ToLower(strings.TrimSpace(email))
+	if address == "" {
+		return Workspace{}, errors.New("a personal workspace needs an owner's address")
+	}
+	name, err := w.freeName(handle(address))
+	if err != nil {
+		return Workspace{}, err
+	}
+	path := filepath.Join(w.Dir(), name)
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return Workspace{}, err
+	}
+	workspace := Workspace{Name: name, Path: path, Title: "Personal", Members: []string{address}}
+	if err := w.Add(workspace); err != nil {
+		return Workspace{}, err
+	}
+	return workspace, nil
+}
+
+// freeName is the first name that is not taken: ana, then ana-2, then ana-3. A cap rather than a loop that
+// might not end, because a registry with a thousand Anas is a problem to look at rather than to keep trying.
+func (w *Workspaces) freeName(base string) (string, error) {
+	for attempt := 1; attempt <= 100; attempt++ {
+		name := base
+		if attempt > 1 {
+			name = fmt.Sprintf("%s-%d", base, attempt)
+		}
+		if _, taken := w.Get(name); !taken {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("no free workspace name for %q after 100 tries", base)
+}
+
+// handle is the readable part of an address, reduced to what a folder name and a workspace name allow. It is
+// derived rather than asked for: the owner names people, and a form field for "what should my folder be
+// called" is a question nobody wants to answer twice.
+func handle(email string) string {
+	local, _, _ := strings.Cut(email, "@")
+	var cleaned strings.Builder
+	for _, r := range strings.ToLower(local) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '-', r == '_', r == '+':
+			cleaned.WriteRune(r)
+		default:
+			cleaned.WriteRune('-')
+		}
+	}
+	name := strings.Trim(cleaned.String(), "-.")
+	if name == "" {
+		return "personal"
+	}
+	return name
 }
 
 // Get returns one workspace by name.
@@ -460,8 +599,8 @@ func (c *Control) discardSandbox(workspacePath string) {
 // Remove forgets a workspace. It never touches the folder or the history, the same way
 // deleting a conversation is a tombstone rather than a delete.
 func (w *Workspaces) Remove(ctx context.Context, name string) error {
-	if name == GeneralWorkspaceName {
-		return errors.New("the general workspace cannot be removed")
+	if name == PersonalWorkspaceName {
+		return fmt.Errorf("the %s workspace cannot be removed: it is the one this install lands on", PersonalWorkspaceName)
 	}
 	w.mu.Lock()
 	workspace, exists := w.registry[name]
@@ -492,10 +631,10 @@ func (w *Workspaces) Remove(ctx context.Context, name string) error {
 }
 
 // Ensure returns the Control for a workspace, starting its worker if this is the first
-// use. The general workspace cannot be missing; any other name must be registered.
+// use. The install's own workspace cannot be missing; any other name must be registered.
 func (w *Workspaces) Ensure(ctx context.Context, name string) (*Control, error) {
 	if name == "" {
-		name = GeneralWorkspaceName
+		name = PersonalWorkspaceName
 	}
 	workspace, control, starter, known, closed := w.lookup(name)
 	if closed {
@@ -790,14 +929,22 @@ func (w *Workspaces) noDefinition(name string) bool {
 }
 
 // Route finds the workspace a request is about and the control that serves it.
-func (w *Workspaces) Route(ctx context.Context, workspaceName string) (Workspace, *Control, error) {
+func (w *Workspaces) Route(ctx context.Context, caller Caller, workspaceName string) (Workspace, *Control, error) {
 	name := workspaceName
 	if name == "" {
-		name = GeneralWorkspaceName
+		// "The workspace" meant one workspace when there was one owner. Now it means the caller's own, and
+		// for a person that is their personal workspace, made the first time they ask (ADR 0032 §3, §9).
+		own, err := w.personal(caller)
+		if err != nil {
+			return Workspace{}, nil, err
+		}
+		name = own
 	}
 	workspace, ok := w.Get(name)
-	if !ok {
-		return Workspace{}, nil, fmt.Errorf("no workspace %q", name)
+	// One refusal for both, deliberately: a caller who is not a member learns nothing about whether the
+	// workspace exists.
+	if !ok || !workspace.Allows(caller) {
+		return Workspace{}, nil, fmt.Errorf("%w %q", ErrNoWorkspace, name)
 	}
 	control, err := w.Ensure(ctx, name)
 	if err != nil {
@@ -828,7 +975,7 @@ type Progress struct {
 // failed. It never starts anything, so the interface can ask this while a start is in flight.
 func (w *Workspaces) Progress(name string) Progress {
 	if name == "" {
-		name = GeneralWorkspaceName
+		name = PersonalWorkspaceName
 	}
 	w.mu.RLock()
 	control := w.controls[name]
@@ -898,7 +1045,7 @@ func (w *Workspaces) idleFor(name string) time.Duration {
 	return time.Since(at)
 }
 
-// evictIdle stops workers nobody is watching. The general workspace is kept: it is where a
+// evictIdle stops workers nobody is watching. The install's own workspace is kept: it is where a
 // fresh client lands, and starting it is the first thing every visit does.
 func (w *Workspaces) evictIdle(ctx context.Context) {
 	ticker := time.NewTicker(evictionSweep)
@@ -931,7 +1078,7 @@ func (w *Workspaces) evictCandidates() []*Control {
 	defer w.mu.Unlock()
 	var stopping []*Control
 	for name, control := range w.controls {
-		if name == GeneralWorkspaceName {
+		if name == PersonalWorkspaceName {
 			continue
 		}
 		// A workspace that runs something keeps running: its sandbox's processes die with it,
@@ -1068,7 +1215,10 @@ func (w *Workspaces) loadRegistry() error {
 	if err := w.resolveDir(file.WorkspacesDir); err != nil {
 		return err
 	}
-	return w.ensureGeneral()
+	if err := w.renameGeneralToPersonal(); err != nil {
+		return err
+	}
+	return w.ensurePersonal()
 }
 
 // resolveDir decides where workspaces live: the flag for this run, then what the file recorded,
@@ -1097,22 +1247,81 @@ func (w *Workspaces) resolveDir(recorded string) error {
 	return nil
 }
 
-// ensureGeneral makes the general workspace on a first run, then repairs a registry that was
-// hand-edited into two: exactly one workspace is general.
-func (w *Workspaces) ensureGeneral() error {
-	if _, ok := w.registry[GeneralWorkspaceName]; !ok {
-		// First run: the general workspace is a workspace like any other, created in the
-		// workspaces folder under its own name. An install that has one already keeps it where
-		// it was, because the registry says where it is.
-		absolute, err := filepath.Abs(filepath.Join(w.dir, GeneralWorkspaceName))
+// oldWorkspaceName is what the install's own workspace was called before ADR 0032 §9.
+const oldWorkspaceName = "general"
+
+// renameGeneralToPersonal moves an install onto the name the ADR chose: the record, and the whole state folder
+// with it.
+//
+// The folder has to travel. A workspace's storage, its settings and its drafts live under
+// `<data-dir>/state/<name>/`, so a rename that moved the record and left the folder would present every
+// conversation as lost — which is what ADR 0011's first attempt at moving one of those files did, one
+// directory down.
+func (w *Workspaces) renameGeneralToPersonal() error {
+	w.mu.Lock()
+	legacy, found := w.registry[oldWorkspaceName]
+	_, taken := w.registry[PersonalWorkspaceName]
+	w.mu.Unlock()
+	switch {
+	case !found:
+		return nil
+	case taken:
+		// Both names exist: a registry somebody edited, or an install that made the new one already. Nothing
+		// is moved, because guessing which of the two holds the real history is how a transcript is lost.
+		workerpool.Log("workspaces: %q and %q both exist, so nothing was renamed; %q is kept as an ordinary workspace", oldWorkspaceName, PersonalWorkspaceName, oldWorkspaceName)
+		return nil
+	}
+	if err := w.moveState(oldWorkspaceName, PersonalWorkspaceName); err != nil {
+		return err
+	}
+	w.mu.Lock()
+	legacy.Name = PersonalWorkspaceName
+	legacy.Title = "Personal"
+	if len(legacy.Members) == 0 && strings.TrimSpace(w.opts.OwnerEmail) != "" {
+		legacy.Members = []string{strings.ToLower(strings.TrimSpace(w.opts.OwnerEmail))}
+	}
+	delete(w.registry, oldWorkspaceName)
+	w.registry[PersonalWorkspaceName] = legacy
+	w.mu.Unlock()
+	workerpool.Log("workspaces: renamed %q to %q, with its state folder", oldWorkspaceName, PersonalWorkspaceName)
+	return w.persist()
+}
+
+// moveState renames one workspace's state folder. One rename, so it either happened or it did not; a folder
+// that is not there is not a failure, because a workspace nobody has opened has no state yet.
+func (w *Workspaces) moveState(from, to string) error {
+	source := filepath.Join(w.opts.DataDir, "state", from)
+	target := filepath.Join(w.opts.DataDir, "state", to)
+	switch _, err := os.Stat(source); {
+	case errors.Is(err, os.ErrNotExist):
+		return nil
+	case err != nil:
+		return err
+	}
+	if _, err := os.Stat(target); err == nil {
+		// Refused rather than merged: two folders of conversations under one name is a question only a person
+		// can answer, and boot says so instead of picking one.
+		return fmt.Errorf("state/%s is in the way of renaming state/%s: move one aside and start again", to, from)
+	}
+	return os.Rename(source, target)
+}
+
+// ensurePersonal makes the install's own workspace on a first run, then repairs a registry that was
+// hand-edited into two: exactly one workspace is the install's own.
+func (w *Workspaces) ensurePersonal() error {
+	if _, ok := w.registry[PersonalWorkspaceName]; !ok {
+		// First run: the install's own workspace is a workspace like any other, created in the
+		// workspaces folder under its own name. An install that has one already keeps it where it was,
+		// because the registry says where it is.
+		absolute, err := filepath.Abs(filepath.Join(w.dir, PersonalWorkspaceName))
 		if err != nil {
 			return err
 		}
 		if err := os.MkdirAll(absolute, 0o755); err != nil {
 			return err
 		}
-		w.registry[GeneralWorkspaceName] = Workspace{
-			Name:    GeneralWorkspaceName,
+		w.registry[PersonalWorkspaceName] = Workspace{
+			Name:    PersonalWorkspaceName,
 			Path:    absolute,
 			Title:   filepath.Base(absolute),
 			General: true,
@@ -1121,7 +1330,7 @@ func (w *Workspaces) ensureGeneral() error {
 			return err
 		}
 	}
-	// Exactly one general workspace: a registry hand-edited into two is repaired by keeping one and
+	// Exactly one install workspace: a registry hand-edited into two is repaired by keeping one and
 	// clearing the rest.
 	w.exactlyOneGeneral()
 	return nil
@@ -1139,9 +1348,9 @@ func (w *Workspaces) exactlyOneGeneral() {
 		switch {
 		case keeper == "":
 			keeper = name
-		case name == GeneralWorkspaceName:
+		case name == PersonalWorkspaceName:
 			keeper = name
-		case keeper != GeneralWorkspaceName && name < keeper:
+		case keeper != PersonalWorkspaceName && name < keeper:
 			keeper = name
 		}
 	}
@@ -1167,11 +1376,38 @@ func (w *Workspaces) persist() error {
 	return SaveRegistryFile(file)
 }
 
+// nameTheOwnersWorkspaces gives an unnamed workspace to the install's owner.
+//
+// Before there were people, every conversation in this registry was the owner's, so this records a fact
+// rather than making a grant. Without it, the first boot with a door would hide every existing workspace
+// from the person at the keyboard — the one outcome nobody would guess from an upgrade.
+func (w *Workspaces) nameTheOwnersWorkspaces() error {
+	owner := strings.ToLower(strings.TrimSpace(w.opts.OwnerEmail))
+	if owner == "" {
+		return nil
+	}
+	w.mu.Lock()
+	changed := false
+	for name, workspace := range w.registry {
+		if len(workspace.Members) > 0 {
+			continue
+		}
+		workspace.Members = []string{owner}
+		w.registry[name] = workspace
+		changed = true
+	}
+	w.mu.Unlock()
+	if !changed {
+		return nil
+	}
+	return w.persist()
+}
+
 // migrate moves a single-workspace install onto the workspace layout: one storage and one
-// settings file, moved into the general workspace's state directory. Nothing is rewritten
+// settings file, moved into the install's own workspace's state directory. Nothing is rewritten
 // inside them, so every conversation appears exactly where it was.
 func (w *Workspaces) migrate() error {
-	state := filepath.Join(w.opts.DataDir, "state", GeneralWorkspaceName)
+	state := filepath.Join(w.opts.DataDir, "state", PersonalWorkspaceName)
 	// The write-ahead log travels with its database. Moving one without the other loses
 	// every commit that had not been checkpointed and leaves megabytes behind.
 	moves := []struct{ from, to string }{
@@ -1191,7 +1427,7 @@ func (w *Workspaces) migrate() error {
 			return err
 		}
 		if err := os.Rename(move.from, move.to); err != nil {
-			return fmt.Errorf("moving %s into the general workspace: %w", move.from, err)
+			return fmt.Errorf("moving %s into the %s workspace: %w", move.from, PersonalWorkspaceName, err)
 		}
 		workerpool.Log("migrated %s to %s", move.from, move.to)
 	}

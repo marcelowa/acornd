@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/acornfall/acornfall/gateway/internal/identity"
 	"github.com/acornfall/acornfall/gateway/internal/update"
 )
 
@@ -58,8 +59,8 @@ With nothing running, the update is written to disk and takes effect at the next
 		logFatal(err)
 	}
 	address := net.JoinHostPort(*host, strconv.Itoa(*port))
-	if gatewayAnswers(address) {
-		runUpdateThroughGateway(address, *checkOnly, *assumeYes, *stopRuns)
+	if gatewayAnswers(dir, address) {
+		runUpdateThroughGateway(dir, address, *checkOnly, *assumeYes, *stopRuns)
 		return
 	}
 	runUpdateOffline(dir, *checkOnly, *assumeYes)
@@ -67,9 +68,14 @@ With nothing running, the update is written to disk and takes effect at the next
 
 // gatewayAnswers is the shortest question that says whether the update can be drained and
 // restarted for real: the status endpoint answers without doing anything.
-func gatewayAnswers(address string) bool {
+func gatewayAnswers(dir, address string) bool {
+	request, err := http.NewRequest(http.MethodGet, "http://"+address+"/api/update/status", nil)
+	if err != nil {
+		return false
+	}
+	prove(request, dir)
 	client := &http.Client{Timeout: 2 * time.Second}
-	response, err := client.Get("http://" + address + "/api/update/status")
+	response, err := client.Do(request)
 	if err != nil {
 		return false
 	}
@@ -84,8 +90,8 @@ type updateStatus struct {
 	Available bool   `json:"available"`
 }
 
-func runUpdateThroughGateway(address string, checkOnly, assumeYes, stopRuns bool) {
-	status, err := gatewayUpdate(address, "/api/update/check", nil)
+func runUpdateThroughGateway(dir, address string, checkOnly, assumeYes, stopRuns bool) {
+	status, err := gatewayUpdate(dir, address, "/api/update/check", nil)
 	if err != nil {
 		logFatal(err)
 	}
@@ -97,7 +103,7 @@ func runUpdateThroughGateway(address string, checkOnly, assumeYes, stopRuns bool
 	if checkOnly || !approved(status.Latest, assumeYes) {
 		return
 	}
-	applyUpdate(address, status.Latest, stopRuns)
+	applyUpdate(dir, address, status.Latest, stopRuns)
 }
 
 // approved is the question, and the answer. An unattended run says yes by asking for --yes.
@@ -116,12 +122,12 @@ func approved(latest string, assumeYes bool) bool {
 }
 
 // applyUpdate asks the gateway to install one release, with what to do about work in flight.
-func applyUpdate(address, tag string, stopRuns bool) {
+func applyUpdate(dir, address, tag string, stopRuns bool) {
 	drain := "wait"
 	if stopRuns {
 		drain = "stop"
 	}
-	_, err := gatewayUpdate(address, "/api/update/apply", map[string]string{"tag": tag, "drain": drain})
+	_, err := gatewayUpdate(dir, address, "/api/update/apply", map[string]string{"tag": tag, "drain": drain})
 	if err != nil {
 		if errors.Is(err, errRunsActive) && !stopRuns {
 			logFatal(fmt.Errorf("%w (rerun with --stop-runs to stop them)", err))
@@ -136,7 +142,7 @@ var errRunsActive = errors.New("runs are active")
 
 // gatewayUpdate is one JSON call to the running gateway, with the answer decoded into the same
 // status the interface reads.
-func gatewayUpdate(address, path string, body any) (updateStatus, error) {
+func gatewayUpdate(dir, address, path string, body any) (updateStatus, error) {
 	var payload io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -152,6 +158,7 @@ func gatewayUpdate(address, path string, body any) (updateStatus, error) {
 	if body != nil {
 		request.Header.Set("content-type", "application/json")
 	}
+	prove(request, dir)
 	// A check reaches the network, so it waits longer than a status call would.
 	client := &http.Client{Timeout: 60 * time.Second}
 	response, err := client.Do(request)
@@ -256,4 +263,18 @@ func confirmYes(prompt string) (bool, error) {
 		return false, nil
 	}
 	return false, nil
+}
+
+// prove adds the install's token when it has one. The command line is the owner, and a console with
+// people refuses a request with no proof; an install with no token file is the single-owner install
+// ADR 0020 describes, and it expects no header at all.
+func prove(request *http.Request, dir string) {
+	if dir == "" {
+		return
+	}
+	token, err := identity.ReadToken(dir)
+	if err != nil {
+		return
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
 }

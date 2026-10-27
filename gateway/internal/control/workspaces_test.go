@@ -65,8 +65,18 @@ func TestARegistryFromAnOlderBuildIsRewrittenWithoutOldKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reloaded.Workspaces) != 2 || reloaded.Workspaces[1].Path != filepath.Join(dir, "old") {
-		t.Errorf("the rewrite lost something: %+v", reloaded.Workspaces)
+	// By name rather than by position: the file is sorted by name, and an index assertion silently changes
+	// meaning the day a workspace is renamed.
+	if len(reloaded.Workspaces) != 2 {
+		t.Fatalf("the rewrite lost something: %+v", reloaded.Workspaces)
+	}
+	found := map[string]string{}
+	for _, workspace := range reloaded.Workspaces {
+		found[workspace.Name] = workspace.Path
+	}
+	// The record moved to the new name; the folder it points at is the one it always had.
+	if found["old"] != filepath.Join(dir, "old") || found["personal"] != filepath.Join(dir, "general") {
+		t.Errorf("the rewrite lost something: %+v", found)
 	}
 }
 

@@ -77,7 +77,7 @@ async function showConversationWithContent(page) {
 	// its row: the list is the app's, and it is not the same instant as the answer.
 	const target =
 		(await inPage(page, async () => {
-			const rows = await (await fetch("/api/workspaces/general/conversations")).json();
+			const rows = await (await fetch("/api/workspaces/personal/conversations")).json();
 			const withContent = (rows ?? []).find(
 				(row) => !row.hidden && row.parent === undefined && row.lastEntryId !== "",
 			);
@@ -115,9 +115,11 @@ try {
 	const problems = [];
 	page.on("console", (message) => {
 		if (message.type() !== "error") return;
-		// The suite asks the server for one refusal on purpose (a workspace name that is a
-		// path). The browser logs the 409; the app shows it in the error strip.
-		if (/Failed to load resource.*409/.test(message.text())) return;
+		// The suite asks the server for refusals on purpose: a workspace name that is a path, and a
+		// conversation the worker does not know. The browser logs the status either way — a conflict is a
+		// 409, and something that is not there is a 404, which is what a non-member and a missing
+		// workspace both answer (ADR 0032 §4) — and the app shows it in the error strip.
+		if (/Failed to load resource.*(404|409)/.test(message.text())) return;
 		problems.push(`console: ${message.text()}`);
 	});
 	page.on("pageerror", (error) => problems.push(`page: ${error.message}`));
@@ -522,7 +524,7 @@ try {
 		check("the new conversation is the one in view", created !== "", created);
 		if (created !== "") {
 			await page.evaluate(async (id) => {
-				await fetch(`/api/workspaces/general/conversations/${id}/hide`, {
+				await fetch(`/api/workspaces/personal/conversations/${id}/hide`, {
 					method: "POST",
 					headers: { "content-type": "application/json" },
 					body: JSON.stringify({ hidden: true }),
@@ -1102,7 +1104,7 @@ try {
 	// part of the check exists for.
 	const target =
 		(await inPage(page, async () => {
-			const rows = await (await fetch("/api/workspaces/general/conversations")).json();
+			const rows = await (await fetch("/api/workspaces/personal/conversations")).json();
 			const row = (rows ?? []).find(
 				(candidate) => !candidate.hidden && candidate.parent === undefined,
 			);
@@ -1216,7 +1218,7 @@ try {
 	}
 
 	const commandCount = await page.evaluate(async () => {
-		const body = await (await fetch("/api/workspaces/general/commands")).json();
+		const body = await (await fetch("/api/workspaces/personal/commands")).json();
 		return (body.commands ?? []).length;
 	});
 	if (commandCount > 0) {
@@ -1325,7 +1327,7 @@ try {
 			.catch(() => false);
 		check("coming back lands on the draft again", back, await composerText());
 		await page.evaluate(async (id) => {
-			await fetch(`/api/workspaces/general/conversations/${id}/hide`, {
+			await fetch(`/api/workspaces/personal/conversations/${id}/hide`, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify({ hidden: true }),
@@ -1428,7 +1430,7 @@ try {
 	// 9. A conversation the worker no longer knows is a refusal, not a white screen: the
 	// rail stays up, and the strip names the id that failed. The final error check below is
 	// what would have caught the crash this replaces.
-	await page.goto(`${url}/c/general/does-not-exist`, { waitUntil: "domcontentloaded" });
+	await page.goto(`${url}/c/personal/does-not-exist`, { waitUntil: "domcontentloaded" });
 	await page.waitForSelector("[data-slot=conversation-list]", { timeout: 15000 });
 	await page
 		.waitForFunction(
@@ -1461,7 +1463,7 @@ try {
 	// that kept offering to save a tool secret as a login. The opt-outs stay for the managers that
 	// read them, but the field's own type is what no manager classifies.
 	await page.setViewport({ width: 1400, height: 900 });
-	await page.goto(`${url}/settings/secrets?workspace=general`, { waitUntil: "networkidle2" });
+	await page.goto(`${url}/settings/secrets?workspace=personal`, { waitUntil: "networkidle2" });
 	await page.waitForSelector("[data-slot=secrets-section]", { timeout: 15000 });
 	await inPage(page, () => {
 		const button = [...document.querySelectorAll("[data-slot=secrets-section] button")].find(

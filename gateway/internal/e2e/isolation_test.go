@@ -14,7 +14,7 @@ import (
 func TestCleanupNamesOnlyTheSandboxesTheTestOwns(t *testing.T) {
 	root := t.TempDir()
 	workspaces := filepath.Join(root, "workspaces")
-	general := filepath.Join(root, "general")
+	general := filepath.Join(root, "personal")
 	owned := filepath.Join(workspaces, "second")
 	other := filepath.Join(root, "other-tests-workspaces", "theirs")
 	for _, dir := range []string{general, owned, other} {

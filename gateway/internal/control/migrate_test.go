@@ -3,6 +3,7 @@ package control
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -29,7 +30,7 @@ func TestAnOldInstallIsMovedIntoTheGeneralWorkspace(t *testing.T) {
 	if err := workspaces.migrate(); err != nil {
 		t.Fatal(err)
 	}
-	state := filepath.Join(dataDir, "state", GeneralWorkspaceName)
+	state := filepath.Join(dataDir, "state", PersonalWorkspaceName)
 	// The write-ahead log travels with its database: moving one without the other loses every
 	// commit that had not been checkpointed.
 	for _, name := range []string{"session.sqlite", "session.sqlite-wal", "session.sqlite-shm", "settings.json"} {
@@ -50,7 +51,7 @@ func TestAnOldInstallIsMovedIntoTheGeneralWorkspace(t *testing.T) {
 // wastes megabytes and invites the next reader to open the wrong one.
 func TestOrphanedSidecarsAreRemoved(t *testing.T) {
 	dataDir := t.TempDir()
-	state := filepath.Join(dataDir, "state", GeneralWorkspaceName)
+	state := filepath.Join(dataDir, "state", PersonalWorkspaceName)
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +160,7 @@ func TestUpdatingAWorkspaceThatIsNotThereIsRefused(t *testing.T) {
 // this call's to change.
 func TestAnUpdateCannotMoveTheGeneralFlag(t *testing.T) {
 	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: t.TempDir(), WorkspacesDir: t.TempDir()})
-	general := Workspace{Name: GeneralWorkspaceName, Path: t.TempDir(), General: true}
+	general := Workspace{Name: PersonalWorkspaceName, Path: t.TempDir(), General: true}
 	other := Workspace{Name: "other", Path: t.TempDir()}
 	workspaces.registry[general.Name] = general
 	workspaces.registry[other.Name] = other
@@ -172,7 +173,113 @@ func TestAnUpdateCannotMoveTheGeneralFlag(t *testing.T) {
 	if workspaces.registry["other"].General {
 		t.Error("an update should not make a second workspace general")
 	}
-	if !workspaces.registry[GeneralWorkspaceName].General {
+	if !workspaces.registry[PersonalWorkspaceName].General {
 		t.Error("the general workspace should still be general")
+	}
+}
+
+// The install's own workspace was called "general" while there was one workspace, and it is called
+// "personal" now that there are people (ADR 0032 §9). The record and the whole state folder move together.
+func TestTheGeneralWorkspaceBecomesPersonal(t *testing.T) {
+	dataDir := t.TempDir()
+	dir := filepath.Join(dataDir, "workspaces")
+	state := filepath.Join(dataDir, "state", "general")
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// The write-ahead log travels with its database: ADR 0011 records what moving one without the other cost.
+	for _, name := range []string{"session.sqlite", "session.sqlite-wal", "session.sqlite-shm", "settings.json", "drafts.json"} {
+		if err := os.WriteFile(filepath.Join(state, name), []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "general"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	registry := RegistryFile{
+		Path:          filepath.Join(dataDir, registryFile),
+		WorkspacesDir: dir,
+		Workspaces:    []Workspace{{Name: "general", Path: filepath.Join(dir, "general"), Title: "general", General: true}},
+	}
+	if err := SaveRegistryFile(registry); err != nil {
+		t.Fatal(err)
+	}
+
+	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: dataDir, WorkspacesDir: dir, OwnerEmail: "Me@Example.com"})
+	if err := workspaces.loadRegistry(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if _, ok := workspaces.registry["general"]; ok {
+		t.Error("the old name is still in the registry")
+	}
+	personal, ok := workspaces.registry[PersonalWorkspaceName]
+	if !ok {
+		t.Fatal("the install's own workspace is not called personal")
+	}
+	if personal.Title != "Personal" {
+		t.Errorf("title = %q, want the label the console shows", personal.Title)
+	}
+	if !slices.Equal(personal.Members, []string{"me@example.com"}) {
+		t.Errorf("members = %v, want the owner, lowercased", personal.Members)
+	}
+	// Everything the folder held is under the new name, and nothing is left behind.
+	for _, name := range []string{"session.sqlite", "session.sqlite-wal", "session.sqlite-shm", "settings.json", "drafts.json"} {
+		if _, err := os.Stat(filepath.Join(dataDir, "state", "personal", name)); err != nil {
+			t.Errorf("state/personal/%s is missing: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "state", "general")); err == nil {
+		t.Error("the old state folder is still there")
+	}
+	// And it is stored: the next boot reads the new name rather than doing this again.
+	reloaded := NewWorkspaces(WorkspacesOptions{DataDir: dataDir, WorkspacesDir: dir})
+	if err := reloaded.loadRegistry(); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if _, ok := reloaded.registry[PersonalWorkspaceName]; !ok {
+		t.Error("the rename was not written to the registry")
+	}
+}
+
+// A folder already sitting under the new name is a question only a person can answer, so boot says so instead
+// of merging two histories into one.
+func TestARenameIsRefusedWhenTheNewFolderIsTaken(t *testing.T) {
+	dataDir := t.TempDir()
+	for _, name := range []string{"general", "personal"} {
+		if err := os.MkdirAll(filepath.Join(dataDir, "state", name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: dataDir})
+	workspaces.registry = map[string]Workspace{
+		"general": {Name: "general", Path: "/w/general"},
+		"second":  {Name: "second", Path: "/w/second"},
+	}
+	if err := workspaces.renameGeneralToPersonal(); err == nil {
+		t.Fatal("a rename over an existing folder was allowed")
+	}
+	if _, ok := workspaces.registry["general"]; !ok {
+		t.Error("the record moved even though the folder did not")
+	}
+}
+
+// An install that already has both names is left alone: guessing which of the two holds the history is how a
+// transcript is lost.
+func TestBothNamesInTheRegistryIsLeftAlone(t *testing.T) {
+	dataDir := t.TempDir()
+	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: dataDir})
+	workspaces.registry = map[string]Workspace{
+		"general":  {Name: "general", Path: "/w/general"},
+		"personal": {Name: "personal", Path: "/w/personal", Members: []string{"me@example.com"}},
+	}
+	if err := workspaces.renameGeneralToPersonal(); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(workspaces.registry) != 2 {
+		t.Errorf("registry = %+v, want both kept", workspaces.registry)
+	}
+	if got := workspaces.registry["personal"].Members; !slices.Equal(got, []string{"me@example.com"}) {
+		t.Errorf("personal members = %v, want them untouched", got)
 	}
 }

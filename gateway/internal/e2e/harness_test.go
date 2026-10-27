@@ -341,7 +341,7 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	s.WorkspacesDir = filepath.Join(t.TempDir(), "workspaces")
 	// The general workspace is created where the product creates one: inside the workspaces
 	// folder, by name. Nothing points the gateway at a folder any more.
-	s.General = filepath.Join(s.WorkspacesDir, "general")
+	s.General = filepath.Join(s.WorkspacesDir, "personal")
 	for _, dir := range []string{s.DataDir, s.WorkspacesDir, s.General, s.SandboxState} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
@@ -840,7 +840,7 @@ type workspaceRef struct {
 	Name    string `json:"name"`
 	Path    string `json:"path"`
 	Title   string `json:"title"`
-	General bool   `json:"general"`
+	General bool   `json:"personal"`
 	// Engine is the sandbox engine the workspace was created with; empty means the install
 	// default.
 	Engine  string `json:"engine"`
@@ -1077,7 +1077,7 @@ func (c *client) createWorkspaceWith(name string, body map[string]any) state {
 	fields := map[string]any{"name": name}
 	maps.Copy(fields, body)
 	c.post("/api/workspaces", fields, nil)
-	return c.state("general")
+	return c.state("personal")
 }
 
 func (c *client) waitIdle(workspace, id string, timeout time.Duration) {

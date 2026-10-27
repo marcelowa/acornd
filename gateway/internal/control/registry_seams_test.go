@@ -17,14 +17,14 @@ import (
 func TestTheSidebarIsGeneralFirstThenByName(t *testing.T) {
 	workspaces := NewWorkspaces(WorkspacesOptions{WorkspacesDir: t.TempDir()})
 	workspaces.registry["zulu"] = Workspace{Name: "zulu", Path: "/z"}
-	workspaces.registry[GeneralWorkspaceName] = Workspace{Name: GeneralWorkspaceName, Path: "/g", General: true}
+	workspaces.registry[PersonalWorkspaceName] = Workspace{Name: PersonalWorkspaceName, Path: "/g", General: true}
 	workspaces.registry["alpha"] = Workspace{Name: "alpha", Path: "/a"}
 
 	names := make([]string, 0, 3)
 	for _, workspace := range workspaces.List() {
 		names = append(names, workspace.Name)
 	}
-	want := []string{GeneralWorkspaceName, "alpha", "zulu"}
+	want := []string{PersonalWorkspaceName, "alpha", "zulu"}
 	for index := range want {
 		if index >= len(names) || names[index] != want[index] {
 			t.Fatalf("order = %v, want %v", names, want)
@@ -70,14 +70,14 @@ func TestTheRegistryFileIsWrittenSorted(t *testing.T) {
 // behind the user's back.
 func TestEvictionSparesWhatIsStillInUse(t *testing.T) {
 	workspaces := NewWorkspaces(WorkspacesOptions{WorkspacesDir: t.TempDir()})
-	workspaces.registry[GeneralWorkspaceName] = Workspace{Name: GeneralWorkspaceName, General: true}
+	workspaces.registry[PersonalWorkspaceName] = Workspace{Name: PersonalWorkspaceName, General: true}
 	workspaces.registry["kept"] = Workspace{Name: "kept", KeepAlive: true}
 	workspaces.registry["fresh"] = Workspace{Name: "fresh"}
 	workspaces.registry["stale"] = Workspace{Name: "stale"}
 	workspaces.registry["running"] = Workspace{Name: "running"}
 	workspaces.registry["watched"] = Workspace{Name: "watched"}
 
-	for _, name := range []string{GeneralWorkspaceName, "kept", "fresh", "stale", "running", "watched"} {
+	for _, name := range []string{PersonalWorkspaceName, "kept", "fresh", "stale", "running", "watched"} {
 		workspaces.controls[name] = New(Options{Workspace: Workspace{Name: name, Path: t.TempDir()}, DataDir: t.TempDir()})
 		workspaces.used[name] = time.Now().Add(-time.Hour)
 	}
@@ -140,8 +140,8 @@ func TestAStaleRegistryIsRewrittenWithoutTheOldKeys(t *testing.T) {
 	path := filepath.Join(data, registryFile)
 	// `trusted` is the key this build no longer writes: a workspace record that still carries it
 	// is rewritten on load.
-	payload := `{"path":` + strconvQuote(path) + `,"workspaces":[{"name":"general","path":"` +
-		filepath.Join(dir, GeneralWorkspaceName) + `","general":true,"trusted":true}]}`
+	payload := `{"path":` + strconvQuote(path) + `,"workspaces":[{"name":"personal","path":"` +
+		filepath.Join(dir, PersonalWorkspaceName) + `","general":true,"trusted":true}]}`
 	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestAStaleRegistryIsRewrittenWithoutTheOldKeys(t *testing.T) {
 	if contains(string(written), `"trusted"`) {
 		t.Errorf("the key this build does not write should be gone: %s", written)
 	}
-	if _, ok := workspaces.registry[GeneralWorkspaceName]; !ok {
+	if _, ok := workspaces.registry[PersonalWorkspaceName]; !ok {
 		t.Error("rewriting should keep the workspaces that were read")
 	}
 }

@@ -111,7 +111,7 @@ func TestAWorkspaceIsFoundByNameOrSaidToBeMissing(t *testing.T) {
 	dir := t.TempDir()
 	registry := control.RegistryFile{Path: filepath.Join(dir, "workspaces.json")}
 	registry.Workspaces = append(registry.Workspaces,
-		control.Workspace{Name: "general", Path: filepath.Join(dir, "general"), General: true},
+		control.Workspace{Name: "personal", Path: filepath.Join(dir, "personal"), General: true},
 		control.Workspace{Name: "work", Path: filepath.Join(dir, "work")},
 	)
 	if err := control.SaveRegistryFile(registry); err != nil {
@@ -128,7 +128,7 @@ func TestAWorkspaceIsFoundByNameOrSaidToBeMissing(t *testing.T) {
 	if err == nil {
 		t.Fatal("a workspace that is not there should be an error")
 	}
-	if !strings.Contains(err.Error(), "general") || !strings.Contains(err.Error(), "work") {
+	if !strings.Contains(err.Error(), "personal") || !strings.Contains(err.Error(), "work") {
 		t.Errorf("the answer should list what there is: %v", err)
 	}
 	// A data folder with no registry at all says that, rather than naming nothing.

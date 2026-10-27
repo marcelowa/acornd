@@ -21,7 +21,7 @@ func TestWorkspacesAreIsolatedAndStartOnDemand(t *testing.T) {
 
 	// Nothing but general is running before anything asks for it.
 	c.createWorkspace("second")
-	after := c.state("general")
+	after := c.state("personal")
 	if len(after.Workspaces) != 2 {
 		t.Fatalf("expected two workspaces, got %+v", after.Workspaces)
 	}
@@ -52,11 +52,11 @@ func TestWorkspacesAreIsolatedAndStartOnDemand(t *testing.T) {
 	// The two histories stay apart. Conversation ids are the harness's own and are unique
 	// only within a workspace, so both workspaces can have a conversation "1" — which is why
 	// a route always names the workspace. What must not leak is the content.
-	first := c.state("general")
+	first := c.state("personal")
 	if len(first.Conversations) != 1 || first.Conversations[0].ID != "1" {
 		t.Fatalf("general should still have only its own root conversation, got %+v", first.Conversations)
 	}
-	generalView := c.view("general", first.Conversation.ID)
+	generalView := c.view("personal", first.Conversation.ID)
 	if strings.Contains(generalView.all(), "answered elsewhere") {
 		t.Errorf("a conversation in one workspace leaked into another:\n%s", generalView.all())
 	}
@@ -116,7 +116,7 @@ func TestRemovingAWorkspaceKeepsItsFolderAndHistory(t *testing.T) {
 	folder := filepath.Join(s.WorkspacesDir, "doomed")
 	c.post("/api/workspaces/doomed/remove", nil, nil)
 
-	after := c.state("general")
+	after := c.state("personal")
 	for _, workspace := range after.Workspaces {
 		if workspace.Name == "doomed" {
 			t.Fatalf("the workspace should be forgotten, got %+v", after.Workspaces)
@@ -135,9 +135,9 @@ func TestRemovingAWorkspaceKeepsItsFolderAndHistory(t *testing.T) {
 		}
 	}
 
-	if status, body := c.postStatus("/api/workspaces/general/remove", nil); status == 200 {
+	if status, body := c.postStatus("/api/workspaces/personal/remove", nil); status == 200 {
 		t.Error("the general workspace cannot be removed")
-	} else if !strings.Contains(body, "general") {
+	} else if !strings.Contains(body, "personal") {
 		t.Errorf("the refusal should name the workspace, got %q", body)
 	}
 }
@@ -166,9 +166,9 @@ func TestAWorkspacesOwnResourcesAreRead(t *testing.T) {
 		}),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
-	got := c.state("general")
+	got := c.state("personal")
 	// The workspace's own agent, beside the general one the worker ships.
 	if len(got.Agents) != 2 || got.Agents[0].Name != "general" || got.Agents[1].Name != "local-agent" {
 		t.Errorf("a workspace's agents should be offered, got %+v", got.Agents)
@@ -179,7 +179,7 @@ func TestAWorkspacesOwnResourcesAreRead(t *testing.T) {
 			Source string `json:"source"`
 		} `json:"commands"`
 	}
-	c.get("/api/workspaces/general/commands", &commands)
+	c.get("/api/workspaces/personal/commands", &commands)
 	found := false
 	for _, command := range commands.Commands {
 		if command.Name == "local-command" {
@@ -197,8 +197,8 @@ func TestAWorkspacesOwnResourcesAreRead(t *testing.T) {
 
 	// A prompt is what builds a system entry, so the prompt is where "what does the model see"
 	// is answerable.
-	c.prompt("general", root, "tidy up")
-	running := c.waitForText("general", root, "cleaned up")
+	c.prompt("personal", root, "tidy up")
+	running := c.waitForText("personal", root, "cleaned up")
 	if !strings.Contains(running.systemSections()["workspace-rules"], "WORKSPACE RULES MARKER") {
 		t.Errorf("a workspace's AGENTS.md should reach the prompt, got %q", running.systemSections()["workspace-rules"])
 	}
@@ -223,7 +223,7 @@ func TestTheTrustFlagIsGone(t *testing.T) {
 		t.Errorf("the refusal should say why, got %q", body)
 	}
 
-	status, body = c.postStatus("/api/workspaces/general/update", map[string]any{"trusted": false})
+	status, body = c.postStatus("/api/workspaces/personal/update", map[string]any{"trusted": false})
 	if status != http.StatusBadRequest {
 		t.Errorf("updating with a trust flag should be refused, got %d", status)
 	}
@@ -232,7 +232,7 @@ func TestTheTrustFlagIsGone(t *testing.T) {
 	}
 
 	// And the workspace it was aimed at is untouched and still serving.
-	if got := c.state("general"); got.Workspace.Name != "general" || !got.WorkerUp {
+	if got := c.state("personal"); got.Workspace.Name != "personal" || !got.WorkerUp {
 		t.Errorf("a refused update should change nothing, got %+v", got.Workspace)
 	}
 }
@@ -289,7 +289,7 @@ func TestAnOpeningWorkspaceSaysWhichStepItIsOn(t *testing.T) {
 		t.Fatalf("no step was ever reported while the workspace opened")
 	}
 	// And the list says the same thing, because that is what the rail reads.
-	after := c.state("general")
+	after := c.state("personal")
 	for _, workspace := range after.Workspaces {
 		if workspace.Name != "coming-up" {
 			continue
@@ -318,7 +318,7 @@ func TestAnUnknownEngineIsRefusedAndNamed(t *testing.T) {
 			t.Errorf("the refusal should name %q so the caller learns the choices, got %q", engine, body)
 		}
 	}
-	if got := c.state("general"); len(got.Workspaces) != 1 {
+	if got := c.state("personal"); len(got.Workspaces) != 1 {
 		t.Errorf("a refused create must leave the listing alone, got %d workspaces", len(got.Workspaces))
 	}
 }
@@ -331,7 +331,7 @@ func TestTheRoutesTheInterfaceReadsAnswer(t *testing.T) {
 	notSandbox(t)
 	s := start(t)
 	c := s.client()
-	root := c.waitForConversation("general")
+	root := c.waitForConversation("personal")
 
 	reads := map[string]func(json.RawMessage) error{
 		"/api/workspaces": func(payload json.RawMessage) error {

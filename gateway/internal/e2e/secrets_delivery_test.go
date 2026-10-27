@@ -73,15 +73,15 @@ func TestSecretsReachTheSandboxWithoutTheirValues(t *testing.T) {
 		),
 	)
 	c := s.client()
-	root := c.waitForConversation("general")
-	c.prompt("general", root, "show the token")
+	root := c.waitForConversation("personal")
+	c.prompt("personal", root, "show the token")
 
-	view := c.waitForText("general", root, "$MSB_SPIKE_TOKEN")
+	view := c.waitForText("personal", root, "$MSB_SPIKE_TOKEN")
 	if strings.Contains(view.all(), value) {
 		t.Fatalf("the value reached the transcript:\n%s", view.all())
 	}
 
-	state := c.state("general")
+	state := c.state("personal")
 	if state.Sandbox.SecretsProblem != "" {
 		t.Fatalf("the vault should be readable: %s", state.Sandbox.SecretsProblem)
 	}
@@ -103,7 +103,7 @@ func TestSecretsReachTheSandboxWithoutTheirValues(t *testing.T) {
 
 	// Rotation keeps the name, so the engine takes the new value live.
 	c.post("/api/secrets/SPIKE_TOKEN/rotate", map[string]any{"value": rotated}, nil)
-	after := c.state("general")
+	after := c.state("personal")
 	if after.Sandbox.SecretsRestart {
 		t.Error("rotating an existing secret should not need a restart")
 	}
@@ -123,16 +123,16 @@ func TestSecretsReachTheSandboxWithoutTheirValues(t *testing.T) {
 	// returns, the run settles, and the control restarts the sandbox then. This is the path
 	// the bug report took: the value has to be usable on the next turn, not never.
 	requests := make(chan string, 1)
-	go func() { requests <- c.waitForSecretRequest("general", root) }()
+	go func() { requests <- c.waitForSecretRequest("personal", root) }()
 	time.Sleep(200 * time.Millisecond)
-	c.prompt("general", root, "ask for the second token")
+	c.prompt("personal", root, "ask for the second token")
 	var requestID string
 	select {
 	case requestID = <-requests:
 	case <-time.After(10 * time.Second):
 		t.Fatal("the second secret request never reached the stream")
 	}
-	path := fmt.Sprintf("/api/workspaces/general/conversations/%s/secrets/%s", root, requestID)
+	path := fmt.Sprintf("/api/workspaces/personal/conversations/%s/secrets/%s", root, requestID)
 	status, body := c.do("POST", path, map[string]any{
 		"value":       "second-card-value",
 		"description": "another test token",
@@ -142,7 +142,7 @@ func TestSecretsReachTheSandboxWithoutTheirValues(t *testing.T) {
 	if status != 200 {
 		t.Fatalf("answer the second card: %d %s", status, body)
 	}
-	cardView := c.waitForText("general", root, "the second card finished")
+	cardView := c.waitForText("personal", root, "the second card finished")
 	if !strings.Contains(cardView.all(), "will continue automatically") {
 		t.Errorf("the tool should say the control will continue:\n%s", cardView.all())
 	}
@@ -151,7 +151,7 @@ func TestSecretsReachTheSandboxWithoutTheirValues(t *testing.T) {
 	// itself. The new turn's script rule is the automatic continuation.
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		added := c.state("general")
+		added := c.state("personal")
 		if !added.Sandbox.SecretsRestart && len(added.Sandbox.Secrets) == 2 {
 			break
 		}
@@ -160,21 +160,21 @@ func TestSecretsReachTheSandboxWithoutTheirValues(t *testing.T) {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	c.waitForText("general", root, "continued after the secret")
-	c.waitIdle("general", root, 60*time.Second)
+	c.waitForText("personal", root, "continued after the secret")
+	c.waitIdle("personal", root, 60*time.Second)
 
 	// The engine substitutes the placeholder for an allowed host: httpbin echoes the header
 	// back, so the real value is proof the network layer used it. This is the value leaving
 	// the sandbox in a request, which is what the secret is for; the guest never held it.
 	// It also proves the card's secret works after the restart.
-	c.prompt("general", root, "send the token to httpbin")
-	substituted := c.waitForText("general", root, "second-card-value")
+	c.prompt("personal", root, "send the token to httpbin")
+	substituted := c.waitForText("personal", root, "second-card-value")
 	if !strings.Contains(substituted.all(), "httpbin.org") {
 		t.Errorf("the response should be httpbin's echo:\n%s", substituted.all())
 	}
 
-	c.prompt("general", root, "show both tokens")
-	both := c.waitForText("general", root, "both shown")
+	c.prompt("personal", root, "show both tokens")
+	both := c.waitForText("personal", root, "both shown")
 	if !strings.Contains(both.all(), "one=[$MSB_SPIKE_TOKEN] two=[$MSB_SECOND_TOKEN]") {
 		t.Errorf("both placeholders should be in the environment after the restart:\n%s", both.all())
 	}

@@ -40,7 +40,7 @@ func TestTheDefaultModelIsCheckedWhereTheChoiceIsMade(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("a model the harness has: status %d (%s)", status, body)
 	}
-	state := c.state("general")
+	state := c.state("personal")
 	if state.DefaultModel.Provider != "faux" || state.DefaultModel.ModelID != "faux-1" {
 		t.Errorf("the state should carry the default, got %+v", state.DefaultModel)
 	}
@@ -51,7 +51,7 @@ func TestTheDefaultModelIsCheckedWhereTheChoiceIsMade(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("clearing the default: status %d (%s)", status, body)
 	}
-	if got := c.state("general").DefaultModel; got.Provider == "" || got.ModelID == "" {
+	if got := c.state("personal").DefaultModel; got.Provider == "" || got.ModelID == "" {
 		t.Errorf("a cleared default must fall back, got %+v", got)
 	}
 }
@@ -112,7 +112,7 @@ func TestASignInStartsOrIsRefused(t *testing.T) {
 		t.Fatalf("the answer should carry the auth id: %q", body)
 	}
 	// Still alive afterwards: a sign-in that fails is not a sign-in that crashes the server.
-	if got := c.state("general"); got.Workspace.Name == "" {
+	if got := c.state("personal"); got.Workspace.Name == "" {
 		t.Error("the gateway should still answer after a failed sign-in")
 	}
 

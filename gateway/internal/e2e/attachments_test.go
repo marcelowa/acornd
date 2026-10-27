@@ -16,7 +16,7 @@ func TestAnUploadedFileIsStagedAndAnsweredWithWhatAMessageCarries(t *testing.T) 
 	s := start(t)
 	c := s.client()
 
-	status, payload := c.uploadStatus("general", "notes.txt", "text/plain", []byte("what the file said"))
+	status, payload := c.uploadStatus("personal", "notes.txt", "text/plain", []byte("what the file said"))
 	if status != 201 {
 		t.Fatalf("status %d: %s", status, payload)
 	}
@@ -44,7 +44,7 @@ func TestAnUploadedFileIsStagedAndAnsweredWithWhatAMessageCarries(t *testing.T) 
 
 	// Two uploads of the same file are two attachments: the second must not reuse the first's id,
 	// or the two would be one file with two messages pointing at it.
-	_, second := c.uploadStatus("general", "notes.txt", "text/plain", []byte("what the file said"))
+	_, second := c.uploadStatus("personal", "notes.txt", "text/plain", []byte("what the file said"))
 	var another struct {
 		ID string `json:"id"`
 	}
@@ -65,19 +65,19 @@ func TestAnUploadThatCannotBeStagedSaysWhy(t *testing.T) {
 	s := start(t)
 	c := s.client()
 
-	status, payload := c.uploadStatus("general", "empty.txt", "text/plain", nil)
+	status, payload := c.uploadStatus("personal", "empty.txt", "text/plain", nil)
 	if status != 400 || !strings.Contains(string(payload), "empty") {
 		t.Errorf("an empty file: %d %s", status, payload)
 	}
 
 	tooBig := bytes.Repeat([]byte("x"), (10<<20)+1)
-	status, payload = c.uploadStatus("general", "big.bin", "application/octet-stream", tooBig)
+	status, payload = c.uploadStatus("personal", "big.bin", "application/octet-stream", tooBig)
 	if status != 413 {
 		t.Errorf("a file over the cap: %d %s", status, payload)
 	}
 
 	// A JSON body is not a multipart form, which is the mistake a script makes.
-	status, payload = c.do("POST", "/api/workspaces/general/attachments", map[string]any{"file": "not a file"})
+	status, payload = c.do("POST", "/api/workspaces/personal/attachments", map[string]any{"file": "not a file"})
 	if status != 400 || !strings.Contains(string(payload), "multipart") {
 		t.Errorf("a request that is not a form: %d %s", status, payload)
 	}

@@ -12,7 +12,7 @@ import (
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	ctl, err := s.controlFor(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	var body struct {
@@ -37,7 +37,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	authID, err := ctl.Login(r.Context(), body.ProviderID, authType)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started", "authId": authID})
@@ -46,7 +46,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	ctl, err := s.controlFor(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	var body struct {
@@ -60,7 +60,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := ctl.Logout(r.Context(), body.ProviderID); err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	writeJSON(w, http.StatusOK, ctl.State())
@@ -73,7 +73,7 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 func (s *Server) authAnswer(w http.ResponseWriter, r *http.Request) {
 	ctl, err := s.controlFor(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	var body struct {
@@ -90,7 +90,7 @@ func (s *Server) authAnswer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := ctl.AnswerAuth(r.Context(), body.AuthID, body.PromptID, body.Value, body.Cancelled); err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "answered"})
@@ -99,7 +99,7 @@ func (s *Server) authAnswer(w http.ResponseWriter, r *http.Request) {
 func (s *Server) authCancel(w http.ResponseWriter, r *http.Request) {
 	ctl, err := s.controlFor(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	var body struct {
@@ -109,7 +109,7 @@ func (s *Server) authCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := ctl.CancelAuth(r.Context(), body.AuthID); err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
