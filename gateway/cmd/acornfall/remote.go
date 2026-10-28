@@ -155,6 +155,9 @@ func applyRemote(ctx context.Context, dir, hostname, zoneName, apiToken string) 
 		if step.Created {
 			verb = "created"
 		}
+		if step.Moved {
+			verb = "pointed"
+		}
 		detail := ""
 		if step.Detail != "" {
 			detail = " (" + step.Detail + ")"

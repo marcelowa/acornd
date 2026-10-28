@@ -94,7 +94,10 @@ func (s State) Ready() bool {
 type Step struct {
 	Name    string `json:"name"`
 	Created bool   `json:"created"`
-	Detail  string `json:"detail,omitempty"`
+	// Moved is a piece that was already there and now says something else — a record re-pointed at a new
+	// tunnel is not created, and reporting it as kept would hide the one change a replacement makes.
+	Moved  bool   `json:"moved,omitempty"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // API is the part of Cloudflare this package uses, and nothing else. It is an interface so the plan can be
@@ -106,6 +109,7 @@ type API interface {
 	TunnelToken(ctx context.Context, account, tunnel string) (string, error)
 	TunnelIngress(ctx context.Context, account, tunnel string) (string, error)
 	SetTunnelIngress(ctx context.Context, account, tunnel, hostname, service string) error
+	UpdateCNAME(ctx context.Context, zone string, record DNSRecord, target string) (DNSRecord, error)
 	DNSRecords(ctx context.Context, zone, hostname string) ([]DNSRecord, error)
 	CreateCNAME(ctx context.Context, zone, hostname, target string) (DNSRecord, error)
 	IdentityProviders(ctx context.Context, account string) ([]IdentityProvider, error)
@@ -291,12 +295,24 @@ func (p *Provisioner) record(ctx context.Context, desired Desired, prior State, 
 	if err != nil {
 		return DNSRecord{}, Step{}, fmt.Errorf("listing dns records: %w", err)
 	}
+	target := tunnelID + ".cfargotunnel.com"
 	for _, record := range records {
-		if record.ID == prior.DNSRecordID || strings.EqualFold(record.Name, desired.Hostname) {
+		if record.ID != prior.DNSRecordID && !strings.EqualFold(record.Name, desired.Hostname) {
+			continue
+		}
+		// A record that exists is not a record that points here: the tunnel it names can be gone, which is what
+		// deleting one in the dashboard leaves behind, and what recreating one means — a tunnel's token cannot
+		// be rotated, so a new tunnel is how a leaked one is replaced. Found before it was fixed, by doing it.
+		if strings.EqualFold(record.Content, target) {
 			return record, Step{Name: "dns", Detail: record.Name}, nil
 		}
+		updated, err := p.API.UpdateCNAME(ctx, desired.ZoneID, record, target)
+		if err != nil {
+			return DNSRecord{}, Step{}, fmt.Errorf("pointing the dns record at the tunnel: %w", err)
+		}
+		return updated, Step{Name: "dns", Moved: true, Detail: record.Name + " → " + target}, nil
 	}
-	created, err := p.API.CreateCNAME(ctx, desired.ZoneID, desired.Hostname, tunnelID+".cfargotunnel.com")
+	created, err := p.API.CreateCNAME(ctx, desired.ZoneID, desired.Hostname, target)
 	if err != nil {
 		return DNSRecord{}, Step{}, fmt.Errorf("creating the dns record: %w", err)
 	}

@@ -143,6 +143,22 @@ func (c *Client) SetTunnelIngress(ctx context.Context, account, tunnel, hostname
 	return c.call(ctx, scopeTunnel, http.MethodPut, "/accounts/"+account+"/cfd_tunnel/"+tunnel+"/configurations", body, nil)
 }
 
+// UpdateCNAME points a record at a tunnel, keeping its proxied flag: a record that stops being proxied stops
+// being Access's, and the door vanishes with it.
+func (c *Client) UpdateCNAME(ctx context.Context, zone string, record DNSRecord, target string) (DNSRecord, error) {
+	body := map[string]any{"type": "CNAME", "name": record.Name, "content": target, "proxied": true}
+	var out struct {
+		ID      string `json:"id"`
+		Name    string `json:"name"`
+		Type    string `json:"type"`
+		Content string `json:"content"`
+	}
+	if err := c.call(ctx, scopeDNS, http.MethodPut, "/zones/"+zone+"/dns_records/"+record.ID, body, &out); err != nil {
+		return DNSRecord{}, err
+	}
+	return DNSRecord{ID: out.ID, Name: out.Name, Type: out.Type, Content: out.Content}, nil
+}
+
 func (c *Client) DNSRecords(ctx context.Context, zone, hostname string) ([]DNSRecord, error) {
 	var records []struct {
 		ID      string `json:"id"`
