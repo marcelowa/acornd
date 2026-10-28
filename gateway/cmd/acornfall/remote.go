@@ -134,38 +134,59 @@ func applyRemote(ctx context.Context, dir, hostname, zoneName, apiToken string) 
 	if err != nil {
 		return err
 	}
-
 	client := &remote.Client{Token: apiToken}
 	zone, err := client.ZoneByName(ctx, zoneName)
 	if err != nil {
 		return err
 	}
 	desire := remote.Desired{Hostname: hostname, ZoneID: zone.ID, AccountID: zone.Account}
-	state, steps, applyErr := (&remote.Provisioner{API: client}).Apply(ctx, desire, setup.State, admitted)
-	// Written whatever happened: what an apply made before it failed is the ids a resume reads instead of
-	// starting over, and losing them is how a second tunnel appears.
-	if err := remote.Save(dir, remote.Setup{Desired: desire, State: state}, time.Now()); err != nil {
-		return fmt.Errorf("%w (and the ids it made could not be written: %w)", applyErr, err)
-	}
+	state, steps, applyErr := applyDesire(ctx, dir, desire, setup, admitted, client)
 	if applyErr != nil {
 		return fmt.Errorf("%w (the ids it made are kept; run it again to finish)", applyErr)
 	}
 	for _, step := range steps {
-		verb := "kept"
-		if step.Created {
-			verb = "created"
-		}
-		if step.Moved {
-			verb = "pointed"
-		}
-		detail := ""
-		if step.Detail != "" {
-			detail = " (" + step.Detail + ")"
-		}
-		fmt.Printf("%-8s %s%s\n", verb, step.Name, detail)
+		fmt.Printf("%-8s %s%s\n", stepVerb(step), step.Name, stepDetail(step))
 	}
 	fmt.Printf("\n%s now reaches this machine; the door needs ACORNFALL_IDENTITY=access and the audience %s\n", desire.Hostname, state.Audience)
 	return nil
+}
+
+// applyDesire is the work an apply does once the zone is resolved: make the account match the desire, write what
+// it made, and hand back the steps it took. It is apart from the command so boot can run the same thing — an
+// install whose record was deleted in a dashboard heals at the next start, not at the next command.
+func applyDesire(
+	ctx context.Context,
+	dir string,
+	desire remote.Desired,
+	setup remote.Setup,
+	admitted []string,
+	api remote.API,
+) (remote.State, []remote.Step, error) {
+	state, steps, applyErr := (&remote.Provisioner{API: api}).Apply(ctx, desire, setup.State, admitted)
+	// Written whatever happened: what an apply made before it failed is the ids a resume reads instead of
+	// starting over, and losing them is how a second tunnel appears.
+	if err := remote.Save(dir, remote.Setup{Desired: desire, State: state}, time.Now()); err != nil {
+		return state, steps, fmt.Errorf("%w (and the ids it made could not be written: %w)", applyErr, err)
+	}
+	return state, steps, applyErr
+}
+
+// stepVerb is what happened to one piece, in a word a person reads rather than decodes.
+func stepVerb(step remote.Step) string {
+	if step.Created {
+		return "created"
+	}
+	if step.Moved {
+		return "pointed"
+	}
+	return "kept"
+}
+
+func stepDetail(step remote.Step) string {
+	if step.Detail == "" {
+		return ""
+	}
+	return " (" + step.Detail + ")"
 }
 
 // remoteInputs is what an apply needs before it can talk to Cloudflare: what the install recorded, and the
