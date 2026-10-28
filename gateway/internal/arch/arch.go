@@ -14,6 +14,7 @@ package arch
 var Allowed = map[string][]string{
 	// The entry point constructs every layer; it is the one place allowed to know them all.
 	"cmd/acornfall": {
+		"internal/cloudflared",
 		"internal/control",
 		"internal/httpapi",
 		"internal/identity",
@@ -55,6 +56,10 @@ var Allowed = map[string][]string{
 	},
 
 	"internal/arch": {},
+	// The connector: a pinned binary, and the process that keeps it dialling out. A leaf — it knows how to
+	// fetch a file, hash it, run it and restart it, and nothing about workspaces, people or Cloudflare's API
+	// (ADR 0033 §5). The tunnel's token is handed in by cmd, which is the only layer that reads remote.json.
+	"internal/cloudflared": {},
 	// Who is calling, proven: the token file or a signed assertion. A leaf, because the door is a
 	// fact about a request and knows nothing about workspaces or engines (ADR 0032).
 	"internal/identity": {},

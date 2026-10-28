@@ -118,6 +118,7 @@ func serve(argv []string) error {
 	dataDir := flags.String("data-dir", "", "the acornfall folder: config, credentials, state, workspaces (default: ~/.acornfall)")
 	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornfall/workspaces)")
 	workerCommand := flags.String("worker", "", `worker command (default: ensured bun over ensured sources)`)
+	cloudflaredPath := flags.String("cloudflared", "", `the connector binary (default: the pinned one, ensured under the install folder)`)
 	if err := flags.Parse(argv); err != nil {
 		return err
 	}
@@ -170,6 +171,7 @@ func serve(argv []string) error {
 	wireUpdates(updates, workspaces, engine)
 
 	logReadiness(ready.Check(readyInputForBoot(dir, updates, engine)))
+	startTunnel(ctx, dir, *cloudflaredPath)
 
 	return listen(ctx, *host, *port, httpapi.New(workspaces, web.Files, updates, gate).Handler(), dir)
 }
