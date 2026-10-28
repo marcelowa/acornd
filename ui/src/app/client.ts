@@ -47,37 +47,148 @@ export interface StreamHandlers {
 	onReconnecting: () => void;
 }
 
+/** What a caller holds: one close, whatever is going on underneath. */
+export interface StreamHandle {
+	close: () => void;
+}
+
+/** How the stream comes back. Milliseconds, and tests bring their own. */
+export interface StreamTiming {
+	retryMin: number;
+	retryMax: number;
+	/** A stream that says nothing for this long is dead, whatever the socket claims. */
+	quiet: number;
+	/** How often the quiet above is checked. */
+	poll: number;
+}
+
+const defaultTiming: StreamTiming = {
+	retryMin: 1000,
+	retryMax: 30_000,
+	quiet: 20_000,
+	poll: 5_000,
+};
+
+/**
+ * Opens the stream, and keeps it open.
+ *
+ * The browser reconnects an EventSource after a network blip, but it gives up for good when the
+ * response is anything other than a live event stream — and a 502 is exactly what a gateway that
+ * is restarting answers with. That is the failure this loop exists for: a page that went quiet
+ * during a deploy and never came back, with a transcript that stopped moving while the console
+ * kept working for everybody else.
+ *
+ * Two other things are deliberate. A stream is declared dead when its pings stop rather than when
+ * its socket closes, because a connector swapped underneath leaves a socket that is open and
+ * silent. And a stream that comes back refetches the state it missed: frames are not replayed, so
+ * reconnecting without catching up would leave the page showing the last thing it saw before the
+ * restart, which looks exactly like a page that is still broken.
+ */
 export function openStream(
 	workspace: string,
 	conversation: string,
 	handlers: StreamHandlers,
-): EventSource {
+	timing: Partial<StreamTiming> = {},
+): StreamHandle {
+	const clock = { ...defaultTiming, ...timing };
 	const query = `workspace=${encodeURIComponent(workspace)}&conversation=${encodeURIComponent(conversation)}`;
-	const source = new EventSource(`/api/stream?${query}`);
+	let source: EventSource | undefined;
+	let closed = false;
+	let attempt = 0;
+	let retry: ReturnType<typeof setTimeout> | undefined;
+	let lastSeen = Date.now();
+	// Every connection is a generation: a listener left over from a socket that was replaced must
+	// never feed the page.
+	let generation = 0;
 
-	// The server's ping is the only event that arrives while nothing is happening, so it is
-	// what proves the stream is alive rather than merely open.
-	source.addEventListener("ping", () => undefined);
-	source.addEventListener("open", () => handlers.onOpen());
-	source.addEventListener("state", (event) => {
-		handlers.onState(JSON.parse((event as MessageEvent<string>).data) as WireState);
-	});
-	source.addEventListener("frame", (event) => {
-		const frame = JSON.parse((event as MessageEvent<string>).data) as WireFrame;
-		if (frame.type === "auth" && frame.authId !== undefined && frame.event !== undefined) {
-			handlers.onAuth?.(frame.authId, frame.event);
-			return;
+	const catchUp = async (current: number): Promise<void> => {
+		try {
+			const state = await fetchState(workspace, conversation);
+			if (closed || current !== generation) return;
+			handlers.onState(state);
+		} catch {
+			// The stream is the thing that reports a workspace it cannot read; a failed catch-up
+			// here would only say the same sentence twice.
 		}
-		if (frame.type === "secret" && frame.secret !== undefined) {
-			handlers.onSecret?.(frame.secret);
-			return;
-		}
-		if (frame.type !== "view" || frame.value === undefined) return;
-		handlers.onView(frame.value, frame.acornfall?.senders ?? {});
-	});
-	source.addEventListener("error", () => handlers.onReconnecting());
+	};
 
-	return source;
+	const connect = (): void => {
+		if (closed) return;
+		const current = ++generation;
+		lastSeen = Date.now();
+		const next = new EventSource(`/api/stream?${query}`);
+		source = next;
+		const mine = (): boolean => !closed && current === generation;
+		next.addEventListener("ping", () => {
+			if (mine()) lastSeen = Date.now();
+		});
+		next.addEventListener("open", () => {
+			if (!mine()) return;
+			attempt = 0;
+			lastSeen = Date.now();
+			handlers.onOpen();
+			void catchUp(current);
+		});
+		next.addEventListener("state", (event) => {
+			if (!mine()) return;
+			handlers.onState(JSON.parse((event as MessageEvent<string>).data) as WireState);
+		});
+		next.addEventListener("frame", (event) => {
+			if (!mine()) return;
+			const frame = JSON.parse((event as MessageEvent<string>).data) as WireFrame;
+			if (frame.type === "auth" && frame.authId !== undefined && frame.event !== undefined) {
+				handlers.onAuth?.(frame.authId, frame.event);
+				return;
+			}
+			if (frame.type === "secret" && frame.secret !== undefined) {
+				handlers.onSecret?.(frame.secret);
+				return;
+			}
+			if (frame.type !== "view" || frame.value === undefined) return;
+			handlers.onView(frame.value, frame.acornfall?.senders ?? {});
+		});
+		next.addEventListener("error", () => {
+			if (!mine()) return;
+			handlers.onReconnecting();
+			// The socket's own retry is left to itself while it is still trying; a socket the
+			// browser has closed for good is ours to replace.
+			if (next.readyState === 2) schedule();
+		});
+	};
+
+	const schedule = (): void => {
+		if (closed) return;
+		source?.close();
+		source = undefined;
+		generation += 1;
+		if (retry !== undefined) return;
+		const wait = Math.min(clock.retryMax, clock.retryMin * 2 ** attempt);
+		attempt += 1;
+		retry = setTimeout(() => {
+			retry = undefined;
+			connect();
+		}, wait);
+	};
+
+	const watchdog = setInterval(() => {
+		if (closed) return;
+		if (Date.now() - lastSeen < clock.quiet) return;
+		handlers.onReconnecting();
+		schedule();
+	}, clock.poll);
+
+	connect();
+
+	return {
+		close: () => {
+			closed = true;
+			generation += 1;
+			if (retry !== undefined) clearTimeout(retry);
+			clearInterval(watchdog);
+			source?.close();
+			source = undefined;
+		},
+	};
 }
 
 async function post(path: string, body: unknown): Promise<void> {
