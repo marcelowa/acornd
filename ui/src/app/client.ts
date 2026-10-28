@@ -38,6 +38,55 @@ export async function fetchWorkspaceStatus(workspace: string): Promise<WireWorks
 	return (await response.json()) as WireWorkspaceStatus;
 }
 
+/** One piece of the door: what the apply did with it, and what it is. */
+export interface RemoteStep {
+	name: string;
+	created: boolean;
+	moved?: boolean | undefined;
+	detail?: string | undefined;
+}
+
+/** What the install recorded about how a browser reaches it. Never a token: the API token is used and dropped. */
+export interface RemoteStatus {
+	configured: boolean;
+	hostname?: string | undefined;
+	zoneId?: string | undefined;
+	accountId?: string | undefined;
+	audience?: string | undefined;
+	updated?: string | undefined;
+	tunnelId?: string | undefined;
+	steps?: RemoteStep[] | undefined;
+}
+
+/** The door as it stands: what is recorded, and whether anything has been made yet. */
+export async function fetchRemote(): Promise<RemoteStatus> {
+	const response = await fetch("/api/remote");
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	return (await response.json()) as RemoteStatus;
+}
+
+/**
+ * Make Cloudflare match what the owner types. The token is the account's, the call uses it and nothing keeps
+ * it — so it travels in the body of this one request and never comes back.
+ */
+export async function applyRemote(request: {
+	hostname: string;
+	zone: string;
+	token?: string | undefined;
+}): Promise<RemoteStatus> {
+	const response = await fetch("/api/remote/apply", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(request),
+	});
+	if (!response.ok) {
+		// A failed apply still carries what it made, because the screen shows the steps it took.
+		const text = (await response.text()).trim();
+		throw new Error(text || response.statusText);
+	}
+	return (await response.json()) as RemoteStatus;
+}
+
 export interface StreamHandlers {
 	onOpen: () => void;
 	onState: (state: WireState) => void;

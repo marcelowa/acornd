@@ -83,6 +83,10 @@ func (s *Server) updateRoutes(mux *http.ServeMux) {
 	// Replacing the binary is the owner's: a person who could restart the gateway could take the install
 	// down for everybody, which is not a workspace-sized decision.
 	mux.HandleFunc("GET /api/update/status", s.owner(s.updateStatus))
+	// The remote-access screen: what the install recorded, and the apply that makes Cloudflare match it. Both are
+	// the install's own business, and the token the second one takes is used and dropped (ADR 0033 §4).
+	mux.HandleFunc("GET /api/remote", s.owner(s.remoteStatus))
+	mux.HandleFunc("POST /api/remote/apply", s.owner(s.remoteApply))
 	mux.HandleFunc("GET /api/update/releases", s.owner(s.updateReleases))
 	mux.HandleFunc("GET /api/update/releases/{tag}", s.owner(s.updateRelease))
 	mux.HandleFunc("GET /api/update/notes", s.owner(s.updateNotes))

@@ -317,6 +317,8 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		applyUpdateNow: noop,
 		rollbackUpdateNow: noop,
 		setUpdatePrefs: noop,
+		applyRemote: async () => undefined,
+		remoteBusy: false,
 		...overrides,
 	};
 }

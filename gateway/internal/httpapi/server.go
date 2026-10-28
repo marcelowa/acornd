@@ -31,6 +31,9 @@ type Server struct {
 type Gate struct {
 	Door   identity.Door
 	People *people.Book
+	// Dir is the install folder. The remote-access screen reads and writes remote.json there, and nothing else
+	// on the edge needs a path at all.
+	Dir string
 }
 
 func New(workspaces *control.Workspaces, static fs.FS, updates *update.Manager, gate Gate) *Server {

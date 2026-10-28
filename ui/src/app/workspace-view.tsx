@@ -18,6 +18,7 @@ import { UpdatesSection } from "@/components/release/updates-section";
 import { ReleaseMark } from "@/components/release/release-mark";
 import { ReleaseScreen } from "@/components/release/release-screen";
 import { ProvidersSection } from "@/components/settings/providers-section";
+import { RemoteSection } from "@/components/settings/remote-section";
 import { SecretsSection } from "@/components/settings/secrets-section";
 import { SecretRequestDialog } from "@/components/secrets/secret-request-dialog";
 import { ProviderLoginDialog } from "@/components/settings/provider-login-dialog";
@@ -480,6 +481,17 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		/>
 	);
 
+	const remote = (
+		<RemoteSection
+			status={platform.remote}
+			failure={platform.remoteFailure}
+			busy={platform.remoteBusy}
+			onApply={(request) => {
+				void platform.applyRemote(request);
+			}}
+		/>
+	);
+
 	const install = (
 		<UpdatesSection
 			status={platform.update}
@@ -551,6 +563,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 				providers={providers}
 				secrets={secrets}
 				install={install}
+				remote={remote}
 				version={platform.update?.current}
 				onClose={() => platform.showScreen("conversation")}
 			/>

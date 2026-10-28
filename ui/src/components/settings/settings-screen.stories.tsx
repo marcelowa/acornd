@@ -4,6 +4,7 @@ import { Stack } from "@/components/layout/stack";
 import { Picker } from "@/components/composer/picker";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ProvidersSection } from "./providers-section";
+import { RemoteSection } from "./remote-section";
 import { SettingsScreen } from "./settings-screen";
 import { Text } from "@/components/typography/text";
 import { UpdatesSection } from "@/components/release/updates-section";
@@ -143,6 +144,7 @@ export const Default: Story = {
 			</Text>
 		),
 		install,
+		remote: <RemoteSection onApply={noop} />,
 		version: "v0.9.2",
 		onClose: noop,
 	},
@@ -151,6 +153,11 @@ export const Default: Story = {
 /** Dark is a token swap, not a second screen: the same settings with the other theme chosen. */
 export const Dark: Story = {
 	args: { ...Default.args, theme: "dark" },
+};
+
+/** Each page has its own URL: the remote-access page, which is where a family install makes its door. */
+export const Remote: Story = {
+	args: { ...Default.args, tab: "remote" },
 };
 
 /** Each page has its own URL: the providers page. */
@@ -174,5 +181,6 @@ export const UpdatesUnanswered: Story = {
 	args: {
 		...Default.args,
 		install: <UpdatesSection status={undefined} onSavePrefs={noop} onOpenReleases={noop} />,
+		remote: <RemoteSection onApply={noop} />,
 	},
 };

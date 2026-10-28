@@ -81,7 +81,7 @@ func openGate(dir, host string) (httpapi.Gate, error) {
 		// the machine can get into, and the fix is one command.
 		fmt.Fprintln(os.Stderr, "acornfall: this install has people but no owner yet; `acornfall people claim you@example.com` names one")
 	}
-	return httpapi.Gate{Door: door, People: book}, nil
+	return httpapi.Gate{Door: door, People: book, Dir: dir}, nil
 }
 
 // identityDoor builds the proof this run requires, or nil for the single-owner install ADR 0020
