@@ -287,3 +287,34 @@ func TestAModelOutsideTheAllowlistIsRefusedOnAssignment(t *testing.T) {
 		t.Error("a request that named no model was checked against the list")
 	}
 }
+
+// The owner arrives through the edge like everybody else: with a door in front, a browser proves an address
+// and the book says what that address may do. The token proves ownership by itself, and that is the only
+// caller it ever describes — a build where the book is never asked is an install whose owner is a person
+// behind their own console, refused with a sentence telling them only its owner may do it.
+func TestTheOwnersAddressMayDoTheInstallsBusiness(t *testing.T) {
+	opened := book(t)
+	if _, err := opened.Claim("marcelo@example.com", "Marcelo"); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	handler := admitted(t, Gate{Door: stubDoor{caller: identity.Caller{Email: "marcelo@example.com"}}, People: opened})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/update/status", nil))
+	if recorder.Code == http.StatusForbidden {
+		t.Fatalf("the owner was refused their own install: %q", recorder.Body.String())
+	}
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want the handler's 503", recorder.Code)
+	}
+
+	// Anybody else, proven by the same door, is refused there — the difference is the book, not the door.
+	if _, err := opened.Add("ana@example.com", "Ana"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	other := admitted(t, Gate{Door: stubDoor{caller: identity.Caller{Email: "ana@example.com"}}, People: opened})
+	recorder = httptest.NewRecorder()
+	other.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/update/status", nil))
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("ana reached the install's business: %d", recorder.Code)
+	}
+}
