@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	abortConversation,
+	applyRemote,
+	fetchRemote,
 	answerAuthPrompt,
 	answerSecretRequest,
 	cancelSecretRequest,
@@ -41,6 +43,7 @@ import {
 	type ProviderAuthType,
 	type SecretAnswerInput,
 	type UpdatePrefs,
+	type RemoteStatus,
 	type UpdateStatus,
 } from "./client";
 import {
@@ -128,9 +131,9 @@ export type Screen = "conversation" | "settings" | "update";
  * page: what runs and how it keeps itself current, the defaults a new conversation starts from,
  * and the theme. The old `defaults`, `updates` and `install` pages kept no redirect — the
  * release page has its own address now, and an unknown page lands on general. */
-export type SettingsTab = "general" | "providers" | "secrets";
+export type SettingsTab = "general" | "providers" | "secrets" | "remote";
 
-const SETTINGS_TABS: SettingsTab[] = ["general", "providers", "secrets"];
+const SETTINGS_TABS: SettingsTab[] = ["general", "providers", "secrets", "remote"];
 
 function settingsTabFrom(segment: string | undefined): SettingsTab {
 	return SETTINGS_TABS.includes(segment as SettingsTab) ? (segment as SettingsTab) : "general";
@@ -324,6 +327,12 @@ export interface Platform {
 	cancelSecret: (requestId: string) => Promise<void>;
 	/** The self-update state, if the gateway answered yet. One dot, not a list. */
 	update?: UpdateStatus | undefined;
+	/** The door as this install recorded it, asked for when the remote page is opened. */
+	remote?: RemoteStatus | undefined;
+	/** One press of the remote form: make Cloudflare match what the owner typed. */
+	applyRemote: (request: { hostname: string; zone: string; token: string }) => Promise<void>;
+	remoteBusy: boolean;
+	remoteFailure?: string | undefined;
 	/** Ask the gateway for the update state again; a success clears the last refusal. */
 	refreshUpdate: () => void;
 	/** An apply is in flight: the update button is disabled until it settles. */
@@ -1335,6 +1344,41 @@ export function usePlatform(): Platform {
 		};
 	}, []);
 
+	const [remote, setRemote] = useState<RemoteStatus | undefined>(undefined);
+	const [remoteFailure, setRemoteFailure] = useState<string | undefined>(undefined);
+	const [remoteBusy, setRemoteBusy] = useState(false);
+	useEffect(() => {
+		if (route.screen !== "settings" || route.settingsTab !== "remote") return;
+		let cancelled = false;
+		void fetchRemote().then(
+			(next) => {
+				if (!cancelled) setRemote(next);
+			},
+			() => {
+				// A gateway that cannot answer says nothing here: the form still works, and a refusal with words
+				// is what the person acts on, not "failed to fetch".
+				if (!cancelled) setRemote(undefined);
+			},
+		);
+		return () => {
+			cancelled = true;
+		};
+	}, [route.screen, route.settingsTab]);
+	const applyRemoteNow = useCallback(
+		async (request: { hostname: string; zone: string; token: string }): Promise<void> => {
+			setRemoteBusy(true);
+			setRemoteFailure(undefined);
+			try {
+				setRemote(await applyRemote(request));
+			} catch (cause) {
+				setRemoteFailure(cause instanceof Error ? cause.message : String(cause));
+			} finally {
+				setRemoteBusy(false);
+			}
+		},
+		[],
+	);
+
 	const refreshUpdate = useCallback((): void => {
 		void fetchUpdateStatus().then(setFetchedUpdate, reportError);
 	}, [reportError]);
@@ -1483,6 +1527,10 @@ export function usePlatform(): Platform {
 		screen: route.screen,
 		showScreen,
 		settingsTab: route.settingsTab,
+		remote,
+		applyRemote: applyRemoteNow,
+		remoteBusy,
+		remoteFailure,
 		showSettingsTab,
 		updateTag: route.updateTag,
 		showUpdate,

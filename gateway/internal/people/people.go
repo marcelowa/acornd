@@ -186,6 +186,24 @@ func (b *Book) Owner() (Person, bool, error) {
 	return Person{}, false, nil
 }
 
+// Admitted is who may come in: everybody the owner has named and not revoked, in the order the book holds them.
+// It is what the door's group is derived from, on every apply, which is what makes the book the only allowlist
+// there is (ADR 0033 §3).
+func (b *Book) Admitted() ([]string, error) {
+	records, err := b.List()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(records))
+	for _, record := range records {
+		if record.State == Revoked {
+			continue
+		}
+		out = append(out, record.Email)
+	}
+	return out, nil
+}
+
 // Find answers one record by address, because a door that proved somebody has to be answered about rather than
 // looked up by scanning a list.
 // promote is Claim's decision, apart from the file: the address keeps the record it already had, becomes the

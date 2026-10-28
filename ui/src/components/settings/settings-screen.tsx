@@ -26,6 +26,8 @@ export interface SettingsScreenProps {
 	secrets: ReactNode;
 	/** The updates section: the running build, auto-check, and the door to the releases. */
 	install: ReactNode;
+	/** The remote-access section: the hostname, the token, and what the apply did. */
+	remote: ReactNode;
 	/** The running build, when the gateway answered: shown under the title. */
 	version?: string | undefined;
 	/** Back to the conversation that was in view. */
@@ -52,6 +54,7 @@ export function SettingsScreen({
 	providers,
 	secrets,
 	install,
+	remote,
 	version,
 	onClose,
 }: SettingsScreenProps) {
@@ -91,6 +94,7 @@ export function SettingsScreen({
 							<TabsTrigger value="general">General</TabsTrigger>
 							<TabsTrigger value="providers">Providers</TabsTrigger>
 							<TabsTrigger value="secrets">Secrets</TabsTrigger>
+							<TabsTrigger value="remote">Remote</TabsTrigger>
 						</TabsList>
 					</Tabs>
 
@@ -143,6 +147,7 @@ export function SettingsScreen({
 
 					{tab === "providers" ? providers : null}
 					{tab === "secrets" ? secrets : null}
+					{tab === "remote" ? remote : null}
 				</Stack>
 			</Measure>
 		</div>

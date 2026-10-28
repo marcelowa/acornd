@@ -212,19 +212,5 @@ func remoteInputs(dir string) (remote.Setup, []string, error) {
 	return setup, admitted, nil
 }
 
-// admittedAddresses is who the door lets in: everyone the owner named and has not revoked. The group is derived
-// from the book on every apply, which is what makes the book the only allowlist there is (ADR 0033 §3).
-func admittedAddresses(book *people.Book) ([]string, error) {
-	records, err := book.List()
-	if err != nil {
-		return nil, err
-	}
-	out := make([]string, 0, len(records))
-	for _, record := range records {
-		if record.State == people.Revoked {
-			continue
-		}
-		out = append(out, record.Email)
-	}
-	return out, nil
-}
+// admittedAddresses is who the door lets in; the book answers, and the group is derived from it on every apply.
+func admittedAddresses(book *people.Book) ([]string, error) { return book.Admitted() }

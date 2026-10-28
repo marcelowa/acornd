@@ -1,0 +1,42 @@
+import type { Meta, StoryObj } from "@storybook/react";
+import { RemoteSection } from "./remote-section";
+
+const meta: Meta<typeof RemoteSection> = {
+	title: "Settings/Remote access",
+	component: RemoteSection,
+	args: { onApply: () => undefined },
+};
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+/** A family install before anybody has made the door: two fields and a token, and nothing to break. */
+export const NothingYet: Story = {};
+
+/** After an apply: what a browser reaches, and what the press did, one line per piece. */
+export const Made: Story = {
+	args: {
+		status: {
+			configured: true,
+			hostname: "console.example.com",
+			audience: "c52dbf9750d9619950bffb6e96106adba22bdd4f8957362c0505a14718873982",
+			updated: "2026-10-30T21:47:20Z",
+			steps: [
+				{ name: "tunnel", created: true, detail: "acornfall" },
+				{ name: "ingress", created: true, detail: "http://127.0.0.1:7777" },
+				{ name: "dns", created: true, detail: "console.example.com" },
+				{ name: "access group", created: false, detail: "2 addresses" },
+			],
+		},
+	},
+};
+
+/** A press that Cloudflare refused: the sentence the person can act on, next to the button that retries. */
+export const Refused: Story = {
+	args: {
+		failure:
+			"The zone token is missing Zone·DNS·Edit, so the record cannot be made. Add the permission in Cloudflare, then press again.",
+	},
+};
+
+/** A press in flight: the button says so rather than the screen going quiet. */
+export const Making: Story = { args: { busy: true } };
