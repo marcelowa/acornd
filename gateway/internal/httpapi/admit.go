@@ -11,6 +11,7 @@ import (
 
 	"github.com/acornfall/acornfall/gateway/internal/control"
 	"github.com/acornfall/acornfall/gateway/internal/identity"
+	"github.com/acornfall/acornfall/gateway/internal/people"
 )
 
 // admit refuses a request no door proved, refuses a state-changing one that came from another site,
@@ -40,12 +41,19 @@ func (s *Server) admit(next http.Handler) http.Handler {
 		// ones not named are refused before a handler runs and before anything is written. The token is
 		// the owner, and does not need a record to be let in (ADR 0032 §3).
 		if !caller.Owner {
-			if _, err := s.gate.People.SignIn(caller.Email); err != nil {
+			person, err := s.gate.People.SignIn(caller.Email)
+			if err != nil {
 				// 403 rather than 401: the proof was good and this person may not come in. Signing in
 				// again would not help, and a page that says so only sends them round the loop.
 				http.Error(w, err.Error(), http.StatusForbidden)
 				return
 			}
+			// The book names the owner, and an address the edge proved *is* that person: the token door
+			// proves ownership by itself, while a browser proves an address and lets the book answer the
+			// rest. Without this the owner arrives through the same door as everybody else and is a
+			// lesser caller for it — refused their own install's business with a sentence telling them
+			// only its owner may do it.
+			caller.Owner = person.Role == people.RoleOwner
 		}
 		next.ServeHTTP(w, r.WithContext(withCaller(r.Context(), s.who(caller))))
 	})
