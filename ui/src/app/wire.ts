@@ -12,7 +12,8 @@ export interface WireWorkspace {
 	name: string;
 	path: string;
 	title: string;
-	general: boolean;
+	/** This workspace is somebody's own room: derived from membership in the gateway. */
+	personal: boolean;
 	image?: string | undefined;
 	network?: string | undefined;
 	/** Which sandbox engine this workspace runs on; absent means the install default. */

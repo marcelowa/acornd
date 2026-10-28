@@ -12,7 +12,8 @@ export interface WorkspaceSummary {
 	name: string;
 	title: string;
 	path: string;
-	general: boolean;
+	/** This workspace is somebody's own room: derived from membership in the gateway. */
+	personal: boolean;
 	/** The worker process for this workspace is up. */
 	running: boolean;
 	active: boolean;

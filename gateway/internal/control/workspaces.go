@@ -52,8 +52,6 @@ type Workspace struct {
 	Name  string `json:"name"`
 	Path  string `json:"path"`
 	Title string `json:"title"`
-	// General marks the default workspace. Exactly one workspace is general.
-	General bool `json:"general"`
 	// Image is the sandbox's environment for this workspace: the project's toolchain, not
 	// ours. Empty means the default, and changing it takes effect at the next sandbox
 	// because the running one is where the workspace's dependencies live.
@@ -107,6 +105,20 @@ var ErrNoWorkspace = errors.New("no workspace")
 type Caller struct {
 	Owner bool
 	Email string
+}
+
+// Personal reports whether this is somebody's own room.
+//
+// It used to be a stored `General bool`, written in a third place beside the membership list and able to
+// disagree with it. A membership list is a fact; a flag is a claim about the same fact, and this one is derived
+// from it (ADR 0032 §9).
+//
+// One member is somebody's own room, and the install's own room is `personal` — the one that predates people and
+// was created with none. The name is not a second flag: it is the identity of one record, and the membership list
+// answers for every other room. A room with no members and another name is neither — it is a workspace somebody
+// made and has not shared yet, and calling it somebody's own would make it un-removable.
+func (w Workspace) Personal() bool {
+	return w.Name == PersonalWorkspaceName || len(w.Members) == 1
 }
 
 // Allows reports whether a caller may use this workspace.
@@ -190,7 +202,7 @@ func Views(list []Workspace, progress func(string) Progress) []WorkspaceState {
 			Name:             workspace.Name,
 			Path:             workspace.Path,
 			Title:            workspace.Title,
-			General:          workspace.General,
+			Personal:         workspace.Personal(),
 			Image:            workspace.Image,
 			Network:          workspace.Network,
 			Private:          workspace.Private,
@@ -365,8 +377,10 @@ func (w *Workspaces) List() []Workspace {
 		list = append(list, workspace)
 	}
 	sort.Slice(list, func(i, j int) bool {
-		if list[i].General != list[j].General {
-			return list[i].General
+		// Somebody's own room leads the rail, then the rest by name: the derived rule below replaced the stored
+		// flag this used to sort on.
+		if list[i].Personal() != list[j].Personal() {
+			return list[i].Personal()
 		}
 		return list[i].Name < list[j].Name
 	})
@@ -558,9 +572,8 @@ func (w *Workspaces) adopt(workspace Workspace) (Workspace, *Control, bool, erro
 		w.mu.Unlock()
 		return Workspace{}, nil, false, fmt.Errorf("no workspace %q", workspace.Name)
 	}
-	// An existing record keeps its general flag: exactly one workspace is general, and it is not
-	// this call's to change.
-	workspace.General = existing.General
+	// A record keeps its membership: who a room belongs to is not this call's to change.
+	workspace.Members = existing.Members
 	workspace.Name = existing.Name
 	w.registry[workspace.Name] = workspace
 	control := w.controls[workspace.Name]
@@ -1294,6 +1307,47 @@ func (w *Workspaces) renameGeneralToPersonal() error {
 	return w.persist()
 }
 
+// ownerMembers is the owner's address as a membership list, when this install knows who the owner is and there are
+// people at all. An install with no book keeps an empty list, which is the same meaning: a room with at most one
+// member is somebody's own.
+func (w *Workspaces) ownerMembers() []string {
+	owner := strings.ToLower(strings.TrimSpace(w.opts.OwnerEmail))
+	if owner == "" {
+		return nil
+	}
+	return []string{owner}
+}
+
+// nameTheOwnersOwnRoom gives the install's own workspace its member, once, on installs that were created before
+// there were people. The derived rule above treats "no members" and "one member" the same, so this is a migration
+// of the record rather than a fix for a behaviour: it is what makes the membership list the whole truth.
+func (w *Workspaces) nameTheOwnersOwnRoom() error {
+	owner := strings.ToLower(strings.TrimSpace(w.opts.OwnerEmail))
+	if owner == "" {
+		return nil
+	}
+	w.mu.Lock()
+	changed := false
+	for name, workspace := range w.registry {
+		if len(workspace.Members) != 0 {
+			continue
+		}
+		// Only the install's own room: a workspace somebody made and has not shared yet is theirs to share or
+		// remove, and naming the owner as its member would hand it over.
+		if name != PersonalWorkspaceName {
+			continue
+		}
+		workspace.Members = []string{owner}
+		w.registry[name] = workspace
+		changed = true
+	}
+	w.mu.Unlock()
+	if !changed {
+		return nil
+	}
+	return w.persist()
+}
+
 // moveState renames one workspace's state folder. One rename, so it either happened or it did not; a folder
 // that is not there is not a failure, because a workspace nobody has opened has no state yet.
 func (w *Workspaces) moveState(from, to string) error {
@@ -1331,43 +1385,16 @@ func (w *Workspaces) ensurePersonal() error {
 			Name:    PersonalWorkspaceName,
 			Path:    absolute,
 			Title:   filepath.Base(absolute),
-			General: true,
+			Members: w.ownerMembers(),
 		}
 		if err := w.persist(); err != nil {
 			return err
 		}
 	}
-	// Exactly one install workspace: a registry hand-edited into two is repaired by keeping one and
-	// clearing the rest.
-	w.exactlyOneGeneral()
+	if err := w.nameTheOwnersOwnRoom(); err != nil {
+		return err
+	}
 	return nil
-}
-
-// exactlyOneGeneral keeps the workspace named general if one is, and otherwise the first by name.
-// The rule decides rather than the iteration order: the registry is a map, which has no order to
-// keep, so "the first in the file" was a promise this code could not have kept.
-func (w *Workspaces) exactlyOneGeneral() {
-	keeper := ""
-	for name, workspace := range w.registry {
-		if !workspace.General {
-			continue
-		}
-		switch {
-		case keeper == "":
-			keeper = name
-		case name == PersonalWorkspaceName:
-			keeper = name
-		case keeper != PersonalWorkspaceName && name < keeper:
-			keeper = name
-		}
-	}
-	for name, workspace := range w.registry {
-		if !workspace.General || name == keeper {
-			continue
-		}
-		workspace.General = false
-		w.registry[name] = workspace
-	}
 }
 
 // persist writes the registry: the folder it records, and every workspace in it. It is the file

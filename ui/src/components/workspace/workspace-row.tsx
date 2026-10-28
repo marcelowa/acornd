@@ -105,7 +105,7 @@ export function WorkspaceRow({
 						<DropdownMenuItem onSelect={() => onRename(workspace)}>
 							Rename
 						</DropdownMenuItem>
-						{workspace.general ? null : (
+						{workspace.personal ? null : (
 							<DropdownMenuItem
 								variant="destructive"
 								onSelect={() => onForget(workspace.name)}

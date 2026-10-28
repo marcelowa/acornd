@@ -1,6 +1,6 @@
 # ADR 0032 — Who may call the console
 
-Status: accepted (2026-10-30), built except dropping the `General` flag (§9)
+Status: accepted (2026-10-30), built
 Date: 2026-10-30
 
 ## Context
@@ -226,9 +226,27 @@ install. Turning on people is the change that closes it.
 - **The default workspace is the caller's, not a constant.** `GeneralWorkspaceName` disappears.
   Where the code falls back to `general` today (`ensure`, routing, the API's unnamed workspace, the
   conversation list), it falls back to the calling person's personal workspace.
-- **A personal workspace is derived, never flagged.** It is a workspace with exactly one member.
-  `General bool` becomes `len(Members) == 1`: a membership list is a fact, and a flag is a claim
-  about the same fact that can disagree with it.
+- **A personal workspace is derived, never flagged.** It is a workspace with exactly one member,
+  or the install's own room. `General bool` becomes
+  `Name == "personal" || len(Members) == 1`: a membership list is a fact, and a flag is a claim about
+  the same fact that can disagree with it.
+
+  **Why the name is in the rule.** The install's own room was created before there were people and
+  has no member; every room made since has one. Loading an install fills the owner's room with their
+  address once the owner is known, so the two shapes converge — but a single-owner install never
+  learns who its owner is, and that room must still be un-forgettable. The name is not a second flag:
+  it is the identity of one record, and membership answers for every other room.
+
+  **Why not "at most one member".** Because a workspace somebody made and has not shared yet has no
+  members either, and calling that somebody's own room would make it un-removable. The end-to-end
+  suite caught exactly that when the rule was written that way; the test is
+  `TestARoomWithNoMembersIsNotAnybodysOwnUnlessItIsTheInstalls`.
+
+  **Built.** The field and its wire copy are gone; the readers are `Workspace.Personal()`, a sort
+  that puts somebody's own room first, and the interface's rule for when *Forget* is offered.
+  `exactlyOneGeneral`, which repaired a registry hand-edited into two, went with it: there is
+  nothing left to disagree. A file written under the old rule still loads, and `general` keys in it
+  are ignored — there is a test for that, because a migration nobody tested is a guess.
 - **Its name belongs to its person, and `personal` is the install owner's.** The owner's is
   `personal`; everyone else's is their email's local part made unique when it is created (`ana`,
   then `ana-2`). The console labels all of them **Personal** and never shows the stored name. A

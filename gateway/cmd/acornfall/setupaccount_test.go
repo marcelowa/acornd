@@ -111,7 +111,7 @@ func TestAWorkspaceIsFoundByNameOrSaidToBeMissing(t *testing.T) {
 	dir := t.TempDir()
 	registry := control.RegistryFile{Path: filepath.Join(dir, "workspaces.json")}
 	registry.Workspaces = append(registry.Workspaces,
-		control.Workspace{Name: "personal", Path: filepath.Join(dir, "personal"), General: true},
+		control.Workspace{Name: "personal", Path: filepath.Join(dir, "personal")},
 		control.Workspace{Name: "work", Path: filepath.Join(dir, "work")},
 	)
 	if err := control.SaveRegistryFile(registry); err != nil {
