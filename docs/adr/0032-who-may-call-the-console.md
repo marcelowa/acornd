@@ -1,6 +1,6 @@
 # ADR 0032 — Who may call the console
 
-Status: accepted (2026-10-30), built except the speakers line and the catalog filter
+Status: accepted (2026-10-30), built except dropping the `General` flag (§9)
 Date: 2026-10-30
 
 ## Context
@@ -194,8 +194,15 @@ number — spend, not content — and a per-person cap is deliberately deferred,
 ### 7. A shared workspace names its speaker
 
 In a workspace with more than one member, a user message is prefixed with the speaker's display
-name at prompt assembly in control — `[Ana] can you check the build?` — and the model is told
-the convention in the layer trace. A personal workspace is unchanged.
+name before the prompt is sent — `[Ana] can you check the build?`. A personal workspace is
+unchanged.
+
+**Built at the edge, not in control.** The name lives in the book and the membership in the
+workspace registry, and the edge is the one layer that can see both without control learning what a
+book of people is (ADR 0002). The rule is three lines with a test apiece: named when the room has
+more than one member and the speaker is not the owner, untouched when the message is a command —
+`/compact` is expanded by its first character, and a prefix would turn it into a sentence about
+compacting — and untouched when the message is files without words.
 
 **No `author` field on entries.** Attribution here is for the model, and the model reads assembled
 text; a durable schema change to carry a display name would be a harness change for a presentation

@@ -90,6 +90,18 @@ func (e ErrRevoked) Error() string {
 	return fmt.Sprintf("%s no longer has access to this install: ask the owner", e.Email)
 }
 
+// DisplayName is what a shared room puts in front of this person's words: the name the owner gave, or the part of
+// the address before the @ when they gave none. It is never empty for a person that exists.
+func (p Person) DisplayName() string {
+	if name := strings.TrimSpace(p.Name); name != "" {
+		return name
+	}
+	if local, _, found := strings.Cut(p.Email, "@"); found && strings.TrimSpace(local) != "" {
+		return local
+	}
+	return p.Email
+}
+
 // Allows reports whether this person may run a model, named as "provider/modelId".
 //
 // An empty list is "any model this install has", which is the owner's default and what a person has until the

@@ -202,7 +202,7 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, ctl.StateFor(r.URL.Query().Get("conversation")))
+	writeJSON(w, http.StatusOK, s.offerable(ctl.StateFor(r.URL.Query().Get("conversation")), callerOf(r)))
 }
 
 // workspaceStatus answers where a workspace is, and never starts it: opening a workspace is the
