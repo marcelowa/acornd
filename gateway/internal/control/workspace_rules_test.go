@@ -10,14 +10,15 @@ import (
 // with a lot behind them: the list is what a person picks from, and the policy is what a sandbox
 // is built from.
 
-// The general workspace is first because it is the one that is always there, and the rest are by
-// name because a list that reorders itself is a list nobody can learn.
-func TestTheWorkspaceListPutsGeneralFirstThenNames(t *testing.T) {
+// Somebody's own room is first because it is the one that is always there, and the rest are by name because a
+// list that reorders itself is a list nobody can learn. The order is derived from the membership list: a room
+// with at most one member leads.
+func TestTheWorkspaceListPutsPersonalFirstThenNames(t *testing.T) {
 	workspaces := &Workspaces{registry: map[string]Workspace{
-		"zulu":     {Name: "zulu"},
-		"personal": {Name: "personal", General: true},
-		"alpha":    {Name: "alpha"},
-		"mike":     {Name: "mike"},
+		"zulu":     {Name: "zulu", Members: []string{"a@example.com", "b@example.com"}},
+		"personal": {Name: "personal", Members: []string{"a@example.com"}},
+		"alpha":    {Name: "alpha", Members: []string{"a@example.com", "b@example.com"}},
+		"mike":     {Name: "mike", Members: []string{"a@example.com", "b@example.com"}},
 	}}
 	got := make([]string, 0, 4)
 	for _, workspace := range workspaces.List() {
@@ -138,5 +139,27 @@ func TestTheWorkspacesFolderIsResolvedInOrder(t *testing.T) {
 	}
 	if !filepath.IsAbs(fresh.dir) || fresh.dir == "" {
 		t.Errorf("a fresh install needs an absolute default, got %q", fresh.dir)
+	}
+}
+
+// A workspace somebody made and has not shared yet is not somebody's own room: no members is also what a room
+// looks like between "made" and "shared", and treating that as personal would make it un-removable — which is
+// exactly what the end-to-end suite caught when this rule was written as "at most one member".
+func TestARoomWithNoMembersIsNotAnybodysOwnUnlessItIsTheInstalls(t *testing.T) {
+	fresh := Workspace{Name: "demo", Path: "/w/demo"}
+	if fresh.Personal() {
+		t.Error("a workspace with no members and its own name counts as somebody's own room")
+	}
+	installs := Workspace{Name: PersonalWorkspaceName, Path: "/w/personal"}
+	if !installs.Personal() {
+		t.Error("the install's own room does not count as somebody's own")
+	}
+	one := Workspace{Name: "ana", Path: "/w/ana", Members: []string{"ana@example.com"}}
+	if !one.Personal() {
+		t.Error("a room with one member is not somebody's own")
+	}
+	shared := Workspace{Name: "team", Path: "/w/team", Members: []string{"a@example.com", "b@example.com"}}
+	if shared.Personal() {
+		t.Error("a shared room counts as somebody's own")
 	}
 }

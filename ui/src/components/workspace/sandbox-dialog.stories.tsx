@@ -17,7 +17,7 @@ const workspace: WorkspaceSummary = {
 	name: "acornfall",
 	title: "acornfall",
 	path: "/home/marcelo/acornfall/workspaces/acronfall",
-	general: true,
+	personal: true,
 	running: true,
 	active: true,
 	image: "acornfall/sandbox:0.7.6",

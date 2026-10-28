@@ -230,7 +230,7 @@ func workspaceList(argv []string) {
 	}
 	for _, workspace := range registry.Workspaces {
 		marker := " "
-		if workspace.General {
+		if workspace.Personal() {
 			marker = "*"
 		}
 		fmt.Printf("%s %-16s %-14s %-30s %s\n", marker, workspace.Name,
@@ -272,8 +272,10 @@ func workspaceRemove(argv []string) {
 			kept = append(kept, workspace)
 			continue
 		}
-		if workspace.General {
-			log.Fatalf("acornfall: the general workspace cannot be removed")
+		if workspace.Personal() {
+			// A room with at most one member is somebody's own: removing it removes their conversations, and the
+			// owner can do that by revoking the person, which is a decision with a name.
+			log.Fatalf("acornfall: %s is somebody's own workspace and cannot be removed", workspace.Name)
 		}
 		removed = true
 	}

@@ -12,68 +12,62 @@ import (
 // every workspace lives. The interesting cases are the ones nobody writes a test for until they
 // happen: a registry that has been edited by hand, and a folder the account cannot write.
 
-// A registry that was edited into two general workspaces is repaired by keeping the first and
-// clearing the rest, because "the general one" has to be one workspace.
-func TestARegistryWithTwoGeneralWorkspacesIsRepaired(t *testing.T) {
+// An install written before the flag was dropped carries `general` keys, and one of them may be true on a
+// workspace with no members. Loading it must not care: the answer comes from the membership list, and a file
+// written under the old rule reads exactly like one written under the new one (ADR 0032 §9).
+func TestAGeneralKeyInAnOldRegistryIsIgnored(t *testing.T) {
 	dataDir := t.TempDir()
 	dir := filepath.Join(dataDir, "workspaces")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	registry := RegistryFile{
-		Path:          filepath.Join(dataDir, "workspaces.json"),
-		WorkspacesDir: dir,
-		Workspaces: []Workspace{
-			{Name: "personal", Path: filepath.Join(dir, "personal"), General: true},
-			{Name: "second", Path: filepath.Join(dir, "second"), General: true},
-			{Name: "third", Path: filepath.Join(dir, "third"), General: true},
-		},
-	}
-	if err := SaveRegistryFile(registry); err != nil {
-		t.Fatal(err)
-	}
-
-	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: dataDir})
-	if err := workspaces.loadRegistry(); err != nil {
-		t.Fatal(err)
-	}
-	generals := 0
-	for _, workspace := range workspaces.registry {
-		if workspace.General {
-			generals++
+	for _, name := range []string{"personal", "second"} {
+		if err := os.MkdirAll(filepath.Join(dir, name), 0o755); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if generals != 1 {
-		t.Errorf("%d general workspaces after the repair, want 1", generals)
+	old := `{"path":"` + filepath.Join(dataDir, "workspaces.json") + `","workspacesDir":"` + dir + `",
+	  "workspaces":[
+	    {"name":"personal","path":"` + filepath.Join(dir, "personal") + `","title":"Personal","general":true},
+	    {"name":"second","path":"` + filepath.Join(dir, "second") + `","title":"Second","general":false,
+	     "members":["ana@example.com","bea@example.com"]}]}`
+	if err := os.WriteFile(filepath.Join(dataDir, "workspaces.json"), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	// The first one in the file is the one kept: the repair is not a guess about which is best.
-	if !workspaces.registry["personal"].General {
-		t.Error("the first general workspace should be the one kept")
+	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: dataDir, WorkspacesDir: dir})
+	if err := workspaces.loadRegistry(); err != nil {
+		t.Fatalf("an old registry failed to load: %v", err)
+	}
+	if !workspaces.registry["personal"].Personal() {
+		t.Error("the room with no members should be somebody's own")
+	}
+	if workspaces.registry["second"].Personal() {
+		t.Error("a room with two members is not anybody's own")
 	}
 }
 
-// A first run makes the general workspace in the workspaces folder, and writes the registry only
+// A first run makes the install's own workspace in the workspaces folder, and writes the registry only
 // once: the file is the record, and a second write would be a second decision.
-func TestAFirstRunMakesTheGeneralWorkspace(t *testing.T) {
+func TestAFirstRunMakesThePersonalWorkspace(t *testing.T) {
 	dataDir := t.TempDir()
 	dir := filepath.Join(dataDir, "workspaces")
 	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: dataDir, WorkspacesDir: dir})
 	if err := workspaces.loadRegistry(); err != nil {
 		t.Fatal(err)
 	}
-	general, ok := workspaces.registry[PersonalWorkspaceName]
+	personal, ok := workspaces.registry[PersonalWorkspaceName]
 	if !ok {
-		t.Fatal("a first run should create the general workspace")
+		t.Fatal("a first run should create the personal workspace")
 	}
-	if general.Path != filepath.Join(dir, PersonalWorkspaceName) {
-		t.Errorf("its folder is %q", general.Path)
+	if personal.Path != filepath.Join(dir, PersonalWorkspaceName) {
+		t.Errorf("its folder is %q", personal.Path)
 	}
-	if !general.General {
-		t.Error("it should be the general one")
+	if !personal.Personal() {
+		t.Error("it should be somebody's own room")
 	}
 	// The folder exists, and the registry was written: a second load finds the same workspace
 	// rather than making another.
-	if info, err := os.Stat(general.Path); err != nil || !info.IsDir() {
+	if info, err := os.Stat(personal.Path); err != nil || !info.IsDir() {
 		t.Errorf("the folder should exist: %v", err)
 	}
 	reloaded := NewWorkspaces(WorkspacesOptions{DataDir: dataDir, WorkspacesDir: dir})

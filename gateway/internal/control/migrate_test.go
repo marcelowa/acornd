@@ -156,25 +156,25 @@ func TestUpdatingAWorkspaceThatIsNotThereIsRefused(t *testing.T) {
 	}
 }
 
-// An update keeps the general flag where it was: exactly one workspace is general, and that is not
-// this call's to change.
-func TestAnUpdateCannotMoveTheGeneralFlag(t *testing.T) {
+// An update keeps who a room belongs to where it was. Membership is the fact the rest is derived from, and an
+// update that could rewrite it would be a way to take somebody's room without saying so.
+func TestAnUpdateCannotChangeWhoseRoomIsWhose(t *testing.T) {
 	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: t.TempDir(), WorkspacesDir: t.TempDir()})
-	general := Workspace{Name: PersonalWorkspaceName, Path: t.TempDir(), General: true}
-	other := Workspace{Name: "other", Path: t.TempDir()}
-	workspaces.registry[general.Name] = general
-	workspaces.registry[other.Name] = other
+	personal := Workspace{Name: PersonalWorkspaceName, Path: t.TempDir(), Members: []string{"owner@example.com"}}
+	shared := Workspace{Name: "shared", Path: t.TempDir(), Members: []string{"owner@example.com", "ana@example.com"}}
+	workspaces.registry[personal.Name] = personal
+	workspaces.registry[shared.Name] = shared
 
-	claim := other
-	claim.General = true
+	claim := shared
+	claim.Members = nil
 	if err := workspaces.Update(claim); err != nil {
 		t.Fatal(err)
 	}
-	if workspaces.registry["other"].General {
-		t.Error("an update should not make a second workspace general")
+	if got := workspaces.registry["shared"].Members; len(got) != 2 {
+		t.Errorf("an update rewrote the membership: %v", got)
 	}
-	if !workspaces.registry[PersonalWorkspaceName].General {
-		t.Error("the general workspace should still be general")
+	if !workspaces.registry[PersonalWorkspaceName].Personal() {
+		t.Error("the personal workspace stopped being personal")
 	}
 }
 
@@ -199,7 +199,7 @@ func TestTheGeneralWorkspaceBecomesPersonal(t *testing.T) {
 	registry := RegistryFile{
 		Path:          filepath.Join(dataDir, registryFile),
 		WorkspacesDir: dir,
-		Workspaces:    []Workspace{{Name: "general", Path: filepath.Join(dir, "general"), Title: "general", General: true}},
+		Workspaces:    []Workspace{{Name: "general", Path: filepath.Join(dir, "general"), Title: "general"}},
 	}
 	if err := SaveRegistryFile(registry); err != nil {
 		t.Fatal(err)

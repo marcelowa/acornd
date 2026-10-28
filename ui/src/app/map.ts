@@ -189,7 +189,7 @@ export function toWorkspaces(
 			name: workspace.name,
 			title: workspace.title,
 			path: workspace.path,
-			general: workspace.general,
+			personal: workspace.personal,
 			running: workspace.running,
 			active: workspace.name === activeName,
 			image: workspace.image,

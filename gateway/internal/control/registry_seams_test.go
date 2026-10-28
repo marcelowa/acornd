@@ -12,13 +12,14 @@ import (
 	"github.com/acornfall/acornfall/gateway/internal/protocol"
 )
 
-// The list is general first and then by name, so the sidebar does not reorder itself between
+// The list is somebody's own room first and then by name, so the sidebar does not reorder itself between
 // releases because a map iterated in a different order.
-func TestTheSidebarIsGeneralFirstThenByName(t *testing.T) {
+func TestTheSidebarIsPersonalFirstThenByName(t *testing.T) {
 	workspaces := NewWorkspaces(WorkspacesOptions{WorkspacesDir: t.TempDir()})
-	workspaces.registry["zulu"] = Workspace{Name: "zulu", Path: "/z"}
-	workspaces.registry[PersonalWorkspaceName] = Workspace{Name: PersonalWorkspaceName, Path: "/g", General: true}
-	workspaces.registry["alpha"] = Workspace{Name: "alpha", Path: "/a"}
+	shared := []string{"a@example.com", "b@example.com"}
+	workspaces.registry["zulu"] = Workspace{Name: "zulu", Path: "/z", Members: shared}
+	workspaces.registry[PersonalWorkspaceName] = Workspace{Name: PersonalWorkspaceName, Path: "/g", Members: []string{"a@example.com"}}
+	workspaces.registry["alpha"] = Workspace{Name: "alpha", Path: "/a", Members: shared}
 
 	names := make([]string, 0, 3)
 	for _, workspace := range workspaces.List() {
@@ -70,7 +71,7 @@ func TestTheRegistryFileIsWrittenSorted(t *testing.T) {
 // behind the user's back.
 func TestEvictionSparesWhatIsStillInUse(t *testing.T) {
 	workspaces := NewWorkspaces(WorkspacesOptions{WorkspacesDir: t.TempDir()})
-	workspaces.registry[PersonalWorkspaceName] = Workspace{Name: PersonalWorkspaceName, General: true}
+	workspaces.registry[PersonalWorkspaceName] = Workspace{Name: PersonalWorkspaceName}
 	workspaces.registry["kept"] = Workspace{Name: "kept", KeepAlive: true}
 	workspaces.registry["fresh"] = Workspace{Name: "fresh"}
 	workspaces.registry["stale"] = Workspace{Name: "stale"}

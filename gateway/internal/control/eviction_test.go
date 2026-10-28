@@ -86,7 +86,7 @@ func TestTheGeneralWorkspaceIsNeverEvicted(t *testing.T) {
 	if err := workspaces.loadRegistry(); err != nil {
 		t.Fatal(err)
 	}
-	workspace := Workspace{Name: PersonalWorkspaceName, Path: t.TempDir(), General: true}
+	workspace := Workspace{Name: PersonalWorkspaceName, Path: t.TempDir()}
 	workspaces.registry[PersonalWorkspaceName] = workspace
 	workspaces.controls[PersonalWorkspaceName] = New(Options{Workspace: workspace, Registry: workspaces.List})
 	workspaces.used[PersonalWorkspaceName] = time.Now().Add(-10 * idleEviction)
