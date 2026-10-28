@@ -97,6 +97,19 @@ func (f *fake) SetTunnelIngress(_ context.Context, _, _, hostname, service strin
 	return nil
 }
 
+func (f *fake) UpdateCNAME(_ context.Context, _ string, record DNSRecord, target string) (DNSRecord, error) {
+	if err := f.record("updateCNAME"); err != nil {
+		return DNSRecord{}, err
+	}
+	record.Content = target
+	for index, existing := range f.records {
+		if existing.ID == record.ID {
+			f.records[index] = record
+		}
+	}
+	return record, nil
+}
+
 func (f *fake) DNSRecords(context.Context, string, string) ([]DNSRecord, error) {
 	if err := f.record("dnsRecords"); err != nil {
 		return nil, err
@@ -265,7 +278,7 @@ func TestAnApplyResumesFromTheIdsItWrote(t *testing.T) {
 	prior := State{TunnelID: "t-existing", TunnelToken: "kept", DNSRecordID: "r-existing"}
 	api.tunnels = []Tunnel{{ID: "t-existing", Name: TunnelName}}
 	api.ingress = DefaultLocal
-	api.records = []DNSRecord{{ID: "r-existing", Name: "testing.acornd.app", Type: "CNAME"}}
+	api.records = []DNSRecord{{ID: "r-existing", Name: "testing.acornd.app", Type: "CNAME", Content: "t-existing.cfargotunnel.com"}}
 
 	state, steps, err := (&Provisioner{API: api}).Apply(context.Background(), desired(), prior, nil)
 	if err != nil {
@@ -309,7 +322,7 @@ func TestWhatAlreadyExistsIsAdopted(t *testing.T) {
 	api := newFake()
 	api.tunnels = []Tunnel{{ID: "made-by-hand", Name: TunnelName}}
 	api.ingress = DefaultLocal
-	api.records = []DNSRecord{{ID: "r-hand", Name: "testing.acornd.app", Type: "CNAME"}}
+	api.records = []DNSRecord{{ID: "r-hand", Name: "testing.acornd.app", Type: "CNAME", Content: "made-by-hand.cfargotunnel.com"}}
 	api.idps = []IdentityProvider{{ID: "pin", Type: "onetimepin"}}
 	api.groups = []Group{{ID: "g-hand", Name: GroupName}}
 	api.apps = []App{{ID: "a-hand", Name: AppName, Domain: "testing.acornd.app", Audience: "aud-hand"}}
@@ -579,5 +592,39 @@ func TestTheTunnelIsPointedAtThisConsole(t *testing.T) {
 	}
 	if api.ingress != "http://127.0.0.1:9000" {
 		t.Errorf("the tunnel points at %q", api.ingress)
+	}
+}
+
+// A record whose name is right and whose target is not is the state a deleted or recreated tunnel leaves: the
+// tunnel a token cannot be rotated on is replaced by a new one, and the door then points at nothing. The apply
+// re-points it rather than reporting the name as done.
+func TestARecordPointingAtAnotherTunnelIsRepointed(t *testing.T) {
+	api := newFake()
+	api.tunnels = []Tunnel{{ID: "t-existing", Name: TunnelName}}
+	api.ingress = DefaultLocal
+	api.records = []DNSRecord{{ID: "r-existing", Name: "console.example.com", Type: "CNAME", Content: "t-gone.cfargotunnel.com"}}
+	prior := State{TunnelID: "t-existing", TunnelToken: "kept", DNSRecordID: "r-existing"}
+
+	state, steps, err := (&Provisioner{API: api}).Apply(context.Background(), desired(), prior, []string{"ana@example.com"})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if state.DNSRecordID != "r-existing" {
+		t.Errorf("the record was replaced rather than re-pointed: %q", state.DNSRecordID)
+	}
+	if got := api.records[0].Content; got != "t-existing.cfargotunnel.com" {
+		t.Errorf("the record points at %q", got)
+	}
+	for _, step := range steps {
+		if step.Name == "dns" && (!step.Moved || step.Created) {
+			t.Errorf("the re-point was reported as %+v, want a move", step)
+		}
+	}
+	calls := strings.Join(api.created(), " ")
+	if !strings.Contains(calls, "updateCNAME") {
+		t.Errorf("the apply did %v, want the record re-pointed", api.created())
+	}
+	if strings.Contains(calls, "createCNAME") {
+		t.Errorf("the apply made a second record: %v", api.created())
 	}
 }
