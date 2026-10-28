@@ -51,7 +51,9 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "whenBusy must be steer, followUp or reject", http.StatusBadRequest)
 		return
 	}
-	if err := ctl.Prompt(r.Context(), r.PathValue("id"), strings.TrimSpace(body.Text), when, body.Attachments); err != nil {
+	// A shared room names its speaker before the model reads the turn (ADR 0032 §7).
+	text := prefixed(body.Text, s.speakerFor(r))
+	if err := ctl.Prompt(r.Context(), r.PathValue("id"), strings.TrimSpace(text), when, body.Attachments); err != nil {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
