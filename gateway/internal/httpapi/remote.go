@@ -165,6 +165,24 @@ func answerFor(desire remote.Desired, state remote.State, steps []remote.Step) r
 	return answer
 }
 
+// remoteCheck answers whether the door is up, from outside: the same request an unauthenticated browser makes, and
+// the keys an assertion is verified against (ADR 0033 §8). It talks to the public hostname and the issuer, never to
+// the Cloudflare API, so it needs no token — an install whose API token was deleted can still answer this.
+func (s *Server) remoteCheck(w http.ResponseWriter, r *http.Request) {
+	setup, err := remote.Load(s.gate.Dir)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !setup.Configured() {
+		http.Error(w, "there is no door to check yet: make it first", http.StatusConflict)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, remote.CheckDoor(ctx, nil, setup.Desired.Hostname, os.Getenv("ACORNFALL_IDENTITY_ISSUER")))
+}
+
 // remoteStatusFor maps a Cloudflare refusal onto an HTTP one: a token that cannot do this is the person's to fix
 // (400), and anything else is the far side failing (502).
 func remoteStatusFor(err error) int {

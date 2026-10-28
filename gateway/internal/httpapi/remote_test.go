@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/acornfall/acornfall/gateway/internal/identity"
 	"github.com/acornfall/acornfall/gateway/internal/people"
@@ -267,5 +268,43 @@ func TestRemoteApplyKeepsNoToken(t *testing.T) {
 	}
 	if strings.Contains(string(payload), "api-token-secret") {
 		t.Error("the API token was written to the install folder")
+	}
+}
+
+// The check answers from what the install recorded, and it needs no API token: an install whose token was deleted
+// can still ask whether the door opens.
+func TestTheDoorCheckNeedsNoApiToken(t *testing.T) {
+	t.Setenv("ACORNFALL_CLOUDFLARE_TOKEN", "")
+	t.Setenv("ACORNFALL_IDENTITY_ISSUER", "")
+	api := newCloudflare()
+	handler, _, dir := screen(t, api)
+	if err := remote.Save(dir, remote.Setup{Desired: remote.Desired{Hostname: "127.0.0.1:1", ZoneID: "z", AccountID: "a"}}, time.Now()); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/remote/check", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var report remote.DoorReport
+	if err := json.Unmarshal(recorder.Body.Bytes(), &report); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if report.Guarded {
+		t.Errorf("a hostname that answers nothing reported guarded: %+v", report)
+	}
+	if report.Detail == "" {
+		t.Error("the report carries no sentence")
+	}
+}
+
+// An install with no door has nothing to check, and says so rather than reporting a failure of a door it never made.
+func TestTheDoorCheckRefusesAnInstallWithNoDoor(t *testing.T) {
+	api := newCloudflare()
+	handler, _, _ := screen(t, api)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/remote/check", nil))
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", recorder.Code)
 	}
 }

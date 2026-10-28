@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	abortConversation,
 	applyRemote,
+	checkRemote as checkRemoteRequest,
 	fetchRemote,
 	answerAuthPrompt,
 	answerSecretRequest,
@@ -43,6 +44,7 @@ import {
 	type ProviderAuthType,
 	type SecretAnswerInput,
 	type UpdatePrefs,
+	type DoorReport,
 	type RemoteStatus,
 	type UpdateStatus,
 } from "./client";
@@ -333,6 +335,10 @@ export interface Platform {
 	applyRemote: (request: { hostname: string; zone: string; token: string }) => Promise<void>;
 	remoteBusy: boolean;
 	remoteFailure?: string | undefined;
+	/** The last answer from outside, and whether a check is in flight. */
+	remoteCheck?: DoorReport | undefined;
+	checkRemote: () => void;
+	remoteChecking: boolean;
 	/** Ask the gateway for the update state again; a success clears the last refusal. */
 	refreshUpdate: () => void;
 	/** An apply is in flight: the update button is disabled until it settles. */
@@ -1347,6 +1353,8 @@ export function usePlatform(): Platform {
 	const [remote, setRemote] = useState<RemoteStatus | undefined>(undefined);
 	const [remoteFailure, setRemoteFailure] = useState<string | undefined>(undefined);
 	const [remoteBusy, setRemoteBusy] = useState(false);
+	const [remoteCheck, setRemoteCheck] = useState<DoorReport | undefined>(undefined);
+	const [remoteChecking, setRemoteChecking] = useState(false);
 	useEffect(() => {
 		if (route.screen !== "settings" || route.settingsTab !== "remote") return;
 		let cancelled = false;
@@ -1378,6 +1386,21 @@ export function usePlatform(): Platform {
 		},
 		[],
 	);
+
+	const checkRemoteNow = useCallback((): void => {
+		setRemoteChecking(true);
+		void checkRemoteRequest()
+			.then(setRemoteCheck, (cause: unknown) => {
+				// A check that cannot run is a finding, not a crash: it is shown where the answer would be.
+				setRemoteCheck({
+					guarded: false,
+					status: 0,
+					keys: false,
+					detail: cause instanceof Error ? cause.message : String(cause),
+				});
+			})
+			.finally(() => setRemoteChecking(false));
+	}, []);
 
 	const refreshUpdate = useCallback((): void => {
 		void fetchUpdateStatus().then(setFetchedUpdate, reportError);
@@ -1531,6 +1554,9 @@ export function usePlatform(): Platform {
 		applyRemote: applyRemoteNow,
 		remoteBusy,
 		remoteFailure,
+		remoteCheck,
+		checkRemote: checkRemoteNow,
+		remoteChecking,
 		showSettingsTab,
 		updateTag: route.updateTag,
 		showUpdate,

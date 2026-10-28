@@ -1,6 +1,6 @@
 # ADR 0033 — A browser reaches the machine through a tunnel we configure
 
-Status: accepted (2026-10-30), the provisioner, the boot-time reconcile and cloudflared's supervision built; the setup screen is not
+Status: accepted (2026-10-30), built
 Date: 2026-10-30
 
 ## Context
@@ -123,6 +123,17 @@ mistake at the edge is a refusal rather than an account.
 The last step of setup fetches the public hostname and expects a `302` to the team's login domain;
 the console shows the result. It is the same assertion the live test makes, so the button cannot rot
 without a test failing.
+
+**Built.** `POST /api/remote/check` asks the public hostname the way a browser with nobody signed in
+would, and then fetches the keys an assertion is verified against. It talks to the hostname and the
+issuer, never to the Cloudflare API, so an install whose API token was deleted can still answer it.
+
+The verdict is the interesting part. A `302` to the login domain is a guarded door; **a `200`, or this
+install's own `401`, is the finding that looks like success** — something reached the console without
+the edge in front of it, which is worse than a door that does not open, and the sentence says so.
+Without an issuer recorded the check can judge the redirect and not the keys, and it says which half
+is missing rather than blaming the door. Proved against the live account:
+`{"guarded":true,"status":302,"login":"https://acornd.cloudflareaccess.com/cdn-cgi/access/login/testing.acornd.app…"}`.
 
 ## What the family member experiences
 

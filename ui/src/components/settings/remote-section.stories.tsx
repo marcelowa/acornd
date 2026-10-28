@@ -40,3 +40,32 @@ export const Refused: Story = {
 
 /** A press in flight: the button says so rather than the screen going quiet. */
 export const Making: Story = { args: { busy: true } };
+
+/** The door checked from outside, and guarded: the answer a person wants before inviting anybody. */
+export const CheckedAndGuarded: Story = {
+	args: {
+		status: Made.args?.status,
+		onCheck: () => undefined,
+		check: {
+			guarded: true,
+			status: 302,
+			login: "https://acornd.cloudflareaccess.com/cdn-cgi/access/login/console.example.com",
+			keys: true,
+			detail: "the door is up: an unauthenticated browser is sent to the login page, and the keys are reachable",
+		},
+	},
+};
+
+/** The finding that looks like success: the console answered directly, so nothing is in front of it. */
+export const CheckedAndOpen: Story = {
+	args: {
+		status: Made.args?.status,
+		onCheck: () => undefined,
+		check: {
+			guarded: false,
+			status: 200,
+			keys: false,
+			detail: "the console answered directly, so nothing is in front of it: this is worse than a door that does not open",
+		},
+	},
+};
