@@ -87,6 +87,7 @@ func (s *Server) updateRoutes(mux *http.ServeMux) {
 	// the install's own business, and the token the second one takes is used and dropped (ADR 0033 §4).
 	mux.HandleFunc("GET /api/remote", s.owner(s.remoteStatus))
 	mux.HandleFunc("POST /api/remote/apply", s.owner(s.remoteApply))
+	mux.HandleFunc("POST /api/remote/check", s.owner(s.remoteCheck))
 	mux.HandleFunc("GET /api/update/releases", s.owner(s.updateReleases))
 	mux.HandleFunc("GET /api/update/releases/{tag}", s.owner(s.updateRelease))
 	mux.HandleFunc("GET /api/update/notes", s.owner(s.updateNotes))

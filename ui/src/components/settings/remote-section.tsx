@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { RemoteStatus, RemoteStep } from "@/app/client";
+import type { DoorReport, RemoteStatus, RemoteStep } from "@/app/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Text } from "@/components/typography/text";
@@ -13,6 +13,10 @@ export interface RemoteSectionProps {
 	/** Whether a press is in flight: the button says so rather than the screen going quiet. */
 	busy?: boolean | undefined;
 	onApply: (request: { hostname: string; zone: string; token: string }) => void;
+	/** The last answer from outside, once somebody pressed the check. */
+	check?: DoorReport | undefined;
+	checking?: boolean | undefined;
+	onCheck?: (() => void) | undefined;
 }
 
 /** One step as a person reads it: the verb, the piece, and the detail when there is one. */
@@ -29,7 +33,15 @@ function stepLine(step: RemoteStep): string {
  * the token lives only in the form: it is used for the press and never shown again, because what the running
  * process keeps is the tunnel's token, not the account's (ADR 0033 §4).
  */
-export function RemoteSection({ status, failure, busy = false, onApply }: RemoteSectionProps) {
+export function RemoteSection({
+	status,
+	failure,
+	busy = false,
+	check,
+	checking = false,
+	onApply,
+	onCheck,
+}: RemoteSectionProps) {
 	const [hostname, setHostname] = useState(status?.hostname ?? "");
 	const [zone, setZone] = useState("");
 	const [token, setToken] = useState("");
@@ -149,6 +161,40 @@ export function RemoteSection({ status, failure, busy = false, onApply }: Remote
 						</Button>
 					</div>
 				</form>
+
+				{status?.configured === true ? (
+					<div className="flex flex-col gap-2">
+						<div>
+							<Button
+								type="button"
+								size="sm"
+								variant="outline"
+								disabled={checking}
+								onClick={onCheck}
+							>
+								{checking ? "Checking…" : "Check the door"}
+							</Button>
+						</div>
+						{check === undefined ? (
+							<Text size="2xs" tone="muted">
+								Fetches the hostname the way a browser with nobody signed in would,
+								and looks for the login page and the keys behind it.
+							</Text>
+						) : (
+							<>
+								<Text size="2xs" tone={check.guarded ? "muted" : "default"}>
+									{check.guarded ? "✅ " : "❌ "}
+									{check.detail}
+								</Text>
+								{check.login === undefined ? null : (
+									<Text size="2xs" tone="muted" className="break-all">
+										login: {check.login}
+									</Text>
+								)}
+							</>
+						)}
+					</div>
+				) : null}
 
 				{failure === undefined ? null : (
 					<Text size="2xs" className="text-destructive">

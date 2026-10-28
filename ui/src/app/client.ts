@@ -58,6 +58,22 @@ export interface RemoteStatus {
 	steps?: RemoteStep[] | undefined;
 }
 
+/** What a check of the door found, from outside: the same request an unauthenticated browser makes. */
+export interface DoorReport {
+	guarded: boolean;
+	status: number;
+	login?: string | undefined;
+	keys: boolean;
+	detail: string;
+}
+
+/** Ask, from outside, whether the door opens and whether it is guarded. Needs no API token. */
+export async function checkRemote(): Promise<DoorReport> {
+	const response = await fetch("/api/remote/check", { method: "POST" });
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	return (await response.json()) as DoorReport;
+}
+
 /** The door as it stands: what is recorded, and whether anything has been made yet. */
 export async function fetchRemote(): Promise<RemoteStatus> {
 	const response = await fetch("/api/remote");

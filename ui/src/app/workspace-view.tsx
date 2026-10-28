@@ -486,6 +486,9 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			status={platform.remote}
 			failure={platform.remoteFailure}
 			busy={platform.remoteBusy}
+			check={platform.remoteCheck}
+			checking={platform.remoteChecking}
+			onCheck={platform.checkRemote}
 			onApply={(request) => {
 				void platform.applyRemote(request);
 			}}
