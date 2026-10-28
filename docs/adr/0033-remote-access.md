@@ -1,6 +1,6 @@
 # ADR 0033 — A browser reaches the machine through a tunnel we configure
 
-Status: accepted (2026-10-30), the provisioner built; cloudflared's supervision and the boot-time reconcile are not
+Status: accepted (2026-10-30), the provisioner and cloudflared's supervision built; the boot-time reconcile and the setup screen are not
 Date: 2026-10-30
 
 ## Context
@@ -87,8 +87,11 @@ but it is a real leak, so rotating it is a button and the sentence that says so 
 
 ### 5. `cloudflared` is ours: pinned, verified, supervised
 
-Downloaded into `<data-dir>/bin/cloudflared` at a pinned version, verified against a checksum, the
-same shape the worker tarball already takes ([ADR 0019](0019-self-update.md)). It is restarted on
+Downloaded into `<data-dir>/tools/cloudflared/<version>/cloudflared` at a pinned version, verified
+against a checksum the build carries — Cloudflare publishes no checksum file, so the pin is ours —
+the same shape the worker tarball takes ([ADR 0019](0019-self-update.md)). Only linux/amd64 is
+pinned today: a platform with no pin is refused with the sentence that says to install it and pass
+`--cloudflared`, because a connector holds the tunnel's token and an unverified one is the whole door. It is restarted on
 exit with backoff, and its state is reported by readiness and shown as one line: running, restarting,
 or not started and why. A tunnel that dies is a visible degradation; it is not an outage nobody
 notices until a family member says the page does not load.
