@@ -171,6 +171,10 @@ func serve(argv []string) error {
 	wireUpdates(updates, workspaces, engine)
 
 	logReadiness(ready.Check(readyInputForBoot(dir, updates, engine)))
+	// The account is made to match what this install recorded, then the connector is started: reconcile first,
+	// so a tunnel that was replaced or a record that was deleted is fixed before anything dials out to it. Both
+	// run under the same context and neither blocks the door.
+	go reconcileRemote(ctx, dir)
 	startTunnel(ctx, dir, *cloudflaredPath)
 
 	return listen(ctx, *host, *port, httpapi.New(workspaces, web.Files, updates, gate).Handler(), dir)

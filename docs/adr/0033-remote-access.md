@@ -1,6 +1,6 @@
 # ADR 0033 — A browser reaches the machine through a tunnel we configure
 
-Status: accepted (2026-10-30), the provisioner and cloudflared's supervision built; the boot-time reconcile and the setup screen are not
+Status: accepted (2026-10-30), the provisioner, the boot-time reconcile and cloudflared's supervision built; the setup screen is not
 Date: 2026-10-30
 
 ## Context
@@ -73,6 +73,13 @@ that true. A person added in the console is in the group; a person revoked is ou
 
 What a reconcile did, and anything it could not do, is one line per step in the console and in
 `acornfall remote status`.
+
+**Built.** Every start runs the same apply the command runs, before the connector dials out, with a
+ninety-second budget and no way to fail a boot: an install with no door, no `remote.json`, or no API
+token in its environment says so once and serves anyway. The API token is read from
+`ACORNFALL_CLOUDFLARE_TOKEN` and is deliberately **not stored** — see §4 — so an install whose service
+does not carry it reconciles only when somebody runs the command. That is the honest limit of "as
+automatic as possible" until the token has a home with a stronger story than a file in the data folder.
 
 ### 4. The running process holds the tunnel token, not the API token
 
