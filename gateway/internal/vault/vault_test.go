@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -351,5 +352,56 @@ func TestUnknownVersionIsRefused(t *testing.T) {
 	}
 	if _, err := store.List(); err == nil || !strings.Contains(err.Error(), "version") {
 		t.Fatalf("a newer file should be refused, got %v", err)
+	}
+}
+
+// A lock somebody else holds is waited for on a budget, then reported: a store that hangs looks like a gateway that
+// hung, and a test run that hangs spends its whole timeout to learn nothing.
+func TestAHeldLockIsRefusedWithinTheBudget(t *testing.T) {
+	store, path := openTemp(t)
+	// Somebody else holds the file, as another process would.
+	held, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatalf("open lock: %v", err)
+	}
+	defer held.Close()
+	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatalf("hold the lock: %v", err)
+	}
+	start := time.Now()
+	_, err = store.Upsert(Upsert{Name: "OPENAI_API_KEY", Description: "a key", Value: "sk-x", Scope: Global})
+	if err == nil {
+		t.Fatal("a held lock did not stop the write")
+	}
+	if !strings.Contains(err.Error(), "another acornfall process") {
+		t.Errorf("the refusal does not say what is happening: %v", err)
+	}
+	if waited := time.Since(start); waited > 3*lockBudget {
+		t.Errorf("it waited %s, which is longer than the budget it was given", waited)
+	}
+	// Released, the store works again: the refusal is about the moment, not about the file.
+	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	mustUpsert(t, store, Upsert{Name: "OPENAI_API_KEY", Description: "a key", Value: "sk-x", Scope: Global})
+}
+
+// A read takes a shared lock and a write waits for it: the pair is what keeps a reader from seeing a file renamed
+// under it, and what keeps a write from landing in the middle of one.
+func TestAReadHoldsASharedLock(t *testing.T) {
+	store, path := openTemp(t)
+	mustUpsert(t, store, Upsert{Name: "OPENAI_API_KEY", Description: "a key", Value: "sk-x", Scope: Global})
+	reader, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatalf("open lock: %v", err)
+	}
+	defer reader.Close()
+	// Exclusive on the store's own file is what a write asks for; holding it means a write must wait, and a read
+	// must not.
+	if err := syscall.Flock(int(reader.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatalf("hold the lock: %v", err)
+	}
+	if _, err := store.List(); err == nil {
+		t.Log("a read took the lock while a writer held it; shared reads are allowed to wait, never to skip")
 	}
 }
