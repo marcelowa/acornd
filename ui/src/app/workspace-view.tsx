@@ -17,6 +17,7 @@ import { SettingsScreen } from "@/components/settings/settings-screen";
 import { UpdatesSection } from "@/components/release/updates-section";
 import { ReleaseMark } from "@/components/release/release-mark";
 import { ReleaseScreen } from "@/components/release/release-screen";
+import { ProviderModelsDialog } from "@/components/settings/provider-models-dialog";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { RemoteSection } from "@/components/settings/remote-section";
 import { SecretsSection } from "@/components/settings/secrets-section";
@@ -537,8 +538,20 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			onConnect={connectProvider}
 			onDisconnect={platform.logoutProvider}
 			onRefresh={platform.refreshProviders}
+			onModels={platform.openProviderModels}
 		/>
 	);
+
+	// What one provider's key may be spent on, when a row asked for the list.
+	const providerModels =
+		platform.modelChoice === undefined ? null : (
+			<ProviderModelsDialog
+				provider={platform.modelChoice.provider}
+				allowed={platform.modelChoice.allowed}
+				onSave={platform.saveProviderModels}
+				onClose={platform.closeProviderModels}
+			/>
+		);
 
 	const pickMethod = (method: ProviderAuthType): Promise<void> => {
 		if (connecting === undefined) return Promise.resolve();
@@ -749,6 +762,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					setConnecting(provider);
 				}}
 			/>
+			{providerModels}
 		</>
 	);
 }

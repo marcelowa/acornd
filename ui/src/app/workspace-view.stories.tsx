@@ -321,6 +321,9 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		remoteBusy: false,
 		checkRemote: noop,
 		remoteChecking: false,
+		openProviderModels: noop,
+		saveProviderModels: noop,
+		closeProviderModels: noop,
 		...overrides,
 	};
 }

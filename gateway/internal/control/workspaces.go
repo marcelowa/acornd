@@ -812,7 +812,7 @@ func (w *Workspaces) changeInstall(ctx context.Context, change func(*Defaults) e
 	}
 	// An empty layer is not a layer: leaving a file full of zeroes behind would make the
 	// install look configured when it is not.
-	if defaults == (Defaults{}) {
+	if defaults.Empty() {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}

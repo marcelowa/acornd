@@ -28,6 +28,16 @@ func (s *Server) reload(w http.ResponseWriter, r *http.Request) {
 	s.stateChange(w, r, func(ctl *control.Control) error { return ctl.Reload(r.Context()) })
 }
 
+// mayRunPinned applies the same two lists to the model this conversation is already pinned to.
+func (s *Server) mayRunPinned(w http.ResponseWriter, r *http.Request, ctl *control.Control, conversation string) bool {
+	binding := ctl.StateFor(conversation).Agent
+	if binding.Provider == "" || binding.ModelID == "" {
+		// Nothing pinned yet: the defaults decide, and they were checked when they were set.
+		return true
+	}
+	return s.mayRun(w, r, binding.Provider, binding.ModelID)
+}
+
 func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	ctl, err := s.controlFor(r)
 	if err != nil {
@@ -49,6 +59,11 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		when = protocol.WhenBusyFollowUp
 	default:
 		http.Error(w, "whenBusy must be steer, followUp or reject", http.StatusBadRequest)
+		return
+	}
+	// The conversation's own model is checked before the words are sent: a model taken off the list must stop the
+	// conversation that was using it, not wait for somebody to re-pin it.
+	if !s.mayRunPinned(w, r, ctl, r.PathValue("id")) {
 		return
 	}
 	// A shared room names its speaker before the model reads the turn (ADR 0032 §7).

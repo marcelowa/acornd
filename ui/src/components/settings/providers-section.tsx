@@ -11,6 +11,8 @@ export interface ProvidersSectionProps {
 	onConnect?: ((provider: ProviderSummary) => void) | undefined;
 	onDisconnect?: ((id: string) => void) | undefined;
 	onRefresh?: (() => void) | undefined;
+	/** Open the list of what this install may use from a provider. Omitted means this screen cannot set it. */
+	onModels?: ((provider: ProviderSummary) => void) | undefined;
 }
 
 function statusLine(provider: ProviderSummary): string {
@@ -45,6 +47,7 @@ export function ProvidersSection({
 	onConnect,
 	onDisconnect,
 	onRefresh,
+	onModels,
 }: ProvidersSectionProps) {
 	const [query, setQuery] = useState("");
 	const [confirming, setConfirming] = useState<string | undefined>(undefined);
@@ -110,6 +113,18 @@ export function ProvidersSection({
 									{statusLine(provider)}
 								</Text>
 							</div>
+							{provider.authenticated &&
+							onModels !== undefined &&
+							provider.authTypes.length > 0 ? (
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									onClick={() => onModels(provider)}
+								>
+									Models
+								</Button>
+							) : null}
 							{provider.authenticated ? (
 								confirming === provider.id ? (
 									<span className="flex shrink-0 items-center gap-1">

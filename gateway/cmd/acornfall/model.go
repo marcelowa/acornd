@@ -28,6 +28,9 @@ func modelCommand(argv []string) {
 		case "clear":
 			modelClear(argv[1:])
 			return
+		case "allow":
+			modelAllow(argv[1:])
+			return
 		case "help", "-h", "--help":
 			modelUsage(os.Stdout)
 			return
@@ -37,15 +40,83 @@ func modelCommand(argv []string) {
 	os.Exit(2)
 }
 
+// modelAllow is what a provider's key may be spent on, per provider, for the whole install.
+//
+// The list belongs to the connection rather than to a person: one credentials file is spent by everyone, so the
+// question "what may this key buy" is a property of the key. A provider with no list allows every model it has, and
+// an empty list puts it back there.
+func modelAllow(argv []string) {
+	flags := flag.NewFlagSet("model allow", flag.ContinueOnError)
+	dataDir := flags.String("data-dir", "", "the acornfall folder (default: ~/.acornfall)")
+	clear := flags.Bool("clear", false, "allow every model this provider has again")
+	flagArgs, rest := splitFlags(argv, map[string]bool{"data-dir": true})
+	if err := flags.Parse(flagArgs); err != nil {
+		os.Exit(2)
+	}
+	dir, err := resolveDataDir(*dataDir)
+	if err != nil {
+		logFatal(err)
+	}
+	if len(rest) == 0 {
+		printAllowlist(dir)
+		return
+	}
+	provider := rest[0]
+	models := rest[1:]
+	if !*clear && len(models) == 0 {
+		logFatal(fmt.Errorf("name the models %s may use, or pass --clear to allow all of them", provider))
+	}
+	if *clear {
+		models = nil
+	}
+	allowed, err := control.SetProviderModels(dir, provider, models)
+	if err != nil {
+		logFatal(err)
+	}
+	if len(allowed[strings.ToLower(provider)]) == 0 {
+		fmt.Printf("%s may use every model it has\n", provider)
+		return
+	}
+	fmt.Printf("%s may use %s\n", provider, strings.Join(allowed[strings.ToLower(provider)], ", "))
+}
+
+// printAllowlist is the report: what this install may spend on what. A provider nobody narrowed is not mentioned at
+// all, which is a different sentence from a provider narrowed to nothing — that one cannot be written down.
+func printAllowlist(dir string) {
+	allowed, err := control.InstallAllowlist(dir)
+	if err != nil {
+		logFatal(err)
+	}
+	if len(allowed) == 0 {
+		fmt.Println("no provider is limited: every model this install has is available")
+		return
+	}
+	providers := make([]string, 0, len(allowed))
+	for provider := range allowed {
+		providers = append(providers, provider)
+	}
+	sort.Strings(providers)
+	for _, provider := range providers {
+		fmt.Printf("%-20s %s\n", provider, strings.Join(allowed[provider], ", "))
+	}
+}
+
 func modelUsage(w *os.File) {
 	fmt.Fprint(w, `usage: acornfall model <command>
 
   list                 the default model and the provider keys this install has
   set <provider>/<id>  make it the default for every workspace
   clear                fall back to the provider's own choice
+  allow                what each provider's key may be spent on
+  allow <provider> <model>...  limit it to these models
+  allow <provider> --clear     allow every model it has again
 
 The default is below a workspace's own choice, and above the last resort. The models each
 provider offers are listed in the interface, where the provider is asked.
+
+allow is the install's list, not a person's: one credentials file is spent by everyone, so
+what a key may buy is a property of the key. A person's own list, when one is set, narrows on
+top of it.
 `)
 }
 
