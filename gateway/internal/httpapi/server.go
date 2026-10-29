@@ -92,7 +92,7 @@ func (s *Server) stateChange(w http.ResponseWriter, r *http.Request, change func
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, ctl.State())
+	writeJSON(w, http.StatusOK, ctl.State(callerOf(r)))
 }
 
 // stateBody is stateChange with one JSON body read first. A body that will not decode has
@@ -102,7 +102,7 @@ func stateBody[B any](s *Server, w http.ResponseWriter, r *http.Request, change 
 		if err := change(ctl, body); err != nil {
 			return false, err
 		}
-		writeJSON(w, http.StatusOK, ctl.State())
+		writeJSON(w, http.StatusOK, ctl.State(callerOf(r)))
 		return true, nil
 	})
 }
@@ -202,7 +202,7 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, s.offerable(ctl.StateFor(r.URL.Query().Get("conversation")), callerOf(r)))
+	writeJSON(w, http.StatusOK, s.offerable(ctl.StateFor(callerOf(r), r.URL.Query().Get("conversation")), callerOf(r)))
 }
 
 // workspaceStatus answers where a workspace is, and never starts it: opening a workspace is the

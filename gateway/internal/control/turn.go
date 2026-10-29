@@ -66,11 +66,20 @@ func (c *Control) expandCommand(
 	if err != nil {
 		return text, false, err
 	}
-	// The invocation was a message like any other: whatever was being typed for this room has
-	// been said, and every machine should hear that it is gone.
-	c.clearDraft(conversationID)
+	// The invocation was a message like any other: whatever its sender was typing for this room has
+	// been said, and their other machines should hear that it is gone. Nobody else's draft is touched.
+	c.clearDraft(draftOwner(author), conversationID)
 	c.publish(protocol.Frame{Type: "state"})
 	return text, true, nil
+}
+
+// draftOwner is whose draft a message clears: the address of the person who sent it, which is the author's, and ""
+// for an install with no admin claimed — one person in it, and one key to hold their words.
+func draftOwner(author *protocol.Author) string {
+	if author == nil {
+		return ""
+	}
+	return author.Email
 }
 
 // Prompt admits one message. author is who wrote it, or nil when the install can name nobody; it travels to the
@@ -119,9 +128,10 @@ func (c *Control) Prompt(
 	c.mu.Lock()
 	c.promptedAt[conversationID] = time.Now().UnixMilli()
 	c.mu.Unlock()
-	// The words have landed: the room's draft is what is left to type, which is nothing.
-	// The clear is announced by the publish below, to every machine watching the room.
-	c.clearDraft(conversationID)
+	// The words have landed: the sender's draft is what is left to type, which is nothing. Only theirs —
+	// clearing the conversation's meant two people typing here erased each other (ADR 0034 §7). The
+	// clear is announced by the publish below, to every machine watching the room.
+	c.clearDraft(draftOwner(author), conversationID)
 	// The grace starts now, and attached tabs hear state moves as signals, not on the
 	// next poll: without this a second tab keeps a stale rail for up to three seconds
 	// behind the click. Like every other mutation here, the prompt announces.
@@ -199,13 +209,21 @@ func (c *Control) UploadAttachment(ctx context.Context, tempPath, name, mime str
 
 // Subscribe attaches one client to one conversation. The view it returns is that
 // conversation's, if any, so a late joiner starts from committed state. An empty id means the
-// conversation this install last used, which is what a fresh tab lands on. The second channel
+// conversation this caller lands on, which is what a fresh tab opens. The second channel
 // is the state signal: a value on it means the state the client holds is stale.
-func (c *Control) Subscribe(ctx context.Context, conversationID string) (int, <-chan protocol.Frame, <-chan struct{}, *protocol.Frame, error) {
-	c.mu.Lock()
+//
+// Watching a conversation does not move where anybody lands: that is Select's, and it is per person
+// (ADR 0034 §7). Two people watching two conversations is the normal case now, not a conflict.
+func (c *Control) Subscribe(
+	ctx context.Context,
+	caller Caller,
+	conversationID string,
+) (int, <-chan protocol.Frame, <-chan struct{}, *protocol.Frame, error) {
+	// Read before the lock: landingFor takes it, and the two orders would be a deadlock (G4).
 	if conversationID == "" {
-		conversationID = c.active
+		conversationID = c.landingFor(caller)
 	}
+	c.mu.Lock()
 	first := c.attachments[conversationID] == 0
 	c.attachments[conversationID] += 1
 	id := c.nextSub
@@ -233,15 +251,6 @@ func (c *Control) Subscribe(ctx context.Context, conversationID string) (int, <-
 		}
 	}
 
-	// The newest watcher decides what a new tab opens on — but only a conversation the
-	// worker could attach to. A failed attach must not poison the active conversation for
-	// every tab behind it.
-	if conversationID != "" {
-		c.mu.Lock()
-		c.active = conversationID
-		c.mu.Unlock()
-	}
-
 	var initial *protocol.Frame
 	if hasCache && cached.value != nil {
 		frame := protocol.Frame{
@@ -257,7 +266,9 @@ func (c *Control) Subscribe(ctx context.Context, conversationID string) (int, <-
 }
 
 // Unsubscribe releases one client. The worker is told to stop watching only when the last
-// watcher of that conversation leaves, and never for the one this install remembers.
+// watcher of that conversation leaves, and never for the workspace's own fallback, which is what a
+// tab with no landing of its own will open next. A person's landing is not pinned: every caller
+// would have to be, and a stream attaches what it shows anyway (ADR 0034 §7).
 func (c *Control) Unsubscribe(id int) {
 	c.mu.Lock()
 	conversationID := c.subscriberConversation[id]

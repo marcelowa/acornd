@@ -172,17 +172,17 @@ func TestClearingADraftStampsEvenWhenThereIsNothingToClear(t *testing.T) {
 		Workspace: Workspace{Name: "w", Path: t.TempDir()},
 		DataDir:   t.TempDir(),
 	})
-	control.clearDraft("never-seen")
-	if _, found := control.drafts["never-seen"]; found {
+	control.clearDraft("", "never-seen")
+	if _, found := control.drafts[draftKey{conversation: "never-seen"}]; found {
 		t.Error("a draft that was never written should not be created")
 	}
 
-	control.drafts["1"] = Draft{Text: "half a thought", UpdatedAt: 1}
-	control.clearDraft("1")
-	if got := control.drafts["1"]; got.Text != "" || got.Attachments != nil {
+	control.drafts[draftKey{conversation: "1"}] = Draft{Text: "half a thought", UpdatedAt: 1}
+	control.clearDraft("", "1")
+	if got := control.drafts[draftKey{conversation: "1"}]; got.Text != "" || got.Attachments != nil {
 		t.Errorf("the words should be gone: %+v", got)
 	}
-	if got := control.drafts["1"].UpdatedAt; got <= 1 {
+	if got := control.drafts[draftKey{conversation: "1"}].UpdatedAt; got <= 1 {
 		t.Errorf("the entry should be stamped, got %d", got)
 	}
 }

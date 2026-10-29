@@ -78,20 +78,20 @@ func TestAStateFrameIsASignalNotAPayload(t *testing.T) {
 // carried in every state a client asks for.
 func TestADraftIsBounded(t *testing.T) {
 	c := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}, DraftsPath: t.TempDir() + "/drafts.json"})
-	if _, err := c.SetDraft("", "text", nil); err == nil {
+	if _, err := c.SetDraft(Caller{}, "", "text", nil); err == nil {
 		t.Error("a draft needs a conversation")
 	}
 	atLimit := strings.Repeat("x", maxDraftBytes)
-	if _, err := c.SetDraft("1", atLimit, nil); err != nil {
+	if _, err := c.SetDraft(Caller{}, "1", atLimit, nil); err != nil {
 		t.Errorf("a draft at the limit should be kept: %v", err)
 	}
-	if _, err := c.SetDraft("1", atLimit+"x", nil); err == nil {
+	if _, err := c.SetDraft(Caller{}, "1", atLimit+"x", nil); err == nil {
 		t.Error("a draft over the limit should be refused")
 	} else if !strings.Contains(err.Error(), "KB at most") {
 		t.Errorf("the refusal should say the limit: %v", err)
 	}
 	// An attachment without an id is not an attachment: it would be a reference to nothing.
-	draft, err := c.SetDraft("1", "text", []DraftAttachment{{ID: ""}, {ID: "a1"}})
+	draft, err := c.SetDraft(Caller{}, "1", "text", []DraftAttachment{{ID: ""}, {ID: "a1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,11 +104,11 @@ func TestADraftIsBounded(t *testing.T) {
 // holding a draft that no state event contradicts, so the words would stay on their screen.
 func TestClearingADraftSaysSoRatherThanDeletingIt(t *testing.T) {
 	c := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}, DraftsPath: t.TempDir() + "/drafts.json"})
-	if _, err := c.SetDraft("1", "half a sentence", nil); err != nil {
+	if _, err := c.SetDraft(Caller{}, "1", "half a sentence", nil); err != nil {
 		t.Fatal(err)
 	}
-	c.clearDraft("1")
-	cleared, found := c.drafts["1"]
+	c.clearDraft("", "1")
+	cleared, found := c.drafts[draftKey{conversation: "1"}]
 	if !found {
 		t.Fatal("clearing should leave a stamped entry, not remove it")
 	}
@@ -120,13 +120,13 @@ func TestClearingADraftSaysSoRatherThanDeletingIt(t *testing.T) {
 	}
 	// Clearing one that is already empty changes nothing, so the stamp does not move for ever.
 	before := cleared.UpdatedAt
-	c.clearDraft("1")
-	if after := c.drafts["1"].UpdatedAt; after != before {
+	c.clearDraft("", "1")
+	if after := c.drafts[draftKey{conversation: "1"}].UpdatedAt; after != before {
 		t.Errorf("clearing an empty draft moved its stamp from %d to %d", before, after)
 	}
 	// And one that was never written is not created by clearing it.
-	c.clearDraft("never")
-	if _, found := c.drafts["never"]; found {
+	c.clearDraft("", "never")
+	if _, found := c.drafts[draftKey{conversation: "never"}]; found {
 		t.Error("clearing a draft nobody wrote should not create one")
 	}
 }

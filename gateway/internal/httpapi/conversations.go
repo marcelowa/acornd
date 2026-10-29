@@ -23,11 +23,11 @@ func (s *Server) conversations(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, ctl.State().Conversations)
+	writeJSON(w, http.StatusOK, ctl.State(callerOf(r)).Conversations)
 }
 
 func (s *Server) createConversation(w http.ResponseWriter, r *http.Request) {
-	s.stateChange(w, r, func(ctl *control.Control) error { return ctl.Create(r.Context()) })
+	s.stateChange(w, r, func(ctl *control.Control) error { return ctl.Create(r.Context(), callerOf(r)) })
 }
 
 func (s *Server) policy(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +56,7 @@ func (s *Server) hideConversation(w http.ResponseWriter, r *http.Request) {
 	stateBody(s, w, r, func(ctl *control.Control, body struct {
 		Hidden bool `json:"hidden"`
 	}) error {
-		return ctl.Hide(r.Context(), r.PathValue("id"), body.Hidden)
+		return ctl.Hide(r.Context(), callerOf(r), r.PathValue("id"), body.Hidden)
 	})
 }
 
@@ -67,7 +67,7 @@ func (s *Server) forkConversation(w http.ResponseWriter, r *http.Request) {
 		if body.At == "" {
 			return errors.New("at is required (the entry id to fork from)")
 		}
-		return ctl.Fork(r.Context(), r.PathValue("id"), body.At)
+		return ctl.Fork(r.Context(), callerOf(r), r.PathValue("id"), body.At)
 	})
 }
 
@@ -82,5 +82,5 @@ func (s *Server) compactPreview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) selectConversation(w http.ResponseWriter, r *http.Request) {
-	s.stateChange(w, r, func(ctl *control.Control) error { return ctl.Select(r.Context(), r.PathValue("id")) })
+	s.stateChange(w, r, func(ctl *control.Control) error { return ctl.Select(r.Context(), callerOf(r), r.PathValue("id")) })
 }

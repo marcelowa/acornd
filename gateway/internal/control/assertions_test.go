@@ -51,7 +51,7 @@ func TestTheStateSaysWhichPartsOfTheBindingWereChosen(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
 			control.bindings["1"] = test.binding
-			got := control.StateFor("1").Inherited
+			got := control.StateFor(Caller{}, "1").Inherited
 			if got != test.inherits {
 				t.Errorf("inherited = %+v, want %+v (binding %+v)", got, test.inherits, test.binding)
 			}

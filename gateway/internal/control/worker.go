@@ -66,7 +66,9 @@ func (c *Control) adoptConversation(ctx context.Context, persistedActive string)
 		return fmt.Errorf("list conversations: %w", err)
 	}
 	if len(conversations) == 0 {
-		if err := c.Create(ctx); err != nil {
+		// Nobody is here yet, so the first conversation is the workspace's: it is not a person's landing, and
+		// naming one would invent a caller this control has not met (ADR 0034 §7).
+		if _, err := c.createConversation(ctx); err != nil {
 			return fmt.Errorf("create first conversation: %w", err)
 		}
 		return nil
@@ -76,9 +78,11 @@ func (c *Control) adoptConversation(ctx context.Context, persistedActive string)
 	if !hasConversation(conversations, active) {
 		active = defaultConversation(conversations)
 	}
-	if err := c.Select(ctx, active); err != nil {
-		return err
-	}
+	// The workspace's fallback, not a landing: this runs before anybody has asked, and it is what a caller with no
+	// landing of their own opens on.
+	c.mu.Lock()
+	c.active = active
+	c.mu.Unlock()
 	// No conversation has an agent yet and no provider is connected is a normal
 	// first run, not a failure.
 	if err := c.ensureConversation(ctx, active); err != nil && !errors.Is(err, ErrNoProvider) {
@@ -517,8 +521,12 @@ func (c *Control) Refresh(ctx context.Context) error {
 	if err := c.ensureLastResort(); err != nil && !errors.Is(err, ErrNoProvider) {
 		return err
 	}
-	if active := c.activeConversation(); active != "" {
-		return c.ensureConversation(ctx, active)
+	// Every conversation somebody lands on: a catalog change is a change to what they will run next, and a
+	// workspace's fallback is not the only one after ADR 0034 §7.
+	for _, active := range c.landedConversations() {
+		if err := c.ensureConversation(ctx, active); err != nil && !errors.Is(err, ErrNoProvider) {
+			return err
+		}
 	}
 	return nil
 }

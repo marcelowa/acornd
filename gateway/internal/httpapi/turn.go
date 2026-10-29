@@ -30,7 +30,7 @@ func (s *Server) reload(w http.ResponseWriter, r *http.Request) {
 
 // mayRunPinned applies the same two lists to the model this conversation is already pinned to.
 func (s *Server) mayRunPinned(w http.ResponseWriter, r *http.Request, ctl *control.Control, conversation string) bool {
-	binding := ctl.StateFor(conversation).Agent
+	binding := ctl.StateFor(callerOf(r), conversation).Agent
 	if binding.Provider == "" || binding.ModelID == "" {
 		// Nothing pinned yet: the defaults decide, and they were checked when they were set.
 		return true
@@ -86,7 +86,7 @@ func (s *Server) draft(w http.ResponseWriter, r *http.Request) {
 		Text        string                    `json:"text"`
 		Attachments []control.DraftAttachment `json:"attachments"`
 	}) error {
-		stored, err := ctl.SetDraft(r.PathValue("id"), body.Text, body.Attachments)
+		stored, err := ctl.SetDraft(callerOf(r), r.PathValue("id"), body.Text, body.Attachments)
 		if err != nil {
 			return err
 		}
@@ -140,7 +140,7 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, ctl.State())
+	writeJSON(w, http.StatusOK, ctl.State(callerOf(r)))
 }
 
 func (s *Server) usage(w http.ResponseWriter, r *http.Request) {

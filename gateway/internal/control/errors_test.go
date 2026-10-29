@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +24,7 @@ func TestAConversationThatCannotBeHiddenSaysSo(t *testing.T) {
 	worker := newFakeWorker()
 	worker.failOn["hide"] = errors.New("the harness refused")
 	control := controlWithWorker(t, worker)
-	if err := control.Hide(context.Background(), "1", true); err == nil {
+	if err := control.Hide(context.Background(), Caller{}, "1", true); err == nil {
 		t.Fatal("a refused hide should be reported")
 	}
 }
@@ -39,7 +40,7 @@ func TestHidingTheLastConversationStartsAnother(t *testing.T) {
 	control.active = "1"
 	control.conversations = []protocol.ConversationInfo{{ID: "1"}}
 
-	if err := control.Hide(context.Background(), "1", true); err != nil {
+	if err := control.Hide(context.Background(), Caller{}, "1", true); err != nil {
 		t.Fatal(err)
 	}
 	asked := worker.asked()
@@ -60,7 +61,7 @@ func TestAHideWhoseRelistFailsIsReported(t *testing.T) {
 	worker := newFakeWorker()
 	worker.failOn["conversations"] = errors.New("the harness is not answering")
 	control := controlWithWorker(t, worker)
-	if err := control.Hide(context.Background(), "1", true); err == nil {
+	if err := control.Hide(context.Background(), Caller{}, "1", true); err == nil {
 		t.Fatal("a failed re-list should be reported")
 	}
 }
@@ -71,7 +72,7 @@ func TestAForkThatFailsIsReported(t *testing.T) {
 	worker := newFakeWorker()
 	worker.failOn["fork"] = errors.New("the harness refused")
 	control := controlWithWorker(t, worker)
-	if err := control.Fork(context.Background(), "1", "entry"); err == nil {
+	if err := control.Fork(context.Background(), Caller{}, "1", "entry"); err == nil {
 		t.Fatal("a refused fork should be reported")
 	}
 }
@@ -82,7 +83,7 @@ func TestAForkWithoutAnIDIsRefused(t *testing.T) {
 	worker := newFakeWorker()
 	worker.answer["fork"] = map[string]any{}
 	control := controlWithWorker(t, worker)
-	if err := control.Fork(context.Background(), "1", "entry"); err == nil {
+	if err := control.Fork(context.Background(), Caller{}, "1", "entry"); err == nil {
 		t.Fatal("a fork with no id should be reported")
 	}
 }
@@ -139,78 +140,94 @@ func TestASecretChangeThatFailsIsReported(t *testing.T) {
 	}
 }
 
-// Selecting a conversation attaches to it and detaches the one before, so the frames describe one
-// transcript: two attached conversations is a transcript with another room's lines in it. Selecting
-// what is already selected does nothing at all, because a detach-then-attach would drop frames for
-// the conversation that never changed.
-func TestSelectingAttachesAndDetachesExactly(t *testing.T) {
+// Moving one person must not take the worker away from another. Two people watching two conversations is the normal
+// case in a shared room, and selecting used to detach the previous conversation, which pulled the subscription out
+// from under another tab's live view (ADR 0034 §7). So a select touches no attachment at all: a stream attaches what
+// it shows.
+func TestMovingAConversationDoesNotDetachAnothers(t *testing.T) {
 	worker := newFakeWorker()
 	worker.answer["conversations"] = map[string]any{"conversations": []any{}}
 	worker.answer["describe"] = protocol.Describe{}
 	control := controlWithWorker(t, worker)
-	control.active = "old"
+	ana := Caller{Email: "ana@example.com"}
+	bo := Caller{Email: "bo@example.com"}
 
-	if err := control.Select(context.Background(), "new"); err != nil {
+	// Bo is watching 5, and Ana moves from 3 to 7.
+	if err := control.Select(context.Background(), bo, "5"); err != nil {
 		t.Fatal(err)
 	}
-	types := make([]string, 0, 4)
-	for _, command := range worker.asked() {
-		types = append(types, command.Type+":"+command.ConversationID)
+	if err := control.Select(context.Background(), ana, "3"); err != nil {
+		t.Fatal(err)
 	}
-	want := []string{"detach:old", "attach:new"}
-	for index, one := range want {
-		if index >= len(types) || types[index] != one {
-			t.Fatalf("commands = %v, want it to start %v", types, want)
+	before := len(worker.asked())
+	if err := control.Select(context.Background(), ana, "7"); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range worker.asked()[before:] {
+		if command.Type == "detach" || command.Type == "attach" {
+			t.Errorf("a select sent %s:%s; a stream attaches what it shows", command.Type, command.ConversationID)
 		}
 	}
-	if control.active != "new" {
-		t.Errorf("active = %q", control.active)
+	if got := control.landingFor(ana); got != "7" {
+		t.Errorf("ana lands on %q, want 7", got)
 	}
+	if got := control.landingFor(bo); got != "5" {
+		t.Errorf("bo's landing moved with ana: %q, want 5", got)
+	}
+}
 
-	// Selecting it again is a no-op: no second attach.
-	before := len(worker.asked())
-	if err := control.Select(context.Background(), "new"); err != nil {
+// Where a person lands is theirs. One landing per workspace was what selecting used to mean, so one person's move moved
+// everybody — including the tab that was reading something else (ADR 0034 §7).
+func TestTheLandingIsEachPersons(t *testing.T) {
+	worker := newFakeWorker()
+	worker.answer["conversations"] = map[string]any{"conversations": []any{}}
+	worker.answer["describe"] = protocol.Describe{}
+	control := controlWithWorker(t, worker)
+	ana := Caller{Email: "ana@example.com"}
+	bo := Caller{Email: "bo@example.com"}
+
+	if err := control.Select(context.Background(), ana, "3"); err != nil {
 		t.Fatal(err)
 	}
-	if len(worker.asked()) != before {
-		t.Errorf("selecting what is already selected sent %d more commands", len(worker.asked())-before)
+	if err := control.Select(context.Background(), bo, "5"); err != nil {
+		t.Fatal(err)
+	}
+	// The state a client reads is the one for the conversation it lands on, so the field the client follows says
+	// where that person is rather than where somebody else went.
+	control.conversations = []protocol.ConversationInfo{{ID: "3"}, {ID: "5"}}
+	if got := control.StateFor(ana, "").Conversation; got == nil || got.ID != "3" {
+		t.Errorf("ana's state should be about 3, got %+v", got)
+	}
+	if got := control.StateFor(bo, "").Conversation; got == nil || got.ID != "5" {
+		t.Errorf("bo's state should be about 5, got %+v", got)
+	}
+	// Somebody who has never chosen lands where the workspace last was, rather than on a conversation nobody
+	// opened: a new browser has to show something.
+	if got := control.landingFor(Caller{Email: "cy@example.com"}); got != "5" {
+		t.Errorf("a caller with no landing of their own lands on %q, want the workspace's 5", got)
 	}
 }
 
-// An attach the harness refuses leaves the active conversation where it was: moving the interface
-// to a conversation the worker is not attached to shows a room that will never receive a frame.
-func TestARefusedAttachLeavesTheActiveConversationAlone(t *testing.T) {
-	worker := newFakeWorker()
-	worker.failOn["attach"] = errors.New("the harness refused")
-	control := controlWithWorker(t, worker)
-	control.active = "old"
+// A landing is remembered for good: where a person was is what they come back to, after a restart as much as after a
+// reload. The file carries one landing per address beside the workspace's fallback, which is what an install written
+// before landings were per person already had (ADR 0034 §7).
+func TestALandingOutlivesTheProcess(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}, DataDir: dir, SettingsPath: path})
+	ana := Caller{Email: "ana@example.com"}
+	bo := Caller{Email: "bo@example.com"}
+	control.setLanding(ana, "3")
+	control.setLanding(bo, "5")
+	control.persist()
 
-	if err := control.Select(context.Background(), "new"); err == nil {
-		t.Fatal("a refused attach should be reported")
+	reopened := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}, DataDir: dir, SettingsPath: path})
+	reopened.loadSettings()
+	if got := reopened.landingFor(ana); got != "3" {
+		t.Errorf("ana's landing did not survive the reopen: %q", got)
 	}
-	if control.active != "old" {
-		t.Errorf("active = %q, want it untouched", control.active)
-	}
-}
-
-// A detach that fails is logged and the attach still happens: the conversation somebody asked for
-// is the one they should get, and a stale attachment is the harness's to clear.
-func TestADetachThatFailsStillAttaches(t *testing.T) {
-	worker := newFakeWorker()
-	worker.failOn["detach"] = errors.New("the harness refused")
-	worker.answer["describe"] = protocol.Describe{}
-	worker.answer["conversations"] = map[string]any{"conversations": []any{}}
-	control := controlWithWorker(t, worker)
-	control.active = "old"
-
-	if err := control.Select(context.Background(), "new"); err != nil {
-		t.Fatalf("a failed detach should not stop the attach: %v", err)
-	}
-	if !worker.ran("attach") {
-		t.Error("the attach should have happened")
-	}
-	if control.active != "new" {
-		t.Errorf("active = %q", control.active)
+	if got := reopened.landingFor(bo); got != "5" {
+		t.Errorf("bo's landing did not survive the reopen: %q", got)
 	}
 }
 
@@ -220,7 +237,7 @@ func TestACreateThatFailsIsReported(t *testing.T) {
 	worker := newFakeWorker()
 	worker.failOn["create"] = errors.New("the harness refused")
 	control := controlWithWorker(t, worker)
-	if err := control.Create(context.Background()); err == nil {
+	if err := control.Create(context.Background(), Caller{}); err == nil {
 		t.Fatal("a refused create should be reported")
 	}
 	if worker.ran("attach") {
@@ -233,7 +250,7 @@ func TestACreateWithoutAnIDIsRefused(t *testing.T) {
 	worker := newFakeWorker()
 	worker.answer["create"] = map[string]any{}
 	control := controlWithWorker(t, worker)
-	if err := control.Create(context.Background()); err == nil {
+	if err := control.Create(context.Background(), Caller{}); err == nil {
 		t.Fatal("a create with no id should be reported")
 	}
 }
@@ -251,7 +268,7 @@ func TestASelectWhoseConversationCannotBeConfiguredIsReported(t *testing.T) {
 	// The conversation has a model, so the failure is the open rather than "no provider" — which
 	// a select is allowed to tolerate.
 	control.bindings["1"] = protocol.ModelBinding{Provider: "faux", ModelID: "faux-1"}
-	if err := control.Select(context.Background(), "1"); err == nil {
+	if err := control.Select(context.Background(), Caller{}, "1"); err == nil {
 		t.Fatal("a conversation that cannot be configured should be reported")
 	}
 }
@@ -266,7 +283,7 @@ func TestAHideThatCannotStartAConversationIsReported(t *testing.T) {
 	control.active = "1"
 	control.conversations = []protocol.ConversationInfo{{ID: "1"}}
 
-	if err := control.Hide(context.Background(), "1", true); err == nil {
+	if err := control.Hide(context.Background(), Caller{}, "1", true); err == nil {
 		t.Fatal("a hide with nowhere to land should be reported")
 	}
 }
@@ -282,7 +299,7 @@ func TestAForkKeepsTheParentsModel(t *testing.T) {
 	control := controlWithWorker(t, worker)
 	control.bindings["parent"] = protocol.ModelBinding{Provider: "faux", ModelID: "faux-1"}
 
-	if err := control.Fork(context.Background(), "parent", "entry"); err != nil {
+	if err := control.Fork(context.Background(), Caller{}, "parent", "entry"); err != nil {
 		t.Fatal(err)
 	}
 	if got := control.bindings["child"]; got.Provider != "faux" || got.ModelID != "faux-1" {
@@ -290,28 +307,21 @@ func TestAForkKeepsTheParentsModel(t *testing.T) {
 	}
 }
 
-// A create whose select fails is reported, and a create whose conversation cannot be configured is
-// reported: an id the harness made but the client was never moved to is a conversation nobody sees.
+// A create that cannot finish is reported: a conversation is made and then configured, and a conversation that
+// cannot run leaves the caller told rather than sending into a room whose first prompt fails for a reason nobody has
+// seen yet.
 func TestACreateThatCannotFinishIsReported(t *testing.T) {
-	for _, one := range []struct {
-		why    string
-		failOn string
-	}{
-		{"the select fails", "attach"},
-		{"the conversation cannot be configured", "open"},
-	} {
-		worker := newFakeWorker()
-		worker.answer["create"] = map[string]any{"conversationId": "9"}
-		worker.answer["conversations"] = map[string]any{"conversations": []any{}}
-		worker.answer["describe"] = protocol.Describe{Provider: "faux", Providers: []protocol.ProviderInfo{{
-			ID: "faux", Authenticated: true, Models: []protocol.ModelInfo{{ID: "faux-1"}},
-		}}}
-		worker.failOn[one.failOn] = errors.New("the harness refused")
-		control := controlWithWorker(t, worker)
-		control.bindings["9"] = protocol.ModelBinding{Provider: "faux", ModelID: "faux-1"}
-		if err := control.Create(context.Background()); err == nil {
-			t.Errorf("%s: it should be reported", one.why)
-		}
+	worker := newFakeWorker()
+	worker.answer["create"] = map[string]any{"conversationId": "9"}
+	worker.answer["conversations"] = map[string]any{"conversations": []any{}}
+	worker.answer["describe"] = protocol.Describe{Provider: "faux", Providers: []protocol.ProviderInfo{{
+		ID: "faux", Authenticated: true, Models: []protocol.ModelInfo{{ID: "faux-1"}},
+	}}}
+	worker.failOn["open"] = errors.New("the harness refused")
+	control := controlWithWorker(t, worker)
+	control.bindings["9"] = protocol.ModelBinding{Provider: "faux", ModelID: "faux-1"}
+	if err := control.Create(context.Background(), Caller{}); err == nil {
+		t.Error("a conversation that cannot be configured should be reported")
 	}
 }
 
