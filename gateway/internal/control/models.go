@@ -24,6 +24,10 @@ type Defaults struct {
 	Model    protocol.ModelBinding `json:"defaultModel,omitzero"`
 	Thinking string                `json:"defaultThinking,omitempty"`
 	Agent    string                `json:"defaultAgent,omitempty"`
+	// ProviderModels is what this install may use from each provider, by provider id. Absent means every model it
+	// has; a provider with an entry is narrowed to the ones named (ADR 0032 §6, decided per connection rather than
+	// per person because the key is spent by everyone).
+	ProviderModels map[string][]string `json:"providerModels,omitempty"`
 }
 
 // ScopeDefaults is one layer's own defaults, before any resolution. Empty means this layer

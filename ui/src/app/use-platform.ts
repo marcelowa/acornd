@@ -3,6 +3,9 @@ import {
 	abortConversation,
 	applyRemote,
 	checkRemote as checkRemoteRequest,
+	fetchProviderAllowlist,
+	fetchProviderCatalog,
+	saveProviderAllowlist,
 	fetchRemote,
 	answerAuthPrompt,
 	answerSecretRequest,
@@ -45,6 +48,7 @@ import {
 	type SecretAnswerInput,
 	type UpdatePrefs,
 	type DoorReport,
+	type ProviderCatalogEntry,
 	type RemoteStatus,
 	type UpdateStatus,
 } from "./client";
@@ -337,6 +341,11 @@ export interface Platform {
 	remoteFailure?: string | undefined;
 	/** The last answer from outside, and whether a check is in flight. */
 	remoteCheck?: DoorReport | undefined;
+	/** The provider whose models are being chosen, with the catalog and the list as they stand. */
+	modelChoice?: { provider: ProviderCatalogEntry; allowed: string[] } | undefined;
+	openProviderModels: (provider: ProviderSummary) => void;
+	saveProviderModels: (models: string[]) => void;
+	closeProviderModels: () => void;
 	checkRemote: () => void;
 	remoteChecking: boolean;
 	/** Ask the gateway for the update state again; a success clears the last refusal. */
@@ -1354,6 +1363,36 @@ export function usePlatform(): Platform {
 	const [remoteFailure, setRemoteFailure] = useState<string | undefined>(undefined);
 	const [remoteBusy, setRemoteBusy] = useState(false);
 	const [remoteCheck, setRemoteCheck] = useState<DoorReport | undefined>(undefined);
+	const [modelChoice, setModelChoice] = useState<
+		{ provider: ProviderCatalogEntry; allowed: string[] } | undefined
+	>(undefined);
+	const openProviderModels = useCallback(
+		(provider: ProviderSummary): void => {
+			// The catalog and the list come from the install, not from the narrowed state: choosing from what is left
+			// would make the list impossible to widen from the screen that writes it.
+			void Promise.all([fetchProviderCatalog(), fetchProviderAllowlist()]).then(
+				([catalog, allowed]) => {
+					const entry = catalog.find((one) => one.id === provider.id);
+					if (entry === undefined) return;
+					setModelChoice({ provider: entry, allowed: allowed[provider.id] ?? [] });
+				},
+				reportError,
+			);
+		},
+		[reportError],
+	);
+	const saveProviderModels = useCallback(
+		(models: string[]): void => {
+			const provider = modelChoice?.provider.id;
+			if (provider === undefined) return;
+			void saveProviderAllowlist(provider, models).then(() => {
+				setModelChoice(undefined);
+				refreshProvidersNow();
+			}, reportError);
+		},
+		[modelChoice, reportError, refreshProvidersNow],
+	);
+	const closeProviderModels = useCallback((): void => setModelChoice(undefined), []);
 	const [remoteChecking, setRemoteChecking] = useState(false);
 	useEffect(() => {
 		if (route.screen !== "settings" || route.settingsTab !== "remote") return;
@@ -1555,6 +1594,10 @@ export function usePlatform(): Platform {
 		remoteBusy,
 		remoteFailure,
 		remoteCheck,
+		modelChoice,
+		openProviderModels,
+		saveProviderModels,
+		closeProviderModels,
 		checkRemote: checkRemoteNow,
 		remoteChecking,
 		showSettingsTab,

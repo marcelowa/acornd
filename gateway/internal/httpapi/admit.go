@@ -138,23 +138,42 @@ func (s *Server) mayRun(w http.ResponseWriter, r *http.Request, provider, model 
 		return true
 	}
 	caller := callerOf(r)
-	if caller.Owner || s.gate.People == nil {
-		return true
-	}
-	person, found, err := s.gate.People.Find(caller.Email)
-	if err != nil || !found {
-		// They got through the book a moment ago, so this is a record that changed under the request. Refused
-		// rather than allowed: an allowlist nobody can read is not an allowlist.
-		http.Error(w, "your access could not be read: ask the owner to look at it", http.StatusForbidden)
+	lists, ok := s.modelLists(caller)
+	if !ok {
+		http.Error(w, "the install's model list could not be read: ask the owner to look at it", http.StatusForbidden)
 		return false
 	}
-	if person.Allows(provider, model) {
-		return true
+	// One question, two lists inside it: the install's, which binds everybody including the owner, and the person's
+	// own when they have one.
+	if !lists.allows(provider, model) {
+		http.Error(w, refusalFor(lists, provider, model), http.StatusForbidden)
+		return false
 	}
-	allowed := person.ModelsText()
-	if allowed == "" {
-		allowed = "no models at all"
+	return true
+}
+
+// qualified names models the way a person picks them: provider/model, which is also the form a list entry takes.
+func qualified(provider string, models []string) string {
+	out := make([]string, 0, len(models))
+	for _, model := range models {
+		out = append(out, provider+"/"+model)
 	}
-	http.Error(w, fmt.Sprintf("you may not run %s/%s here; your models are %s", provider, model, allowed), http.StatusForbidden)
-	return false
+	return strings.Join(out, ", ")
+}
+
+// refusalFor is the sentence a refusal carries: what this install allows, and — when the person has their own list —
+// what they allow, so the person can pick one rather than guess.
+func refusalFor(lists modelLists, provider, model string) string {
+	install := qualified(provider, lists.install.Allowed(provider))
+	if install == "" {
+		install = "none of them"
+	}
+	if !lists.limited {
+		return fmt.Sprintf("this install may not run %s/%s; %s allows %s", provider, model, provider, install)
+	}
+	personal := qualified(provider, lists.personalModels(provider))
+	if personal == "" {
+		personal = "none of them"
+	}
+	return fmt.Sprintf("you may not run %s/%s here; %s allows %s for this install and %s for you", provider, model, provider, install, personal)
 }

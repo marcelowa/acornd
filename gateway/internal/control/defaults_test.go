@@ -124,7 +124,9 @@ func TestDefaultsFallThroughLayers(t *testing.T) {
 				control.describe = protocol.Describe{}
 			}
 			resolved, origin := control.effectiveDefaults()
-			if resolved != test.want {
+			// The layer now carries the provider allowlist, which a map makes incomparable: what this test is about
+			// is the three resolved fields, so they are what it compares.
+			if resolved.Model != test.want.Model || resolved.Thinking != test.want.Thinking || resolved.Agent != test.want.Agent {
 				t.Errorf("defaults:\n got %+v\nwant %+v", resolved, test.want)
 			}
 			if origin != test.origin {

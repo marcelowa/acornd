@@ -273,7 +273,9 @@ func TestAModelOutsideTheAllowlistIsRefusedOnAssignment(t *testing.T) {
 		t.Errorf("status = %d, want 403", recorder.Code)
 	}
 	body := recorder.Body.String()
-	if !strings.Contains(body, "faux-1") || !strings.Contains(body, "your models are") {
+	// The sentence names the models the person may run, in the form they pick them, and says which list is which:
+	// the install's for the provider, then theirs on top.
+	if !strings.Contains(body, "faux/faux-1") || !strings.Contains(body, "for you") {
 		t.Errorf("the refusal does not say what they may run: %q", body)
 	}
 

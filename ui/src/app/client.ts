@@ -58,6 +58,44 @@ export interface RemoteStatus {
 	steps?: RemoteStep[] | undefined;
 }
 
+/** A provider with every model it has, for choosing what the install may spend on it. */
+export interface ProviderCatalogEntry {
+	id: string;
+	name: string;
+	models: { id: string; name: string }[];
+}
+
+/** Every provider and every model: the list the owner chooses from, never the narrowed one. */
+export async function fetchProviderCatalog(): Promise<ProviderCatalogEntry[]> {
+	const response = await fetch("/api/providers/catalog");
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	const body = (await response.json()) as { providers?: ProviderCatalogEntry[] };
+	return body.providers ?? [];
+}
+
+/** What this install may use from each provider: `{openai: ["gpt-5"]}`. Absent means every model it has. */
+export async function fetchProviderAllowlist(): Promise<Record<string, string[]>> {
+	const response = await fetch("/api/providers/allowlist");
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	const body = (await response.json()) as { providers?: Record<string, string[]> };
+	return body.providers ?? {};
+}
+
+/** Write one provider's list. An empty list puts it back to "every model it has". */
+export async function saveProviderAllowlist(
+	provider: string,
+	models: string[],
+): Promise<Record<string, string[]>> {
+	const response = await fetch("/api/providers/allowlist", {
+		method: "PUT",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ provider, models }),
+	});
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	const body = (await response.json()) as { providers?: Record<string, string[]> };
+	return body.providers ?? {};
+}
+
 /** What a check of the door found, from outside: the same request an unauthenticated browser makes. */
 export interface DoorReport {
 	guarded: boolean;
