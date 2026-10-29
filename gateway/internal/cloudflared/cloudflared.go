@@ -132,8 +132,9 @@ func write(path string, payload []byte) error {
 	}
 	defer os.Remove(temp.Name())
 	if _, err := temp.Write(payload); err != nil {
-		temp.Close()
-		return err
+		// Both errors, joined: the write is what went wrong, and a close that failed too is part of the same
+		// refusal rather than a second one. errors.Join drops a nil, so the usual message is the write's alone.
+		return errors.Join(err, temp.Close())
 	}
 	if err := temp.Close(); err != nil {
 		return err
