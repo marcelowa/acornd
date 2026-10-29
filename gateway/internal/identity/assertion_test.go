@@ -122,8 +122,8 @@ func TestAValidAssertionNamesItsEmail(t *testing.T) {
 	if caller.Email != testEmail {
 		t.Errorf("email = %q, want %q", caller.Email, testEmail)
 	}
-	if caller.Owner {
-		t.Error("a person from the edge is not the install owner")
+	if caller.Admin {
+		t.Error("a person from the edge is not the install admin")
 	}
 }
 
@@ -278,7 +278,7 @@ func TestAnUnknownKeyIDRefetches(t *testing.T) {
 }
 
 // A key set that is not a key set is reported as that, rather than as a signature failure: the two have
-// different fixes, and one of them is not the owner's.
+// different fixes, and one of them is not the admin's.
 func TestAKeySetThatIsNotOneIsReported(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"keys":[]}`))

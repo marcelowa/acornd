@@ -28,7 +28,7 @@ func admitted(t *testing.T, gate Gate) http.Handler {
 	return New(nil, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<!doctype html>")}}, nil, gate).Handler()
 }
 
-// withDoor is the gate with a door and no book: the single owner of ADR 0020 behind a proof.
+// withDoor is the gate with a door and no book: the single admin of ADR 0020 behind a proof.
 func withDoor(door identity.Door) Gate { return Gate{Door: door} }
 
 // book is a book of people in a temporary install folder.
@@ -69,7 +69,7 @@ func TestHealthAnswersWithoutAProof(t *testing.T) {
 // A proven request reaches the handler it was for. The absent update tier answers 503, which is a handler
 // that ran: the door must not be the thing that answers every route.
 func TestAProvenRequestReachesItsHandler(t *testing.T) {
-	handler := admitted(t, withDoor(stubDoor{caller: identity.Caller{Owner: true}}))
+	handler := admitted(t, withDoor(stubDoor{caller: identity.Caller{Admin: true}}))
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/update/status", nil))
 	if recorder.Code != http.StatusServiceUnavailable {
@@ -77,7 +77,7 @@ func TestAProvenRequestReachesItsHandler(t *testing.T) {
 	}
 }
 
-// No gate is the single owner ADR 0020 describes, and the console answers exactly as it did before there
+// No gate is the single admin ADR 0020 describes, and the console answers exactly as it did before there
 // was a door. A door that exists but is switched off is how a guard nobody believes in comes back.
 func TestNoGateMeansTheConsoleIsOpen(t *testing.T) {
 	handler := admitted(t, Gate{})
@@ -88,9 +88,9 @@ func TestNoGateMeansTheConsoleIsOpen(t *testing.T) {
 	}
 }
 
-// A proof of an address is not permission to use the install. Someone the owner never named is refused
+// A proof of an address is not permission to use the install. Someone the admin never named is refused
 // with 403 — the proof was good, so signing in again would not help — and nothing is written.
-func TestAnEmailTheOwnerNeverNamedIsRefused(t *testing.T) {
+func TestAnEmailTheAdminNeverNamedIsRefused(t *testing.T) {
 	opened := book(t)
 	handler := admitted(t, Gate{Door: stubDoor{caller: identity.Caller{Email: "stranger@example.com"}}, People: opened})
 	recorder := httptest.NewRecorder()
@@ -132,7 +132,7 @@ func TestAnInvitedPersonIsActiveAfterTheirFirstRequest(t *testing.T) {
 	}
 }
 
-// Someone the owner removed is refused from their next request on, with the reason rather than a 401: a
+// Someone the admin removed is refused from their next request on, with the reason rather than a 401: a
 // door that says "sign in" to a person who was revoked sends them round a loop they cannot leave.
 func TestARevokedPersonIsRefused(t *testing.T) {
 	opened := book(t)
@@ -153,10 +153,10 @@ func TestARevokedPersonIsRefused(t *testing.T) {
 	}
 }
 
-// The owner is proven by the token, and needs no record to be let in: an install with a door and no owner
+// The admin is proven by the token, and needs no record to be let in: an install with a door and no admin
 // claimed must still be reachable from the machine it runs on, or there is no way to claim it.
-func TestTheOwnerNeedsNoRecord(t *testing.T) {
-	handler := admitted(t, Gate{Door: stubDoor{caller: identity.Caller{Owner: true}}, People: book(t)})
+func TestTheAdminNeedsNoRecord(t *testing.T) {
+	handler := admitted(t, Gate{Door: stubDoor{caller: identity.Caller{Admin: true}}, People: book(t)})
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/update/status", nil))
 	if recorder.Code != http.StatusServiceUnavailable {
@@ -167,7 +167,7 @@ func TestTheOwnerNeedsNoRecord(t *testing.T) {
 // The console sets no cookie of ours, so SameSite protects nothing: the edge's cookie authenticates a
 // cross-site form POST perfectly well. Without this check the door opens for whoever wrote the page.
 func TestACrossSitePostIsRefused(t *testing.T) {
-	handler := admitted(t, withDoor(stubDoor{caller: identity.Caller{Owner: true}}))
+	handler := admitted(t, withDoor(stubDoor{caller: identity.Caller{Admin: true}}))
 	request := httptest.NewRequest(http.MethodPost, "http://console.example.com/api/update/check", strings.NewReader("{}"))
 	request.Header.Set("Origin", "https://evil.example.com")
 	recorder := httptest.NewRecorder()
@@ -180,7 +180,7 @@ func TestACrossSitePostIsRefused(t *testing.T) {
 // The page's own fetch sends an Origin that matches the host it was served from, and a check that refuses
 // those is a console nobody can use.
 func TestASameSitePostIsAllowed(t *testing.T) {
-	handler := admitted(t, withDoor(stubDoor{caller: identity.Caller{Owner: true}}))
+	handler := admitted(t, withDoor(stubDoor{caller: identity.Caller{Admin: true}}))
 	request := httptest.NewRequest(http.MethodPost, "http://console.example.com/api/update/check", strings.NewReader("{}"))
 	request.Header.Set("Origin", "http://console.example.com")
 	recorder := httptest.NewRecorder()
@@ -193,7 +193,7 @@ func TestASameSitePostIsAllowed(t *testing.T) {
 // A command line sends no Origin, and it is not the party this is aimed at. Refusing it would mean a door
 // only a browser could open.
 func TestARequestWithNoOriginIsAllowed(t *testing.T) {
-	handler := admitted(t, withDoor(stubDoor{caller: identity.Caller{Owner: true}}))
+	handler := admitted(t, withDoor(stubDoor{caller: identity.Caller{Admin: true}}))
 	request := httptest.NewRequest(http.MethodPost, "http://console.example.com/api/update/check", strings.NewReader("{}"))
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
@@ -205,7 +205,7 @@ func TestARequestWithNoOriginIsAllowed(t *testing.T) {
 // A read is not a change, and the stream and every page load are reads: a cross-site check that covered
 // them would break the console's own navigation for no gain.
 func TestACrossSiteReadIsAllowed(t *testing.T) {
-	handler := admitted(t, withDoor(stubDoor{caller: identity.Caller{Owner: true}}))
+	handler := admitted(t, withDoor(stubDoor{caller: identity.Caller{Admin: true}}))
 	request := httptest.NewRequest(http.MethodGet, "http://console.example.com/api/update/status", nil)
 	request.Header.Set("Origin", "https://evil.example.com")
 	recorder := httptest.NewRecorder()
@@ -215,10 +215,10 @@ func TestACrossSiteReadIsAllowed(t *testing.T) {
 	}
 }
 
-// The install's own routes — its workspaces' lifecycle, its credentials, its updates — are the owner's.
+// The install's own routes — its workspaces' lifecycle, its credentials, its updates — are the admin's.
 // A person gets 403 rather than the 404 a workspace answers: these routes are not about a workspace they
 // might be a member of, they are about an install they do not own.
-func TestAnInstallRouteIsTheOwnersOnly(t *testing.T) {
+func TestAnInstallRouteIsTheAdminsOnly(t *testing.T) {
 	opened := book(t)
 	if _, err := opened.Add("ana@example.com", "Ana"); err != nil {
 		t.Fatalf("add: %v", err)
@@ -229,9 +229,9 @@ func TestAnInstallRouteIsTheOwnersOnly(t *testing.T) {
 		want   int
 	}{
 		{"a person", identity.Caller{Email: "ana@example.com"}, http.StatusForbidden},
-		// The owner passes the check and reaches the handler, which answers 503 because this build has no
+		// The admin passes the check and reaches the handler, which answers 503 because this build has no
 		// update tier.
-		{"the owner", identity.Caller{Owner: true}, http.StatusServiceUnavailable},
+		{"the admin", identity.Caller{Admin: true}, http.StatusServiceUnavailable},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -245,7 +245,7 @@ func TestAnInstallRouteIsTheOwnersOnly(t *testing.T) {
 	}
 }
 
-// A person may run the models the owner gave them and no others, and the refusal says which ones those are:
+// A person may run the models the admin gave them and no others, and the refusal says which ones those are:
 // the person is family, and "forbidden" is not a sentence anybody can act on (ADR 0032 §6).
 func TestAModelOutsideTheAllowlistIsRefusedOnAssignment(t *testing.T) {
 	opened := book(t)
@@ -279,22 +279,22 @@ func TestAModelOutsideTheAllowlistIsRefusedOnAssignment(t *testing.T) {
 		t.Errorf("the refusal does not say what they may run: %q", body)
 	}
 
-	// The owner has no list, and neither does an install with nobody in it.
-	owner := httptest.NewRequest(http.MethodPost, "/api/agent", nil)
-	owner = owner.WithContext(withCaller(owner.Context(), control.Caller{Owner: true}))
-	if recorder := httptest.NewRecorder(); !server.mayRun(recorder, owner, "faux", "anything") {
-		t.Error("the owner was refused a model")
+	// The admin has no list, and neither does an install with nobody in it.
+	admin := httptest.NewRequest(http.MethodPost, "/api/agent", nil)
+	admin = admin.WithContext(withCaller(admin.Context(), control.Caller{Admin: true}))
+	if recorder := httptest.NewRecorder(); !server.mayRun(recorder, admin, "faux", "anything") {
+		t.Error("the admin was refused a model")
 	}
 	if recorder := httptest.NewRecorder(); !server.mayRun(recorder, as("ana@example.com"), "", "") {
 		t.Error("a request that named no model was checked against the list")
 	}
 }
 
-// The owner arrives through the edge like everybody else: with a door in front, a browser proves an address
+// The admin arrives through the edge like everybody else: with a door in front, a browser proves an address
 // and the book says what that address may do. The token proves ownership by itself, and that is the only
-// caller it ever describes — a build where the book is never asked is an install whose owner is a person
-// behind their own console, refused with a sentence telling them only its owner may do it.
-func TestTheOwnersAddressMayDoTheInstallsBusiness(t *testing.T) {
+// caller it ever describes — a build where the book is never asked is an install whose admin is a person
+// behind their own console, refused with a sentence telling them only its admin may do it.
+func TestTheAdminsAddressMayDoTheInstallsBusiness(t *testing.T) {
 	opened := book(t)
 	if _, err := opened.Claim("marcelo@example.com", "Marcelo"); err != nil {
 		t.Fatalf("claim: %v", err)
@@ -303,7 +303,7 @@ func TestTheOwnersAddressMayDoTheInstallsBusiness(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/update/status", nil))
 	if recorder.Code == http.StatusForbidden {
-		t.Fatalf("the owner was refused their own install: %q", recorder.Body.String())
+		t.Fatalf("the admin was refused their own install: %q", recorder.Body.String())
 	}
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want the handler's 503", recorder.Code)

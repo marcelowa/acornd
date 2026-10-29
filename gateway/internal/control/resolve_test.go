@@ -11,7 +11,7 @@ import (
 
 // What reaches a sandbox is decided here, and the two engines decide differently: a substitute
 // engine keeps the value on the host and needs to know which hosts it may go to, and an
-// environment engine puts it in the process and needs the owner to have said that is allowed. A
+// environment engine puts it in the process and needs the admin to have said that is allowed. A
 // secret that fails either rule stays visible with its reason, because a list that silently drops
 // one is a list nobody can debug.
 
@@ -69,7 +69,7 @@ func TestASubstituteEngineNeedsAHostForEverySecret(t *testing.T) {
 	}
 }
 
-func TestAnEnvironmentEngineNeedsTheOwnerToAllowIt(t *testing.T) {
+func TestAnEnvironmentEngineNeedsTheAdminToAllowIt(t *testing.T) {
 	// AllowEnv defaults to true — the card asks, and a value somebody typed into a form is a value
 	// they meant to give — so the refusal is the opt-out, not the default.
 	allowed := true
@@ -82,7 +82,7 @@ func TestAnEnvironmentEngineNeedsTheOwnerToAllowIt(t *testing.T) {
 	resolved := control.resolveSecrets(sandbox.DeliveryEnvironment)
 
 	if len(resolved.delivered) != 1 || resolved.delivered[0].Name != "ALLOWED" {
-		t.Errorf("only the entry the owner allowed is delivered: %v", resolved.delivered)
+		t.Errorf("only the entry the admin allowed is delivered: %v", resolved.delivered)
 	}
 	for _, state := range resolved.state {
 		if state.Name == "REFUSED" && state.Status != "not delivered: its value may not enter the sandbox" {

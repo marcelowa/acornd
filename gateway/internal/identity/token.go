@@ -18,7 +18,7 @@ import (
 	"strings"
 )
 
-// TokenFile is the file inside the install folder that holds the owner's token. ADR 0014 names it
+// TokenFile is the file inside the install folder that holds the admin's token. ADR 0014 names it
 // when it says the install folder is never mounted into a sandbox, so this name is not free to
 // change quietly.
 const TokenFile = "token"
@@ -26,7 +26,7 @@ const TokenFile = "token"
 // tokenBytes is 32 bytes of randomness: a token nobody guesses, in 43 base64url characters.
 const tokenBytes = 32
 
-// Token proves the install's owner by possession of the token file.
+// Token proves the install's admin by possession of the token file.
 //
 // Prove reads the file on every request rather than caching it, so a rotation takes effect without a
 // restart. It is a page-cache read of 43 bytes, and an attached client holds one request open for
@@ -37,7 +37,7 @@ type Token struct {
 	Dir string
 }
 
-// Prove answers the owner when the request carries the install's token, in
+// Prove answers the admin when the request carries the install's token, in
 // `Authorization: Bearer <token>`. It is read from the header and never from the query string: a URL
 // is written down in shell history, in proxy logs, and in the Referer of whatever the page loads.
 func (t Token) Prove(r *http.Request) (Caller, error) {
@@ -56,7 +56,7 @@ func (t Token) Prove(r *http.Request) (Caller, error) {
 	if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
 		return Caller{}, ErrWrongToken
 	}
-	return Caller{Owner: true}, nil
+	return Caller{Admin: true}, nil
 }
 
 // bearer reads the header's token, without pretending to parse the scheme case-sensitively: RFC 6750
@@ -97,7 +97,7 @@ func ReadToken(dir string) (string, error) {
 // EnsureToken returns the install's token, minting one when there is none, and reports whether it
 // minted one so the caller can say where it went instead of printing a secret nobody asked for.
 //
-// An install that never turns people on never calls this: ADR 0020's single owner has no token, and
+// An install that never turns people on never calls this: ADR 0020's single admin has no token, and
 // creating a credential nothing checks is how a switched-off guard comes back.
 func EnsureToken(dir string) (token string, minted bool, err error) {
 	token, err = ReadToken(dir)

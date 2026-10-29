@@ -160,8 +160,8 @@ func TestUpdatingAWorkspaceThatIsNotThereIsRefused(t *testing.T) {
 // update that could rewrite it would be a way to take somebody's room without saying so.
 func TestAnUpdateCannotChangeWhoseRoomIsWhose(t *testing.T) {
 	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: t.TempDir(), WorkspacesDir: t.TempDir()})
-	personal := Workspace{Name: PersonalWorkspaceName, Path: t.TempDir(), Members: []string{"owner@example.com"}}
-	shared := Workspace{Name: "shared", Path: t.TempDir(), Members: []string{"owner@example.com", "ana@example.com"}}
+	personal := Workspace{Name: PersonalWorkspaceName, Path: t.TempDir(), Members: []string{"admin@example.com"}}
+	shared := Workspace{Name: "shared", Path: t.TempDir(), Members: []string{"admin@example.com", "ana@example.com"}}
 	workspaces.registry[personal.Name] = personal
 	workspaces.registry[shared.Name] = shared
 
@@ -205,7 +205,7 @@ func TestTheGeneralWorkspaceBecomesPersonal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: dataDir, WorkspacesDir: dir, OwnerEmail: "Me@Example.com"})
+	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: dataDir, WorkspacesDir: dir, AdminEmail: "Me@Example.com"})
 	if err := workspaces.loadRegistry(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestTheGeneralWorkspaceBecomesPersonal(t *testing.T) {
 		t.Errorf("title = %q, want the label the console shows", personal.Title)
 	}
 	if !slices.Equal(personal.Members, []string{"me@example.com"}) {
-		t.Errorf("members = %v, want the owner, lowercased", personal.Members)
+		t.Errorf("members = %v, want the admin, lowercased", personal.Members)
 	}
 	// Everything the folder held is under the new name, and nothing is left behind.
 	for _, name := range []string{"session.sqlite", "session.sqlite-wal", "session.sqlite-shm", "settings.json", "drafts.json"} {

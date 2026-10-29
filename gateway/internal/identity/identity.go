@@ -1,11 +1,11 @@
 // Package identity answers who is calling the console, and refuses when it cannot tell.
 // See docs/adr/0032-who-may-call-the-console.md.
 //
-// A door is a proof, never an address. Two exist: the install's token file, which proves the owner
+// A door is a proof, never an address. Two exist: the install's token file, which proves the admin
 // from the command line, and a signed assertion the edge attaches to every request it forwards,
 // which proves a person from a browser. Loopback is not one of them — ADR 0012 records that a
 // workspace's guest can reach the gateway's own API, so treating "it came from this machine" as the
-// owner would make every agent in every workspace the owner. A request from 127.0.0.1 with no proof
+// admin would make every agent in every workspace the admin. A request from 127.0.0.1 with no proof
 // is refused like any other.
 package identity
 
@@ -16,13 +16,13 @@ import (
 	"strings"
 )
 
-// Caller is who is calling: the install's owner, proven locally, or a person, proven remotely.
+// Caller is who is calling: the install's admin, proven locally, or a person, proven remotely.
 //
-// Owner is the install owner and is deliberately not a member of anyone else's workspace (ADR 0032
+// Admin is the install admin and is deliberately not a member of anyone else's workspace (ADR 0032
 // decision 4): owning the install means lifecycle, credentials and policy, not reading a
-// conversation. Email is empty only while the owner has not been claimed with `acornfall people`.
+// conversation. Email is empty only while the admin has not been claimed with `acornfall people`.
 type Caller struct {
-	Owner bool
+	Admin bool
 	Email string
 }
 

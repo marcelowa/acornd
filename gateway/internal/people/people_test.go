@@ -21,7 +21,7 @@ func book(t *testing.T) *Book {
 	return opened
 }
 
-// An install with no file is the single owner ADR 0020 describes, not an error: the book appears the
+// An install with no file is the single admin ADR 0020 describes, not an error: the book appears the
 // first time somebody is named, and until then nobody is.
 func TestAnInstallWithNoBookHasNoPeople(t *testing.T) {
 	b := book(t)
@@ -32,37 +32,37 @@ func TestAnInstallWithNoBookHasNoPeople(t *testing.T) {
 	if len(list) != 0 {
 		t.Errorf("list = %v, want none", list)
 	}
-	if _, ok, err := b.Owner(); err != nil || ok {
-		t.Errorf("owner = %v, %v; want nobody and no error", ok, err)
+	if _, ok, err := b.Admin(); err != nil || ok {
+		t.Errorf("admin = %v, %v; want nobody and no error", ok, err)
 	}
 	if _, err := b.SignIn("ana@example.com"); !errors.As(err, &ErrUnknown{}) {
 		t.Fatalf("err = %v, want unknown", err)
 	}
 }
 
-// Exactly one owner, and the command line is what claims it: the token already proves ownership, so
+// Exactly one admin, and the command line is what claims it: the token already proves ownership, so
 // there is no race and nothing to self-promote through the API.
-func TestTheOwnerIsClaimedOnce(t *testing.T) {
+func TestTheAdminIsClaimedOnce(t *testing.T) {
 	b := book(t)
-	owner, err := b.Claim("Me@Example.com", "Me")
+	admin, err := b.Claim("Me@Example.com", "Me")
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if owner.Role != RoleOwner || owner.State != Active {
-		t.Errorf("owner = %+v, want an active owner", owner)
+	if admin.Role != RoleAdmin || admin.State != Active {
+		t.Errorf("admin = %+v, want an active admin", admin)
 	}
-	if owner.Email != "me@example.com" {
-		t.Errorf("email = %q, want it lowercased", owner.Email)
+	if admin.Email != "me@example.com" {
+		t.Errorf("email = %q, want it lowercased", admin.Email)
 	}
-	if owner.Created != "2026-10-30" {
-		t.Errorf("created = %q, want today's date", owner.Created)
+	if admin.Created != "2026-10-30" {
+		t.Errorf("created = %q, want today's date", admin.Created)
 	}
-	if _, err := b.Claim("someone@example.com", "Someone"); !errors.Is(err, ErrHasOwner) {
-		t.Fatalf("err = %v, want ErrHasOwner", err)
+	if _, err := b.Claim("someone@example.com", "Someone"); !errors.Is(err, ErrHasAdmin) {
+		t.Fatalf("err = %v, want ErrHasAdmin", err)
 	}
 }
 
-// A person the owner names is invited until they show up. A typo therefore costs nothing, and nobody
+// A person the admin names is invited until they show up. A typo therefore costs nothing, and nobody
 // holds a workspace they never visited.
 func TestAnAddedPersonIsInvitedUntilTheySignIn(t *testing.T) {
 	b := book(t)
@@ -73,7 +73,7 @@ func TestAnAddedPersonIsInvitedUntilTheySignIn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	if added.State != Invited || added.Role != RolePerson {
+	if added.State != Invited || added.Role != RoleMember {
 		t.Fatalf("added = %+v, want an invited person", added)
 	}
 
@@ -93,7 +93,7 @@ func TestAnAddedPersonIsInvitedUntilTheySignIn(t *testing.T) {
 	}
 }
 
-// Revoked is a state, not a deletion: "who was here" is a question the owner asks later, and every
+// Revoked is a state, not a deletion: "who was here" is a question the admin asks later, and every
 // request from a revoked address refuses from the next one.
 func TestRevokingKeepsTheRecordAndRefusesSignIn(t *testing.T) {
 	b := book(t)
@@ -115,18 +115,18 @@ func TestRevokingKeepsTheRecordAndRefusesSignIn(t *testing.T) {
 	}
 }
 
-// Revoking the owner would leave nobody able to name anybody, and the only way back in is the token
+// Revoking the admin would leave nobody able to name anybody, and the only way back in is the token
 // that belongs to the record being revoked.
-func TestTheOwnerCannotBeRevoked(t *testing.T) {
+func TestTheAdminCannotBeRevoked(t *testing.T) {
 	b := book(t)
 	if _, err := b.Claim("me@example.com", "Me"); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	if err := b.Revoke("me@example.com"); err == nil {
-		t.Fatal("the owner was revoked")
+		t.Fatal("the admin was revoked")
 	}
-	if owner, ok, _ := b.Owner(); !ok || owner.State != Active {
-		t.Errorf("owner = %+v, want it intact", owner)
+	if admin, ok, _ := b.Admin(); !ok || admin.State != Active {
+		t.Errorf("admin = %+v, want it intact", admin)
 	}
 }
 
@@ -264,7 +264,7 @@ func TestTheDateIsTodaysWhenNoClockIsInjected(t *testing.T) {
 // type: "access denied" for a person who was removed is a support thread.
 func TestTheRefusalsSayWhatToDo(t *testing.T) {
 	unknown := ErrUnknown{Email: "ana@example.com"}
-	if got := unknown.Error(); !strings.Contains(got, "ana@example.com") || !strings.Contains(got, "ask the owner") {
+	if got := unknown.Error(); !strings.Contains(got, "ana@example.com") || !strings.Contains(got, "ask the admin") {
 		t.Errorf("unknown = %q, want the address and who to ask", got)
 	}
 	revoked := ErrRevoked{Email: "ana@example.com"}
@@ -294,7 +294,7 @@ func TestABookNeedsAPlaceItCanWrite(t *testing.T) {
 }
 
 // The allowlist is "provider/modelId", and an empty list means every model the install has. A person is bound
-// by theirs; nothing here decides who the owner is, because the owner has no list at all.
+// by theirs; nothing here decides who the admin is, because the admin has no list at all.
 func TestAModelsListIsWhatTheyMayRun(t *testing.T) {
 	narrowed := Person{Email: "ana@example.com", Models: []string{"anthropic/claude-sonnet-4", " faux / faux-1 "}}
 	cases := []struct {
@@ -322,9 +322,9 @@ func TestAModelsListIsWhatTheyMayRun(t *testing.T) {
 	}
 }
 
-// The owner narrows what somebody may run, and the book says so: a list, written down, that the door can read.
-// The owner has no list to narrow, because the install is theirs.
-func TestTheOwnerNarrowsWhatSomebodyMayRun(t *testing.T) {
+// The admin narrows what somebody may run, and the book says so: a list, written down, that the door can read.
+// The admin has no list to narrow, because the install is theirs.
+func TestTheAdminNarrowsWhatSomebodyMayRun(t *testing.T) {
 	b := book(t)
 	if _, err := b.Claim("me@example.com", "Me"); err != nil {
 		t.Fatalf("claim: %v", err)
@@ -340,7 +340,7 @@ func TestTheOwnerNarrowsWhatSomebodyMayRun(t *testing.T) {
 		t.Errorf("models = %v, want them normalised", narrowed.Models)
 	}
 	if _, err := b.SetModels("me@example.com", []string{"faux/faux-1"}); err == nil {
-		t.Error("the owner was narrowed")
+		t.Error("the admin was narrowed")
 	}
 	if _, err := b.SetModels("ana@example.com", []string{"not-a-model"}); err == nil {
 		t.Error("a model without a provider was accepted")
@@ -356,9 +356,9 @@ func TestTheOwnerNarrowsWhatSomebodyMayRun(t *testing.T) {
 }
 
 // Adding somebody and then claiming them is the order the setup screen invites — the list fills the door's
-// group, and the owner names themselves after. The second step must promote the record the first one wrote,
+// group, and the admin names themselves after. The second step must promote the record the first one wrote,
 // not write a twin beside it: with two records for one address, "who is this" depends on line order, and an
-// owner whose first line says "person" is locked out of their own install.
+// admin whose first line says "person" is locked out of their own install.
 func TestClaimingSomebodyAlreadyInTheBookPromotesThem(t *testing.T) {
 	path := filepath.Join(t.TempDir(), File)
 	opened, err := Open(path)
@@ -372,16 +372,16 @@ func TestClaimingSomebodyAlreadyInTheBookPromotesThem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if claimed.Role != RoleOwner || claimed.State != Active {
-		t.Errorf("claimed record is %q/%q, want owner and active", claimed.Role, claimed.State)
+	if claimed.Role != RoleAdmin || claimed.State != Active {
+		t.Errorf("claimed record is %q/%q, want admin and active", claimed.Role, claimed.State)
 	}
 	if records, err := opened.read(); err != nil || len(records) != 1 {
 		t.Fatalf("%d records for one address (%v): %+v", len(records), err, records)
-	} else if records[0].Role != RoleOwner {
-		t.Errorf("the record is %+v, want the same address as owner", records[0])
+	} else if records[0].Role != RoleAdmin {
+		t.Errorf("the record is %+v, want the same address as admin", records[0])
 	}
 
-	// Claiming again is the same answer, not ErrHasOwner: it is the same person, and they may run the command
+	// Claiming again is the same answer, not ErrHasAdmin: it is the same person, and they may run the command
 	// twice without being told their own install belongs to somebody else.
 	if _, err := opened.Claim("marcelo@example.com", ""); err != nil {
 		t.Fatalf("second claim: %v", err)
@@ -406,19 +406,19 @@ func TestClaimingSomebodyAlreadyInTheBookPromotesThem(t *testing.T) {
 		t.Errorf("the claim erased the name: %q", claimed.Name)
 	}
 
-	// A different address is still refused, because that is a different owner.
-	if _, err := opened.Claim("ana@example.com", ""); !errors.Is(err, ErrHasOwner) {
+	// A different address is still refused, because that is a different admin.
+	if _, err := opened.Claim("ana@example.com", ""); !errors.Is(err, ErrHasAdmin) {
 		t.Errorf("a second address claimed the install: %v", err)
 	}
 }
 
 // A book that already holds two records for one address — written before Claim learned to promote — must not
-// lock the owner out: the strongest record answers, whatever order the lines are in.
-func TestAnAddressWrittenTwiceAnswersAsItsOwner(t *testing.T) {
+// lock the admin out: the strongest record answers, whatever order the lines are in.
+func TestAnAddressWrittenTwiceAnswersAsItsAdmin(t *testing.T) {
 	path := filepath.Join(t.TempDir(), File)
 	written := `{"people":[
-	  {"email":"ana@example.com","role":"person","state":"active","created":"2026-01-01"},
-	  {"email":"ana@example.com","role":"owner","state":"active","created":"2026-01-02"}]}`
+	  {"email":"ana@example.com","role":"member","state":"active","created":"2026-01-01"},
+	  {"email":"ana@example.com","role":"admin","state":"active","created":"2026-01-02"}]}`
 	if err := os.WriteFile(path, []byte(written), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -430,14 +430,14 @@ func TestAnAddressWrittenTwiceAnswersAsItsOwner(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("find: %v, found %v", err, found)
 	}
-	if person.Role != RoleOwner {
-		t.Errorf("the answer is %q, want the owner record", person.Role)
+	if person.Role != RoleAdmin {
+		t.Errorf("the answer is %q, want the admin record", person.Role)
 	}
 	// And claiming heals the file rather than adding to it.
 	if _, err := opened.Claim("ana@example.com", ""); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if records, _ := opened.read(); len(records) != 1 || records[0].Role != RoleOwner {
+	if records, _ := opened.read(); len(records) != 1 || records[0].Role != RoleAdmin {
 		t.Errorf("the book still holds %+v", records)
 	}
 
@@ -452,13 +452,13 @@ func TestAnAddressWrittenTwiceAnswersAsItsOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if person, _, err := opened.Find("ana@example.com"); err != nil || person.Role == RoleOwner {
+	if person, _, err := opened.Find("ana@example.com"); err != nil || person.Role == RoleAdmin {
 		t.Errorf("a roleless record answered as %q (%v)", person.Role, err)
 	}
 	if _, err := opened.Claim("ana@example.com", ""); err != nil {
 		t.Fatalf("claim over roleless records: %v", err)
 	}
-	if records, _ := opened.read(); len(records) != 1 || records[0].Role != RoleOwner {
+	if records, _ := opened.read(); len(records) != 1 || records[0].Role != RoleAdmin {
 		t.Errorf("the roleless book still holds %+v", records)
 	}
 }
@@ -491,5 +491,54 @@ func TestAWedgedLockIsRefusedRatherThanWaitedOn(t *testing.T) {
 	}
 	if waited := time.Since(start); waited > 3*lockBudget {
 		t.Errorf("it waited %s, which is longer than the budget it was given", waited)
+	}
+}
+
+// A book written before the roles were renamed still reads: "owner" is the admin and "person" is a member,
+// and the first write puts the new names back (ADR 0034).
+func TestARoleWrittenBeforeTheRenameLoads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), File)
+	written := `{"people":[
+	  {"email":"me@example.com","role":"owner","state":"active"},
+	  {"email":"ana@example.com","role":"person","state":"active"}]}`
+	if err := os.WriteFile(path, []byte(written), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	opened, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	list, err := opened.List()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("the book holds %d records, want 2", len(list))
+	}
+	for _, person := range list {
+		switch person.Email {
+		case "me@example.com":
+			if person.Role != RoleAdmin {
+				t.Errorf("owner loaded as %q, want %q", person.Role, RoleAdmin)
+			}
+		case "ana@example.com":
+			if person.Role != RoleMember {
+				t.Errorf("person loaded as %q, want %q", person.Role, RoleMember)
+			}
+		}
+	}
+	// The old names are read, never written back: a write is the migration.
+	if _, err := opened.Add("bo@example.com", "Bo"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if strings.Contains(string(payload), `"role": "owner"`) || strings.Contains(string(payload), `"role": "person"`) {
+		t.Errorf("the write kept the old role names:\n%s", payload)
+	}
+	if !strings.Contains(string(payload), `"role": "admin"`) || !strings.Contains(string(payload), `"role": "member"`) {
+		t.Errorf("the write did not put the new names back:\n%s", payload)
 	}
 }

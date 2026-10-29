@@ -27,7 +27,7 @@ import (
 	"github.com/acornfall/acornfall/gateway/internal/workerpool"
 )
 
-// PersonalWorkspaceName is the install's own workspace: the one the owner lands on when nothing else is
+// PersonalWorkspaceName is the install's own workspace: the one the admin lands on when nothing else is
 // chosen, the one that cannot be removed, and the name every install has exactly one of. It was called
 // "general" because there was one workspace; ADR 0032 §9 renamed it when there was more than one person.
 const PersonalWorkspaceName = "personal"
@@ -87,7 +87,7 @@ type Workspace struct {
 	// Members is who may use this workspace: email addresses, lowercase. Being a member is the whole of it
 	// — there are no roles inside one, because ADR 0032 gives two and both are install-level. A workspace
 	// with no members belongs to nobody, which is the state every workspace was in before there were
-	// people, and which the owner's own claim fills in.
+	// people, and which the admin's own claim fills in.
 	Members []string `json:"members,omitempty"`
 	// Running is runtime state, never stored: a persisted `true` would be a claim about a
 	// process that does not exist after a restart.
@@ -99,11 +99,11 @@ type Workspace struct {
 // enumerate the workspaces they cannot see (ADR 0032 §4).
 var ErrNoWorkspace = errors.New("no workspace")
 
-// Caller is who a request is from, in control's own words: the install's owner, or a person. The edge
+// Caller is who a request is from, in control's own words: the install's admin, or a person. The edge
 // translates the proof it obtained into this shape, because ADR 0002 keeps the transport's types out of
 // the domain and control is what owns identity, resources and policy (ADR 0001).
 type Caller struct {
-	Owner bool
+	Admin bool
 	Email string
 }
 
@@ -124,12 +124,12 @@ func (w Workspace) Personal() bool {
 // Allows reports whether a caller may use this workspace.
 //
 // Being a member is the whole of it: it is not a read where a member writes, and it is not a role. The
-// owner is not special here — ADR 0032 has them own the install, not other people's conversations — and
-// the one exception is an install where no owner has been claimed, which is the machine talking to
+// admin is not special here — ADR 0032 has them own the install, not other people's conversations — and
+// the one exception is an install where no admin has been claimed, which is the machine talking to
 // itself before anybody is named.
 func (w Workspace) Allows(caller Caller) bool {
 	if strings.TrimSpace(caller.Email) == "" {
-		return caller.Owner
+		return caller.Admin
 	}
 	return slices.Contains(w.Members, strings.ToLower(caller.Email))
 }
@@ -253,10 +253,10 @@ type WorkspacesOptions struct {
 	// DisableVMNesting is the install default from --disable-vm-nesting: a workspace's
 	// sandbox nests when the engine and the machine can, unless a workspace refuses it.
 	DisableVMNesting bool
-	// OwnerEmail is the install owner's address, from the book of people, or empty when nobody has claimed
-	// it. It exists for one decision: a workspace that predates people is the owner's, and recording that
-	// is what stops turning people on from locking the owner out of everything they had.
-	OwnerEmail string
+	// AdminEmail is the install admin's address, from the book of people, or empty when nobody has claimed
+	// it. It exists for one decision: a workspace that predates people is the admin's, and recording that
+	// is what stops turning people on from locking the admin out of everything they had.
+	AdminEmail string
 }
 
 // Workspaces is the install: a registry of workspaces and their started Controls.
@@ -328,7 +328,7 @@ func (w *Workspaces) Open(ctx context.Context) error {
 	if err := w.migrate(); err != nil {
 		return err
 	}
-	if err := w.nameTheOwnersWorkspaces(); err != nil {
+	if err := w.nameTheAdminsWorkspaces(); err != nil {
 		return err
 	}
 	if _, err := w.Ensure(ctx, PersonalWorkspaceName); err != nil {
@@ -387,11 +387,11 @@ func (w *Workspaces) List() []Workspace {
 	return list
 }
 
-// ListFor answers the workspaces a caller may see: every one of them for the owner, and only their own for
-// a person. The owner sees the install because they administer it; that is a list of names, not a
+// ListFor answers the workspaces a caller may see: every one of them for the admin, and only their own for
+// a person. The admin sees the install because they administer it; that is a list of names, not a
 // transcript from inside any of them.
 func (w *Workspaces) ListFor(caller Caller) []Workspace {
-	if caller.Owner {
+	if caller.Admin {
 		return w.List()
 	}
 	visible := make([]Workspace, 0)
@@ -408,7 +408,7 @@ func (w *Workspaces) ListFor(caller Caller) []Workspace {
 // It is made on the first request rather than at sign-in because that request is the sign-in: nobody gets a
 // workspace they never showed up for, and nothing has to remember that the making was owed.
 func (w *Workspaces) personal(caller Caller) (string, error) {
-	if caller.Owner || strings.TrimSpace(caller.Email) == "" {
+	if caller.Admin || strings.TrimSpace(caller.Email) == "" {
 		return PersonalWorkspaceName, nil
 	}
 	// One workspace with exactly one member, that member being this person. It is derived rather than
@@ -433,7 +433,7 @@ func (w *Workspaces) personal(caller Caller) (string, error) {
 func (w *Workspaces) CreatePersonal(email string) (Workspace, error) {
 	address := strings.ToLower(strings.TrimSpace(email))
 	if address == "" {
-		return Workspace{}, errors.New("a personal workspace needs an owner's address")
+		return Workspace{}, errors.New("a personal workspace needs somebody's address")
 	}
 	name, err := w.freeName(handle(address))
 	if err != nil {
@@ -473,7 +473,7 @@ func (w *Workspaces) freeName(base string) (string, error) {
 }
 
 // handle is the readable part of an address, reduced to what a folder name and a workspace name allow. It is
-// derived rather than asked for: the owner names people, and a form field for "what should my folder be
+// derived rather than asked for: the admin names people, and a form field for "what should my folder be
 // called" is a question nobody wants to answer twice.
 func handle(email string) string {
 	local, _, _ := strings.Cut(email, "@")
@@ -952,7 +952,7 @@ func (w *Workspaces) noDefinition(name string) bool {
 func (w *Workspaces) Route(ctx context.Context, caller Caller, workspaceName string) (Workspace, *Control, error) {
 	name := workspaceName
 	if name == "" {
-		// "The workspace" meant one workspace when there was one owner. Now it means the caller's own, and
+		// "The workspace" meant one workspace when there was one admin. Now it means the caller's own, and
 		// for a person that is their personal workspace, made the first time they ask (ADR 0032 §3, §9).
 		own, err := w.personal(caller)
 		if err != nil {
@@ -1144,7 +1144,7 @@ func (w *Workspaces) registryPath() string {
 	return filepath.Join(w.opts.DataDir, registryFile)
 }
 
-// RegistryFile is the workspaces registry as it exists on disk. It has one owner so the
+// RegistryFile is the workspaces registry as it exists on disk. It has one admin so the
 // server and the command line cannot disagree about its shape.
 //
 // WorkspacesDir is recorded here rather than in the global config because it belongs to the
@@ -1297,8 +1297,8 @@ func (w *Workspaces) renameGeneralToPersonal() error {
 	w.mu.Lock()
 	legacy.Name = PersonalWorkspaceName
 	legacy.Title = "Personal"
-	if len(legacy.Members) == 0 && strings.TrimSpace(w.opts.OwnerEmail) != "" {
-		legacy.Members = []string{strings.ToLower(strings.TrimSpace(w.opts.OwnerEmail))}
+	if len(legacy.Members) == 0 && strings.TrimSpace(w.opts.AdminEmail) != "" {
+		legacy.Members = []string{strings.ToLower(strings.TrimSpace(w.opts.AdminEmail))}
 	}
 	delete(w.registry, oldWorkspaceName)
 	w.registry[PersonalWorkspaceName] = legacy
@@ -1307,23 +1307,23 @@ func (w *Workspaces) renameGeneralToPersonal() error {
 	return w.persist()
 }
 
-// ownerMembers is the owner's address as a membership list, when this install knows who the owner is and there are
+// ownerMembers is the admin's address as a membership list, when this install knows who the admin is and there are
 // people at all. An install with no book keeps an empty list, which is the same meaning: a room with at most one
 // member is somebody's own.
 func (w *Workspaces) ownerMembers() []string {
-	owner := strings.ToLower(strings.TrimSpace(w.opts.OwnerEmail))
-	if owner == "" {
+	admin := strings.ToLower(strings.TrimSpace(w.opts.AdminEmail))
+	if admin == "" {
 		return nil
 	}
-	return []string{owner}
+	return []string{admin}
 }
 
-// nameTheOwnersOwnRoom gives the install's own workspace its member, once, on installs that were created before
+// nameTheAdminsOwnRoom gives the install's own workspace its member, once, on installs that were created before
 // there were people. The derived rule above treats "no members" and "one member" the same, so this is a migration
 // of the record rather than a fix for a behaviour: it is what makes the membership list the whole truth.
-func (w *Workspaces) nameTheOwnersOwnRoom() error {
-	owner := strings.ToLower(strings.TrimSpace(w.opts.OwnerEmail))
-	if owner == "" {
+func (w *Workspaces) nameTheAdminsOwnRoom() error {
+	admin := strings.ToLower(strings.TrimSpace(w.opts.AdminEmail))
+	if admin == "" {
 		return nil
 	}
 	w.mu.Lock()
@@ -1333,11 +1333,11 @@ func (w *Workspaces) nameTheOwnersOwnRoom() error {
 			continue
 		}
 		// Only the install's own room: a workspace somebody made and has not shared yet is theirs to share or
-		// remove, and naming the owner as its member would hand it over.
+		// remove, and naming the admin as its member would hand it over.
 		if name != PersonalWorkspaceName {
 			continue
 		}
-		workspace.Members = []string{owner}
+		workspace.Members = []string{admin}
 		w.registry[name] = workspace
 		changed = true
 	}
@@ -1391,7 +1391,7 @@ func (w *Workspaces) ensurePersonal() error {
 			return err
 		}
 	}
-	if err := w.nameTheOwnersOwnRoom(); err != nil {
+	if err := w.nameTheAdminsOwnRoom(); err != nil {
 		return err
 	}
 	return nil
@@ -1410,14 +1410,14 @@ func (w *Workspaces) persist() error {
 	return SaveRegistryFile(file)
 }
 
-// nameTheOwnersWorkspaces gives an unnamed workspace to the install's owner.
+// nameTheAdminsWorkspaces gives an unnamed workspace to the install's admin.
 //
-// Before there were people, every conversation in this registry was the owner's, so this records a fact
+// Before there were people, every conversation in this registry was the admin's, so this records a fact
 // rather than making a grant. Without it, the first boot with a door would hide every existing workspace
 // from the person at the keyboard — the one outcome nobody would guess from an upgrade.
-func (w *Workspaces) nameTheOwnersWorkspaces() error {
-	owner := strings.ToLower(strings.TrimSpace(w.opts.OwnerEmail))
-	if owner == "" {
+func (w *Workspaces) nameTheAdminsWorkspaces() error {
+	admin := strings.ToLower(strings.TrimSpace(w.opts.AdminEmail))
+	if admin == "" {
 		return nil
 	}
 	w.mu.Lock()
@@ -1426,7 +1426,7 @@ func (w *Workspaces) nameTheOwnersWorkspaces() error {
 		if len(workspace.Members) > 0 {
 			continue
 		}
-		workspace.Members = []string{owner}
+		workspace.Members = []string{admin}
 		w.registry[name] = workspace
 		changed = true
 	}

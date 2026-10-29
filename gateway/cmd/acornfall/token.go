@@ -1,4 +1,4 @@
-// The token that proves the owner to their own console, and the door a run requires.
+// The token that proves the admin to their own console, and the door a run requires.
 package main
 
 import (
@@ -60,7 +60,7 @@ func printToken(out, notes io.Writer, dir string, rotate bool) error {
 }
 
 // openGate builds what this run admits by: the door that proves who is calling, and the book of people
-// it must then know. Both are nil for the single-owner install ADR 0020 describes, because a door
+// it must then know. Both are nil for the single-admin install ADR 0020 describes, because a door
 // nothing configured is how a switched-off guard comes back.
 func openGate(dir, host string) (httpapi.Gate, error) {
 	door, err := identityDoor(dir, host)
@@ -74,23 +74,23 @@ func openGate(dir, host string) (httpapi.Gate, error) {
 	if err != nil {
 		return httpapi.Gate{}, err
 	}
-	if _, claimed, err := book.Owner(); err != nil {
+	if _, claimed, err := book.Admin(); err != nil {
 		return httpapi.Gate{}, err
 	} else if !claimed {
-		// Loud at boot rather than at the first browser: a console with a door and no owner is one only
+		// Loud at boot rather than at the first browser: a console with a door and no admin is one only
 		// the machine can get into, and the fix is one command.
-		fmt.Fprintln(os.Stderr, "acornfall: this install has people but no owner yet; `acornfall people claim you@example.com` names one")
+		fmt.Fprintln(os.Stderr, "acornfall: this install has people but no admin yet; `acornfall people claim you@example.com` names one")
 	}
 	return httpapi.Gate{Door: door, People: book, Dir: dir}, nil
 }
 
-// identityDoor builds the proof this run requires, or nil for the single-owner install ADR 0020
+// identityDoor builds the proof this run requires, or nil for the single-admin install ADR 0020
 // describes. The door is off unless this run names a publisher, so an install that never turns people
 // on behaves exactly as it did before there was a door.
 //
 // ACORNFALL_IDENTITY=access means a browser arrives through Cloudflare Access, with the assertion it
 // signs; `token` means only the command line, which is what a machine behind somebody else's proxy
-// wants. The token door is in the set either way: the command line is how the owner reaches a console
+// wants. The token door is in the set either way: the command line is how the admin reaches a console
 // that has people, and how they get back in when the proxy is what broke.
 func identityDoor(dir, host string) (identity.Door, error) {
 	kind := strings.TrimSpace(os.Getenv("ACORNFALL_IDENTITY"))
@@ -101,7 +101,7 @@ func identityDoor(dir, host string) (identity.Door, error) {
 	// machine (ADR 0033), and a listener on every interface would be reachable without one — a door on
 	// one address and a hole on the others.
 	if !loopback(host) {
-		return nil, fmt.Errorf("a console with people listens on loopback only, and --host %q is not one: reach it through cloudflared, or unset ACORNFALL_IDENTITY for a single-owner install", host)
+		return nil, fmt.Errorf("a console with people listens on loopback only, and --host %q is not one: reach it through cloudflared, or unset ACORNFALL_IDENTITY for a single-admin install", host)
 	}
 	if _, minted, err := identity.EnsureToken(dir); err != nil {
 		return nil, err
@@ -170,15 +170,15 @@ func loopback(host string) bool {
 	return address != nil && address.IsLoopback()
 }
 
-// ownerEmail is the install owner's address, or empty when nobody has claimed it. It is the one answer
+// ownerEmail is the install admin's address, or empty when nobody has claimed it. It is the one answer
 // control needs out of the book: whose the workspaces that predate people are.
 func ownerEmail(book *people.Book) string {
 	if book == nil {
 		return ""
 	}
-	owner, ok, err := book.Owner()
+	admin, ok, err := book.Admin()
 	if err != nil || !ok {
 		return ""
 	}
-	return owner.Email
+	return admin.Email
 }

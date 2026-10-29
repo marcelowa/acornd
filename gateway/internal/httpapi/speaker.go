@@ -18,9 +18,9 @@ import (
 // speakerFor answers the name this request's words are prefixed with, and "" when nobody needs naming.
 func (s *Server) speakerFor(r *http.Request) string {
 	caller := callerOf(r)
-	// The owner is not named in their own rooms: the install is theirs, and a prefix would tell the model that a
-	// room's owner is a guest in it.
-	if caller.Owner || caller.Email == "" || s.gate.People == nil || s.workspaces == nil {
+	// The admin is not named in their own rooms: the install is theirs, and a prefix would tell the model that a
+	// room's admin is a guest in it.
+	if caller.Admin || caller.Email == "" || s.gate.People == nil || s.workspaces == nil {
 		return ""
 	}
 	if !shared(s.workspaces, workspaceOf(r)) {

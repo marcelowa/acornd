@@ -18,9 +18,9 @@ func request(header, value string) *http.Request {
 	return r
 }
 
-// An install whose owner runs the command line has a token, and that token is the only thing that
-// makes a request the owner's.
-func TestTheTokenDoorAnswersTheOwner(t *testing.T) {
+// An install whose admin runs the command line has a token, and that token is the only thing that
+// makes a request the admin's.
+func TestTheTokenDoorAnswersTheAdmin(t *testing.T) {
 	dir := t.TempDir()
 	token, minted, err := EnsureToken(dir)
 	if err != nil {
@@ -34,15 +34,15 @@ func TestTheTokenDoorAnswersTheOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the install's own token was refused: %v", err)
 	}
-	if !caller.Owner {
-		t.Error("the token door must answer the owner")
+	if !caller.Admin {
+		t.Error("the token door must answer the admin")
 	}
 	if caller.Email != "" {
-		t.Errorf("an unclaimed owner has no email, got %q", caller.Email)
+		t.Errorf("an unclaimed admin has no email, got %q", caller.Email)
 	}
 }
 
-// ADR 0012's limit is that a guest can reach the port. It must not also be reachable *as the owner*,
+// ADR 0012's limit is that a guest can reach the port. It must not also be reachable *as the admin*,
 // so a request with no token is refused even from loopback — the address is not a door.
 func TestALoopbackRequestWithoutProofIsRefused(t *testing.T) {
 	dir := t.TempDir()
@@ -158,7 +158,7 @@ func TestEnsureTokenDoesNotOverwriteAFileItCannotUse(t *testing.T) {
 }
 
 // A token path that exists and is not a readable file is reported as itself. Reading it as "no token
-// yet" would mint over whatever is there and send the owner looking in the wrong place.
+// yet" would mint over whatever is there and send the admin looking in the wrong place.
 func TestATokenPathThatIsNotAFileIsReported(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, TokenFile), 0o700); err != nil {

@@ -265,8 +265,8 @@ func confirmYes(prompt string) (bool, error) {
 	return false, nil
 }
 
-// prove adds the install's token when it has one. The command line is the owner, and a console with
-// people refuses a request with no proof; an install with no token file is the single-owner install
+// prove adds the install's token when it has one. The command line is the admin, and a console with
+// people refuses a request with no proof; an install with no token file is the single-admin install
 // ADR 0020 describes, and it expects no header at all.
 func prove(request *http.Request, dir string) {
 	if dir == "" {

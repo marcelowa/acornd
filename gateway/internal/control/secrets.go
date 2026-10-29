@@ -225,7 +225,7 @@ func (c *Control) SecretNeedsHost() bool {
 
 // resolveSecrets reads the workspace's effective set and asks what this engine can do with
 // each entry. A substitute engine needs an allowed host; an environment engine needs the
-// owner to have allowed the value inside. A blocked entry stays visible with its reason.
+// admin to have allowed the value inside. A blocked entry stays visible with its reason.
 func (c *Control) resolveSecrets(delivery sandbox.Delivery) sandboxSecrets {
 	resolved := sandboxSecrets{}
 	if c.opts.Vault == nil {

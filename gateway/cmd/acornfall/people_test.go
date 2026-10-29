@@ -42,13 +42,13 @@ func TestTheListOfNobodySaysHowToStart(t *testing.T) {
 	}
 }
 
-// The whole life of a person through the command line: claimed as the owner, added as a guest, listed,
+// The whole life of a person through the command line: claimed as the admin, added as a guest, listed,
 // and revoked. It is one test because the order is the feature.
 func TestTheCommandLineNamesPeopleAndTakesAccessAway(t *testing.T) {
 	dir := t.TempDir()
 
 	claimed := capture(t, func() { peopleClaim([]string{"--data-dir", dir, "--name", "Me", "me@example.com"}) })
-	if !strings.Contains(claimed, "owns this install") {
+	if !strings.Contains(claimed, "administers this install") {
 		t.Errorf("claim said %q", claimed)
 	}
 	added := capture(t, func() { peopleAdd([]string{"--data-dir", dir, "--name", "Ana", "ana@example.com"}) })
@@ -57,7 +57,7 @@ func TestTheCommandLineNamesPeopleAndTakesAccessAway(t *testing.T) {
 	}
 
 	list := capture(t, func() { peopleList([]string{"--data-dir", dir}) })
-	for _, want := range []string{"me@example.com", "ana@example.com", "owner", "person", "invited"} {
+	for _, want := range []string{"me@example.com", "ana@example.com", "admin", "member", "invited"} {
 		if !strings.Contains(list, want) {
 			t.Errorf("the list does not mention %q: %q", want, list)
 		}

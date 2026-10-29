@@ -9,7 +9,7 @@ import (
 	"github.com/acornfall/acornfall/gateway/internal/identity"
 )
 
-// The door is off unless this run names a publisher. That is ADR 0020's install: one owner, no people,
+// The door is off unless this run names a publisher. That is ADR 0020's install: one admin, no people,
 // and no credential to present.
 func TestADoorIsOffUnlessThisRunNamesOne(t *testing.T) {
 	t.Setenv("ACORNFALL_IDENTITY", "")
@@ -183,7 +183,7 @@ func TestLoopbackIsTheMachineAndNothingElse(t *testing.T) {
 }
 
 // The command line proves itself to the gateway it is talking to, and sends nothing when the install has
-// no token, which is the single-owner install ADR 0020 describes.
+// no token, which is the single-admin install ADR 0020 describes.
 func TestProveSendsTheInstallTokenWhenThereIsOne(t *testing.T) {
 	dir := t.TempDir()
 	token, err := identity.RotateToken(dir)

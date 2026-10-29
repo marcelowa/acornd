@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-// Client talks to the Cloudflare API with an owner's token (ADR 0033 §2).
+// Client talks to the Cloudflare API with an admin's token (ADR 0033 §2).
 type Client struct {
 	// Token is the API token. It is used here and at reconcile time, and is offered for deletion afterwards:
 	// what the running process holds is the tunnel's own token.
@@ -54,7 +54,7 @@ const (
 	scopeGroups scope = "Account · Access: Organizations, Identity Providers and Groups · Edit"
 )
 
-// ZoneByName resolves the zone the hostname belongs to, and the account it lives in. It is how the owner names
+// ZoneByName resolves the zone the hostname belongs to, and the account it lives in. It is how the admin names
 // a domain instead of two ids, and it is why the token does not need Account · Read: a zone says which account
 // it is in.
 func (c *Client) ZoneByName(ctx context.Context, name string) (Zone, error) {

@@ -15,7 +15,7 @@ import (
 // every sandbox mount, so an agent cannot read the tunnel's token.
 const File = "remote.json"
 
-// Setup is the file: what the owner asked for, and what exists because of it.
+// Setup is the file: what the admin asked for, and what exists because of it.
 type Setup struct {
 	Desired Desired `json:"desired"`
 	State   State   `json:"state"`
@@ -85,7 +85,7 @@ func Save(dir string, setup Setup, now time.Time) error {
 
 // Env is the identity configuration a run needs once this setup is applied: the three values the assertion
 // door checks an assertion against (ADR 0032 §2). The issuer is the team's own domain and the keys live under
-// it, so the owner does not have to remember either.
+// it, so the admin does not have to remember either.
 func (s Setup) Env(teamDomain string) map[string]string {
 	domain := strings.TrimSuffix(strings.TrimSpace(teamDomain), "/")
 	return map[string]string{

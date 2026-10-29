@@ -33,7 +33,7 @@ func TestPrefixedNamesTheSpeakerOnlyWhenThereIsOne(t *testing.T) {
 	}
 }
 
-// The name is the one the owner gave, and the address is the fallback: a person added by email only is still
+// The name is the one the admin gave, and the address is the fallback: a person added by email only is still
 // somebody the model can be told about.
 func TestADisplayNameFallsBackToTheAddress(t *testing.T) {
 	named := people.Person{Email: "ana@example.com", Name: "Ana Silva"}

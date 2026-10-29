@@ -274,7 +274,7 @@ func workspaceRemove(argv []string) {
 		}
 		if workspace.Personal() {
 			// A room with at most one member is somebody's own: removing it removes their conversations, and the
-			// owner can do that by revoking the person, which is a decision with a name.
+			// admin can do that by revoking the person, which is a decision with a name.
 			log.Fatalf("acornfall: %s is somebody's own workspace and cannot be removed", workspace.Name)
 		}
 		removed = true

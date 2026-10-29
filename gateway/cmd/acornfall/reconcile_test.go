@@ -23,7 +23,7 @@ func logs(t *testing.T, run func()) string {
 }
 
 // An install with no door in front of it has nothing to reconcile, and a boot that talks to Cloudflare anyway
-// would be a single-owner install reaching for an account it never named.
+// would be a single-admin install reaching for an account it never named.
 func TestReconcileDoesNothingWithoutADoor(t *testing.T) {
 	t.Setenv("ACORNFALL_IDENTITY", "")
 	t.Setenv("ACORNFALL_CLOUDFLARE_TOKEN", "not-used")
@@ -52,7 +52,7 @@ func TestReconcileSaysItCannotWithoutAnAPIToken(t *testing.T) {
 }
 
 // An install that never ran an apply has no declared state, so the boot has nothing to match and says nothing:
-// the first apply is the owner's command, not something a boot invents.
+// the first apply is the admin's command, not something a boot invents.
 func TestReconcileDoesNothingBeforeAnApply(t *testing.T) {
 	t.Setenv("ACORNFALL_IDENTITY", "access")
 	t.Setenv("ACORNFALL_CLOUDFLARE_TOKEN", "present-but-unused")

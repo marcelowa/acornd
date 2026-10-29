@@ -24,12 +24,12 @@ func TestAMemberIsTheWholeOfWhatAWorkspaceAllows(t *testing.T) {
 		{"a member in another case", Caller{Email: "Ana@Example.COM"}, true},
 		{"somebody else", Caller{Email: "eve@example.com"}, false},
 		{"nobody", Caller{}, false},
-		// The install owner is not a member of anybody's workspace, and owning the install is not a way
+		// The install admin is not a member of anybody's workspace, and owning the install is not a way
 		// in: ADR 0032 decision 4 is what makes the privacy claim true (ADR 0032 §4).
-		{"the owner who is not a member", Caller{Owner: true, Email: "me@example.com"}, false},
-		// An install with no owner claimed is the machine talking to itself: there is no list to check
+		{"the admin who is not a member", Caller{Admin: true, Email: "me@example.com"}, false},
+		// An install with no admin claimed is the machine talking to itself: there is no list to check
 		// against and nobody to protect it from.
-		{"the machine before an owner is claimed", Caller{Owner: true}, true},
+		{"the machine before an admin is claimed", Caller{Admin: true}, true},
 		{"a stranger with no address", Caller{}, false},
 	}
 	for _, test := range cases {
@@ -41,7 +41,7 @@ func TestAMemberIsTheWholeOfWhatAWorkspaceAllows(t *testing.T) {
 	}
 }
 
-// A person's list is their own workspaces. The owner's is the install: a list of names, which is what
+// A person's list is their own workspaces. The admin's is the install: a list of names, which is what
 // administering it means, and not a transcript from inside any of them.
 func TestAListShowsAPersonOnlyTheirOwn(t *testing.T) {
 	workspaces := registry(t, []Workspace{
@@ -59,8 +59,8 @@ func TestAListShowsAPersonOnlyTheirOwn(t *testing.T) {
 		return out
 	}
 
-	if got := names(Caller{Owner: true, Email: "me@example.com"}); len(got) != 3 {
-		t.Errorf("the owner sees %v, want the install", got)
+	if got := names(Caller{Admin: true, Email: "me@example.com"}); len(got) != 3 {
+		t.Errorf("the admin sees %v, want the install", got)
 	}
 	if got := names(Caller{Email: "ana@example.com"}); !slices.Equal(got, []string{"ana", "house"}) {
 		t.Errorf("a person sees %v, want only their own", got)
@@ -103,20 +103,20 @@ func equalApartFromName(a, b string) bool {
 	return strip(a) == strip(b)
 }
 
-// The workspaces that existed before there were people are the owner's. Recording that is a fact rather
-// than a grant: every conversation in the registry was the owner's, and without the record the first
+// The workspaces that existed before there were people are the admin's. Recording that is a fact rather
+// than a grant: every conversation in the registry was the admin's, and without the record the first
 // boot with a door would hide all of them from the person at the keyboard.
-func TestAWorkspaceThatPredatesPeopleIsTheOwners(t *testing.T) {
+func TestAWorkspaceThatPredatesPeopleIsTheAdmins(t *testing.T) {
 	dataDir := t.TempDir()
 	workspaces := registryIn(t, dataDir, "me@example.com", []Workspace{
 		{Name: "personal", Path: "/w/personal"},
 		{Name: "house", Path: "/w/house", Members: []string{"ana@example.com"}},
 	})
-	if err := workspaces.nameTheOwnersWorkspaces(); err != nil {
+	if err := workspaces.nameTheAdminsWorkspaces(); err != nil {
 		t.Fatalf("name: %v", err)
 	}
 	if got := workspaces.registry["personal"].Members; !slices.Equal(got, []string{"me@example.com"}) {
-		t.Errorf("general members = %v, want the owner", got)
+		t.Errorf("general members = %v, want the admin", got)
 	}
 	// A workspace that already names somebody is not touched: the migration fills what nobody decided.
 	if got := workspaces.registry["house"].Members; !slices.Equal(got, []string{"ana@example.com"}) {
@@ -128,15 +128,15 @@ func TestAWorkspaceThatPredatesPeopleIsTheOwners(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 	if got := reloaded.registry["personal"].Members; !slices.Equal(got, []string{"me@example.com"}) {
-		t.Errorf("after a reload general members = %v, want the owner", got)
+		t.Errorf("after a reload general members = %v, want the admin", got)
 	}
 }
 
-// With no owner claimed there is nobody to name a workspace for, and the migration says nothing rather
+// With no admin claimed there is nobody to name a workspace for, and the migration says nothing rather
 // than inventing an address.
-func TestTheMigrationSaysNothingWithoutAnOwner(t *testing.T) {
-	workspaces := registryWithOwners(t, "", []Workspace{{Name: "personal", Path: "/w/personal"}})
-	if err := workspaces.nameTheOwnersWorkspaces(); err != nil {
+func TestTheMigrationSaysNothingWithoutAnAdmin(t *testing.T) {
+	workspaces := registryWithAdmins(t, "", []Workspace{{Name: "personal", Path: "/w/personal"}})
+	if err := workspaces.nameTheAdminsWorkspaces(); err != nil {
 		t.Fatalf("name: %v", err)
 	}
 	if got := workspaces.registry["personal"].Members; len(got) != 0 {
@@ -148,17 +148,17 @@ func TestTheMigrationSaysNothingWithoutAnOwner(t *testing.T) {
 // rules these tests check are decisions rather than processes.
 func registry(t *testing.T, list []Workspace) *Workspaces {
 	t.Helper()
-	return registryWithOwners(t, "", list)
+	return registryWithAdmins(t, "", list)
 }
 
-func registryWithOwners(t *testing.T, owner string, list []Workspace) *Workspaces {
+func registryWithAdmins(t *testing.T, admin string, list []Workspace) *Workspaces {
 	t.Helper()
-	return registryIn(t, t.TempDir(), owner, list)
+	return registryIn(t, t.TempDir(), admin, list)
 }
 
-func registryIn(t *testing.T, dataDir, owner string, list []Workspace) *Workspaces {
+func registryIn(t *testing.T, dataDir, admin string, list []Workspace) *Workspaces {
 	t.Helper()
-	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: dataDir, OwnerEmail: owner})
+	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: dataDir, AdminEmail: admin})
 	if list != nil {
 		if err := SaveRegistryFile(RegistryFile{Path: filepath.Join(dataDir, registryFile), WorkspacesDir: workspaces.Dir(), Workspaces: list}); err != nil {
 			t.Fatalf("save registry: %v", err)
@@ -240,17 +240,17 @@ func TestAPersonsOwnWorkspaceIsFoundRatherThanMadeAgain(t *testing.T) {
 	}
 }
 
-// The owner's default stays the general workspace until the rename in ADR 0032 §9 lands: this slice is about
+// The admin's default stays the general workspace until the rename in ADR 0032 §9 lands: this slice is about
 // a person having somewhere to land, not about what the install's own workspace is called.
-func TestTheOwnerStillLandsOnTheGeneralWorkspace(t *testing.T) {
+func TestTheAdminStillLandsOnTheGeneralWorkspace(t *testing.T) {
 	workspaces := registry(t, nil)
-	for _, caller := range []Caller{{Owner: true}, {Owner: true, Email: "me@example.com"}} {
+	for _, caller := range []Caller{{Admin: true}, {Admin: true, Email: "me@example.com"}} {
 		name, err := workspaces.personal(caller)
 		if err != nil {
 			t.Fatalf("personal: %v", err)
 		}
 		if name != PersonalWorkspaceName {
-			t.Errorf("the owner's default = %q, want %q", name, PersonalWorkspaceName)
+			t.Errorf("the admin's default = %q, want %q", name, PersonalWorkspaceName)
 		}
 	}
 }
@@ -292,12 +292,12 @@ func TestANameSearchThatFindsNothingRefuses(t *testing.T) {
 	}
 }
 
-// The install's own room was created before there were people, so it has no member. Once the owner is known, the
+// The install's own room was created before there were people, so it has no member. Once the admin is known, the
 // record is given one: the derived rule treats "no members" and "one member" the same, and this is what makes the
 // membership list the whole truth rather than something the reader has to interpret (ADR 0032 §9).
-func TestTheOwnersOwnRoomIsGivenItsMember(t *testing.T) {
-	workspaces := registryWithOwners(t,
-		"owner@example.com",
+func TestTheAdminsOwnRoomIsGivenItsMember(t *testing.T) {
+	workspaces := registryWithAdmins(t,
+		"admin@example.com",
 		[]Workspace{{Name: PersonalWorkspaceName, Path: "/w/personal"}},
 	)
 	if err := workspaces.loadRegistry(); err != nil {
@@ -307,15 +307,15 @@ func TestTheOwnersOwnRoomIsGivenItsMember(t *testing.T) {
 	if !ok {
 		t.Fatal("the personal workspace is gone")
 	}
-	if len(personal.Members) != 1 || personal.Members[0] != "owner@example.com" {
-		t.Errorf("the room's members are %v, want the owner", personal.Members)
+	if len(personal.Members) != 1 || personal.Members[0] != "admin@example.com" {
+		t.Errorf("the room's members are %v, want the admin", personal.Members)
 	}
 	if !personal.Personal() {
 		t.Error("naming its member stopped it being somebody's own room")
 	}
 
 	// A room with members is left alone: this migration fills a blank, it does not rewrite a fact.
-	shared := registryWithOwners(t, "owner@example.com", []Workspace{
+	shared := registryWithAdmins(t, "admin@example.com", []Workspace{
 		{Name: PersonalWorkspaceName, Path: "/w/personal"},
 		{Name: "shared", Path: "/w/shared", Members: []string{"ana@example.com", "bea@example.com"}},
 	})
@@ -327,16 +327,16 @@ func TestTheOwnersOwnRoomIsGivenItsMember(t *testing.T) {
 	}
 }
 
-// An install with no owner yet keeps the empty list, which means the same thing: at most one member is somebody's
+// An install with no admin yet keeps the empty list, which means the same thing: at most one member is somebody's
 // own room.
-func TestAnInstallWithNoOwnerKeepsBothShapesOfTheOwnRoom(t *testing.T) {
-	workspaces := registryWithOwners(t, "", []Workspace{{Name: PersonalWorkspaceName, Path: "/w/personal"}})
+func TestAnInstallWithNoAdminKeepsBothShapesOfTheOwnRoom(t *testing.T) {
+	workspaces := registryWithAdmins(t, "", []Workspace{{Name: PersonalWorkspaceName, Path: "/w/personal"}})
 	if err := workspaces.loadRegistry(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	personal := workspaces.registry[PersonalWorkspaceName]
 	if len(personal.Members) != 0 {
-		t.Errorf("an install with no owner invented a member: %v", personal.Members)
+		t.Errorf("an install with no admin invented a member: %v", personal.Members)
 	}
 	if !personal.Personal() {
 		t.Error("a room with no members is not somebody's own room")

@@ -37,10 +37,10 @@ func (s *Server) admit(next http.Handler) http.Handler {
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
 		}
-		// A proof of an address is not permission to use this install: the owner names people, and the
+		// A proof of an address is not permission to use this install: the admin names people, and the
 		// ones not named are refused before a handler runs and before anything is written. The token is
-		// the owner, and does not need a record to be let in (ADR 0032 §3).
-		if !caller.Owner {
+		// the admin, and does not need a record to be let in (ADR 0032 §3).
+		if !caller.Admin {
 			person, err := s.gate.People.SignIn(caller.Email)
 			if err != nil {
 				// 403 rather than 401: the proof was good and this person may not come in. Signing in
@@ -48,12 +48,12 @@ func (s *Server) admit(next http.Handler) http.Handler {
 				http.Error(w, err.Error(), http.StatusForbidden)
 				return
 			}
-			// The book names the owner, and an address the edge proved *is* that person: the token door
+			// The book names the admin, and an address the edge proved *is* that person: the token door
 			// proves ownership by itself, while a browser proves an address and lets the book answer the
-			// rest. Without this the owner arrives through the same door as everybody else and is a
+			// rest. Without this the admin arrives through the same door as everybody else and is a
 			// lesser caller for it — refused their own install's business with a sentence telling them
-			// only its owner may do it.
-			caller.Owner = person.Role == people.RoleOwner
+			// only its admin may do it.
+			caller.Admin = person.Role == people.RoleAdmin
 		}
 		next.ServeHTTP(w, r.WithContext(withCaller(r.Context(), s.who(caller))))
 	})
@@ -90,34 +90,34 @@ func withCaller(ctx context.Context, caller control.Caller) context.Context {
 	return context.WithValue(ctx, callerKey{}, caller)
 }
 
-// callerOf is who this request is from. A request nothing proved is the single owner ADR 0020 describes:
+// callerOf is who this request is from. A request nothing proved is the single admin ADR 0020 describes:
 // the gate is off, there is nobody to tell apart, and every path answers as it always did.
 func callerOf(r *http.Request) control.Caller {
 	if caller, ok := r.Context().Value(callerKey{}).(control.Caller); ok {
 		return caller
 	}
-	return control.Caller{Owner: true}
+	return control.Caller{Admin: true}
 }
 
-// who turns a proof into control's own caller. The token proves the owner but not which address they are,
+// who turns a proof into control's own caller. The token proves the admin but not which address they are,
 // and membership is written in terms of an address, so the book answers that one question.
 func (s *Server) who(caller identity.Caller) control.Caller {
-	who := control.Caller{Owner: caller.Owner, Email: caller.Email}
-	if who.Owner && who.Email == "" && s.gate.People != nil {
-		if owner, ok, err := s.gate.People.Owner(); err == nil && ok {
-			who.Email = owner.Email
+	who := control.Caller{Admin: caller.Admin, Email: caller.Email}
+	if who.Admin && who.Email == "" && s.gate.People != nil {
+		if admin, ok, err := s.gate.People.Admin(); err == nil && ok {
+			who.Email = admin.Email
 		}
 	}
 	return who
 }
 
-// owner wraps a route that is the install's own: its workspaces' lifecycle, its credentials, its policy. A
+// admin wraps a route that is the install's own: its workspaces' lifecycle, its credentials, its policy. A
 // person is refused with 403 here rather than the 404 a workspace answers, because these routes are not
 // about a workspace somebody might be a member of — they are about an install they do not own.
-func (s *Server) owner(next http.HandlerFunc) http.HandlerFunc {
+func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !callerOf(r).Owner {
-			http.Error(w, "this is the install's own business, and only its owner may do it", http.StatusForbidden)
+		if !callerOf(r).Admin {
+			http.Error(w, "this is the install's own business, and only its admin may do it", http.StatusForbidden)
 			return
 		}
 		next(w, r)
@@ -126,9 +126,9 @@ func (s *Server) owner(next http.HandlerFunc) http.HandlerFunc {
 
 // mayRun reports whether the caller may run a model, and writes the refusal when they may not.
 //
-// The owner has no list: the whole install is theirs. A person is bound by theirs, and the refusal names what
+// The admin has no list: the whole install is theirs. A person is bound by theirs, and the refusal names what
 // they may run rather than saying "forbidden" — the person is family, and the fix is a sentence they can act
-// on (ADR 0032 §6). An empty list is every model, which is what a person has until the owner narrows it.
+// on (ADR 0032 §6). An empty list is every model, which is what a person has until the admin narrows it.
 //
 // This is the control, not the whole of it: the picker still offers every model the install has, and filtering
 // it is the convenience that comes after the refusal rather than instead of it.
@@ -140,10 +140,10 @@ func (s *Server) mayRun(w http.ResponseWriter, r *http.Request, provider, model 
 	caller := callerOf(r)
 	lists, ok := s.modelLists(caller)
 	if !ok {
-		http.Error(w, "the install's model list could not be read: ask the owner to look at it", http.StatusForbidden)
+		http.Error(w, "the install's model list could not be read: ask the admin to look at it", http.StatusForbidden)
 		return false
 	}
-	// One question, two lists inside it: the install's, which binds everybody including the owner, and the person's
+	// One question, two lists inside it: the install's, which binds everybody including the admin, and the person's
 	// own when they have one.
 	if !lists.allows(provider, model) {
 		http.Error(w, refusalFor(lists, provider, model), http.StatusForbidden)

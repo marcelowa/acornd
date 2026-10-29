@@ -189,7 +189,7 @@ func newWorkspaces(
 	secrets *vault.Store,
 	engine *sandbox.Manager,
 	tier *sandbox.Tier,
-	owner string,
+	admin string,
 ) *control.Workspaces {
 	return control.NewWorkspaces(control.WorkspacesOptions{
 		DataDir:       dir,
@@ -211,7 +211,7 @@ func newWorkspaces(
 		Sandbox:    engine,
 		Sandboxes:  tier,
 		Vault:      secrets,
-		OwnerEmail: owner,
+		AdminEmail: admin,
 	})
 }
 
@@ -323,7 +323,7 @@ func wireUpdates(updates *update.Manager, workspaces *control.Workspaces, engine
 	}
 }
 
-// listen serves until the owner stops, shutting down within five seconds and no later.
+// listen serves until the admin stops, shutting down within five seconds and no later.
 func listen(ctx context.Context, host string, port int, handler http.Handler, dir string) error {
 	server := &http.Server{
 		Addr:              net.JoinHostPort(host, strconv.Itoa(port)),

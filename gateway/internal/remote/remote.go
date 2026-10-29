@@ -2,7 +2,7 @@
 // in front of it, and the Access application that decides who gets through. See
 // docs/adr/0033-remote-access.md.
 //
-// The shape is declared state and a reconciler, not a wizard. The owner says which hostname the console
+// The shape is declared state and a reconciler, not a wizard. The admin says which hostname the console
 // answers on; everything else is derived from that, from the people file, and from what the Cloudflare
 // account already has. Every id the apply writes down is kept, so a second run is a no-op and a run that
 // died halfway resumes instead of starting over.
@@ -25,7 +25,7 @@ const (
 	DSPrefix   = "acornfall-"
 )
 
-// Desired is what the owner asked for: the hostname the console answers on, the zone it belongs to, and the
+// Desired is what the admin asked for: the hostname the console answers on, the zone it belongs to, and the
 // account all of it lives in.
 type Desired struct {
 	Hostname  string `json:"hostname"`
@@ -337,7 +337,7 @@ func (p *Provisioner) identity(ctx context.Context, desired Desired) (IdentityPr
 }
 
 // group is the one step that is rewritten rather than created once: the addresses the door admits are the
-// owner's list of people, so the group follows the book on every apply (ADR 0033 §3).
+// admin's list of people, so the group follows the book on every apply (ADR 0033 §3).
 func (p *Provisioner) group(ctx context.Context, desired Desired, prior State, people []string) (Group, Step, error) {
 	emails := normalise(people)
 	groups, err := p.API.AccessGroups(ctx, desired.AccountID)

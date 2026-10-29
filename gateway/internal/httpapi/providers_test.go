@@ -20,7 +20,7 @@ func allowlisted(t *testing.T, callerIs identity.Caller) (http.Handler, *people.
 	if err != nil {
 		t.Fatalf("open book: %v", err)
 	}
-	if _, err := opened.Claim("owner@example.com", "Owner"); err != nil {
+	if _, err := opened.Claim("admin@example.com", "Admin"); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	if _, err := opened.Add("ana@example.com", "Ana"); err != nil {
@@ -28,20 +28,20 @@ func allowlisted(t *testing.T, callerIs identity.Caller) (http.Handler, *people.
 	}
 	server := &Server{gate: Gate{Door: stubDoor{caller: callerIs}, People: opened, Dir: dir}}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/providers/allowlist", server.owner(server.providerAllowlist))
-	mux.HandleFunc("PUT /api/providers/allowlist", server.owner(server.setProviderAllowlist))
+	mux.HandleFunc("GET /api/providers/allowlist", server.admin(server.providerAllowlist))
+	mux.HandleFunc("PUT /api/providers/allowlist", server.admin(server.setProviderAllowlist))
 	// The door puts the caller in the context in front of every route; a request that skips it would be the default
-	// owner ADR 0020 describes, which is the one thing these tests must not silently become.
+	// admin ADR 0020 describes, which is the one thing these tests must not silently become.
 	proven := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mux.ServeHTTP(w, r.WithContext(withCaller(r.Context(), control.Caller{Owner: callerIs.Owner, Email: callerIs.Email})))
+		mux.ServeHTTP(w, r.WithContext(withCaller(r.Context(), control.Caller{Admin: callerIs.Admin, Email: callerIs.Email})))
 	})
 	return proven, opened, dir
 }
 
-// The owner sets what a provider's key may be spent on, and reads it back: empty means every model it has, so the
+// The admin sets what a provider's key may be spent on, and reads it back: empty means every model it has, so the
 // only way to say "none" is to say so with a list that leaves nothing out.
-func TestTheOwnerSetsWhatAProviderMaySpendOn(t *testing.T) {
-	handler, _, dir := allowlisted(t, identity.Caller{Owner: true})
+func TestTheAdminSetsWhatAProviderMaySpendOn(t *testing.T) {
+	handler, _, dir := allowlisted(t, identity.Caller{Admin: true})
 
 	body := strings.NewReader(`{"provider":"openai","models":["gpt-5","gpt-5-mini"]}`)
 	request := httptest.NewRequest(http.MethodPut, "/api/providers/allowlist", body)
@@ -70,7 +70,7 @@ func TestTheOwnerSetsWhatAProviderMaySpendOn(t *testing.T) {
 	}
 }
 
-// Reading it is the owner's too: the list says what the install spends its keys on.
+// Reading it is the admin's too: the list says what the install spends its keys on.
 func TestAPersonCannotReadTheAllowlist(t *testing.T) {
 	handler, _, _ := allowlisted(t, identity.Caller{Email: "ana@example.com"})
 	recorder := httptest.NewRecorder()
@@ -80,25 +80,25 @@ func TestAPersonCannotReadTheAllowlist(t *testing.T) {
 	}
 }
 
-// The list binds the owner as well: a whitelist with a hole for its author is one nobody has tested.
-func TestTheAllowlistBindsTheOwner(t *testing.T) {
-	_, opened, dir := allowlisted(t, identity.Caller{Owner: true})
+// The list binds the admin as well: a whitelist with a hole for its author is one nobody has tested.
+func TestTheAllowlistBindsTheAdmin(t *testing.T) {
+	_, opened, dir := allowlisted(t, identity.Caller{Admin: true})
 	if _, err := control.SetProviderModels(dir, "openai", []string{"gpt-5"}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	server := &Server{gate: Gate{People: opened, Dir: dir}}
-	state := server.offerable(stateWith(), control.Caller{Owner: true, Email: "owner@example.com"})
+	state := server.offerable(stateWith(), control.Caller{Admin: true, Email: "admin@example.com"})
 	// stateWith offers openai/cheap and openai/expensive; only cheap survives the list written above? It is gpt-5, so
 	// nothing of openai's survives and the anthropic pair is untouched.
 	if got := offered(state); len(got) != 2 || got[0] != "anthropic/fast" {
-		t.Errorf("the owner was offered %v", got)
+		t.Errorf("the admin was offered %v", got)
 	}
 }
 
-// A denial names the provider and what it may use, because that is the sentence a person can act on: ask the owner,
+// A denial names the provider and what it may use, because that is the sentence a person can act on: ask the admin,
 // or pick one of these.
 func TestARefusalNamesWhatTheProviderAllows(t *testing.T) {
-	_, opened, dir := allowlisted(t, identity.Caller{Owner: true})
+	_, opened, dir := allowlisted(t, identity.Caller{Admin: true})
 	if _, err := control.SetProviderModels(dir, "openai", []string{"gpt-5"}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestARefusalNamesWhatTheProviderAllows(t *testing.T) {
 // The catalog is unfiltered on purpose: narrowing it by the list would make the list impossible to widen from the
 // screen that writes it.
 func TestTheCatalogIsNotNarrowed(t *testing.T) {
-	handler, _, dir := allowlisted(t, identity.Caller{Owner: true})
+	handler, _, dir := allowlisted(t, identity.Caller{Admin: true})
 	if _, err := control.SetProviderModels(dir, "openai", []string{"gpt-5"}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestTheCatalogIsNotNarrowed(t *testing.T) {
 // refused on its next turn. Without this, revoking a model only takes effect the next time somebody re-pins, and a
 // person keeps spending a model they no longer have.
 func TestATurnPinnedToARevokedModelIsRefused(t *testing.T) {
-	_, opened, dir := allowlisted(t, identity.Caller{Owner: true})
+	_, opened, dir := allowlisted(t, identity.Caller{Admin: true})
 	if _, err := control.SetProviderModels(dir, "openai", []string{"gpt-5"}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
