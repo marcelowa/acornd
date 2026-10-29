@@ -76,6 +76,10 @@ func (k *Keys) Key(kid string) (*rsa.PublicKey, error) {
 	return key, nil
 }
 
+// defaultClient is the client a Keys with none gets: a timeout, because a publisher that accepts the connection and
+// then says nothing must not hold the door open forever.
+func defaultClient() *http.Client { return &http.Client{Timeout: 10 * time.Second} }
+
 // fetch reads one key set. It is called without the mutex held: a lock held across a network read is
 // a lock held for as long as someone else's server takes to answer (G4).
 func (k *Keys) fetch() (map[string]*rsa.PublicKey, error) {
@@ -84,7 +88,7 @@ func (k *Keys) fetch() (map[string]*rsa.PublicKey, error) {
 	}
 	client := k.Client
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+		client = defaultClient()
 	}
 	response, err := client.Get(k.URL)
 	if err != nil {

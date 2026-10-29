@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
@@ -202,12 +203,7 @@ func (a Assertion) checkLifetime(claims assertionClaims) error {
 
 // audienceContains reads the audience, which is a string in some assertions and a list in others.
 func audienceContains(raw json.RawMessage, want string) bool {
-	for _, audience := range audiences(raw) {
-		if audience == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(audiences(raw), want)
 }
 
 func audienceText(raw json.RawMessage) string {

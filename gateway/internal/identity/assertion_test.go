@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"maps"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -92,9 +93,7 @@ func claims(overrides map[string]any) map[string]any {
 		"exp":   time.Now().Add(15 * time.Minute).Unix(),
 		"iat":   time.Now().Add(-time.Minute).Unix(),
 	}
-	for key, value := range overrides {
-		base[key] = value
-	}
+	maps.Copy(base, overrides)
 	return base
 }
 

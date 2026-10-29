@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -442,14 +443,9 @@ func reason(envelope response) string {
 }
 
 func join(parts []string, sep string) string {
-	out := ""
-	for index, part := range parts {
-		if index > 0 {
-			out += sep
-		}
-		out += part
-	}
-	return out
+	// strings.Join, not a builder of our own: the standard library's version does the same thing with one
+	// allocation, and a hand-written one here was only ever a slower spelling of it.
+	return strings.Join(parts, sep)
 }
 
 // ErrNoToken is a run that has nowhere to get a token from.
