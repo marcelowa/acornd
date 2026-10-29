@@ -1,6 +1,7 @@
 # ADR 0032 — Who may call the console
 
-Status: accepted (2026-10-30), built
+Status: accepted (2026-10-30), built; the install's `owner` and the room's `members` gain their
+final names and roles in [ADR 0034](0034-install-roles-and-room-roles.md)
 Date: 2026-10-30
 
 ## Context
