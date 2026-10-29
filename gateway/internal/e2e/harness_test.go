@@ -1211,6 +1211,37 @@ type entry struct {
 	Data  map[string]any `json:"data"`
 }
 
+// personMessageKind is the entry a person's prompt is placed as when it names an author. Not `pi.user`: the kind is
+// the harness's own, and the author has to land in the same commit as the words (ADR 0034 §7), which needs a kind of
+// ours to carry it. An install with no admin claimed can name nobody, so its prompts stay the harness's `pi.user` —
+// which is this suite, and personMessages is how a test asks for either.
+const personMessageKind = "acornfall.message"
+
+// isPersonMessage reports whether this entry is somebody's prompt, whichever kind carried it.
+func (e entry) isPersonMessage() bool {
+	return e.Kind == personMessageKind || e.Kind == "pi.user"
+}
+
+// personMessages are the entries a person wrote, in order.
+func (v view) personMessages() []entry {
+	messages := make([]entry, 0, len(v.Entries))
+	for _, one := range v.Entries {
+		if one.isPersonMessage() {
+			messages = append(messages, one)
+		}
+	}
+	return messages
+}
+
+// lastPersonMessage is the newest one, which is what a test about a just-sent message wants.
+func (v view) lastPersonMessage() string {
+	messages := v.personMessages()
+	if len(messages) == 0 {
+		return ""
+	}
+	return messages[len(messages)-1].text()
+}
+
 type view struct {
 	Entries []entry `json:"entries"`
 }

@@ -284,6 +284,36 @@ describe("the wire mapping", () => {
 		expect(entries[0]?.kind === "user" ? entries[0].action : undefined).toBe("steer");
 	});
 
+	test("a message carries who wrote it, and one written before that carries nothing", () => {
+		// The gateway places a person's message as `acornfall.message` with its author (ADR 0034 §7); an entry
+		// written before authors were recorded has none, and the interface shows nothing rather than a guess.
+		const view: WireView = {
+			entries: [
+				{
+					id: 9,
+					kind: "acornfall.message",
+					model: [{ content: "can you check the build?" }],
+					data: {
+						author: {
+							email: "ana@example.com",
+							name: "Ana Silva",
+							speaker: "Ana Silva",
+						},
+					},
+				},
+				{ id: 10, kind: "acornfall.message", model: [{ content: "and again" }] },
+				{ id: 11, kind: "pi.user", model: [{ content: "from another conversation" }] },
+			],
+		};
+		const entries = toTranscript(view, {});
+		const authorOf = (index: number) =>
+			entries[index]?.kind === "user" ? entries[index].author : undefined;
+		expect(authorOf(0)).toEqual({ email: "ana@example.com", name: "Ana Silva" });
+		expect(authorOf(1)).toBeUndefined();
+		// An agent's message to another conversation is `pi.user`, and is nobody's words.
+		expect(authorOf(2)).toBeUndefined();
+	});
+
 	test("a message with no claimed mark shows none", () => {
 		const view: WireView = {
 			entries: [{ id: 8, kind: "pi.user", model: [{ content: "an ordinary turn" }] }],

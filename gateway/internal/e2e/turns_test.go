@@ -29,7 +29,7 @@ func TestCommandExpansionIsWhatTheModelSees(t *testing.T) {
 	c.prompt("personal", root, "/summarize the notes")
 	got := c.waitForText("personal", root, "on it")
 
-	user := lastEntryOfKind(got, "pi.user")
+	user := got.lastPersonMessage()
 	if !strings.Contains(user, "EXPANDED: summarize the notes, briefly.") {
 		t.Errorf("the message should be the expanded template, got %q", user)
 	}
@@ -57,7 +57,7 @@ func TestCommandArgumentsAreAppendedWhenThereIsNoPlaceholder(t *testing.T) {
 
 	c.prompt("personal", root, "/status everything please")
 	got := c.waitForText("personal", root, "pong")
-	user := lastEntryOfKind(got, "pi.user")
+	user := got.lastPersonMessage()
 	if !strings.Contains(user, "PING the status.") || !strings.Contains(user, "everything please") {
 		t.Errorf("the body and the arguments should both be in the message, got %q", user)
 	}
@@ -73,7 +73,7 @@ func TestAnUnknownCommandIsSentAsWritten(t *testing.T) {
 
 	c.prompt("personal", root, "/not-a-command does not exist")
 	got := c.waitForText("personal", root, "understood")
-	user := lastEntryOfKind(got, "pi.user")
+	user := got.lastPersonMessage()
 	if !strings.Contains(user, "/not-a-command does not exist") {
 		t.Errorf("an unknown command should be sent as written, got %q", user)
 	}
@@ -154,7 +154,7 @@ func TestSteeringJoinsTheRunningTurn(t *testing.T) {
 		t.Errorf("both messages should be in the transcript:\n%s", all)
 	}
 	// One run, not two: the steered message is answered after the first, inside the same one.
-	if users := len(got.entriesOf("pi.user")); users != 2 {
+	if users := len(got.personMessages()); users != 2 {
 		t.Errorf("expected exactly the two user messages, got %d:\n%s", users, all)
 	}
 	c.waitIdle("personal", root, 60*time.Second)
@@ -331,12 +331,4 @@ func TestUsageIsReportedForAWorkspace(t *testing.T) {
 	if conversation.Cost < 0 {
 		t.Errorf("cost should not be negative, got %v", conversation.Cost)
 	}
-}
-
-func lastEntryOfKind(v view, kind string) string {
-	entries := v.entriesOf(kind)
-	if len(entries) == 0 {
-		return ""
-	}
-	return entries[len(entries)-1].text()
 }

@@ -319,8 +319,19 @@ export interface WireEntry {
 	id: number;
 	kind: string;
 	model?: WireMessage[] | undefined;
-	/** Display-only payload, never model context: the notice text lives here. */
-	data?: { text?: string | undefined } | undefined;
+	/**
+	 * The payload an entry carries beside its messages: a notice's text, and the author of a message a
+	 * person wrote. Entries written before authors were recorded carry none, and the interface shows
+	 * nothing for them rather than a guess (ADR 0034 §7).
+	 */
+	data?: { text?: string | undefined; author?: WireAuthor | undefined } | undefined;
+}
+
+/** Who wrote a message. `speaker` is the name the model reads, and it is empty in a personal room. */
+export interface WireAuthor {
+	email: string;
+	name?: string | undefined;
+	speaker?: string | undefined;
 }
 
 export interface WireToolSlot {

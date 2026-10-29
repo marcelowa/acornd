@@ -19,7 +19,11 @@ import (
 // live; an unknown name comes back unchanged, so a message that happens to start with a slash is
 // never rewritten. A builtin is an action rather than a turn: it is run here, recorded, and
 // reported as done, and nothing is sent to the model.
-func (c *Control) expandCommand(ctx context.Context, conversationID, text string) (string, bool, error) {
+func (c *Control) expandCommand(
+	ctx context.Context,
+	author *protocol.Author,
+	conversationID, text string,
+) (string, bool, error) {
 	var expanded struct {
 		Text    string `json:"text"`
 		Command string `json:"command"`
@@ -51,6 +55,9 @@ func (c *Control) expandCommand(ctx context.Context, conversationID, text string
 		ConversationID: conversationID,
 		Text:           strings.TrimSpace(text),
 		Action:         expanded.Action,
+		// A builtin is somebody's act, so the record it leaves names them: `/compact` from a guest is not
+		// the same event as the owner's, and a transcript that cannot tell them apart reads as a crash.
+		Author: author,
 	}, &response)
 	c.mu.Lock()
 	delete(c.promptedAt, conversationID)
@@ -66,7 +73,15 @@ func (c *Control) expandCommand(ctx context.Context, conversationID, text string
 	return text, true, nil
 }
 
-func (c *Control) Prompt(ctx context.Context, conversationID, text string, when protocol.WhenBusy, attachments []string) error {
+// Prompt admits one message. author is who wrote it, or nil when the install can name nobody; it travels to the
+// worker, which stores it on the entry and composes the speaker prefix the model reads (ADR 0034 §7).
+func (c *Control) Prompt(
+	ctx context.Context,
+	author *protocol.Author,
+	conversationID, text string,
+	when protocol.WhenBusy,
+	attachments []string,
+) error {
 	// A prompt admitted while a secret restart runs must not start a tool call against the
 	// sandbox being replaced. The restart holds this lock across Stop/Produce.
 	c.lifecycle.Lock()
@@ -82,7 +97,7 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 	}
 	// A message that opens with a slash may be a command.
 	if strings.HasPrefix(strings.TrimSpace(text), "/") {
-		expanded, acted, err := c.expandCommand(ctx, conversationID, text)
+		expanded, acted, err := c.expandCommand(ctx, author, conversationID, text)
 		if err != nil {
 			return err
 		}
@@ -97,6 +112,7 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 		Text:           text,
 		WhenBusy:       when,
 		Attachments:    attachments,
+		Author:         author,
 	}, nil); err != nil {
 		return err
 	}
@@ -113,13 +129,35 @@ func (c *Control) Prompt(ctx context.Context, conversationID, text string, when 
 	return nil
 }
 
+// Abort stops everything running in one conversation and names nobody. It is what a drain does at shutdown, which is
+// nobody's act: the note the stop lands as says the run was stopped, without attributing it.
 func (c *Control) Abort(ctx context.Context, conversationID string) error {
+	return c.stopRun(ctx, nil, conversationID)
+}
+
+// AbortBy stops what one person asked to stop, and the note it lands as names them (ADR 0034 §7): a guest stopping a
+// member's turn otherwise reads as a crash. No speaker is sent, because a stop is not a message and nothing is
+// prefixed with a name.
+func (c *Control) AbortBy(ctx context.Context, author *protocol.Author, conversationID string) error {
+	return c.stopRun(ctx, author, conversationID)
+}
+
+// stopRun is the one path both entry points take: the author is the only difference between them.
+func (c *Control) stopRun(ctx context.Context, author *protocol.Author, conversationID string) error {
 	c.cancelSecrets(conversationID)
 	worker, err := c.currentWorker()
 	if err != nil {
 		return err
 	}
-	return worker.CallInto(ctx, protocol.Command{Type: "abort", ConversationID: conversationID}, nil)
+	var stopper *protocol.Author
+	if author != nil {
+		stopper = &protocol.Author{Email: author.Email, Name: author.Name}
+	}
+	return worker.CallInto(ctx, protocol.Command{
+		Type:           "abort",
+		ConversationID: conversationID,
+		Author:         stopper,
+	}, nil)
 }
 
 func (c *Control) Usage(ctx context.Context) (json.RawMessage, error) {

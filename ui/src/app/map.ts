@@ -362,7 +362,10 @@ export function toTranscript(
 		const id = String(entry.id);
 
 		switch (entry.kind) {
-			case "pi.user": {
+			// A person's message: the gateway places it as `acornfall.message` so the author lands with the
+			// words (ADR 0034 §7), and `pi.user` is still what an agent's message to another conversation is.
+			case "pi.user":
+			case "acornfall.message": {
 				const text = messages
 					.map((message) => textOf(message.content))
 					.join("\n")
@@ -371,6 +374,7 @@ export function toTranscript(
 				// A branch keeps everything before the message, so it forks at the entry that
 				// precedes a user turn, not at the turn itself.
 				const previous = index > 0 ? entries[index - 1] : undefined;
+				const author = entry.data?.author;
 				transcript.push({
 					kind: "user",
 					id,
@@ -378,6 +382,10 @@ export function toTranscript(
 					at: at(first),
 					action: marks?.[id],
 					sender: senders[id],
+					author:
+						author === undefined
+							? undefined
+							: { email: author.email, name: author.name },
 					forkAt: previous === undefined ? undefined : String(previous.id),
 				});
 				break;

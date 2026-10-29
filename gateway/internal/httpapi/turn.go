@@ -66,9 +66,9 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	if !s.mayRunPinned(w, r, ctl, r.PathValue("id")) {
 		return
 	}
-	// A shared room names its speaker before the model reads the turn (ADR 0032 §7).
-	text := prefixed(body.Text, s.speakerFor(r))
-	if err := ctl.Prompt(r.Context(), r.PathValue("id"), strings.TrimSpace(text), when, body.Attachments); err != nil {
+	// A shared room names its speaker before the model reads the turn (ADR 0032 §7), and the author rides with the
+	// words so the worker stores who said them (ADR 0034 §7). The prefix is composed there, never here.
+	if err := ctl.Prompt(r.Context(), s.authorOf(r), r.PathValue("id"), strings.TrimSpace(body.Text), when, body.Attachments); err != nil {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
@@ -103,7 +103,7 @@ func (s *Server) abort(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	if err := ctl.Abort(r.Context(), r.PathValue("id")); err != nil {
+	if err := ctl.AbortBy(r.Context(), s.authorOf(r), r.PathValue("id")); err != nil {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}

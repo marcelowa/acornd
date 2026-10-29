@@ -693,7 +693,9 @@ export function usePlatform(): Platform {
 				const conversation = activeIdRef.current;
 				const claims: Record<string, BusyAction> = {};
 				for (const entry of nextView.entries ?? []) {
-					if (entry.kind !== "pi.user") continue;
+					// A person's message is placed as `acornfall.message` (ADR 0034 §7); `pi.user` is an
+					// agent's message to another conversation.
+					if (entry.kind !== "pi.user" && entry.kind !== "acornfall.message") continue;
 					const text = (entry.model ?? [])
 						.map((message) => textOf(message.content))
 						.join("\n")
