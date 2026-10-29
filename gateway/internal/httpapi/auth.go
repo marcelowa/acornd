@@ -63,7 +63,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, ctl.State())
+	writeJSON(w, http.StatusOK, ctl.State(callerOf(r)))
 }
 
 func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {

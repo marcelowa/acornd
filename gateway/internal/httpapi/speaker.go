@@ -4,16 +4,38 @@
 // a model answering three people is not left guessing which of them asked. A personal workspace has one voice and
 // says nothing — a prefix there would be noise with no answer behind it.
 //
-// No author field on entries. Attribution here is for the model, which reads assembled text; a durable schema
-// change to carry a display name would be a harness change for a presentation need.
+// ADR 0034 §7: the name is decided here and stored as a name. The edge no longer writes `[Ana] ` into the message,
+// because a guest could type another person's prefix and be believed, and because with an author field the model
+// would read the name twice. The worker composes the prefix when it assembles the transcript for the model, and
+// `speakerFor` is still the only thing that decides it.
 package httpapi
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/acornfall/acornfall/gateway/internal/control"
+	"github.com/acornfall/acornfall/gateway/internal/people"
+	"github.com/acornfall/acornfall/gateway/internal/protocol"
 )
+
+// authorOf is who wrote this request's words: the address the door proved, the display name the book has for it,
+// and the speaker the model is told — which speakerFor decides.
+//
+// Nobody is nil: an install with no admin claimed has no address to attribute words to, and inventing a name there
+// would put a guess in the transcript the interface is not allowed to make.
+func (s *Server) authorOf(r *http.Request) *protocol.Author {
+	caller := callerOf(r)
+	if caller.Email == "" {
+		return nil
+	}
+	person := people.Person{Email: caller.Email}
+	if s.gate.People != nil {
+		if named, found, err := s.gate.People.Find(caller.Email); err == nil && found {
+			person = named
+		}
+	}
+	return &protocol.Author{Email: caller.Email, Name: person.DisplayName(), Speaker: s.speakerFor(r)}
+}
 
 // speakerFor answers the name this request's words are prefixed with, and "" when nobody needs naming.
 func (s *Server) speakerFor(r *http.Request) string {
@@ -49,15 +71,4 @@ func workspaceOf(r *http.Request) string {
 func shared(workspaces *control.Workspaces, name string) bool {
 	workspace, known := workspaces.Get(name)
 	return known && len(workspace.Members) > 1
-}
-
-// prefixed puts the speaker in front of the words, and leaves them alone when there is nothing to say, when the
-// message is files without words, or when it is a command — a slash command is expanded by matching its first
-// character, and a prefix would turn `/compact` into an ordinary sentence about compacting.
-func prefixed(text, speaker string) string {
-	trimmed := strings.TrimSpace(text)
-	if speaker == "" || trimmed == "" || strings.HasPrefix(trimmed, "/") {
-		return text
-	}
-	return "[" + speaker + "] " + text
 }

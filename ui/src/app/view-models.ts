@@ -148,6 +148,11 @@ export interface UserEntry {
 	action?: BusyAction | undefined;
 	/** Set when another conversation's words arrived here. */
 	sender?: AgentSender | undefined;
+	/**
+	 * Who wrote this, when the transcript knows: absent for a message written before authors were recorded,
+	 * and for an agent's. The interface shows nothing for an absent author rather than a guess (ADR 0034 §7).
+	 */
+	author?: { email: string; name?: string | undefined } | undefined;
 	/** Set when this message can be branched from. */
 	forkAt?: string | undefined;
 }

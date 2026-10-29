@@ -27,9 +27,11 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Each client names the conversation it wants, so two tabs can watch two
-	// conversations without agreeing on an active one.
+	// conversations without agreeing on an active one — and every state it is sent is its
+	// caller's, because the landing and the draft are per person (ADR 0034 §7).
+	caller := callerOf(r)
 	conversationID := r.URL.Query().Get("conversation")
-	id, frames, stale, initial, err := ctl.Subscribe(r.Context(), conversationID)
+	id, frames, stale, initial, err := ctl.Subscribe(r.Context(), caller, conversationID)
 	if err != nil {
 		// The stream is already open, so a status line here would be a second header that no
 		// client reads. Say it on the stream and close: the client reconnects, which is what
@@ -40,10 +42,10 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ctl.Unsubscribe(id)
 
-	if !s.sendOpening(w, flusher, ctl, conversationID, initial) {
+	if !s.sendOpening(w, flusher, ctl, caller, conversationID, initial) {
 		return
 	}
-	s.forward(w, flusher, r, ctl, conversationID, frames, stale)
+	s.forward(w, flusher, r, ctl, caller, conversationID, frames, stale)
 }
 
 // openStream writes the headers and the reconnect interval. Everything after this is events:
@@ -66,10 +68,11 @@ func (s *Server) sendOpening(
 	w http.ResponseWriter,
 	flusher http.Flusher,
 	ctl *control.Control,
+	caller control.Caller,
 	conversationID string,
 	initial *protocol.Frame,
 ) bool {
-	if err := writeEvent(w, "state", ctl.StateFor(conversationID)); err != nil {
+	if err := writeEvent(w, "state", ctl.StateFor(caller, conversationID)); err != nil {
 		return false
 	}
 	if initial != nil {
@@ -89,6 +92,7 @@ func (s *Server) forward(
 	flusher http.Flusher,
 	r *http.Request,
 	ctl *control.Control,
+	caller control.Caller,
 	conversationID string,
 	frames <-chan protocol.Frame,
 	stale <-chan struct{},
@@ -113,7 +117,7 @@ func (s *Server) forward(
 		// itself, built now rather than when the signal was raised: the signal can wait,
 		// the state cannot be old.
 		case <-stale:
-			if err := writeEvent(w, "state", ctl.StateFor(conversationID)); err != nil {
+			if err := writeEvent(w, "state", ctl.StateFor(caller, conversationID)); err != nil {
 				return
 			}
 			flusher.Flush()

@@ -195,7 +195,7 @@ func TestForkBranchesBeforeATurn(t *testing.T) {
 	var previous *entry
 	for index := range full.Entries {
 		e := full.Entries[index]
-		if e.Kind == "pi.user" && strings.Contains(e.text(), "second question") && previous != nil {
+		if e.isPersonMessage() && strings.Contains(e.text(), "second question") && previous != nil {
 			at = strconv.Itoa(previous.ID)
 		}
 		previous = &full.Entries[index]
@@ -490,10 +490,15 @@ func TestPromptRoundTrip(t *testing.T) {
 	c.prompt("personal", root, "say hello")
 	got := c.waitForText("personal", root, "Hello from the script.")
 
-	for _, want := range []string{"pi.user", "pi.system", "pi.assistant"} {
+	for _, want := range []string{"pi.system", "pi.assistant"} {
 		if len(got.entriesOf(want)) == 0 {
 			t.Errorf("the transcript should contain a %s entry, got %s", want, strings.Join(got.kinds(), ","))
 		}
+	}
+	// This suite has no door and no admin claimed, so nobody can be named and the prompt is placed as the harness's
+	// own `pi.user` (ADR 0034 §7).
+	if len(got.personMessages()) == 0 {
+		t.Errorf("the transcript should contain the person's message, got %s", strings.Join(got.kinds(), ","))
 	}
 	if sections := got.systemSections(); len(sections) == 0 {
 		t.Error("the transcript should carry the prompt that was sent")

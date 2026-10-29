@@ -27,6 +27,19 @@ type ModelBinding struct {
 	Definition string `json:"definition,omitempty"`
 }
 
+// Author is who wrote a prompt: the address the door proved, the display name the book has for it, and the
+// speaker the model is told about it — empty in a room with one person in it (ADR 0032 §7, ADR 0034 §7).
+//
+// The speaker is decided here rather than in the worker because it is a fact about a room's membership, and
+// membership is this install's. A name written into the message is what a guest could type and be believed.
+type Author struct {
+	Email string `json:"email"`
+	Name  string `json:"name,omitempty"`
+	// Speaker is what the model reads in front of the words: nothing for a personal room or its admin, and
+	// the person's name in a room with somebody else in it.
+	Speaker string `json:"speaker,omitempty"`
+}
+
 // Command is a request from control to the worker.
 type Command struct {
 	ID             string        `json:"id"`
@@ -36,6 +49,9 @@ type Command struct {
 	Text           string        `json:"text,omitempty"`
 	WhenBusy       WhenBusy      `json:"whenBusy,omitempty"`
 	Title          string        `json:"title,omitempty"`
+	// Author rides a prompt, a builtin's record, and an abort. Absent when nobody can be named: an install
+	// with no admin claimed has no address to attribute words to, and an agent speaks for itself.
+	Author *Author `json:"author,omitempty"`
 	// No omitempty: `false` is a value here, and omitting it turns a restore into
 	// a no-op that still reports success.
 	Hidden     bool   `json:"hidden"`

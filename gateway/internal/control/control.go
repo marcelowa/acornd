@@ -282,9 +282,14 @@ type Control struct {
 	// clients watching different conversations is what makes browser tabs work.
 	subscriberConversation map[int]string
 	attachments            map[string]int
-	// drafts holds one unsent message per conversation, keyed by the harness's own id.
-	// Loaded at open, persisted on every save: a draft outlives the process that took it.
-	drafts map[string]Draft
+	// drafts holds one unsent message per person per conversation, keyed by the harness's own id
+	// and the address of the person typing. Loaded at open, persisted on every save: a draft
+	// outlives the process that took it.
+	drafts map[draftKey]Draft
+	// landing is where each person lands, by address, and active is the workspace's fallback for a
+	// caller with no landing of their own. One landing per workspace is what selecting used to mean,
+	// and it made one person's move move everybody (ADR 0034 §7).
+	landing map[string]string
 	// secretRequests are tools waiting for a person to set a secret. The worker asks; the
 	// card answers through the gateway, which owns the vault and the answer.
 	secretMu       sync.Mutex
@@ -327,7 +332,8 @@ func New(opts Options) *Control {
 		policies:               map[string]json.RawMessage{},
 		promptedAt:             map[string]int64{},
 		actionAt:               map[string]int64{},
-		drafts:                 map[string]Draft{},
+		drafts:                 map[draftKey]Draft{},
+		landing:                map[string]string{},
 		secretRequests:         map[string]*pendingSecret{},
 		continuations:          map[string][]string{},
 	}
@@ -483,20 +489,20 @@ func (c *Control) Describe() protocol.Describe {
 	return c.describe
 }
 
-func (c *Control) State() State {
-	c.mu.RLock()
-	active := c.active
-	c.mu.RUnlock()
-	return c.StateFor(active)
+// State is everything a client needs for the conversation this caller lands on.
+func (c *Control) State(caller Caller) State {
+	return c.StateFor(caller, "")
 }
 
 // StateFor is everything a client needs for one conversation. Each tab asks for its own,
-// so two tabs can show two conversations without agreeing on an "active" one.
-func (c *Control) StateFor(conversationID string) State {
-	parts := c.stateParts(conversationID)
+// so two tabs can show two conversations without agreeing on an "active" one — and each
+// person asks as themselves, because the landing conversation and the draft are theirs
+// (ADR 0034 §7).
+func (c *Control) StateFor(caller Caller, conversationID string) State {
+	parts := c.stateParts(caller, conversationID)
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.stateLocked(parts)
+	return c.stateLocked(caller, parts)
 }
 
 // stateParts is what a state needs and cannot read under the snapshot lock. The effective
@@ -517,10 +523,10 @@ type stateParts struct {
 	origins    DefaultOrigins
 }
 
-func (c *Control) stateParts(conversationID string) stateParts {
+func (c *Control) stateParts(caller Caller, conversationID string) stateParts {
 	active := conversationID
 	if active == "" {
-		active = c.activeConversation()
+		active = c.landingFor(caller)
 	}
 	inputs, child := c.conversationInputs(active)
 	workspaces := c.workspaceList()
@@ -554,8 +560,8 @@ func (c *Control) conversationInputs(active string) (resolveInputs, bool) {
 	return inputs, true
 }
 
-// stateLocked assembles the snapshot. The caller holds the read lock.
-func (c *Control) stateLocked(parts stateParts) State {
+// stateLocked assembles the snapshot for one caller. The caller holds the read lock.
+func (c *Control) stateLocked(caller Caller, parts stateParts) State {
 	active := parts.active
 	state := State{
 		Workspace: WorkspaceState{
@@ -609,7 +615,9 @@ func (c *Control) stateLocked(parts stateParts) State {
 	// The draft travels with the state, not with the transcript: it is the composer's, and
 	// the conversation it belongs to is the one this state is about. A copy, so the client
 	// reads a value rather than a map that a keystroke on another machine can change under it.
-	if draft, found := c.drafts[active]; found {
+	// It is this caller's draft: somebody else's half-typed message is not theirs to see, and
+	// showing it would put words in a composer that person never typed (ADR 0034 §7).
+	if draft, found := c.drafts[draftKey{conversation: active, caller: caller.Email}]; found {
 		state.Draft = &draft
 	}
 	// The conversation this call asked for, not the one the worker happens to be attached
@@ -653,7 +661,11 @@ func (c *Control) notifyState() {
 }
 
 type persistedSettings struct {
-	Active          string                           `json:"active,omitempty"`
+	Active string `json:"active,omitempty"`
+	// Landing is where each person lands, by address (ADR 0034 §7). Active stays beside it as the
+	// workspace's fallback: it is what a caller with no landing of their own opens, a new browser for
+	// instance, and it is what an install written before landings were per person already had.
+	Landing         map[string]string                `json:"landing,omitempty"`
 	GeneralPinned   bool                             `json:"generalPinned,omitempty"`
 	DefaultModel    protocol.ModelBinding            `json:"defaultModel,omitzero"`
 	DefaultThinking string                           `json:"defaultThinking,omitempty"`
@@ -707,6 +719,11 @@ func (c *Control) applySettings(settings persistedSettings) {
 	c.defaultThinking = settings.DefaultThinking
 	c.defaultAgent = settings.DefaultAgent
 	c.generalPinned = settings.GeneralPinned
+	for caller, landing := range settings.Landing {
+		if landing != "" {
+			c.landing[caller] = landing
+		}
+	}
 	for id, binding := range settings.Agents {
 		if binding.Provider == "" && binding.ModelID == "" && binding.Definition == "" {
 			continue
@@ -725,11 +742,17 @@ func (c *Control) persist() {
 	// would outrank every layer below for good.
 	settings := persistedSettings{
 		Active:          c.active,
+		Landing:         map[string]string{},
 		GeneralPinned:   c.generalPinned,
 		DefaultModel:    c.defaultModel,
 		DefaultThinking: c.defaultThinking,
 		DefaultAgent:    c.defaultAgent,
 		Agents:          map[string]protocol.ModelBinding{},
+	}
+	for caller, landing := range c.landing {
+		if landing != "" {
+			settings.Landing[caller] = landing
+		}
 	}
 	for id, binding := range c.bindings {
 		if binding.Provider == "" && binding.ModelID == "" && binding.Definition == "" {
