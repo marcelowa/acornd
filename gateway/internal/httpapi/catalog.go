@@ -63,8 +63,8 @@ func (l modelLists) allows(provider, model string) bool {
 func (l modelLists) personalModels(provider string) []string {
 	names := make([]string, 0, len(l.personal))
 	for key := range l.personal {
-		if strings.HasPrefix(key, provider+"/") {
-			names = append(names, strings.TrimPrefix(key, provider+"/"))
+		if model, ok := strings.CutPrefix(key, provider+"/"); ok {
+			names = append(names, model)
 		}
 	}
 	sort.Strings(names)
