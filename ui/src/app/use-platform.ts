@@ -74,6 +74,8 @@ import {
 	toModelChoices,
 	toModelGroups,
 	toProviders,
+	toRights,
+	toRoomRole,
 	toSandbox,
 	toScopeDefaults,
 	toThinkingGroups,
@@ -87,6 +89,8 @@ import type {
 	EngineSummary,
 	PickerGroup,
 	ProviderSummary,
+	RoomRights,
+	RoomRole,
 	SandboxSummary,
 	SlashCommand,
 	TranscriptEntry,
@@ -255,6 +259,12 @@ export interface Platform {
 	opening?: { stage: string } | undefined;
 	workerUp: boolean;
 	workerError?: string | undefined;
+	/** What this caller may change in the room in view: the state's one table, not a guess from a role. */
+	can: RoomRights;
+	/** What this caller is in the room in view; undefined when they are not in it. */
+	role?: RoomRole | undefined;
+	/** The install's role, not the room's: it is what shows the People page (ADR 0034 §1). */
+	admin: boolean;
 	conversations: ConversationSummary[];
 	deleted: ConversationSummary[];
 	/** The workspaces, with the one in view marked. */
@@ -884,7 +894,10 @@ export function usePlatform(): Platform {
 	// A subagent runs what its creator gave it: the pickers show that rather than offering a
 	// change the gateway would not apply.
 	const subagent = state?.subagent === true;
-	const fixed = activeId === "" || subagent;
+	// A guest sees the agent, the model and the thinking with their values and cannot pick another, and no
+	// explanatory sentence: the state carries the answer, so this is the one place that reads it (ADR 0034 §4).
+	const can = toRights(state?.can);
+	const fixed = activeId === "" || subagent || !can.model;
 	const pinnedModel = modelChoices.find((choice) => choice.value === effectiveModel);
 
 	/** Every picker can go back to inheriting: a choice has to be undoable. */
@@ -1559,6 +1572,9 @@ export function usePlatform(): Platform {
 		opening,
 		workerUp: state?.workerUp ?? false,
 		workerError: state?.workerError,
+		can,
+		role: toRoomRole(state?.role),
+		admin: state?.admin === true,
 		steerable: state?.capabilities.steer ?? false,
 		model,
 		thinking,

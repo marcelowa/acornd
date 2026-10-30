@@ -199,10 +199,16 @@ export function toRights(can: WireCan | undefined): RoomRights {
 	};
 }
 
-/** What somebody is in a room. An address with no role is a record the migration has not finished, and it
- * reads as a guest: a right is never granted by a missing field (ADR 0034 §8). */
-function toRole(role: string | undefined): RoomRole {
-	return role === "owner" ? "owner" : "guest";
+/** What somebody is in a room; undefined when the caller is not in it at all. */
+export function toRoomRole(role: string | undefined): RoomRole | undefined {
+	if (role === "owner" || role === "guest") return role;
+	return undefined;
+}
+
+/** A member's role. An address with no role is a record the migration has not finished, and it reads as a
+ * guest: a right is never granted by a missing field (ADR 0034 §8). */
+function toMemberRole(role: string | undefined): RoomRole {
+	return toRoomRole(role) ?? "guest";
 }
 
 /** What a workspace is. `personal` is the gateway's own derivation of the same fact, so it answers when an
@@ -215,7 +221,7 @@ function toKind(workspace: WireWorkspace): RoomKind {
 function toMembers(members: WireMember[] | undefined): RoomMember[] {
 	return (members ?? []).map((member) => ({
 		email: member.email,
-		role: toRole(member.role),
+		role: toMemberRole(member.role),
 	}));
 }
 

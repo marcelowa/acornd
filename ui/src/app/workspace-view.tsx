@@ -334,6 +334,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					workspaces={platform.workspaces}
 					onSelect={platform.selectWorkspace}
 					onCreate={platform.createWorkspace}
+					canMakeRoom={platform.can.makeRoom}
 					engines={platform.engines}
 					onRename={platform.renameWorkspace}
 					onForget={platform.removeWorkspace}
@@ -357,6 +358,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					conversations={platform.conversations}
 					deleted={platform.deleted}
 					activeId={platform.active?.id}
+					can={platform.can}
 					onSelect={platform.select}
 					onRename={(id) =>
 						setRenaming(
@@ -370,16 +372,20 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			}
 			foot={
 				<>
-					<Button
-						variant="ghost"
-						size="sm"
-						className="justify-start"
-						aria-label="New conversation"
-						onClick={platform.newConversation}
-					>
-						<Plus />
-						New conversation
-					</Button>
+					{/* A guest speaks in the conversations the room already has: making one is the owner's,
+					 * and an affordance that the server refuses is worse than none (ADR 0034 §4). */}
+					{platform.can.create ? (
+						<Button
+							variant="ghost"
+							size="sm"
+							className="justify-start"
+							aria-label="New conversation"
+							onClick={platform.newConversation}
+						>
+							<Plus />
+							New conversation
+						</Button>
+					) : null}
 					<Button
 						variant="ghost"
 						size="sm"
@@ -638,7 +644,8 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 							entries={platform.entries}
 							ready={platform.ready}
 							opening={platform.opening}
-							onFork={platform.fork}
+							// A guest reads and prompts: branching is the room owner's (ADR 0034 §4).
+							onFork={platform.can.fork ? platform.fork : undefined}
 						/>
 					)
 				}

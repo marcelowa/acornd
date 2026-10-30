@@ -1,5 +1,5 @@
 import { Ellipsis } from "lucide-react";
-import type { ConversationSummary } from "@/app/view-models";
+import type { ConversationSummary, RoomRights } from "@/app/view-models";
 import { Button } from "@/components/ui/button";
 import {
 	ContextMenu,
@@ -27,6 +27,11 @@ import { cn } from "cn";
 export interface ConversationRowProps {
 	conversation: ConversationSummary;
 	active?: boolean | undefined;
+	/**
+	 * What this caller may do with a conversation here: rename and delete are the room's owner's
+	 * (ADR 0034 §4), and a guest is not offered them rather than offered and refused.
+	 */
+	can?: Pick<RoomRights, "rename" | "hide"> | undefined;
 	onSelect?: ((id: string) => void) | undefined;
 	onRename?: ((id: string) => void) | undefined;
 	onSecrets?: ((id: string) => void) | undefined;
@@ -63,6 +68,7 @@ interface RowAction {
 export function ConversationRow({
 	conversation,
 	active = false,
+	can,
 	onSelect,
 	onRename,
 	onSecrets,
@@ -104,12 +110,28 @@ export function ConversationRow({
 	const moved = formatMoved(conversation.updatedAt, now);
 	const run = runState(conversation.running, conversation.updatedAt, now);
 
+	// Absent rights are the full set: a row rendered outside the app — a story, a test — is the
+	// owner's, and the app always hands it what the state answered.
+	const rename = can === undefined || can.rename;
+	const hide = can === undefined || can.hide;
 	const actions: RowAction[] = conversation.hidden
-		? [{ label: "Restore", destructive: false, run: () => onRestore?.(conversation.id) }]
+		? hide
+			? [{ label: "Restore", destructive: false, run: () => onRestore?.(conversation.id) }]
+			: []
 		: [
-				{ label: "Rename", destructive: false, run: () => onRename?.(conversation.id) },
+				...(rename
+					? [
+							{
+								label: "Rename",
+								destructive: false,
+								run: () => onRename?.(conversation.id),
+							},
+						]
+					: []),
 				{ label: "Secrets", destructive: false, run: () => onSecrets?.(conversation.id) },
-				{ label: "Delete", destructive: true, run: () => onHide?.(conversation.id) },
+				...(hide
+					? [{ label: "Delete", destructive: true, run: () => onHide?.(conversation.id) }]
+					: []),
 			];
 
 	const row = (
@@ -172,7 +194,12 @@ export function ConversationRow({
 					</span>
 				</span>
 			</button>
-			<span className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100">
+			<span
+				className={cn(
+					"flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100",
+					actions.length === 0 && "hidden",
+				)}
+			>
 				<DropdownMenu>
 					<DropdownMenuTrigger asChild>
 						<Button
@@ -199,6 +226,8 @@ export function ConversationRow({
 			</span>
 		</div>
 	);
+
+	if (actions.length === 0) return row;
 
 	return (
 		<ContextMenu>

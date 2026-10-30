@@ -103,6 +103,14 @@ export const Default: Story = {
 	},
 };
 
+/**
+ * A member without `can_create`: they may be a guest in a room and nothing more, so there is no create
+ * form at all — not a disabled one, and no sentence about a form that cannot work (ADR 0034 §3).
+ */
+export const CannotMakeRoom: Story = {
+	args: { ...Default.args, canMakeRoom: false },
+};
+
 /** Nothing but the general workspace: the only row that cannot be forgotten. */
 export const GeneralOnly: Story = {
 	args: { ...Default.args, workspaces: workspaces.slice(0, 1) },

@@ -66,6 +66,19 @@ const deleted: ConversationSummary[] = [
 ];
 
 export const Mixed: Story = { args: { conversations, deleted, activeId: "3" } };
+
+/**
+ * A guest's rail: the conversations are all there and the menu offers none of what the room keeps for its
+ * owner — no rename, no delete, and no Restore on a tombstone (ADR 0034 §4).
+ */
+export const Guest: Story = {
+	args: {
+		conversations,
+		deleted,
+		activeId: "3",
+		can: { rename: false, hide: false },
+	},
+};
 export const Empty: Story = { args: { conversations: [], deleted: [] } };
 export const WithoutDeleted: Story = { args: { conversations, deleted: [] } };
 
