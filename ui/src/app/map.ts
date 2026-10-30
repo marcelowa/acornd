@@ -218,7 +218,8 @@ function toKind(workspace: WireWorkspace): RoomKind {
 	return workspace.personal ? "personal" : "room";
 }
 
-function toMembers(members: WireMember[] | undefined): RoomMember[] {
+/** The people in a room, the owner first as the registry writes them. */
+export function toMembers(members: WireMember[] | undefined): RoomMember[] {
 	return (members ?? []).map((member) => ({
 		email: member.email,
 		role: toMemberRole(member.role),

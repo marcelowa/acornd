@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import type { EngineSummary, WorkspaceSummary } from "@/app/view-models";
+import type { EngineSummary, ShareView, WorkspaceSummary } from "@/app/view-models";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RenameDialog } from "@/components/ui/rename-dialog";
 import { Text } from "@/components/typography/text";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { SandboxDialog } from "./sandbox-dialog";
+import { ShareDialog } from "./share-dialog";
 import { WorkspaceRow } from "./workspace-row";
 
 export interface WorkspacesPanelProps {
@@ -29,6 +30,15 @@ export interface WorkspacesPanelProps {
 		name: string,
 		change: { image: string; network: string; keepAlive: boolean; private: boolean },
 	) => void;
+	/**
+	 * The room in view, when it can be shared: who is in it and whether this caller runs it. Absent on a
+	 * personal room, which is never shared — and on every other row, because a room's members are the
+	 * state's answer for the room somebody is in and for no other (ADR 0034 §5).
+	 */
+	share?: ShareView | undefined;
+	/** Put somebody the book names into a room, and take a guest out. Both are the owner's. */
+	onAddGuest?: ((name: string, email: string) => void) | undefined;
+	onRemoveGuest?: ((name: string, email: string) => void) | undefined;
 	/** The last refusal, in the server's words: the sandbox dialog shows its own. */
 	failure?: string | undefined;
 }
@@ -54,6 +64,9 @@ export function WorkspacesPanel({
 	onRename,
 	onForget,
 	onUpdateSandbox,
+	share,
+	onAddGuest,
+	onRemoveGuest,
 	failure,
 }: WorkspacesPanelProps) {
 	const [name, setName] = useState("");
@@ -74,6 +87,8 @@ export function WorkspacesPanel({
 	const [renaming, setRenaming] = useState<WorkspaceSummary | undefined>(undefined);
 	/** The workspace whose sandbox is being changed, if any. */
 	const [sandboxFor, setSandboxFor] = useState<WorkspaceSummary | undefined>(undefined);
+	/** The room whose members are open, if any. */
+	const [sharing, setSharing] = useState(false);
 	const create = (): void => {
 		if (name.trim() === "") return;
 		onCreate(name.trim(), engine === "" ? undefined : engine);
@@ -94,6 +109,13 @@ export function WorkspacesPanel({
 						onRename={setRenaming}
 						onSandbox={setSandboxFor}
 						onForget={onForget}
+						// Only the room in view: its members are what the state answered, and a
+						// personal room is never shared.
+						onShare={
+							share !== undefined && share.name === workspace.name
+								? () => setSharing(true)
+								: undefined
+						}
 					/>
 				))}
 			</div>
@@ -193,6 +215,13 @@ export function WorkspacesPanel({
 				failure={failure}
 				onSave={onUpdateSandbox}
 				onClose={() => setSandboxFor(undefined)}
+			/>
+			<ShareDialog
+				room={sharing ? share : undefined}
+				failure={failure}
+				onAdd={(name, email) => onAddGuest?.(name, email)}
+				onRemove={(name, email) => onRemoveGuest?.(name, email)}
+				onClose={() => setSharing(false)}
 			/>
 		</div>
 	);

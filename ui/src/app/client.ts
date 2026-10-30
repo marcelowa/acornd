@@ -441,6 +441,31 @@ export async function setAgent(
 	return (await response.json()) as WireState;
 }
 
+/**
+ * Put somebody the book already names into a room. Only the room's owner may invite, and the answer is the
+ * workspace listing: the room's members changed, and the screen that shows them is the one that asked.
+ *
+ * An address the book does not hold is a 400 with the sentence that says to ask the admin, so the refusal is
+ * shown rather than swallowed — never inviting somebody into a room that would refuse them (ADR 0034 §1).
+ */
+export async function addMember(workspace: string, email: string): Promise<void> {
+	const response = await fetch(workspacePath(workspace, "/members"), {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ email }),
+	});
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+}
+
+/** Take a guest out of a room, or let a guest leave. The owner cannot be removed: ending a room is forgetting it. */
+export async function removeMember(workspace: string, email: string): Promise<void> {
+	const response = await fetch(
+		workspacePath(workspace, `/members/${encodeURIComponent(email)}`),
+		{ method: "DELETE" },
+	);
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+}
+
 export function removeWorkspace(name: string): Promise<void> {
 	return post(`/api/workspaces/${encodeURIComponent(name)}/remove`, {});
 }

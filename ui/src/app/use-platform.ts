@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	abortConversation,
+	addMember,
 	applyRemote,
 	checkRemote as checkRemoteRequest,
 	fetchProviderAllowlist,
@@ -26,6 +27,7 @@ import {
 	logoutProvider,
 	openStream,
 	refreshProviders,
+	removeMember,
 	removeWorkspace as removeWorkspaceRequest,
 	restartUpdate,
 	renameConversation,
@@ -71,6 +73,7 @@ import {
 	toAgentGroups,
 	toConversation,
 	toEngines,
+	toMembers,
 	toModelChoices,
 	toModelGroups,
 	toProviders,
@@ -92,6 +95,7 @@ import type {
 	RoomRights,
 	RoomRole,
 	SandboxSummary,
+	ShareView,
 	SlashCommand,
 	TranscriptEntry,
 	WorkspaceSummary,
@@ -269,6 +273,11 @@ export interface Platform {
 	deleted: ConversationSummary[];
 	/** The workspaces, with the one in view marked. */
 	workspaces: WorkspaceSummary[];
+	/** The room in view, when it can be shared: who is in it, and whether this caller runs it. */
+	share?: ShareView | undefined;
+	/** Put somebody the book names into a room, and take a guest out. Both are the room's owner's. */
+	addGuest: (workspace: string, email: string) => void;
+	removeGuest: (workspace: string, email: string) => void;
 	/** The screen in view: a conversation or settings. The workspaces list is a level of the rail
 	 * over the conversations, not a screen (`workspacesOpen`). */
 	screen: Screen;
@@ -898,6 +907,18 @@ export function usePlatform(): Platform {
 	// explanatory sentence: the state carries the answer, so this is the one place that reads it (ADR 0034 §4).
 	const can = toRights(state?.can);
 	const fixed = activeId === "" || subagent || !can.model;
+	// A personal room is never shared, on any install: journey 1 is "make a room and invite people", not
+	// "open my room" (ADR 0034 §5). So the surface that shares one has nothing to say about it.
+	const share = useMemo<ShareView | undefined>(() => {
+		const room = state?.workspace;
+		if (room === undefined || room.personal) return undefined;
+		return {
+			name: room.name,
+			title: room.title,
+			members: toMembers(room.members),
+			administer: can.administer,
+		};
+	}, [state, can.administer]);
 	const pinnedModel = modelChoices.find((choice) => choice.value === effectiveModel);
 
 	/** Every picker can go back to inheriting: a choice has to be undoable. */
@@ -1213,6 +1234,21 @@ export function usePlatform(): Platform {
 	const renameWorkspace = useCallback(
 		(name: string, title: string) => {
 			act(updateWorkspace(name, { title }), () => void reload());
+		},
+		[act, reload],
+	);
+
+	// The room's members. Both answer the workspace listing, and a refusal — an address the book does not
+	// hold says to ask the admin — lands in `failure`, which the dialog shows where the address was typed.
+	const addGuest = useCallback(
+		(name: string, email: string) => {
+			act(addMember(name, email), () => void reload());
+		},
+		[act, reload],
+	);
+	const removeGuest = useCallback(
+		(name: string, email: string) => {
+			act(removeMember(name, email), () => void reload());
 		},
 		[act, reload],
 	);
@@ -1582,6 +1618,9 @@ export function usePlatform(): Platform {
 		commands,
 		context: contextFold,
 		workspaces,
+		share,
+		addGuest,
+		removeGuest,
 		sandbox,
 		selectWorkspace,
 		defaults,

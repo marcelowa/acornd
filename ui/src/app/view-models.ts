@@ -35,6 +35,19 @@ export interface RoomRights {
 	administer: boolean;
 }
 
+/**
+ * The room in view, as the surface that shares it reads it: who is in it, and whether this caller is the one
+ * who invites. A personal room is never shared, so there is no view model for one.
+ */
+export interface ShareView {
+	name: string;
+	title: string;
+	/** The owner first, then its guests. */
+	members: RoomMember[];
+	/** This caller owns the room: they add and remove guests. False is a guest's list, with no controls. */
+	administer: boolean;
+}
+
 /** One selectable workspace: where it points, what runs it, and whether it is the one in view. */
 export interface WorkspaceSummary {
 	name: string;

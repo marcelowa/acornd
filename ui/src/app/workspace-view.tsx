@@ -339,6 +339,9 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					onRename={platform.renameWorkspace}
 					onForget={platform.removeWorkspace}
 					onUpdateSandbox={platform.setWorkspaceSandbox}
+					share={platform.share}
+					onAddGuest={platform.addGuest}
+					onRemoveGuest={platform.removeGuest}
 					failure={platform.failure}
 				/>
 			}

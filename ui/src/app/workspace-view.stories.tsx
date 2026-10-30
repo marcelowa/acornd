@@ -249,6 +249,11 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 			},
 		],
 		selectWorkspace: noop,
+		// The room in view is the personal one, so there is nothing to share: a story that shares a
+		// room gives it a `share` of its own.
+		share: undefined,
+		addGuest: noop,
+		removeGuest: noop,
 		subagent: false,
 		screen: "conversation",
 		showScreen: noop,

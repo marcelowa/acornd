@@ -100,6 +100,10 @@ export const Default: Story = {
 		onRename: noop,
 		onForget: noop,
 		onUpdateSandbox: noop,
+		// The row in view is the personal room, which is never shared: no row offers Share… here.
+		share: undefined,
+		onAddGuest: noop,
+		onRemoveGuest: noop,
 	},
 };
 
@@ -109,6 +113,40 @@ export const Default: Story = {
  */
 export const CannotMakeRoom: Story = {
 	args: { ...Default.args, canMakeRoom: false },
+};
+
+/**
+ * A room in view that its owner runs: that row's menu offers Share…, and the dialog it opens reads the
+ * members the state answered for this room and no other (ADR 0034 §5).
+ */
+export const ShareableRoom: Story = {
+	args: {
+		...Default.args,
+		workspaces: [
+			{
+				name: "team",
+				title: "Team",
+				path: "/home/marcelo/workspaces/team",
+				personal: false,
+				kind: "room",
+				members: [
+					{ email: "me@example.com", role: "owner" },
+					{ email: "ana@example.com", role: "guest" },
+				],
+				running: true,
+				active: true,
+			},
+		],
+		share: {
+			name: "team",
+			title: "Team",
+			members: [
+				{ email: "me@example.com", role: "owner" },
+				{ email: "ana@example.com", role: "guest" },
+			],
+			administer: true,
+		},
+	},
 };
 
 /** Nothing but the general workspace: the only row that cannot be forgotten. */
