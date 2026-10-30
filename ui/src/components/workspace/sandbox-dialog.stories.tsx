@@ -18,6 +18,8 @@ const workspace: WorkspaceSummary = {
 	title: "acornfall",
 	path: "/home/marcelo/acornfall/workspaces/acronfall",
 	personal: true,
+	kind: "personal",
+	members: [{ email: "me@example.com", role: "owner" }],
 	running: true,
 	active: true,
 	image: "acornfall/sandbox:0.7.6",

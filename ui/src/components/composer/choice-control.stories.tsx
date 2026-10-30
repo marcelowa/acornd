@@ -105,6 +105,18 @@ export const ManyModels: Story = {
 	},
 };
 
+/**
+ * A guest in somebody else's room: the agent, the model and the thinking are shown with their values and
+ * cannot be picked, and there is no sentence explaining why — the owner decided that (ADR 0034 §4).
+ */
+export const Guest: Story = {
+	args: {
+		agent: { ...agent, disabled: true },
+		model: { ...model, disabled: true },
+		thinking: { ...thinking, disabled: true },
+	},
+};
+
 /** Nothing authenticated: the control says so instead of offering a choice that would fail. */
 export const NothingAvailable: Story = {
 	args: {
