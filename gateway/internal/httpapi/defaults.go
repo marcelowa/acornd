@@ -74,14 +74,32 @@ func (s *Server) setInstallDefaultAgent(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, s.listing())
 }
 
+// setDefaultModel is the room's default, and it is an assignment: the model is checked against both lists before
+// it is stored, the same way a conversation's own model is. It is written by hand rather than through stateBody
+// because a refused model answers with its own sentence, and a state document written after it would be a second
+// body on one response.
 func (s *Server) setDefaultModel(w http.ResponseWriter, r *http.Request) {
-	stateBody(s, w, r, func(ctl *control.Control, body struct {
+	var body struct {
 		Provider string `json:"provider"`
 		ModelID  string `json:"modelId"`
-	}) error {
-		if !ctl.May(callerOf(r), control.ActionModel) {
-			return control.ErrNotAllowed
-		}
-		return ctl.SetDefaultModel(r.Context(), body.Provider, body.ModelID)
-	})
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	ctl, err := s.controlFor(r)
+	if err != nil {
+		http.Error(w, err.Error(), statusFor(err))
+		return
+	}
+	if !s.mayRoom(w, r, ctl, control.ActionModel) {
+		return
+	}
+	if !s.mayRun(w, r, body.Provider, body.ModelID) {
+		return
+	}
+	if err := ctl.SetDefaultModel(r.Context(), body.Provider, body.ModelID); err != nil {
+		http.Error(w, err.Error(), statusFor(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, s.stateOf(ctl, callerOf(r), ""))
 }

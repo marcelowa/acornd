@@ -568,3 +568,55 @@ func TestANewMemberMayMakeRoomsUntilTheAdminSaysNo(t *testing.T) {
 		t.Error("the admin was narrowed")
 	}
 }
+
+// A revoked person keeps their record and their rooms, so naming them again is the whole of bringing them back;
+// somebody who never signed in comes back as invited rather than active (ADR 0034 §1).
+func TestARevokedPersonComesBackWhenNamed(t *testing.T) {
+	opened := book(t)
+	if _, err := opened.Claim("me@example.com", "Me"); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if _, err := opened.Add("ana@example.com", "Ana"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if _, err := opened.SignIn("ana@example.com"); err != nil {
+		t.Fatalf("sign in: %v", err)
+	}
+	if err := opened.Revoke("ana@example.com"); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	restored, err := opened.Restore("ana@example.com")
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if restored.State != Active {
+		t.Errorf("somebody who had signed in came back as %q", restored.State)
+	}
+	if _, err := opened.Restore("me@example.com"); err == nil {
+		t.Error("the admin was restored")
+	}
+	if _, err := opened.Restore("nobody@example.com"); err == nil {
+		t.Error("a stranger was restored")
+	}
+}
+
+// And somebody who never signed in comes back invited, because active is a visit and there was none.
+func TestARestoreOfSomebodyWhoNeverSignedInIsAnInvitation(t *testing.T) {
+	opened := book(t)
+	if _, err := opened.Claim("me@example.com", "Me"); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if _, err := opened.Add("ana@example.com", "Ana"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := opened.Revoke("ana@example.com"); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	restored, err := opened.Restore("ana@example.com")
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if restored.State != Invited {
+		t.Errorf("somebody who never signed in came back as %q", restored.State)
+	}
+}

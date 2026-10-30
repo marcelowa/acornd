@@ -363,6 +363,40 @@ func (b *Book) Revoke(email string) error {
 	return ErrUnknown{Email: address}
 }
 
+// Restore names a revoked person again. Their rooms never lost their name, so this is the whole of coming back:
+// the door admits them, and the rooms they were in are theirs again (ADR 0034 §1). Somebody who never signed in
+// returns to invited rather than active.
+func (b *Book) Restore(email string) (Person, error) {
+	address, err := address(email)
+	if err != nil {
+		return Person{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	release, records, err := b.lock()
+	if err != nil {
+		return Person{}, err
+	}
+	defer release()
+	for index := range records {
+		if records[index].Email != address {
+			continue
+		}
+		if records[index].Role == RoleAdmin {
+			return Person{}, errors.New("the admin was never revoked: there is nothing to restore")
+		}
+		records[index].State = Invited
+		if records[index].LastSeen != "" {
+			records[index].State = Active
+		}
+		if err := b.write(records); err != nil {
+			return Person{}, err
+		}
+		return records[index], nil
+	}
+	return Person{}, ErrUnknown{Email: address}
+}
+
 // SetModels narrows what somebody may run. An empty list is every model this install has, which is where a
 // person starts; the admin is never narrowed, because the install is theirs.
 func (b *Book) SetModels(email string, models []string) (Person, error) {
