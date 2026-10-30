@@ -343,3 +343,44 @@ func captureLog(run func()) string {
 	run()
 	return captured.String()
 }
+
+// A room made over the state of one that was forgotten would open its storage, its settings and its drafts: a
+// room that looks new and answers with somebody else's history. The state is not the record, so the record cannot
+// answer for it — the name is refused, before a folder is made, and the sentence says what deletes it (ADR 0034 §6).
+func TestANewRoomCannotInheritAForgottenOne(t *testing.T) {
+	dataDir := t.TempDir()
+	workspaces := registryIn(t, dataDir, "", nil)
+	left := StatePath(dataDir, "team")
+	if err := os.MkdirAll(left, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(left, "session.sqlite"), []byte("db"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := workspaces.Create("team", "ana@example.com")
+	if err == nil {
+		t.Fatal("a room was made over the state of a forgotten one")
+	}
+	if !strings.Contains(err.Error(), "acornfall workspace purge team") || !strings.Contains(err.Error(), left) {
+		t.Errorf("the refusal should name the command and the folder, got %q", err)
+	}
+	// Refused before anything was created: no record, and no folder for the next Create to adopt either.
+	if _, found := workspaces.Get("team"); found {
+		t.Error("the refused room was recorded")
+	}
+	if _, err := os.Stat(filepath.Join(workspaces.Dir(), "team")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a folder was made for a name that was refused: %v", err)
+	}
+
+	// The same rule for a record registered another way, and the way out: with the state gone the name is free.
+	if err := workspaces.Add(Workspace{Name: "team", Path: filepath.Join(workspaces.Dir(), "team"), Kind: KindRoom}); err == nil {
+		t.Error("Add registered a room over a forgotten room's state")
+	}
+	if err := os.RemoveAll(left); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workspaces.Create("team", "ana@example.com"); err != nil {
+		t.Errorf("a name whose state is gone was still refused: %v", err)
+	}
+}

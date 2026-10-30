@@ -290,17 +290,19 @@ func workspaceRemove(argv []string) {
 // purgeUsage is the one command in this file that deletes anything, and it says so before it does.
 const purgeUsage = `usage: acornfall workspace purge <name> --yes
 
-  --yes              delete the folder and the record; without it, purge only names the folder
+  --yes              delete the folder, its state, and the record; without it, purge only names them
   --data-dir DIR     the acornfall folder (default: ~/.acornfall)
 
 Forgetting a workspace and deleting one are two acts, and this is the second (ADR 0034 §6). It
 needs the record to find the folder: a forgotten folder is just a folder, and a command that
 deleted a directory by a name nothing points at any more is how somebody removes the wrong one.
+A workspace is two folders, not one — its own, and the state beside the registry — and both go:
+leaving the state behind would hand a forgotten history to the next room of that name.
 `
 
-// workspacePurge deletes a workspace's folder and its record. It is the only thing in acornfall that
-// deletes a workspace, it is never behind a route or a button, and it prints the folder first: a path is
-// the one thing a person can check before an unrecoverable act.
+// workspacePurge deletes what makes a name a workspace: its folder, its state, and its record. It is the only
+// thing in acornfall that deletes one, it is never behind a route or a button, and it prints both paths before
+// it does: a path is the one thing a person can check before an unrecoverable act.
 func workspacePurge(argv []string) {
 	dir, name, yes := purgeArgs(argv)
 	path := filepath.Join(dir, "workspaces.json")
@@ -312,19 +314,35 @@ func workspacePurge(argv []string) {
 	if err != nil {
 		log.Fatalf("acornfall: %v", err)
 	}
-	fmt.Printf("purge %s, folder %s\n", workspace.Name, workspace.Path)
+	folder, state := purgeTargets(dir, workspace)
+	fmt.Printf("purge %s\n  folder %s\n  state  %s\n", workspace.Name, folder, state)
 	if !yes {
 		fmt.Println("nothing was deleted: run it again with --yes")
 		os.Exit(1)
 	}
-	if err := os.RemoveAll(workspace.Path); err != nil {
+	if err := purgeWorkspace(registry, workspace.Name, folder, state); err != nil {
 		log.Fatalf("acornfall: %v", err)
 	}
-	registry.Workspaces = withoutWorkspace(registry.Workspaces, workspace.Name)
-	if err := control.SaveRegistryFile(registry); err != nil {
-		log.Fatalf("acornfall: %v", err)
+	fmt.Printf("purged %s: the folder, its state and the record are gone\n", workspace.Name)
+}
+
+// purgeTargets are the two places a workspace name means something: the folder the agent works in, and the state
+// folder beside the registry. Deleting only the first is the bug this pair exists for — the storage, the settings
+// and the drafts would stay, and the next room of the name would open them.
+func purgeTargets(dataDir string, workspace control.Workspace) (folder, state string) {
+	return workspace.Path, control.StatePath(dataDir, workspace.Name)
+}
+
+// purgeWorkspace deletes the two folders and then the record. The record goes last, so a purge that stopped
+// halfway is a purge to run again rather than an orphan nothing can name.
+func purgeWorkspace(registry control.RegistryFile, name, folder, state string) error {
+	for _, path := range []string{folder, state} {
+		if err := os.RemoveAll(path); err != nil {
+			return err
+		}
 	}
-	fmt.Printf("purged %s: the folder and the record are gone\n", workspace.Name)
+	registry.Workspaces = withoutWorkspace(registry.Workspaces, name)
+	return control.SaveRegistryFile(registry)
 }
 
 // purgeArgs is the three things this command cannot guess: which install, which name, and whether the person
@@ -365,15 +383,21 @@ func withoutWorkspace(workspaces []control.Workspace, name string) []control.Wor
 //
 // Purge needs the record to find the folder (ADR 0034 §6), so it runs instead of forget and never after it:
 // once a room is forgotten, its folder is just a folder, and deleting a directory by a name that no longer
-// means anything is how somebody removes the wrong one. The install's own room is refused as well: the next
-// start makes it again, so purging it would take the history and leave a room that looks the same.
+// means anything is how somebody removes the wrong one.
+//
+// Every personal room is refused: a personal room is never forgotten (ADR 0034 §5), and purge is stronger than
+// forget, so it cannot be the way round the rule. The filesystem stays the operator's escape hatch, which is what
+// the two sentences say.
 func purgeTarget(registry control.RegistryFile, name string) (control.Workspace, error) {
 	workspace, err := recordFor(registry, name)
 	if err != nil {
 		return control.Workspace{}, fmt.Errorf("no workspace %q: a forgotten folder is just a folder, and there is no record of where it was", name)
 	}
 	if workspace.Name == control.PersonalWorkspaceName {
-		return control.Workspace{}, fmt.Errorf("%s is the install's own room: the next start makes it again, so its history would be gone with nothing to show for it", name)
+		return control.Workspace{}, fmt.Errorf("%s is the install's own room: the next start makes it again, so purging it would take its history and leave a room that looks the same; its files are still yours to remove by hand", name)
+	}
+	if workspace.Personal() {
+		return control.Workspace{}, fmt.Errorf("%s is somebody's own room, and a personal room is never shared and never forgotten; its files are still yours to remove by hand", name)
 	}
 	return workspace, nil
 }

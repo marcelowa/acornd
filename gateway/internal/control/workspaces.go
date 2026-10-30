@@ -502,6 +502,11 @@ func (w *Workspaces) Create(name, creator string) (Workspace, error) {
 	if strings.ContainsAny(name, "/\\ ") {
 		return Workspace{}, fmt.Errorf("a workspace name cannot contain a slash or a space: %q", name)
 	}
+	// Before the folder: a name whose state is still there would open somebody else's history, and a room that
+	// looks empty and answers with a forgotten conversation is the worst of both.
+	if err := w.stateRefusal(name); err != nil {
+		return Workspace{}, err
+	}
 	path := filepath.Join(w.Dir(), name)
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		return Workspace{}, err
@@ -528,6 +533,9 @@ func (w *Workspaces) Add(workspace Workspace) error {
 	if err := workspace.memberProblem(); err != nil {
 		return fmt.Errorf("workspace %q: %w", workspace.Name, err)
 	}
+	if err := w.stateRefusal(workspace.Name); err != nil {
+		return err
+	}
 	w.mu.Lock()
 	if _, exists := w.registry[workspace.Name]; exists {
 		w.mu.Unlock()
@@ -536,6 +544,20 @@ func (w *Workspaces) Add(workspace Workspace) error {
 	w.registry[workspace.Name] = workspace
 	w.mu.Unlock()
 	return w.persist()
+}
+
+// stateRefusal refuses a name whose state folder is still there with no record behind it. A room made over it
+// would open the conversations and the settings of one that was forgotten, so a new name is the cheap answer and
+// the state has to go first.
+//
+// The record is what knows the folder, so purge is what deletes state, and a state with no record has none:
+// the sentence says so and names the folder, because deleting it by hand is the one escape hatch left.
+func (w *Workspaces) stateRefusal(name string) error {
+	state := StatePath(w.opts.DataDir, name)
+	if _, err := os.Stat(state); err != nil {
+		return nil
+	}
+	return fmt.Errorf("workspace %q cannot be made: %s holds the state of one that is not registered, and a room of that name would open its history (delete it with `acornfall workspace purge %s`, or remove %s by hand)", name, state, name, state)
 }
 
 // Update replaces a workspace record. The name may not change: it is the identity every
@@ -726,9 +748,9 @@ func (w *Workspaces) open(ctx context.Context, name string, workspace Workspace)
 		WorkspacesDir: w.Dir(),
 		DataDir:       w.opts.DataDir,
 		UserHome:      w.opts.UserHome,
-		StoragePath:   filepath.Join(w.opts.DataDir, "state", name, "session.sqlite"),
-		SettingsPath:  filepath.Join(w.opts.DataDir, "state", name, "settings.json"),
-		DraftsPath:    filepath.Join(w.opts.DataDir, "state", name, "drafts.json"),
+		StoragePath:   filepath.Join(StatePath(w.opts.DataDir, name), "session.sqlite"),
+		SettingsPath:  filepath.Join(StatePath(w.opts.DataDir, name), "settings.json"),
+		DraftsPath:    filepath.Join(StatePath(w.opts.DataDir, name), "drafts.json"),
 		Sandbox:       w.opts.Sandbox,
 		Sandboxes:     w.opts.Sandboxes,
 		Engines:       w.Engines,
@@ -738,7 +760,7 @@ func (w *Workspaces) open(ctx context.Context, name string, workspace Workspace)
 		Update:        w.opts.Update,
 		Model:         w.opts.Model,
 	})
-	if err := os.MkdirAll(filepath.Join(w.opts.DataDir, "state", name), 0o700); err != nil {
+	if err := os.MkdirAll(StatePath(w.opts.DataDir, name), 0o700); err != nil {
 		return nil, err
 	}
 	control.Open(ctx)
@@ -1187,6 +1209,13 @@ func droppedKeys(payload []byte) bool {
 	return false
 }
 
+// StatePath is where a workspace's storage, its settings and its drafts live: `<data-dir>/state/<name>`, beside
+// the registry rather than inside the workspace's folder. It is the folder that makes a name mean a history, so
+// forgetting a room leaves it and purging one deletes it.
+func StatePath(dataDir, name string) string {
+	return filepath.Join(dataDir, "state", name)
+}
+
 // OrphanFolders names every folder under the workspaces folder that no record points at: what forgetting a
 // workspace leaves behind, since forgetting unregisters and never deletes (ADR 0034 §6). Doctor names them,
 // so a folder nobody owns is seen once rather than forgotten twice.
@@ -1425,8 +1454,8 @@ func (w *Workspaces) ownerMembers() []Member {
 // moveState renames one workspace's state folder. One rename, so it either happened or it did not; a folder
 // that is not there is not a failure, because a workspace nobody has opened has no state yet.
 func (w *Workspaces) moveState(from, to string) error {
-	source := filepath.Join(w.opts.DataDir, "state", from)
-	target := filepath.Join(w.opts.DataDir, "state", to)
+	source := StatePath(w.opts.DataDir, from)
+	target := StatePath(w.opts.DataDir, to)
 	switch _, err := os.Stat(source); {
 	case errors.Is(err, os.ErrNotExist):
 		return nil
@@ -1484,7 +1513,7 @@ func (w *Workspaces) persist() error {
 // settings file, moved into the install's own workspace's state directory. Nothing is rewritten
 // inside them, so every conversation appears exactly where it was.
 func (w *Workspaces) migrate() error {
-	state := filepath.Join(w.opts.DataDir, "state", PersonalWorkspaceName)
+	state := StatePath(w.opts.DataDir, PersonalWorkspaceName)
 	// The write-ahead log travels with its database. Moving one without the other loses
 	// every commit that had not been checkpointed and leaves megabytes behind.
 	moves := []struct{ from, to string }{
