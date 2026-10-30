@@ -1187,6 +1187,51 @@ func droppedKeys(payload []byte) bool {
 	return false
 }
 
+// OrphanFolders names every folder under the workspaces folder that no record points at: what forgetting a
+// workspace leaves behind, since forgetting unregisters and never deletes (ADR 0034 §6). Doctor names them,
+// so a folder nobody owns is seen once rather than forgotten twice.
+//
+// It reads; nothing is removed here. A folder with no record is just a folder, and whether it should go is
+// its owner's decision rather than a diagnosis.
+func OrphanFolders(registry RegistryFile) ([]string, error) {
+	dir := registry.WorkspacesDir
+	if dir == "" {
+		// A registry written before the folder was recorded, or none at all: the install's own default is
+		// where a workspace would have been made.
+		defaultDir, err := DefaultWorkspacesDir()
+		if err != nil {
+			return nil, err
+		}
+		dir = defaultDir
+	}
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	recorded := make(map[string]bool, len(registry.Workspaces))
+	for _, workspace := range registry.Workspaces {
+		// By path rather than by name: `workspace add` points one at a folder of its choosing, which is
+		// usually outside this folder, and a name is not where a workspace lives.
+		recorded[filepath.Clean(workspace.Path)] = true
+	}
+	orphans := make([]string, 0)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		folder := filepath.Join(dir, entry.Name())
+		if recorded[folder] {
+			continue
+		}
+		orphans = append(orphans, folder)
+	}
+	sort.Strings(orphans)
+	return orphans, nil
+}
+
 // LoadRegistryFile reads a registry, tolerating absence.
 func LoadRegistryFile(path string) (RegistryFile, error) {
 	registry := RegistryFile{Path: path}

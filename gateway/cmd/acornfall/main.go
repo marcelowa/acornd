@@ -97,7 +97,7 @@ func usage(w io.Writer) {
   start      run the gateway
   setup      check this machine, and make it able to run sandboxes
   doctor     report what the sandbox engines can do here; changes nothing
-  workspace  list, add, and remove workspaces
+  workspace  list, add, forget, and purge workspaces
   secret     list, add, show, rotate, and remove secrets
   provider   list, add, and remove model provider keys
   model      list or choose the default model

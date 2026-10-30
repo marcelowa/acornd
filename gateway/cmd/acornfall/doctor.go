@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
+	"github.com/acornfall/acornfall/gateway/internal/control"
 	"github.com/acornfall/acornfall/gateway/internal/ready"
 	"github.com/acornfall/acornfall/gateway/internal/sandbox"
 	"github.com/acornfall/acornfall/gateway/internal/update"
@@ -52,6 +54,7 @@ type doctorReport struct {
 	chosen       sandbox.Report
 	health       update.Preflight
 	requirements []ready.Requirement
+	orphans      []string
 }
 
 // gatherDoctor asks every manager doctor already owns. Report-only: doctor changes nothing.
@@ -79,6 +82,7 @@ func gatherDoctor(dataDir string) doctorReport {
 		chosen:       chosen,
 		health:       health,
 		requirements: ready.Check(readyInput(dataDir, updater, health, chosen)),
+		orphans:      workspaceOrphans(dataDir),
 	}
 }
 
@@ -88,7 +92,8 @@ func printDoctorJSON(report doctorReport) {
 		Default   string              `json:"default"`
 		Update    update.Preflight    `json:"update"`
 		Readiness []ready.Requirement `json:"readiness"`
-	}{Engines: report.engines, Default: report.defaultName, Update: report.health, Readiness: report.requirements}, "", "  ")
+		Orphans   []string            `json:"orphans"`
+	}{Engines: report.engines, Default: report.defaultName, Update: report.health, Readiness: report.requirements, Orphans: report.orphans}, "", "  ")
 	if err != nil {
 		log.Fatalf("acornfall doctor: %v", err)
 	}
@@ -99,6 +104,37 @@ func printDoctor(report doctorReport) {
 	printEngines(report.engines, report.defaultName)
 	printUpdate(report.health)
 	printReadiness(report.requirements)
+	printOrphans(report.orphans)
+}
+
+// workspaceOrphans names every folder under the workspaces folder that no record points at. Forgetting a
+// room unregisters it and leaves the folder, so this is the one place a folder nothing owns is seen — once,
+// by name, rather than forgotten twice (ADR 0034 §6). Doctor reads the registry rather than repairing it.
+func workspaceOrphans(dataDir string) []string {
+	registry, err := control.LoadRegistryFile(filepath.Join(dataDir, "workspaces.json"))
+	if err != nil {
+		log.Printf("acornfall doctor: %v", err)
+		return nil
+	}
+	orphans, err := control.OrphanFolders(registry)
+	if err != nil {
+		log.Printf("acornfall doctor: %v", err)
+		return nil
+	}
+	return orphans
+}
+
+// printOrphans is one line per folder with no record, and a sentence rather than a red mark: the folder is
+// usually somebody's repository, and deleting it is a decision this command does not make.
+func printOrphans(orphans []string) {
+	fmt.Println("workspaces")
+	if len(orphans) == 0 {
+		fmt.Println("  every folder has a record")
+		return
+	}
+	for _, folder := range orphans {
+		fmt.Printf("  %s\n      has no record: a forgotten folder is just a folder, so delete it yourself if you want it gone\n", folder)
+	}
 }
 
 func printUpdate(health update.Preflight) {
