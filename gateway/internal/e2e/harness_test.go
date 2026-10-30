@@ -175,6 +175,9 @@ type settings struct {
 	// environment variable because tests run in parallel: one test's mirror must not be another
 	// test's, and os.Setenv while another test reads the environment is a data race.
 	updateURL string
+	// extraEnv is what one test's install needs beyond the curated environment: the remote door's
+	// three values, for instance, which have to reach the gateway process and not this one.
+	extraEnv []string
 }
 
 // withScript is what the model does: the first rule whose Match is a substring of the last
@@ -186,6 +189,12 @@ func withScript(rules ...scriptRule) func(*settings) {
 // withOwnBinary runs the gateway from its own copy of the binary, which an update may replace.
 func withOwnBinary() func(*settings) {
 	return func(s *settings) { s.ownBinary = true }
+}
+
+// withEnv adds environment for this install alone. Values are appended after the curated ones, so a test
+// that needs a door can name its publisher without changing what every other test starts with.
+func withEnv(values ...string) func(*settings) {
+	return func(s *settings) { s.extraEnv = append(s.extraEnv, values...) }
 }
 
 // withUpdateURL points this gateway's release lookups at a mirror.
@@ -265,6 +274,7 @@ func (s *system) environment(engineEnv string, hostEngine bool, lastResort strin
 	if s.cfg.updateURL != "" {
 		env = append(env, "ACORNFALL_UPDATE_URL="+s.cfg.updateURL)
 	}
+	env = append(env, s.cfg.extraEnv...)
 	if noSandbox := os.Getenv("ACORNFALL_NO_SANDBOX"); noSandbox != "" && !hostEngine {
 		env = append(env, "ACORNFALL_NO_SANDBOX="+noSandbox)
 	}
@@ -663,7 +673,10 @@ func writeFile(t *testing.T, path, content string) {
 type client struct {
 	t    *testing.T
 	base string
-	http *http.Client
+	// identity is the signed assertion this client sends, when a test starts a door that wants one. Empty
+	// is the install with no door, where every request is the admin's.
+	identity string
+	http     *http.Client
 	// stream is the same client without a timeout: a stream is meant to stay open.
 	stream *http.Client
 }
@@ -740,6 +753,9 @@ func (c *client) doTry(method, path string, body any) (int, []byte, error) {
 	}
 	if body != nil {
 		request.Header.Set("content-type", "application/json")
+	}
+	if c.identity != "" {
+		request.Header.Set("Cf-Access-Jwt-Assertion", c.identity)
 	}
 	response, err := c.http.Do(request)
 	if err != nil {

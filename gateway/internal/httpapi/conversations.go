@@ -27,7 +27,12 @@ func (s *Server) conversations(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createConversation(w http.ResponseWriter, r *http.Request) {
-	s.stateChange(w, r, func(ctl *control.Control) error { return ctl.Create(r.Context(), callerOf(r)) })
+	s.stateChange(w, r, func(ctl *control.Control) error {
+		if !ctl.May(callerOf(r), control.ActionCreate) {
+			return control.ErrNotAllowed
+		}
+		return ctl.Create(r.Context(), callerOf(r))
+	})
 }
 
 func (s *Server) policy(w http.ResponseWriter, r *http.Request) {
@@ -59,6 +64,9 @@ func (s *Server) hideConversation(w http.ResponseWriter, r *http.Request) {
 	stateBody(s, w, r, func(ctl *control.Control, body struct {
 		Hidden bool `json:"hidden"`
 	}) error {
+		if !ctl.May(callerOf(r), control.ActionHide) {
+			return control.ErrNotAllowed
+		}
 		return ctl.Hide(r.Context(), callerOf(r), r.PathValue("id"), body.Hidden)
 	})
 }
@@ -69,6 +77,9 @@ func (s *Server) forkConversation(w http.ResponseWriter, r *http.Request) {
 	}) error {
 		if body.At == "" {
 			return errors.New("at is required (the entry id to fork from)")
+		}
+		if !ctl.May(callerOf(r), control.ActionFork) {
+			return control.ErrNotAllowed
 		}
 		return ctl.Fork(r.Context(), callerOf(r), r.PathValue("id"), body.At)
 	})
