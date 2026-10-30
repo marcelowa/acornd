@@ -11,14 +11,14 @@ import (
 // is built from.
 
 // Somebody's own room is first because it is the one that is always there, and the rest are by name because a
-// list that reorders itself is a list nobody can learn. The order is derived from the membership list: a room
-// with at most one member leads.
+// list that reorders itself is a list nobody can learn. The order is read from the kind: a personal room leads.
 func TestTheWorkspaceListPutsPersonalFirstThenNames(t *testing.T) {
+	shared := []Member{{Email: "a@example.com", Role: RoleOwner}, {Email: "b@example.com", Role: RoleGuest}}
 	workspaces := &Workspaces{registry: map[string]Workspace{
-		"zulu":     {Name: "zulu", Members: []string{"a@example.com", "b@example.com"}},
-		"personal": {Name: "personal", Members: []string{"a@example.com"}},
-		"alpha":    {Name: "alpha", Members: []string{"a@example.com", "b@example.com"}},
-		"mike":     {Name: "mike", Members: []string{"a@example.com", "b@example.com"}},
+		"zulu":     {Name: "zulu", Kind: KindRoom, Members: shared},
+		"personal": {Name: "personal", Kind: KindPersonal, Members: []Member{{Email: "a@example.com", Role: RoleOwner}}},
+		"alpha":    {Name: "alpha", Kind: KindRoom, Members: shared},
+		"mike":     {Name: "mike", Kind: KindRoom, Members: shared},
 	}}
 	got := make([]string, 0, 4)
 	for _, workspace := range workspaces.List() {
@@ -142,24 +142,27 @@ func TestTheWorkspacesFolderIsResolvedInOrder(t *testing.T) {
 	}
 }
 
-// A workspace somebody made and has not shared yet is not somebody's own room: no members is also what a room
-// looks like between "made" and "shared", and treating that as personal would make it un-removable — which is
-// exactly what the end-to-end suite caught when this rule was written as "at most one member".
+// The kind is what says whether a room is somebody's own, and no longer the member list: a room is born with its
+// owner, so a fresh room and somebody's own room both have one, and a room somebody made and has not shared yet
+// must not be un-forgettable just because nobody else is in it (ADR 0034 §5).
 func TestARoomWithNoMembersIsNotAnybodysOwnUnlessItIsTheInstalls(t *testing.T) {
-	fresh := Workspace{Name: "demo", Path: "/w/demo"}
-	if fresh.Personal() {
-		t.Error("a workspace with no members and its own name counts as somebody's own room")
+	cases := []struct {
+		name      string
+		workspace Workspace
+		personal  bool
+	}{
+		{"a room somebody made", Workspace{Name: "demo", Path: "/w/demo", Kind: KindRoom,
+			Members: []Member{{Email: "ana@example.com", Role: RoleOwner}}}, false},
+		{"a room with no members at all", Workspace{Name: "demo", Path: "/w/demo", Kind: KindRoom}, false},
+		{"the install's own room", Workspace{Name: PersonalWorkspaceName, Path: "/w/personal", Kind: KindPersonal}, true},
+		{"somebody's own room", Workspace{Name: "ana", Path: "/w/ana", Kind: KindPersonal,
+			Members: []Member{{Email: "ana@example.com", Role: RoleOwner}}}, true},
 	}
-	installs := Workspace{Name: PersonalWorkspaceName, Path: "/w/personal"}
-	if !installs.Personal() {
-		t.Error("the install's own room does not count as somebody's own")
-	}
-	one := Workspace{Name: "ana", Path: "/w/ana", Members: []string{"ana@example.com"}}
-	if !one.Personal() {
-		t.Error("a room with one member is not somebody's own")
-	}
-	shared := Workspace{Name: "team", Path: "/w/team", Members: []string{"a@example.com", "b@example.com"}}
-	if shared.Personal() {
-		t.Error("a shared room counts as somebody's own")
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := test.workspace.Personal(); got != test.personal {
+				t.Errorf("Personal() = %v, want %v", got, test.personal)
+			}
+		})
 	}
 }
