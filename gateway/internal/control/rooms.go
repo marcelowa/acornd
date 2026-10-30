@@ -287,3 +287,143 @@ func decideRoles(members []Member) {
 		}
 	}
 }
+
+// removableBy is why one member may or may not be taken out of a room: the owner never leaves, a guest may take
+// themselves out, and taking somebody else out is the owner's (ADR 0034 §3).
+func removableBy(workspace Workspace, caller Caller, email string) error {
+	switch role := workspace.RoleOf(email); {
+	case role == "":
+		return fmt.Errorf("%s is not in %s", email, workspace.Name)
+	case role == RoleOwner:
+		return errors.New("the owner cannot leave: forget the room instead")
+	case !strings.EqualFold(caller.Email, email) && !workspace.May(caller, ActionAdminister):
+		return notAllowed("remove somebody else")
+	}
+	return nil
+}
+
+// Action is one thing somebody might do in a room. The table lives in May, in one place, because a
+// permission check copied into a handler is a second table that can disagree with this one (ADR 0034 §4).
+type Action string
+
+const (
+	// ActionPrompt is speaking in a conversation the room already has: a message, a steer, an abort, a file.
+	ActionPrompt Action = "prompt"
+	// ActionCompact folds the room's context into a summary. It is an interaction, so a guest has it.
+	ActionCompact Action = "compact"
+	// ActionCreate makes a conversation in the room, and ActionFork copies one out of it.
+	ActionCreate Action = "create"
+	ActionFork   Action = "fork"
+	// ActionHide and ActionRename change what every member of the room sees.
+	ActionHide   Action = "hide"
+	ActionRename Action = "rename"
+	// ActionReset is /clear: a fresh context, which buries what the room had.
+	ActionReset Action = "reset"
+	// ActionModel is choosing the model, the thinking level, or the agent a conversation runs.
+	ActionModel Action = "model"
+	// ActionAdminister is inviting a guest, removing one, or forgetting the room.
+	ActionAdminister Action = "administer"
+)
+
+// ErrNotAllowed is "you are in this room, and this is the owner's": the edge answers 403 for it, which is
+// different from the 404 a caller gets for a room they are not in.
+var ErrNotAllowed = errors.New("not allowed in this room")
+
+// notAllowed says which act was refused, because a person reading it should know what to ask the owner for.
+func notAllowed(verb string) error {
+	return fmt.Errorf("%w: only the room's owner may %s", ErrNotAllowed, verb)
+}
+
+// May is the permission table: a room's owner may do everything, a guest interacts and reads, and a caller
+// who is not in the room may do nothing. An install that has not named its admin yet is one caller with no
+// address, and it is the owner of everything (ADR 0032 §4, ADR 0034 §3).
+func (w Workspace) May(caller Caller, action Action) bool {
+	if !w.Allows(caller) {
+		return false
+	}
+	if strings.TrimSpace(caller.Email) == "" {
+		return caller.Admin
+	}
+	if w.RoleOf(caller.Email) == RoleOwner {
+		return true
+	}
+	return action == ActionPrompt || action == ActionCompact
+}
+
+// AddGuest puts somebody the book names into a room as a guest. Only the room's owner may invite, and a
+// personal room is never shared (ADR 0034 §3, §5). The book check belongs to the edge, which is the layer
+// that holds people.json: control knows what a room is and not what a person is (ADR 0002).
+func (w *Workspaces) AddGuest(caller Caller, name, address string) (Workspace, error) {
+	email := strings.ToLower(strings.TrimSpace(address))
+	if email == "" {
+		return Workspace{}, errors.New("a guest needs an address")
+	}
+	w.mu.Lock()
+	workspace, ok := w.registry[name]
+	if !ok || !workspace.Allows(caller) {
+		w.mu.Unlock()
+		return Workspace{}, fmt.Errorf("%w %q", ErrNoWorkspace, name)
+	}
+	if !workspace.May(caller, ActionAdminister) {
+		w.mu.Unlock()
+		return Workspace{}, notAllowed("invite anybody")
+	}
+	if workspace.Personal() {
+		w.mu.Unlock()
+		return Workspace{}, errors.New("a personal room is never shared")
+	}
+	if workspace.RoleOf(email) != "" {
+		w.mu.Unlock()
+		return Workspace{}, fmt.Errorf("%s is already in %s", email, name)
+	}
+	workspace.Members = append(workspace.Members, Member{Email: email, Role: RoleGuest})
+	w.registry[name] = workspace
+	control := w.controls[name]
+	w.mu.Unlock()
+	if err := w.persist(); err != nil {
+		return Workspace{}, err
+	}
+	// The live control holds its own copy of the record, and it is what answers "is this room shared" for
+	// the speaker's name: without this the guest speaks anonymously until the next start.
+	if control != nil {
+		control.SetWorkspace(workspace)
+	}
+	return workspace, nil
+}
+
+// RemoveMember takes somebody out of a room. The owner may remove a guest; a guest may remove themselves,
+// which is leaving. The owner never leaves: a room with nobody in it is a room nobody can open, so ending
+// one is forgetting it (ADR 0034 §3, §6).
+func (w *Workspaces) RemoveMember(caller Caller, name, address string) (Workspace, error) {
+	email := strings.ToLower(strings.TrimSpace(address))
+	if email == "" {
+		return Workspace{}, errors.New("a member needs an address")
+	}
+	w.mu.Lock()
+	workspace, ok := w.registry[name]
+	if !ok || !workspace.Allows(caller) {
+		w.mu.Unlock()
+		return Workspace{}, fmt.Errorf("%w %q", ErrNoWorkspace, name)
+	}
+	if err := removableBy(workspace, caller, email); err != nil {
+		w.mu.Unlock()
+		return Workspace{}, err
+	}
+	kept := make([]Member, 0, len(workspace.Members))
+	for _, member := range workspace.Members {
+		if member.Email != email {
+			kept = append(kept, member)
+		}
+	}
+	workspace.Members = kept
+	w.registry[name] = workspace
+	control := w.controls[name]
+	w.mu.Unlock()
+	if err := w.persist(); err != nil {
+		return Workspace{}, err
+	}
+	if control != nil {
+		control.SetWorkspace(workspace)
+	}
+	return workspace, nil
+}

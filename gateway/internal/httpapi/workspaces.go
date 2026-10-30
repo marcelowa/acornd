@@ -155,12 +155,66 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.listing())
 }
 
+// workspaceRemove forgets a room. It is the room's owner's act, not the install's: the admin's route to the same
+// power is `acornfall workspace remove` on the machine, where it is visible (ADR 0034 §6). A room the caller is
+// not in is a 404, the same refusal as one that does not exist, so a status cannot enumerate.
 func (s *Server) workspaceRemove(w http.ResponseWriter, r *http.Request) {
-	if err := s.workspaces.Remove(r.Context(), r.PathValue("ws")); err != nil {
+	caller := callerOf(r)
+	workspace, ok := s.workspaces.Get(r.PathValue("ws"))
+	if !ok || !workspace.Allows(caller) {
+		http.Error(w, "no workspace", http.StatusNotFound)
+		return
+	}
+	if !workspace.May(caller, control.ActionAdminister) {
+		http.Error(w, control.ErrNotAllowed.Error(), http.StatusForbidden)
+		return
+	}
+	if err := s.workspaces.Remove(r.Context(), workspace.Name); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.listing())
+	writeJSON(w, http.StatusOK, s.listingFor(caller))
+}
+
+// addMember invites somebody the book already names into a room. A name the book does not hold is refused with
+// the sentence that says who can add them: an invite that the door will refuse is worse than a refusal now.
+func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email string `json:"email"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(body.Email))
+	if email == "" {
+		http.Error(w, "an invitation needs an address", http.StatusBadRequest)
+		return
+	}
+	if s.gate.People == nil {
+		http.Error(w, "this install has no book of people yet: run `acornfall people claim you@example.com` first", http.StatusBadRequest)
+		return
+	}
+	if _, found, err := s.gate.People.Find(email); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	} else if !found {
+		http.Error(w, email+" is not in People: ask the install's admin to add them first", http.StatusBadRequest)
+		return
+	}
+	if _, err := s.workspaces.AddGuest(callerOf(r), r.PathValue("ws"), email); err != nil {
+		http.Error(w, err.Error(), statusFor(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, s.listingFor(callerOf(r)))
+}
+
+// removeMember takes a guest out, or lets a guest leave. The owner cannot leave: ending a room is forgetting it.
+func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.workspaces.RemoveMember(callerOf(r), r.PathValue("ws"), r.PathValue("email")); err != nil {
+		http.Error(w, err.Error(), statusFor(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, s.listingFor(callerOf(r)))
 }
 
 // page serves the client for a conversation route, so a reload and a shared link both

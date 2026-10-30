@@ -517,7 +517,7 @@ func (c *Control) resumeAfterSecrets(ctx context.Context) {
 			text += "s " + strings.Join(names, ", ") + "."
 		}
 		// The continuation is the install's own words, not a person's: nobody is named, so nothing is prefixed.
-		if err := c.Prompt(ctx, nil, conversationID, text, protocol.WhenBusyFollowUp, nil); err != nil {
+		if err := c.Prompt(ctx, Caller{Admin: true}, nil, conversationID, text, protocol.WhenBusyFollowUp, nil); err != nil {
 			workerpool.Log("automatic continuation for %s: %v", conversationID, err)
 		}
 	}

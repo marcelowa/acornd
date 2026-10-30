@@ -380,7 +380,7 @@ func TestTheCommandCarriesTheAuthor(t *testing.T) {
 	control.bindings["1"] = protocol.ModelBinding{Provider: "faux", ModelID: "faux-1"}
 
 	author := &protocol.Author{Email: "ana@example.com", Name: "Ana Silva", Speaker: "Ana Silva"}
-	if err := control.Prompt(context.Background(), author, "1", "hello", protocol.WhenBusyFollowUp, nil); err != nil {
+	if err := control.Prompt(context.Background(), Caller{Admin: true}, author, "1", "hello", protocol.WhenBusyFollowUp, nil); err != nil {
 		t.Fatalf("prompt: %v", err)
 	}
 	asked := worker.asked()

@@ -21,6 +21,7 @@ import (
 // reported as done, and nothing is sent to the model.
 func (c *Control) expandCommand(
 	ctx context.Context,
+	caller Caller,
 	author *protocol.Author,
 	conversationID, text string,
 ) (string, bool, error) {
@@ -38,6 +39,14 @@ func (c *Control) expandCommand(
 			return expanded.Text, false, nil
 		}
 		return text, false, nil
+	}
+	// `/clear` and `/compact` are commands, not routes, so the route table cannot be the permission table:
+	// a guest may compact, and may not reset the room's context (ADR 0034 §4).
+	if expanded.Action == "reset" && !c.May(caller, ActionReset) {
+		return "", false, notAllowed("clear the room's context")
+	}
+	if expanded.Action == "compact" && !c.May(caller, ActionCompact) {
+		return "", false, notAllowed("compact the room's context")
 	}
 	now := time.Now().UnixMilli()
 	c.mu.Lock()
@@ -86,6 +95,7 @@ func draftOwner(author *protocol.Author) string {
 // worker, which stores it on the entry and composes the speaker prefix the model reads (ADR 0034 §7).
 func (c *Control) Prompt(
 	ctx context.Context,
+	caller Caller,
 	author *protocol.Author,
 	conversationID, text string,
 	when protocol.WhenBusy,
@@ -106,7 +116,7 @@ func (c *Control) Prompt(
 	}
 	// A message that opens with a slash may be a command.
 	if strings.HasPrefix(strings.TrimSpace(text), "/") {
-		expanded, acted, err := c.expandCommand(ctx, author, conversationID, text)
+		expanded, acted, err := c.expandCommand(ctx, caller, author, conversationID, text)
 		if err != nil {
 			return err
 		}

@@ -181,6 +181,8 @@ func Views(list []Workspace, progress func(string) Progress) []WorkspaceState {
 			Path:             workspace.Path,
 			Title:            workspace.Title,
 			Personal:         workspace.Personal(),
+			Kind:             workspace.Kind,
+			Members:          workspace.Members,
 			Image:            workspace.Image,
 			Network:          workspace.Network,
 			Private:          workspace.Private,

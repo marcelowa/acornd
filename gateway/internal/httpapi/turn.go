@@ -35,7 +35,7 @@ func (s *Server) mayRunPinned(w http.ResponseWriter, r *http.Request, ctl *contr
 		// Nothing pinned yet: the defaults decide, and they were checked when they were set.
 		return true
 	}
-	return s.mayRun(w, r, binding.Provider, binding.ModelID)
+	return s.mayRunInstall(w, r, binding.Provider, binding.ModelID)
 }
 
 func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
@@ -68,7 +68,7 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	}
 	// A shared room names its speaker before the model reads the turn (ADR 0032 §7), and the author rides with the
 	// words so the worker stores who said them (ADR 0034 §7). The prefix is composed there, never here.
-	if err := ctl.Prompt(r.Context(), s.authorOf(r), r.PathValue("id"), strings.TrimSpace(body.Text), when, body.Attachments); err != nil {
+	if err := ctl.Prompt(r.Context(), callerOf(r), s.authorOf(r), r.PathValue("id"), strings.TrimSpace(body.Text), when, body.Attachments); err != nil {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
@@ -114,6 +114,9 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), statusFor(err))
+		return
+	}
+	if !s.mayRoom(w, r, ctl, control.ActionModel) {
 		return
 	}
 	// Pointers, so "absent" and "set to empty" are different requests. A plain

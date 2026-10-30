@@ -48,6 +48,9 @@ func (s *Server) renameConversation(w http.ResponseWriter, r *http.Request) {
 	stateBody(s, w, r, func(ctl *control.Control, body struct {
 		Title string `json:"title"`
 	}) error {
+		if !ctl.May(callerOf(r), control.ActionRename) {
+			return control.ErrNotAllowed
+		}
 		return ctl.Rename(r.Context(), r.PathValue("id"), body.Title)
 	})
 }

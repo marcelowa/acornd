@@ -13,6 +13,9 @@ func (s *Server) setDefaultThinking(w http.ResponseWriter, r *http.Request) {
 	stateBody(s, w, r, func(ctl *control.Control, body struct {
 		Level string `json:"level"`
 	}) error {
+		if !ctl.May(callerOf(r), control.ActionModel) {
+			return control.ErrNotAllowed
+		}
 		return ctl.SetDefaultThinking(r.Context(), body.Level)
 	})
 }
@@ -21,6 +24,9 @@ func (s *Server) setDefaultAgent(w http.ResponseWriter, r *http.Request) {
 	stateBody(s, w, r, func(ctl *control.Control, body struct {
 		Definition string `json:"definition"`
 	}) error {
+		if !ctl.May(callerOf(r), control.ActionModel) {
+			return control.ErrNotAllowed
+		}
 		return ctl.SetDefaultAgent(r.Context(), body.Definition)
 	})
 }
@@ -73,6 +79,9 @@ func (s *Server) setDefaultModel(w http.ResponseWriter, r *http.Request) {
 		Provider string `json:"provider"`
 		ModelID  string `json:"modelId"`
 	}) error {
+		if !ctl.May(callerOf(r), control.ActionModel) {
+			return control.ErrNotAllowed
+		}
 		return ctl.SetDefaultModel(r.Context(), body.Provider, body.ModelID)
 	})
 }

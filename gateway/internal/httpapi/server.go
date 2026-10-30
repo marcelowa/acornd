@@ -79,7 +79,20 @@ func statusFor(err error) int {
 	if errors.Is(err, control.ErrNoWorkspace) {
 		return http.StatusNotFound
 	}
+	if errors.Is(err, control.ErrNotAllowed) {
+		return http.StatusForbidden
+	}
 	return http.StatusConflict
+}
+
+// mayRoom refuses an action this room keeps for its owner. The table is control's; this only decides the status
+// and the sentence, because a 403 here is "the room says no" and a 404 would be "there is no such room".
+func (s *Server) mayRoom(w http.ResponseWriter, r *http.Request, ctl *control.Control, action control.Action) bool {
+	if ctl.May(callerOf(r), action) {
+		return true
+	}
+	http.Error(w, control.ErrNotAllowed.Error(), http.StatusForbidden)
+	return false
 }
 
 // stateChange runs one mutation on the workspace and answers with its state.

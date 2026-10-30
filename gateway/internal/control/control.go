@@ -97,11 +97,15 @@ type WorkspaceState struct {
 	Name  string `json:"name"`
 	Path  string `json:"path"`
 	Title string `json:"title"`
-	// Personal is this workspace being somebody's own room, derived from its membership: at most one member
-	// (ADR 0032 §9). It decides the rail's order and whether the interface may offer to forget it.
-	Personal bool   `json:"personal"`
-	Image    string `json:"image,omitempty"`
-	Network  string `json:"network,omitempty"`
+	// Personal is this workspace being somebody's own room, by its stored kind (ADR 0034 §5). It decides the
+	// rail's order, and it is why the interface never offers to share or forget one.
+	Personal bool `json:"personal"`
+	// Kind is "personal" or "room", and Members is who is in it: an owner and its guests. A room's members
+	// are shown to the room, which is what the share dialog reads.
+	Kind    string   `json:"kind,omitempty"`
+	Members []Member `json:"members,omitempty"`
+	Image   string   `json:"image,omitempty"`
+	Network string   `json:"network,omitempty"`
 	// Private is whether this workspace's sandbox may reach private networks as this machine.
 	Private bool `json:"private,omitempty"`
 	// KeepAlive is whether this workspace's sandbox is exempt from idle eviction.
@@ -409,6 +413,15 @@ func (c *Control) workspaceList() []WorkspaceState {
 }
 
 // SetWorkspace applies a changed record: a folder that moved, or trust being granted.
+// May answers whether this control's room lets a caller do something. It is the same table every handler asks,
+// read under the lock because SetWorkspace replaces the record a membership change is written into.
+func (c *Control) May(caller Caller, action Action) bool {
+	c.mu.RLock()
+	workspace := c.opts.Workspace
+	c.mu.RUnlock()
+	return workspace.May(caller, action)
+}
+
 func (c *Control) SetWorkspace(workspace Workspace) {
 	c.mu.Lock()
 	changed := c.opts.Workspace.Engine != workspace.Engine

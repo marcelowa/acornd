@@ -120,11 +120,16 @@ func (s *Server) secretRoutes(mux *http.ServeMux) {
 
 func (s *Server) workspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces", s.workspaceList)
-	// Making, re-making and forgetting a workspace is the install's own business: a person uses the rooms
-	// they were added to. Creation becomes theirs when `can_create` is wired, and not before.
+	// Making and re-making a workspace is the install's own business: creation becomes a member's when
+	// `can_create` is wired, and not before. Forgetting one is the room's owner's, not the install's: owning
+	// the machine does not mean reading, or ending, somebody's room (ADR 0034 §3, §6).
 	mux.HandleFunc("POST /api/workspaces", s.admin(s.workspaceCreate))
 	mux.HandleFunc("POST /api/workspaces/{ws}/update", s.admin(s.workspaceUpdate))
-	mux.HandleFunc("POST /api/workspaces/{ws}/remove", s.admin(s.workspaceRemove))
+	mux.HandleFunc("POST /api/workspaces/{ws}/remove", s.workspaceRemove)
+	// A room's members: its owner invites and removes, and a guest may leave. The book is the edge's, so the
+	// address is checked against people.json here and not in control (ADR 0002).
+	mux.HandleFunc("POST /api/workspaces/{ws}/members", s.addMember)
+	mux.HandleFunc("DELETE /api/workspaces/{ws}/members/{email}", s.removeMember)
 }
 
 // pageRoutes are the interface's own screens: /c/<workspace>/<conversation> is a conversation,

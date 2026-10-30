@@ -152,6 +152,22 @@ func (s *Server) mayRun(w http.ResponseWriter, r *http.Request, provider, model 
 	return true
 }
 
+// mayRunInstall is the question a turn asks: may this install spend its key on this model? It is the install's
+// list only, because a person's list governs choosing and not speaking — a guest runs the model the room was
+// given by the member who pinned it (ADR 0034 §4).
+func (s *Server) mayRunInstall(w http.ResponseWriter, r *http.Request, provider, model string) bool {
+	lists, ok := s.modelLists(callerOf(r))
+	if !ok {
+		http.Error(w, "the install's model list could not be read: ask the admin to look at it", http.StatusForbidden)
+		return false
+	}
+	if lists.install.ModelAllowed(provider, model) {
+		return true
+	}
+	http.Error(w, refusalFor(modelLists{install: lists.install}, provider, model), http.StatusForbidden)
+	return false
+}
+
 // qualified names models the way a person picks them: provider/model, which is also the form a list entry takes.
 func qualified(provider string, models []string) string {
 	out := make([]string, 0, len(models))
