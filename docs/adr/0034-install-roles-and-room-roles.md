@@ -84,7 +84,11 @@ means. Until it lands, the code's `owner` means `admin`.
 ### 3. A room has one owner, and guests
 
 - A workspace's members become records with a role: `{email, role}` with `role` either `owner` or
-  `guest`. Exactly one owner, checked when the registry loads.
+  `guest`. Exactly one owner, checked when the registry loads — with one exception. An install that
+  has never claimed its admin has no address to name as an owner, and refusing to create a room
+  there would break the default install, so a room is written with nobody in it and the admin is
+  put in it at the next load. The invariant is "at most one owner, and never a guest without one",
+  and the load is what makes it one.
 - **A room is born with its creator as its owner.** `Workspaces.Create` takes the creator; the
   ownerless room stops being constructible, and the bug in the context goes with it.
 - **The owner invites and removes guests.** Nobody else administers: not another guest, not the
@@ -138,8 +142,9 @@ from membership — `name == personal || len(Members) == 1` — because a member
 and a flag is a claim that can disagree with it. A room born with its owner is one member too, and
 a room someone made and has not shared yet is one member. The fact that used to answer "is this
 somebody's own room" no longer distinguishes it, so the record carries `kind: personal | room`, and
-the two invariants are enforced rather than described: a personal room refuses a guest, and a
-personal room cannot be forgotten.
+the three invariants are enforced rather than described: a personal room refuses a guest, cannot
+be forgotten, and cannot be purged — purge is stronger than forget, so it cannot be the way round
+the rule. The filesystem stays the operator's escape hatch.
 
 The name stays: `personal` is the admin's, and everyone else's is their address's local part made
 unique (`ana`, then `ana-2`). The console labels all of them **Personal**.
@@ -151,8 +156,12 @@ unique (`ana`, then `ana-2`). The console labels all of them **Personal**.
   from the command line, and there is **no console button for a room you do not own** — the
   destructive power stays where it is visible.
 - **Purge** is the only thing that deletes: `acornfall workspace purge <name>`. It prints the
-  folder, requires the name or `--yes`, refuses when the record is missing, and is never behind
-  an API route or a button.
+  folder **and the state**, requires the name or `--yes`, refuses when the record is missing, and is
+  never behind an API route or a button.
+- **Two folders, both deleted.** A name means the workspace's own folder and `<data-dir>/state/<name>`
+  — storage, settings, drafts. Deleting only the first would leave a forgotten history for the next
+  room of that name to open, so purge takes both, and `Create` and `Add` refuse a name whose state
+  folder is still there until it is purged.
 - **The order between them is the trap.** Purge needs the record to know the folder, so it runs
   instead of forget, never after it. Once forgotten, that folder is just a folder.
 - `acornfall doctor` names every folder under the workspaces directory with no record, so an
@@ -250,10 +259,12 @@ The naming is the plan; each of these is a test that must exist before this is c
 - The room's owner: `TestARoomIsBornWithItsOwner`, `TestARoomHasExactlyOneOwner`,
   `TestTheOwnerCannotLeave`, `TestAGuestMayLeave`, `TestOnlyTheOwnerInvitesAndRemoves`,
   `TestARoomCannotNameSomebodyTheBookDoesNot`.
-- What a guest may do: one table, `TestWhatAGuestMayDo`, plus `TestAGuestCannotCreate`,
-  `TestAGuestCannotFork`, `TestAGuestCannotHideOrRename`, `TestAGuestMayCompact`,
-  `TestAGuestMayNotReset` (through `expandCommand`, not only the route),
-  `TestAGuestCannotChangeTheModel`, `TestAGuestIsShownTheModelAndCannotPickIt`.
+- What a guest may do: `TestMayIsTheRoomsTable` (the whole table), `TestAGuestMayCompactButMayNotReset`
+  (through `expandCommand`, not only the route), `TestOnlyTheRoomsOwnerInvites`,
+  `TestAGuestLeavesAndTheOwnerRemoves`, `TestForgetIsTheRoomsOwnersAndPersonalIsNeverShared`, and
+  `TestAGuestsListDoesNotBindARoomTheyWereInvitedTo`. Still owed: the route checks for create, fork,
+  hide, rename and the model, and the disabled pickers. `TestWhatAGuestMayDo` was the plan's name and
+  the table is the built one.
 - Personal: `TestAPersonalRoomRefusesAGuest`, `TestAPersonalRoomCannotBeForgotten`,
   `TestARoomSomebodyMadeIsNeither`.
 - Models: `TestAGuestsListDoesNotBindARoomTheyWereInvitedTo`, `TestTheInstallsListStillStopsATurn`.
@@ -261,7 +272,8 @@ The naming is the plan; each of these is a test that must exist before this is c
   `TestTheSpeakerIsTheAuthorNotTheText`, `TestAnAbortNamesWhoStoppedIt`.
 - Drafts and landing: `TestADraftBelongsToOnePerson`, `TestMovingAConversationDoesNotDetachAnothers`.
 - Forget and purge: `TestForgetKeepsTheFolder`, `TestPurgeNeedsTheRecord`,
-  `TestDoctorNamesAFolderWithNoRecord`.
+  `TestPurgeDeletesTheStateToo`, `TestANewRoomCannotInheritAForgottenOne`,
+  `TestPurgeRefusesEveryPersonalRoom`, `TestDoctorNamesAFolderWithNoRecord`.
 - Migration: `TestAMembersListBecomesItsOwner`, `TestASecondAddressBecomesAGuestAndSaysSo`,
   `TestAOneMemberRoomBecomesPersonal`, `TestAMemberlessRoomIsTheAdmins`,
   `TestAPersonalRoomWithAGuestIsRefused`.
