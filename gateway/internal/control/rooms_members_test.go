@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
+	"sort"
 	"testing"
 
 	"github.com/acornfall/acornfall/gateway/internal/protocol"
@@ -175,5 +177,39 @@ func TestTheStateSaysWhatACallerMayChange(t *testing.T) {
 	}
 	if guest.Can.Model || guest.Can.Create || guest.Can.Fork || guest.Can.Hide || guest.Can.Rename || guest.Can.Administer {
 		t.Errorf("the guest may change something: %+v", guest.Can)
+	}
+}
+
+// The state's rail is the caller's rooms, not the install's: a person sees their own and the rooms they were
+// invited into, a stranger sees none, and the admin still sees the install (ADR 0032 §4, ADR 0034 §1).
+func TestTheStateListIsTheCallersRooms(t *testing.T) {
+	me := Workspace{Name: PersonalWorkspaceName, Kind: KindPersonal, Members: []Member{{Email: "me@example.com", Role: RoleOwner}}}
+	ana := Workspace{Name: "ana", Kind: KindPersonal, Members: []Member{{Email: "ana@example.com", Role: RoleOwner}}}
+	house := Workspace{
+		Name: "house", Kind: KindRoom,
+		Members: []Member{
+			{Email: "me@example.com", Role: RoleOwner},
+			{Email: "ana@example.com", Role: RoleGuest},
+		},
+	}
+	all := []Workspace{me, ana, house}
+	ctl := &Control{opts: Options{Registry: func() []Workspace { return all }}}
+
+	names := func(caller Caller) []string {
+		var out []string
+		for _, workspace := range ctl.workspaceList(caller) {
+			out = append(out, workspace.Name)
+		}
+		sort.Strings(out)
+		return out
+	}
+	if got := names(Caller{Admin: true, Email: "me@example.com"}); len(got) != 3 {
+		t.Errorf("the admin sees %v, want the install", got)
+	}
+	if got := names(Caller{Email: "ana@example.com"}); !slices.Equal(got, []string{"ana", "house"}) {
+		t.Errorf("a person sees %v, want their own and the room", got)
+	}
+	if got := names(Caller{Email: "eve@example.com"}); len(got) != 0 {
+		t.Errorf("a stranger sees %v", got)
 	}
 }
