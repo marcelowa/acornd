@@ -143,7 +143,7 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, ctl.State(callerOf(r)))
+	writeJSON(w, http.StatusOK, s.stateOf(ctl, callerOf(r), ""))
 }
 
 func (s *Server) usage(w http.ResponseWriter, r *http.Request) {

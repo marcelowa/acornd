@@ -158,6 +158,8 @@ func canIn(workspace Workspace, caller Caller) Can {
 // Can is what the caller may change in this room, so the interface disables what it may not instead of
 // inferring a role from a control's name. It is the state's copy of the one table, `Workspace.May`.
 type Can struct {
+	// MakeRoom is the install's permission, not the room's: may this caller lead a room of their own.
+	MakeRoom   bool `json:"makeRoom"`
 	Create     bool `json:"create"`
 	Fork       bool `json:"fork"`
 	Hide       bool `json:"hide"`
@@ -214,6 +216,9 @@ type State struct {
 	// and the agent with their values and cannot pick another (ADR 0034 §4).
 	Can  Can    `json:"can"`
 	Role string `json:"role,omitempty"`
+	// Admin is the install's role, not the room's: it is what shows the People screen. Owning the install does
+	// not make the caller a member of anybody's room (ADR 0034 §1).
+	Admin bool `json:"admin"`
 	// WorkerUp is false when the harness process is gone. Without it a dead backend is
 	// indistinguishable from an idle one, because everything here is served from cache.
 	WorkerUp    bool   `json:"workerUp"`
@@ -545,10 +550,6 @@ func (c *Control) Describe() protocol.Describe {
 }
 
 // State is everything a client needs for the conversation this caller lands on.
-func (c *Control) State(caller Caller) State {
-	return c.StateFor(caller, "")
-}
-
 // StateFor is everything a client needs for one conversation. Each tab asks for its own,
 // so two tabs can show two conversations without agreeing on an "active" one — and each
 // person asks as themselves, because the landing conversation and the draft are theirs

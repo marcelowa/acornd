@@ -48,5 +48,5 @@ func (s *Server) providerCatalog(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"providers": ctl.StateFor(callerOf(r), "").Providers})
+	writeJSON(w, http.StatusOK, map[string]any{"providers": s.stateOf(ctl, callerOf(r), "").Providers})
 }

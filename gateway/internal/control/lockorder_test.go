@@ -54,7 +54,7 @@ func TestStateDoesNotTakeTheRegistryLockInsideItsOwn(t *testing.T) {
 	// Both entry points: State() delegates today, and would stop being covered if it
 	// stopped delegating.
 	subject.StateFor(Caller{}, "")
-	subject.State(Caller{})
+	subject.StateFor(Caller{}, "")
 
 	if reads.Load() == 0 {
 		t.Fatal("the state never read the registry, so this test checked nothing")

@@ -72,7 +72,7 @@ func (s *Server) sendOpening(
 	conversationID string,
 	initial *protocol.Frame,
 ) bool {
-	if err := writeEvent(w, "state", ctl.StateFor(caller, conversationID)); err != nil {
+	if err := writeEvent(w, "state", s.stateOf(ctl, caller, conversationID)); err != nil {
 		return false
 	}
 	if initial != nil {
@@ -117,7 +117,7 @@ func (s *Server) forward(
 		// itself, built now rather than when the signal was raised: the signal can wait,
 		// the state cannot be old.
 		case <-stale:
-			if err := writeEvent(w, "state", ctl.StateFor(caller, conversationID)); err != nil {
+			if err := writeEvent(w, "state", s.stateOf(ctl, caller, conversationID)); err != nil {
 				return
 			}
 			flusher.Flush()

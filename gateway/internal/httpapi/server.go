@@ -85,6 +85,20 @@ func statusFor(err error) int {
 	return http.StatusConflict
 }
 
+// stateOf is the state a caller gets. The install's two answers — am I its admin, may I lead a room — come from
+// the book, which is the edge's file; control builds the room's answer and cannot read people.json (ADR 0002).
+func (s *Server) stateOf(ctl *control.Control, caller control.Caller, conversation string) control.State {
+	state := ctl.StateFor(caller, conversation)
+	state.Admin = caller.Admin
+	state.Can.MakeRoom = caller.Admin
+	if !caller.Admin && caller.Email != "" && s.gate.People != nil {
+		if person, found, err := s.gate.People.Find(caller.Email); err == nil && found {
+			state.Can.MakeRoom = person.CanCreate
+		}
+	}
+	return state
+}
+
 // mayRoom refuses an action this room keeps for its owner. The table is control's; this only decides the status
 // and the sentence, because a 403 here is "the room says no" and a 404 would be "there is no such room".
 func (s *Server) mayRoom(w http.ResponseWriter, r *http.Request, ctl *control.Control, action control.Action) bool {
@@ -105,7 +119,7 @@ func (s *Server) stateChange(w http.ResponseWriter, r *http.Request, change func
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, ctl.State(callerOf(r)))
+	writeJSON(w, http.StatusOK, s.stateOf(ctl, callerOf(r), ""))
 }
 
 // stateBody is stateChange with one JSON body read first. A body that will not decode has
@@ -115,7 +129,7 @@ func stateBody[B any](s *Server, w http.ResponseWriter, r *http.Request, change 
 		if err := change(ctl, body); err != nil {
 			return false, err
 		}
-		writeJSON(w, http.StatusOK, ctl.State(callerOf(r)))
+		writeJSON(w, http.StatusOK, s.stateOf(ctl, callerOf(r), ""))
 		return true, nil
 	})
 }
@@ -215,7 +229,7 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, s.offerable(ctl.StateFor(callerOf(r), r.URL.Query().Get("conversation")), callerOf(r)))
+	writeJSON(w, http.StatusOK, s.offerable(s.stateOf(ctl, callerOf(r), r.URL.Query().Get("conversation")), callerOf(r)))
 }
 
 // workspaceStatus answers where a workspace is, and never starts it: opening a workspace is the

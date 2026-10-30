@@ -23,7 +23,7 @@ func (s *Server) conversations(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, ctl.State(callerOf(r)).Conversations)
+	writeJSON(w, http.StatusOK, s.stateOf(ctl, callerOf(r), "").Conversations)
 }
 
 func (s *Server) createConversation(w http.ResponseWriter, r *http.Request) {

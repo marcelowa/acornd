@@ -113,3 +113,33 @@ func TestOnlyAMemberWhoseRecordAllowsItMayMakeARoom(t *testing.T) {
 		t.Errorf("status = %d, want 403", recorder.Code)
 	}
 }
+
+// The state answers the two install-level questions the interface asks: am I the admin (show People), and may I
+// lead a room (show Create). Both come from the book, which control cannot read (ADR 0002, 0034 §3).
+func TestTheStateSaysWhoMayMakeRooms(t *testing.T) {
+	opened := book(t)
+	if _, err := opened.Claim("me@example.com", "Me"); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if _, err := opened.Add("ana@example.com", "Ana"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	ctl := control.New(control.Options{Workspace: control.Workspace{Name: "house", Kind: control.KindRoom}})
+	server := &Server{gate: Gate{People: opened}}
+
+	member := server.stateOf(ctl, control.Caller{Email: "ana@example.com"}, "")
+	if member.Admin || !member.Can.MakeRoom {
+		t.Errorf("a new member: admin %v, make room %v", member.Admin, member.Can.MakeRoom)
+	}
+	if _, err := opened.SetCanCreate("ana@example.com", false); err != nil {
+		t.Fatalf("narrow: %v", err)
+	}
+	member = server.stateOf(ctl, control.Caller{Email: "ana@example.com"}, "")
+	if member.Can.MakeRoom {
+		t.Error("a member whose record says no may still make a room")
+	}
+	admin := server.stateOf(ctl, control.Caller{Admin: true, Email: "me@example.com"}, "")
+	if !admin.Admin || !admin.Can.MakeRoom {
+		t.Errorf("the admin: admin %v, make room %v", admin.Admin, admin.Can.MakeRoom)
+	}
+}
