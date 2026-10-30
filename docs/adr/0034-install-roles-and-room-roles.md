@@ -1,6 +1,6 @@
 # ADR 0034 — Install roles and room roles
 
-Status: accepted (2026-10-31), not built
+Status: accepted (2026-10-31), built; the route-level permission tests are still owed
 Date: 2026-10-31
 
 ## Context
@@ -242,8 +242,8 @@ that is a different sharing model rather than one more permission.
 ## Not in this ADR
 
 - **Ownership transfer.** A room that needs a new owner is a decision of its own.
-- **The People screen.** ADR 0032 §3 promised it; it is still owed, and this ADR only gives it the
-  roles it will show.
+- **The People screen.** ADR 0032 §3 promised it, and it is built in this change: it shows the roles
+  this decision gives, and every write goes through the book's own routes.
 - **Per-person provider credentials, spend caps, encryption at rest.** Unchanged from ADR 0032.
 - **Email sent by acornfall.** The door proves the mailbox; an invitation is still a message the
   admin sends.
@@ -262,9 +262,11 @@ The naming is the plan; each of these is a test that must exist before this is c
 - What a guest may do: `TestMayIsTheRoomsTable` (the whole table), `TestAGuestMayCompactButMayNotReset`
   (through `expandCommand`, not only the route), `TestOnlyTheRoomsOwnerInvites`,
   `TestAGuestLeavesAndTheOwnerRemoves`, `TestForgetIsTheRoomsOwnersAndPersonalIsNeverShared`, and
-  `TestAGuestsListDoesNotBindARoomTheyWereInvitedTo`. Still owed: the route checks for create, fork,
-  hide, rename and the model, and the disabled pickers. `TestWhatAGuestMayDo` was the plan's name and
-  the table is the built one.
+  `TestAGuestsListDoesNotBindARoomTheyWereInvitedTo`. The disabled pickers are built and pinned in
+  `ui/test/map.test.ts`. Still owed: the route-level tests for create, fork, hide, rename and the
+  model — the table is tested and every handler asks it, but a test that removes one call would need
+  a fake control the edge does not have. `TestWhatAGuestMayDo` was the plan's name and the table is
+  the built one.
 - Personal: `TestAPersonalRoomRefusesAGuest`, `TestAPersonalRoomCannotBeForgotten`,
   `TestARoomSomebodyMadeIsNeither`.
 - Models: `TestAGuestsListDoesNotBindARoomTheyWereInvitedTo`, `TestTheInstallsListStillStopsATurn`.
