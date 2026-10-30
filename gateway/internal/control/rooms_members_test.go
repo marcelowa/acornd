@@ -181,7 +181,8 @@ func TestTheStateSaysWhatACallerMayChange(t *testing.T) {
 }
 
 // The state's rail is the caller's rooms, not the install's: a person sees their own and the rooms they were
-// invited into, a stranger sees none, and the admin still sees the install (ADR 0032 §4, ADR 0034 §1).
+// invited into, a stranger sees none, and the admin sees the rooms they are in — not somebody else's, because
+// owning the machine is not membership (ADR 0032 §4, ADR 0034 §1).
 func TestTheStateListIsTheCallersRooms(t *testing.T) {
 	me := Workspace{Name: PersonalWorkspaceName, Kind: KindPersonal, Members: []Member{{Email: "me@example.com", Role: RoleOwner}}}
 	ana := Workspace{Name: "ana", Kind: KindPersonal, Members: []Member{{Email: "ana@example.com", Role: RoleOwner}}}
@@ -203,8 +204,8 @@ func TestTheStateListIsTheCallersRooms(t *testing.T) {
 		sort.Strings(out)
 		return out
 	}
-	if got := names(Caller{Admin: true, Email: "me@example.com"}); len(got) != 3 {
-		t.Errorf("the admin sees %v, want the install", got)
+	if got := names(Caller{Admin: true, Email: "me@example.com"}); !slices.Equal(got, []string{"house", PersonalWorkspaceName}) {
+		t.Errorf("the admin's rail is %v, want the rooms they are in", got)
 	}
 	if got := names(Caller{Email: "ana@example.com"}); !slices.Equal(got, []string{"ana", "house"}) {
 		t.Errorf("a person sees %v, want their own and the room", got)
