@@ -8,12 +8,24 @@
  * model in `map.ts` before a component sees them.
  */
 
+/** One person in a room: their address, and what they are in it. A room has one owner and its guests
+ * (ADR 0034 §3); the name is the book's, and the room's record keeps the address alone. */
+export interface WireMember {
+	email: string;
+	/** `owner` or `guest`. */
+	role: string;
+}
+
 export interface WireWorkspace {
 	name: string;
 	path: string;
 	title: string;
-	/** This workspace is somebody's own room: derived from membership in the gateway. */
+	/** This workspace is somebody's own room: derived from the stored kind in the gateway. */
 	personal: boolean;
+	/** `personal` or `room`. A personal room is never shared and never forgotten (ADR 0034 §5). */
+	kind?: string | undefined;
+	/** Who is in it: the owner, and its guests. */
+	members?: WireMember[] | undefined;
 	image?: string | undefined;
 	network?: string | undefined;
 	/** Which sandbox engine this workspace runs on; absent means the install default. */
@@ -40,6 +52,24 @@ export interface WireWorkspaceStatus {
 	stage?: string | undefined;
 	since?: string | undefined;
 	error?: string | undefined;
+}
+
+/**
+ * What the caller may change in the room in view, and what they are in it.
+ *
+ * It is the state's copy of the gateway's one permission table, so a component disables a control rather
+ * than reading a right out of a role — a second copy of that table is the bug it prevents (ADR 0034 §4).
+ */
+export interface WireCan {
+	/** The install's permission, not the room's: may this caller lead a room of their own. */
+	makeRoom: boolean;
+	create: boolean;
+	fork: boolean;
+	hide: boolean;
+	rename: boolean;
+	model: boolean;
+	/** The room is this caller's: they invite and remove guests. */
+	administer: boolean;
 }
 
 /** One sandbox engine this install can run, and whether this machine can. */
@@ -261,6 +291,12 @@ export interface WireState {
 	installDefaults: WireScopeDefaults;
 	/** True when another conversation created this one: its configuration is that one's. */
 	subagent: boolean;
+	/** What this caller may change here, and what they are in the room (ADR 0034 §4). */
+	can: WireCan;
+	/** `owner` or `guest` in the room in view; absent when the caller is not in it. */
+	role?: string | undefined;
+	/** The install's role, not the room's: it is what shows the People page (ADR 0034 §1). */
+	admin: boolean;
 	agents: WireAgentSummary[];
 	providers: WireProvider[];
 	seq: number;
@@ -325,6 +361,27 @@ export interface WireEntry {
 	 * nothing for them rather than a guess (ADR 0034 §7).
 	 */
 	data?: { text?: string | undefined; author?: WireAuthor | undefined } | undefined;
+}
+
+/** One record in the book of people: who may use this install, and what they may do on it (ADR 0032 §3). */
+export interface WirePerson {
+	email: string;
+	name?: string | undefined;
+	/** `admin` or `member`. */
+	role: string;
+	/** `invited`, `active`, or `revoked`. */
+	state: string;
+	/** What they may run, as `provider/modelId`. Absent is every model, which is what no list means. */
+	models?: string[] | undefined;
+	/** May they lead a room of their own (ADR 0034 §3). Absent is false. */
+	can_create?: boolean | undefined;
+	created?: string | undefined;
+	last_seen?: string | undefined;
+}
+
+/** The book as every People route answers it: one document, after whatever the request changed. */
+export interface WirePeople {
+	people: WirePerson[];
 }
 
 /** Who wrote a message. `speaker` is the name the model reads, and it is empty in a personal room. */

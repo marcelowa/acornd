@@ -3,19 +3,28 @@ import type {
 	ConversationSummary,
 	EngineSummary,
 	ModelChoice,
+	PersonState,
+	PersonSummary,
 	PickerGroup,
 	ProviderSummary,
+	RoomKind,
+	RoomMember,
+	RoomRights,
+	RoomRole,
 	SandboxSummary,
 	TranscriptEntry,
 	WorkspaceSummary,
 } from "./view-models";
 import type {
 	WireAgentSummary,
+	WireCan,
 	WireContentBlock,
 	WireConversation,
 	WireEngine,
 	WireEntry,
+	WireMember,
 	WireMessage,
+	WirePerson,
 	WireProvider,
 	WireSandbox,
 	WireScopeDefaults,
@@ -171,6 +180,74 @@ export function engineLabel(engine: string): string {
 }
 
 /**
+ * What this caller may change in the room in view.
+ *
+ * Every answer is false when the state carries none, and that is deliberate: a right is granted, never
+ * assumed, so a state this layer cannot read offers nothing rather than everything. The state always
+ * carries it — the gateway fills it for every caller — and the absence this tolerates is a story or a
+ * test that built a literal without one.
+ */
+export function toRights(can: WireCan | undefined): RoomRights {
+	return {
+		makeRoom: can?.makeRoom === true,
+		create: can?.create === true,
+		fork: can?.fork === true,
+		hide: can?.hide === true,
+		rename: can?.rename === true,
+		model: can?.model === true,
+		administer: can?.administer === true,
+	};
+}
+
+/** What somebody is in a room. An address with no role is a record the migration has not finished, and it
+ * reads as a guest: a right is never granted by a missing field (ADR 0034 §8). */
+function toRole(role: string | undefined): RoomRole {
+	return role === "owner" ? "owner" : "guest";
+}
+
+/** What a workspace is. `personal` is the gateway's own derivation of the same fact, so it answers when an
+ * older record has no kind: a workspace somebody called their own is never read as a room. */
+function toKind(workspace: WireWorkspace): RoomKind {
+	if (workspace.kind === "personal" || workspace.kind === "room") return workspace.kind;
+	return workspace.personal ? "personal" : "room";
+}
+
+function toMembers(members: WireMember[] | undefined): RoomMember[] {
+	return (members ?? []).map((member) => ({
+		email: member.email,
+		role: toRole(member.role),
+	}));
+}
+
+/**
+ * The book as the People page lists it.
+ *
+ * An absent `can_create` is false and absent `models` is every model: the book omits a field it does not
+ * set, and the two absences mean opposite things, so each is read where it is used rather than defaulted
+ * once (people.go says the same in the record's own words).
+ */
+export function toPeople(people: WirePerson[]): PersonSummary[] {
+	return people.map((person) => ({
+		email: person.email,
+		name: person.name,
+		role: person.role === "admin" ? "admin" : "member",
+		state: toPersonState(person.state),
+		models: person.models ?? [],
+		canCreate: person.can_create === true,
+		created: person.created,
+		lastSeen: person.last_seen,
+	}));
+}
+
+/** Where a record is in its life. An unknown state reads as invited, because the one state that must never
+ * be assumed is the one that lets somebody in. */
+function toPersonState(state: string): PersonState {
+	if (state === "active") return "active";
+	if (state === "revoked") return "revoked";
+	return "invited";
+}
+
+/**
  * The workspaces as the rail lists them, with the one in view marked. `defaultEngine` is the
  * install's own, which a workspace that names none runs on — resolved here so that every row can
  * say what it runs on instead of only the ones that chose.
@@ -190,6 +267,8 @@ export function toWorkspaces(
 			title: workspace.title,
 			path: workspace.path,
 			personal: workspace.personal,
+			kind: toKind(workspace),
+			members: toMembers(workspace.members),
 			running: workspace.running,
 			active: workspace.name === activeName,
 			image: workspace.image,
