@@ -156,10 +156,18 @@ export type Screen = "conversation" | "settings" | "update";
  * release page has its own address now, and an unknown page lands on general. */
 export type SettingsTab = "general" | "providers" | "secrets" | "people" | "remote";
 
-const SETTINGS_TABS: SettingsTab[] = ["general", "providers", "secrets", "people", "remote"];
+export const SETTINGS_TABS: SettingsTab[] = ["general", "providers", "secrets", "people", "remote"];
+
+/**
+ * Whether a string names a settings page this build has. It is the one list: the URL parser and the tab bar
+ * both ask it, so a page added here cannot be drawn by one and refused by the other.
+ */
+export function isSettingsTab(value: string | undefined): value is SettingsTab {
+	return value !== undefined && (SETTINGS_TABS as string[]).includes(value);
+}
 
 function settingsTabFrom(segment: string | undefined): SettingsTab {
-	return SETTINGS_TABS.includes(segment as SettingsTab) ? (segment as SettingsTab) : "general";
+	return isSettingsTab(segment) ? segment : "general";
 }
 
 /**

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { routeFromUrl } from "@/app/use-platform";
+import { isSettingsTab, routeFromUrl, SETTINGS_TABS } from "@/app/use-platform";
 
 /**
  * The URL scheme, as one function. The workspaces list is the case worth a test: it was a page
@@ -55,6 +55,16 @@ test("the secrets page is its own setting", () => {
 // decides who may see it (ADR 0034 §1).
 test("the people page is its own setting", () => {
 	expect(routeFromUrl("/settings/people", "?workspace=spikes").settingsTab).toBe("people");
+});
+
+// The bar and the URL parser ask one question, so a page cannot be drawn by the bar and refused by it —
+// which is what happened to Remote, drawn as a tab and left out of the list the bar checked.
+test("every settings page is one the bar and the address both accept", () => {
+	for (const page of SETTINGS_TABS) {
+		expect(isSettingsTab(page)).toBe(true);
+		expect(routeFromUrl(`/settings/${page}`, "").settingsTab).toBe(page);
+	}
+	expect(isSettingsTab("nope")).toBe(false);
 });
 
 test("an unknown settings page lands on general", () => {

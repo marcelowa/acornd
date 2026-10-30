@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { ChevronLeft } from "lucide-react";
-import type { SettingsTab } from "@/app/use-platform";
+import { isSettingsTab, type SettingsTab } from "@/app/use-platform";
 import { Measure } from "@/components/layout/measure";
 import { Stack } from "@/components/layout/stack";
 import { Button } from "@/components/ui/button";
@@ -95,13 +95,9 @@ export function SettingsScreen({
 					<Tabs
 						value={page}
 						onValueChange={(next) => {
-							if (
-								next === "general" ||
-								next === "providers" ||
-								next === "secrets" ||
-								next === "people"
-							)
-								onTabChange(next);
+							// One list of pages, asked by the URL parser and by this bar: a guard that restated
+							// them was a second list, and the Remote page was drawn but never added to it.
+							if (isSettingsTab(next)) onTabChange(next);
 						}}
 					>
 						<TabsList aria-label="Settings pages">
