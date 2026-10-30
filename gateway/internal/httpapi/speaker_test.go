@@ -49,7 +49,7 @@ func TestAPersonalRoomHasNoSpeaker(t *testing.T) {
 		Name:    "ana",
 		Path:    t.TempDir(),
 		Title:   "Ana",
-		Members: []string{"ana@example.com"},
+		Members: []control.Member{{Email: "ana@example.com", Role: control.RoleOwner}},
 	})
 	request := room("ana", control.Caller{Email: "ana@example.com"})
 	if speaker := server.speakerFor(request); speaker != "" {
@@ -71,7 +71,7 @@ func TestASharedRoomNamesANonOwner(t *testing.T) {
 		Name:    "house",
 		Path:    t.TempDir(),
 		Title:   "House",
-		Members: []string{"me@example.com", "ana@example.com"},
+		Members: []control.Member{{Email: "me@example.com", Role: control.RoleOwner}, {Email: "ana@example.com", Role: control.RoleGuest}},
 	})
 	request := room("house", control.Caller{Email: "ana@example.com"})
 	if speaker := server.speakerFor(request); speaker != "Ana Silva" {
@@ -95,7 +95,7 @@ func TestNobodyToNameIsNoAuthor(t *testing.T) {
 		Name:    "personal",
 		Path:    t.TempDir(),
 		Title:   "Personal",
-		Members: []string{},
+		Members: []control.Member{{Email: "me@example.com", Role: control.RoleOwner}},
 	})
 	if author := server.authorOf(room("personal", control.Caller{Admin: true})); author != nil {
 		t.Errorf("nobody proved an address, so nobody is the author, got %+v", author)

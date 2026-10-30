@@ -30,6 +30,9 @@ func workspaceCommand(argv []string) {
 		case "remove":
 			workspaceRemove(argv[1:])
 			return
+		case "purge":
+			workspacePurge(argv[1:])
+			return
 		case "help", "-h", "--help":
 			workspaceUsage(os.Stdout)
 			return
@@ -44,7 +47,8 @@ func workspaceUsage(w *os.File) {
 
   list                 every workspace, and the engine and image it runs on
   add <name> [folder]  register a folder as a workspace; the folder defaults to ./<name>
-  remove <name>        unregister a workspace; its folder and its history stay
+  remove <name>        forget a workspace; its folder and its history stay
+  purge <name> --yes   delete a workspace's folder and its record; the only thing that deletes
 
 acornfall workspace add -h    explains the flags it takes
 `)
@@ -198,9 +202,11 @@ func recordWorkspace(dir string, registry control.RegistryFile, record addRecord
 		decision := true
 		devices = &decision
 	}
+	// A room, with nobody in it yet: this command has no way to say who its owner is, and the gateway's load
+	// gives an unnamed room to the install's admin, which is who a folder added from a terminal belongs to.
 	registry.Workspaces = append(registry.Workspaces, control.Workspace{
-		Name: record.name, Path: record.absolute, Title: record.name, Image: record.image,
-		Network: record.network, Engine: chosen, KeepAlive: record.keepAlive,
+		Name: record.name, Path: record.absolute, Title: record.name, Kind: control.KindRoom,
+		Image: record.image, Network: record.network, Engine: chosen, KeepAlive: record.keepAlive,
 		Private: record.private, DisableVMNesting: nesting, DisableDevices: devices,
 	})
 	if err := control.SaveRegistryFile(registry); err != nil {
@@ -265,28 +271,121 @@ func workspaceRemove(argv []string) {
 	if err != nil {
 		log.Fatalf("acornfall: %v", err)
 	}
-	kept := registry.Workspaces[:0]
-	removed := false
-	for _, workspace := range registry.Workspaces {
-		if workspace.Name != args[0] {
-			kept = append(kept, workspace)
-			continue
-		}
-		if workspace.Personal() {
-			// A room with at most one member is somebody's own: removing it removes their conversations, and the
-			// admin can do that by revoking the person, which is a decision with a name.
-			log.Fatalf("acornfall: %s is somebody's own workspace and cannot be removed", workspace.Name)
-		}
-		removed = true
+	record, err := recordFor(registry, args[0])
+	if err != nil {
+		log.Fatalf("acornfall: %v", err)
 	}
-	if !removed {
-		log.Fatalf("acornfall: no workspace %q", args[0])
+	if record.Personal() {
+		// Somebody's own room is never shared and never removed: forgetting it removes the one place they had, and
+		// the admin can do that by revoking the person, which is a decision with a name.
+		log.Fatalf("acornfall: %s is somebody's own room and cannot be forgotten", record.Name)
 	}
-	registry.Workspaces = kept
+	registry.Workspaces = withoutWorkspace(registry.Workspaces, record.Name)
 	if err := control.SaveRegistryFile(registry); err != nil {
 		log.Fatalf("acornfall: %v", err)
 	}
-	fmt.Printf("removed %s (its folder and history are untouched)\n", args[0])
+	fmt.Printf("forgot %s (its folder and history are untouched)\n", record.Name)
+}
+
+// purgeUsage is the one command in this file that deletes anything, and it says so before it does.
+const purgeUsage = `usage: acornfall workspace purge <name> --yes
+
+  --yes              delete the folder and the record; without it, purge only names the folder
+  --data-dir DIR     the acornfall folder (default: ~/.acornfall)
+
+Forgetting a workspace and deleting one are two acts, and this is the second (ADR 0034 §6). It
+needs the record to find the folder: a forgotten folder is just a folder, and a command that
+deleted a directory by a name nothing points at any more is how somebody removes the wrong one.
+`
+
+// workspacePurge deletes a workspace's folder and its record. It is the only thing in acornfall that
+// deletes a workspace, it is never behind a route or a button, and it prints the folder first: a path is
+// the one thing a person can check before an unrecoverable act.
+func workspacePurge(argv []string) {
+	dir, name, yes := purgeArgs(argv)
+	path := filepath.Join(dir, "workspaces.json")
+	registry, err := control.LoadRegistryFile(path)
+	if err != nil {
+		log.Fatalf("acornfall: %v", err)
+	}
+	workspace, err := purgeTarget(registry, name)
+	if err != nil {
+		log.Fatalf("acornfall: %v", err)
+	}
+	fmt.Printf("purge %s, folder %s\n", workspace.Name, workspace.Path)
+	if !yes {
+		fmt.Println("nothing was deleted: run it again with --yes")
+		os.Exit(1)
+	}
+	if err := os.RemoveAll(workspace.Path); err != nil {
+		log.Fatalf("acornfall: %v", err)
+	}
+	registry.Workspaces = withoutWorkspace(registry.Workspaces, workspace.Name)
+	if err := control.SaveRegistryFile(registry); err != nil {
+		log.Fatalf("acornfall: %v", err)
+	}
+	fmt.Printf("purged %s: the folder and the record are gone\n", workspace.Name)
+}
+
+// purgeArgs is the three things this command cannot guess: which install, which name, and whether the person
+// meant it. It is separate from the deleting so that the deleting reads as one act.
+func purgeArgs(argv []string) (dir, name string, yes bool) {
+	flags := flag.NewFlagSet("workspace purge", flag.ContinueOnError)
+	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	confirmed := flags.Bool("yes", false, "delete the folder and the record")
+	flags.Usage = func() { fmt.Fprint(os.Stderr, purgeUsage) }
+	flagArgs, positional := splitFlags(argv, map[string]bool{"data-dir": true})
+	if err := flags.Parse(flagArgs); err != nil {
+		os.Exit(2)
+	}
+	if len(positional) != 1 {
+		flags.Usage()
+		os.Exit(2)
+	}
+	dir, err := resolveDataDir(*dataDir)
+	if err != nil {
+		log.Fatalf("acornfall: %v", err)
+	}
+	return dir, positional[0], *confirmed
+}
+
+// withoutWorkspace is the registry with one name taken out. It filters in place: the write index never passes the
+// read index, so the list behind it is the same list, shorter.
+func withoutWorkspace(workspaces []control.Workspace, name string) []control.Workspace {
+	kept := workspaces[:0]
+	for _, workspace := range workspaces {
+		if workspace.Name != name {
+			kept = append(kept, workspace)
+		}
+	}
+	return kept
+}
+
+// purgeTarget is the record a purge deletes, and the refusal when there is none.
+//
+// Purge needs the record to find the folder (ADR 0034 §6), so it runs instead of forget and never after it:
+// once a room is forgotten, its folder is just a folder, and deleting a directory by a name that no longer
+// means anything is how somebody removes the wrong one. The install's own room is refused as well: the next
+// start makes it again, so purging it would take the history and leave a room that looks the same.
+func purgeTarget(registry control.RegistryFile, name string) (control.Workspace, error) {
+	workspace, err := recordFor(registry, name)
+	if err != nil {
+		return control.Workspace{}, fmt.Errorf("no workspace %q: a forgotten folder is just a folder, and there is no record of where it was", name)
+	}
+	if workspace.Name == control.PersonalWorkspaceName {
+		return control.Workspace{}, fmt.Errorf("%s is the install's own room: the next start makes it again, so its history would be gone with nothing to show for it", name)
+	}
+	return workspace, nil
+}
+
+// recordFor is the workspace a verb names, refused when the registry holds no such name.
+func recordFor(registry control.RegistryFile, name string) (control.Workspace, error) {
+	for _, workspace := range registry.Workspaces {
+		if workspace.Name == name {
+			return workspace, nil
+		}
+	}
+	return control.Workspace{}, fmt.Errorf("no workspace %q", name)
 }
 
 // parseEgress turns the one question into the two fields a workspace record keeps.

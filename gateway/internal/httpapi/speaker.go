@@ -70,5 +70,5 @@ func workspaceOf(r *http.Request) string {
 // shared reports whether a room has more than one person in it, which is the whole of when a speaker is named.
 func shared(workspaces *control.Workspaces, name string) bool {
 	workspace, known := workspaces.Get(name)
-	return known && len(workspace.Members) > 1
+	return known && workspace.Shared()
 }

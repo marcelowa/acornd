@@ -105,7 +105,9 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, refusal, http.StatusBadRequest)
 		return
 	}
-	workspace, err := s.workspaces.Create(body.Name)
+	// The creator is the caller's address, and a room is born with its owner (ADR 0034 §3): a room nobody owns
+	// is refused to everybody, its maker included, because being in the room is what allows a caller.
+	workspace, err := s.workspaces.Create(body.Name, callerOf(r).Email)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return

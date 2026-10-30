@@ -84,11 +84,16 @@ type Workspace struct {
 	// workspace can run another acornfall with its own bwrap engine and network. A
 	// pointer because true is a decision and absent is not.
 	DisableDevices *bool `json:"disable_devices,omitempty"`
-	// Members is who may use this workspace: email addresses, lowercase. Being a member is the whole of it
-	// — there are no roles inside one, because ADR 0032 gives two and both are install-level. A workspace
-	// with no members belongs to nobody, which is the state every workspace was in before there were
-	// people, and which the admin's own claim fills in.
-	Members []string `json:"members,omitempty"`
+	// Kind is what this workspace is: KindPersonal, somebody's own room, or KindRoom, which has one owner and
+	// may have guests. It is stored rather than derived because a room is born with its owner, so a member
+	// list no longer tells the two apart, and the two rules that follow from the kind — never shared, never
+	// forgotten — are enforced where a record is read and written (rooms.go).
+	Kind string `json:"kind,omitempty"`
+	// Members is who may use this workspace, and what they are in it: exactly one owner, and its guests. Being
+	// in the room is the whole of entry, and what a guest may not do inside it is a rule of its own
+	// (ADR 0034 §4). Nobody named is the state every workspace was in before there were people, which the
+	// admin's own claim fills in at load.
+	Members []Member `json:"members,omitempty"`
 	// Running is runtime state, never stored: a persisted `true` would be a claim about a
 	// process that does not exist after a restart.
 	Running bool `json:"-"`
@@ -105,33 +110,6 @@ var ErrNoWorkspace = errors.New("no workspace")
 type Caller struct {
 	Admin bool
 	Email string
-}
-
-// Personal reports whether this is somebody's own room.
-//
-// It used to be a stored `General bool`, written in a third place beside the membership list and able to
-// disagree with it. A membership list is a fact; a flag is a claim about the same fact, and this one is derived
-// from it (ADR 0032 §9).
-//
-// One member is somebody's own room, and the install's own room is `personal` — the one that predates people and
-// was created with none. The name is not a second flag: it is the identity of one record, and the membership list
-// answers for every other room. A room with no members and another name is neither — it is a workspace somebody
-// made and has not shared yet, and calling it somebody's own would make it un-removable.
-func (w Workspace) Personal() bool {
-	return w.Name == PersonalWorkspaceName || len(w.Members) == 1
-}
-
-// Allows reports whether a caller may use this workspace.
-//
-// Being a member is the whole of it: it is not a read where a member writes, and it is not a role. The
-// admin is not special here — ADR 0032 has them own the install, not other people's conversations — and
-// the one exception is an install where no admin has been claimed, which is the machine talking to
-// itself before anybody is named.
-func (w Workspace) Allows(caller Caller) bool {
-	if strings.TrimSpace(caller.Email) == "" {
-		return caller.Admin
-	}
-	return slices.Contains(w.Members, strings.ToLower(caller.Email))
 }
 
 // NetworkOff is the one non-default value Network has today.
@@ -328,9 +306,6 @@ func (w *Workspaces) Open(ctx context.Context) error {
 	if err := w.migrate(); err != nil {
 		return err
 	}
-	if err := w.nameTheAdminsWorkspaces(); err != nil {
-		return err
-	}
 	if _, err := w.Ensure(ctx, PersonalWorkspaceName); err != nil {
 		// Logged, not fatal: the install's own workspace is where a client lands, but a client can
 		// still be told what is wrong with it. Exiting here would leave nothing to talk to.
@@ -411,10 +386,10 @@ func (w *Workspaces) personal(caller Caller) (string, error) {
 	if caller.Admin || strings.TrimSpace(caller.Email) == "" {
 		return PersonalWorkspaceName, nil
 	}
-	// One workspace with exactly one member, that member being this person. It is derived rather than
-	// flagged, because a membership list is a fact and a flag is a claim that can disagree with it.
+	// The room this person owns. A personal room is one person's by construction (rooms.go), so the owner is
+	// the whole question: a room with nobody in it — an install with no admin claimed — matches nobody.
 	for _, workspace := range w.List() {
-		if len(workspace.Members) == 1 && workspace.Members[0] == strings.ToLower(caller.Email) {
+		if workspace.Personal() && workspace.Owner() == strings.ToLower(caller.Email) {
 			return workspace.Name, nil
 		}
 	}
@@ -443,7 +418,13 @@ func (w *Workspaces) CreatePersonal(email string) (Workspace, error) {
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		return Workspace{}, err
 	}
-	workspace := Workspace{Name: name, Path: path, Title: "Personal", Members: []string{address}}
+	workspace := Workspace{
+		Name:    name,
+		Path:    path,
+		Title:   "Personal",
+		Kind:    KindPersonal,
+		Members: []Member{{Email: address, Role: RoleOwner}},
+	}
 	if err := w.Add(workspace); err != nil {
 		return Workspace{}, err
 	}
@@ -501,13 +482,20 @@ func (w *Workspaces) Get(name string) (Workspace, bool) {
 	return workspace, ok
 }
 
-// Create makes a workspace inside the workspaces folder. This is the only way the API
+// Create makes a room inside the workspaces folder. This is the only way the API
 // creates one, which is what keeps the interface inside a single directory: a folder
 // anywhere else on the machine is an operator's decision, not a form field.
 //
+// A room is born with its creator as its owner (ADR 0034 §3). It used to be born with nobody in it — no
+// member who could open it, the admin included, because being in the room is what allows a caller — and
+// that is the bug this signature ends: a room nobody owns is not constructible any more.
+//
+// An empty creator is an install with no admin claimed yet, which is the machine talking to itself. The
+// room is then written with nobody in it, and the next load adopts it once an admin exists (ADR 0034 §8).
+//
 // A folder of that name already there is adopted rather than refused, so a workspace the
 // reader prepared themselves works.
-func (w *Workspaces) Create(name string) (Workspace, error) {
+func (w *Workspaces) Create(name, creator string) (Workspace, error) {
 	if strings.TrimSpace(name) == "" {
 		return Workspace{}, errors.New("a workspace needs a name")
 	}
@@ -518,7 +506,10 @@ func (w *Workspaces) Create(name string) (Workspace, error) {
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		return Workspace{}, err
 	}
-	workspace := Workspace{Name: name, Path: path, Title: name}
+	workspace := Workspace{Name: name, Path: path, Title: name, Kind: KindRoom}
+	if address := strings.ToLower(strings.TrimSpace(creator)); address != "" {
+		workspace.Members = []Member{{Email: address, Role: RoleOwner}}
+	}
 	if err := w.Add(workspace); err != nil {
 		return Workspace{}, err
 	}
@@ -530,6 +521,12 @@ func (w *Workspaces) Create(name string) (Workspace, error) {
 func (w *Workspaces) Add(workspace Workspace) error {
 	if err := validateWorkspace(workspace); err != nil {
 		return err
+	}
+	// Exactly one owner, and never a guest in a personal room. It is checked here because this is where a record
+	// is born; an update keeps the members it read, so it cannot change how many owners a room has (adopt), and a
+	// file is checked when it is read (loadRegistry).
+	if err := workspace.memberProblem(); err != nil {
+		return fmt.Errorf("workspace %q: %w", workspace.Name, err)
 	}
 	w.mu.Lock()
 	if _, exists := w.registry[workspace.Name]; exists {
@@ -572,8 +569,11 @@ func (w *Workspaces) adopt(workspace Workspace) (Workspace, *Control, bool, erro
 		w.mu.Unlock()
 		return Workspace{}, nil, false, fmt.Errorf("no workspace %q", workspace.Name)
 	}
-	// A record keeps its membership: who a room belongs to is not this call's to change.
+	// A record keeps what it is and who it belongs to: a room's owner and its kind are not this call's to
+	// change, and an update that could rewrite either would be a way to take somebody's room without saying
+	// so, or to make a room un-forgettable.
 	workspace.Members = existing.Members
+	workspace.Kind = existing.Kind
 	workspace.Name = existing.Name
 	w.registry[workspace.Name] = workspace
 	control := w.controls[workspace.Name]
@@ -616,17 +616,23 @@ func (c *Control) discardSandbox(workspacePath string) {
 	}
 }
 
-// Remove forgets a workspace. It never touches the folder or the history, the same way
-// deleting a conversation is a tombstone rather than a delete.
+// Remove forgets a room: it is gone from every rail and refused for every caller, and its folder and its
+// history stay exactly where they are, the same way deleting a conversation is a tombstone rather than a
+// delete. Forget and delete are two acts, and this is the first one (ADR 0034 §6): the second is
+// `acornfall workspace purge`, which needs the record this one takes away.
+//
+// A personal room refuses it. Somebody's own room is never shared and never removed, and the admin who wants
+// one gone can revoke the person, which is a decision with a name.
 func (w *Workspaces) Remove(ctx context.Context, name string) error {
-	if name == PersonalWorkspaceName {
-		return fmt.Errorf("the %s workspace cannot be removed: it is the one this install lands on", PersonalWorkspaceName)
-	}
 	w.mu.Lock()
 	workspace, exists := w.registry[name]
 	if !exists {
 		w.mu.Unlock()
 		return fmt.Errorf("no workspace %q", name)
+	}
+	if workspace.Personal() {
+		w.mu.Unlock()
+		return fmt.Errorf("workspace %q is somebody's own room and cannot be forgotten: a personal room is never shared and never removed", name)
 	}
 	control := w.controls[name]
 	delete(w.registry, name)
@@ -1181,6 +1187,51 @@ func droppedKeys(payload []byte) bool {
 	return false
 }
 
+// OrphanFolders names every folder under the workspaces folder that no record points at: what forgetting a
+// workspace leaves behind, since forgetting unregisters and never deletes (ADR 0034 §6). Doctor names them,
+// so a folder nobody owns is seen once rather than forgotten twice.
+//
+// It reads; nothing is removed here. A folder with no record is just a folder, and whether it should go is
+// its owner's decision rather than a diagnosis.
+func OrphanFolders(registry RegistryFile) ([]string, error) {
+	dir := registry.WorkspacesDir
+	if dir == "" {
+		// A registry written before the folder was recorded, or none at all: the install's own default is
+		// where a workspace would have been made.
+		defaultDir, err := DefaultWorkspacesDir()
+		if err != nil {
+			return nil, err
+		}
+		dir = defaultDir
+	}
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	recorded := make(map[string]bool, len(registry.Workspaces))
+	for _, workspace := range registry.Workspaces {
+		// By path rather than by name: `workspace add` points one at a folder of its choosing, which is
+		// usually outside this folder, and a name is not where a workspace lives.
+		recorded[filepath.Clean(workspace.Path)] = true
+	}
+	orphans := make([]string, 0)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		folder := filepath.Join(dir, entry.Name())
+		if recorded[folder] {
+			continue
+		}
+		orphans = append(orphans, folder)
+	}
+	sort.Strings(orphans)
+	return orphans, nil
+}
+
 // LoadRegistryFile reads a registry, tolerating absence.
 func LoadRegistryFile(path string) (RegistryFile, error) {
 	registry := RegistryFile{Path: path}
@@ -1216,29 +1267,85 @@ func SaveRegistryFile(registry RegistryFile) error {
 	return os.Rename(temp, registry.Path)
 }
 
+// loadRegistry reads the file, brings every record into the shape this build writes, and writes it back
+// once if anything moved.
+//
+// One write, at the end, for the reason a migration that writes as it goes has always been wrong: a run
+// that stops halfway leaves a file that is neither the old shape nor the new one, and every later reader
+// has to guess which half it is looking at (ADR 0034 §8).
 func (w *Workspaces) loadRegistry() error {
 	file, err := LoadRegistryFile(w.registryPath())
 	if err != nil {
 		return err
 	}
-	// Anything the file says that we no longer write is dropped on the way out, once.
-	defer func() {
-		if file.dropped {
-			if err := w.persist(); err != nil {
-				workerpool.Log("rewriting the registry without old keys: %v", err)
-			}
-		}
-	}()
 	for _, workspace := range file.Workspaces {
 		w.registry[workspace.Name] = workspace
 	}
 	if err := w.resolveDir(file.WorkspacesDir); err != nil {
 		return err
 	}
-	if err := w.renameGeneralToPersonal(); err != nil {
+	renamed, err := w.renameGeneralToPersonal()
+	if err != nil {
 		return err
 	}
-	return w.ensurePersonal()
+	created, err := w.ensurePersonal()
+	if err != nil {
+		return err
+	}
+	changed, guessed, ownerless := w.migrateRooms()
+	// Read before it is written: a file that says something this design says is impossible is refused
+	// rather than loaded as if it were possible, and the sentence names the file because the fix is an
+	// edit to it (ADR 0034 §8).
+	if err := w.validateRegistry(file.Path); err != nil {
+		return err
+	}
+	sayMigration(guessed, ownerless)
+	return w.writeBack(renamed || created || changed || file.dropped, created)
+}
+
+// sayMigration is what the load says out loud about the records it decided for: a guess about an address list,
+// and a room it could not give an owner. Both are sentences rather than silence, because a migration that
+// arranged somebody's rooms without saying so is a change nobody can audit (ADR 0034 §8).
+func sayMigration(guessed, ownerless []string) {
+	for _, name := range guessed {
+		workerpool.Log("workspaces: %q named more than one address and no roles, so this is a guess: the first is its owner and the rest are guests", name)
+	}
+	for _, name := range ownerless {
+		workerpool.Log("workspaces: %q has no members and no admin is claimed, so it has no owner yet", name)
+	}
+}
+
+// writeBack stores the registry the load brought into shape, once.
+func (w *Workspaces) writeBack(moved, firstRun bool) error {
+	if !moved {
+		return nil
+	}
+	if err := w.persist(); err != nil {
+		// A file that was read and could not be written back is read again next start, with the records it has;
+		// losing every workspace because the disk was full is the worse failure of the two. The first run is the
+		// exception: an install that cannot record its own room has nothing to open, and says so.
+		if !firstRun {
+			workerpool.Log("rewriting the workspace registry: %v", err)
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// validateRegistry refuses a registry that cannot mean what it says: a personal room with a guest in it, a
+// room with two owners, or a member whose role is neither.
+func (w *Workspaces) validateRegistry(path string) error {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	// Sorted, so a file with two broken rooms always reports the same one: the registry is a map, and a
+	// map's iteration order is not a decision.
+	for _, name := range slices.Sorted(maps.Keys(w.registry)) {
+		if err := w.registry[name].memberProblem(); err != nil {
+			return fmt.Errorf("%s: room %q: %w", path, name, err)
+		}
+	}
+	return nil
 }
 
 // resolveDir decides where workspaces live: the flag for this run, then what the file recorded,
@@ -1277,75 +1384,42 @@ const oldWorkspaceName = "general"
 // `<data-dir>/state/<name>/`, so a rename that moved the record and left the folder would present every
 // conversation as lost — which is what ADR 0011's first attempt at moving one of those files did, one
 // directory down.
-func (w *Workspaces) renameGeneralToPersonal() error {
+func (w *Workspaces) renameGeneralToPersonal() (bool, error) {
 	w.mu.Lock()
 	legacy, found := w.registry[oldWorkspaceName]
 	_, taken := w.registry[PersonalWorkspaceName]
 	w.mu.Unlock()
 	switch {
 	case !found:
-		return nil
+		return false, nil
 	case taken:
 		// Both names exist: a registry somebody edited, or an install that made the new one already. Nothing
 		// is moved, because guessing which of the two holds the real history is how a transcript is lost.
 		workerpool.Log("workspaces: %q and %q both exist, so nothing was renamed; %q is kept as an ordinary workspace", oldWorkspaceName, PersonalWorkspaceName, oldWorkspaceName)
-		return nil
+		return false, nil
 	}
 	if err := w.moveState(oldWorkspaceName, PersonalWorkspaceName); err != nil {
-		return err
+		return false, err
 	}
 	w.mu.Lock()
 	legacy.Name = PersonalWorkspaceName
 	legacy.Title = "Personal"
-	if len(legacy.Members) == 0 && strings.TrimSpace(w.opts.AdminEmail) != "" {
-		legacy.Members = []string{strings.ToLower(strings.TrimSpace(w.opts.AdminEmail))}
-	}
+	legacy.Kind = KindPersonal
 	delete(w.registry, oldWorkspaceName)
 	w.registry[PersonalWorkspaceName] = legacy
 	w.mu.Unlock()
 	workerpool.Log("workspaces: renamed %q to %q, with its state folder", oldWorkspaceName, PersonalWorkspaceName)
-	return w.persist()
+	return true, nil
 }
 
-// ownerMembers is the admin's address as a membership list, when this install knows who the admin is and there are
-// people at all. An install with no book keeps an empty list, which is the same meaning: a room with at most one
-// member is somebody's own.
-func (w *Workspaces) ownerMembers() []string {
+// ownerMembers is the admin's address as the install's own room, when this install knows who the admin is. An
+// install with no book keeps an empty list: nobody is named in it yet, and the room is the machine's.
+func (w *Workspaces) ownerMembers() []Member {
 	admin := strings.ToLower(strings.TrimSpace(w.opts.AdminEmail))
 	if admin == "" {
 		return nil
 	}
-	return []string{admin}
-}
-
-// nameTheAdminsOwnRoom gives the install's own workspace its member, once, on installs that were created before
-// there were people. The derived rule above treats "no members" and "one member" the same, so this is a migration
-// of the record rather than a fix for a behaviour: it is what makes the membership list the whole truth.
-func (w *Workspaces) nameTheAdminsOwnRoom() error {
-	admin := strings.ToLower(strings.TrimSpace(w.opts.AdminEmail))
-	if admin == "" {
-		return nil
-	}
-	w.mu.Lock()
-	changed := false
-	for name, workspace := range w.registry {
-		if len(workspace.Members) != 0 {
-			continue
-		}
-		// Only the install's own room: a workspace somebody made and has not shared yet is theirs to share or
-		// remove, and naming the admin as its member would hand it over.
-		if name != PersonalWorkspaceName {
-			continue
-		}
-		workspace.Members = []string{admin}
-		w.registry[name] = workspace
-		changed = true
-	}
-	w.mu.Unlock()
-	if !changed {
-		return nil
-	}
-	return w.persist()
+	return []Member{{Email: admin, Role: RoleOwner}}
 }
 
 // moveState renames one workspace's state folder. One rename, so it either happened or it did not; a folder
@@ -1367,34 +1441,30 @@ func (w *Workspaces) moveState(from, to string) error {
 	return os.Rename(source, target)
 }
 
-// ensurePersonal makes the install's own workspace on a first run, then repairs a registry that was
-// hand-edited into two: exactly one workspace is the install's own.
-func (w *Workspaces) ensurePersonal() error {
-	if _, ok := w.registry[PersonalWorkspaceName]; !ok {
-		// First run: the install's own workspace is a workspace like any other, created in the
-		// workspaces folder under its own name. An install that has one already keeps it where it was,
-		// because the registry says where it is.
-		absolute, err := filepath.Abs(filepath.Join(w.dir, PersonalWorkspaceName))
-		if err != nil {
-			return err
-		}
-		if err := os.MkdirAll(absolute, 0o755); err != nil {
-			return err
-		}
-		w.registry[PersonalWorkspaceName] = Workspace{
-			Name:    PersonalWorkspaceName,
-			Path:    absolute,
-			Title:   filepath.Base(absolute),
-			Members: w.ownerMembers(),
-		}
-		if err := w.persist(); err != nil {
-			return err
-		}
+// ensurePersonal makes the install's own room on a first run, and says whether it did. It is personal by
+// kind, not merely by name: the record is what Personal() answers from, and the load writes the file once.
+func (w *Workspaces) ensurePersonal() (bool, error) {
+	if _, ok := w.registry[PersonalWorkspaceName]; ok {
+		return false, nil
 	}
-	if err := w.nameTheAdminsOwnRoom(); err != nil {
-		return err
+	// First run: the install's own workspace is a workspace like any other, created in the
+	// workspaces folder under its own name. An install that has one already keeps it where it was,
+	// because the registry says where it is.
+	absolute, err := filepath.Abs(filepath.Join(w.dir, PersonalWorkspaceName))
+	if err != nil {
+		return false, err
 	}
-	return nil
+	if err := os.MkdirAll(absolute, 0o755); err != nil {
+		return false, err
+	}
+	w.registry[PersonalWorkspaceName] = Workspace{
+		Name:    PersonalWorkspaceName,
+		Path:    absolute,
+		Title:   filepath.Base(absolute),
+		Kind:    KindPersonal,
+		Members: w.ownerMembers(),
+	}
+	return true, nil
 }
 
 // persist writes the registry: the folder it records, and every workspace in it. It is the file
@@ -1408,33 +1478,6 @@ func (w *Workspaces) persist() error {
 	}
 	w.mu.RUnlock()
 	return SaveRegistryFile(file)
-}
-
-// nameTheAdminsWorkspaces gives an unnamed workspace to the install's admin.
-//
-// Before there were people, every conversation in this registry was the admin's, so this records a fact
-// rather than making a grant. Without it, the first boot with a door would hide every existing workspace
-// from the person at the keyboard — the one outcome nobody would guess from an upgrade.
-func (w *Workspaces) nameTheAdminsWorkspaces() error {
-	admin := strings.ToLower(strings.TrimSpace(w.opts.AdminEmail))
-	if admin == "" {
-		return nil
-	}
-	w.mu.Lock()
-	changed := false
-	for name, workspace := range w.registry {
-		if len(workspace.Members) > 0 {
-			continue
-		}
-		workspace.Members = []string{admin}
-		w.registry[name] = workspace
-		changed = true
-	}
-	w.mu.Unlock()
-	if !changed {
-		return nil
-	}
-	return w.persist()
 }
 
 // migrate moves a single-workspace install onto the workspace layout: one storage and one
