@@ -179,6 +179,15 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		},
 		role: "owner",
 		admin: true,
+		// The book is read when the People page is opened, and it is the admin's: a story about that page
+		// hands it records.
+		people: undefined,
+		peopleLoading: false,
+		addPerson: noop,
+		revokePerson: noop,
+		restorePerson: noop,
+		setPersonCanCreate: noop,
+		setPersonModels: noop,
 		connection: "live",
 		clearFailure: noop,
 		reload: noop,

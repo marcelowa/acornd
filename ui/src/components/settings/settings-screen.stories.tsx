@@ -3,6 +3,7 @@ import type { ProviderSummary } from "@/app/view-models";
 import { Stack } from "@/components/layout/stack";
 import { Picker } from "@/components/composer/picker";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { PeopleSection } from "./people-section";
 import { ProvidersSection } from "./providers-section";
 import { RemoteSection } from "./remote-section";
 import { SettingsScreen } from "./settings-screen";
@@ -145,6 +146,17 @@ export const Default: Story = {
 		),
 		install,
 		remote: <RemoteSection onApply={noop} />,
+		people: (
+			<PeopleSection
+				people={[]}
+				onAdd={noop}
+				onRevoke={noop}
+				onRestore={noop}
+				onSetCanCreate={noop}
+				onSetModels={noop}
+			/>
+		),
+		admin: true,
 		version: "v0.9.2",
 		onClose: noop,
 	},
@@ -163,6 +175,64 @@ export const Remote: Story = {
 /** Each page has its own URL: the providers page. */
 export const Providers: Story = {
 	args: { ...Default.args, tab: "providers" },
+};
+
+/**
+ * The People page: the admin's, and it is in the bar only for the admin. Who may use this install, what they
+ * may run, and whether they may lead a room of their own (ADR 0034 §1, §3).
+ */
+export const People: Story = {
+	args: {
+		...Default.args,
+		tab: "people",
+		people: (
+			<PeopleSection
+				people={[
+					{
+						email: "me@example.com",
+						name: "Marcelo",
+						role: "admin",
+						state: "active",
+						models: [],
+						canCreate: true,
+						created: "2026-09-01",
+						lastSeen: "2026-10-31",
+					},
+					{
+						email: "ana@example.com",
+						name: "Ana Silva",
+						role: "member",
+						state: "active",
+						models: ["opencode-go/deepseek-v4.1-flash"],
+						canCreate: true,
+						created: "2026-10-02",
+						lastSeen: "2026-10-30",
+					},
+					{
+						email: "bo@example.com",
+						role: "member",
+						state: "invited",
+						models: [],
+						canCreate: false,
+						created: "2026-10-28",
+					},
+				]}
+				onAdd={noop}
+				onRevoke={noop}
+				onRestore={noop}
+				onSetCanCreate={noop}
+				onSetModels={noop}
+			/>
+		),
+	},
+};
+
+/**
+ * A member's settings: the People tab is not in the bar at all, and a link to its address lands on the
+ * install page rather than on a page with no tab selected.
+ */
+export const PeopleForAMember: Story = {
+	args: { ...Default.args, tab: "people", admin: false },
 };
 
 /** The secrets page lists names and descriptions; a value is never shown. */

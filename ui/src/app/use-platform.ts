@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	abortConversation,
 	addMember,
+	addPerson as addPersonRequest,
 	applyRemote,
 	checkRemote as checkRemoteRequest,
 	fetchProviderAllowlist,
@@ -17,6 +18,7 @@ import {
 	compactConversation,
 	createConversation as createConversationRequest,
 	fetchCompactPreview,
+	fetchPeople,
 	fetchUpdateStatus,
 	createWorkspace as createWorkspaceRequest,
 	fetchCommands,
@@ -28,6 +30,8 @@ import {
 	openStream,
 	refreshProviders,
 	removeMember,
+	restorePerson as restorePersonRequest,
+	revokePerson as revokePersonRequest,
 	removeWorkspace as removeWorkspaceRequest,
 	restartUpdate,
 	renameConversation,
@@ -39,6 +43,8 @@ import {
 	setDefaultAgent,
 	setDefaultModel,
 	setDefaultThinking,
+	setPersonCanCreate as setPersonCanCreateRequest,
+	setPersonModels as setPersonModelsRequest,
 	setUpdatePrefs as saveUpdatePrefs,
 	startProviderLogin,
 	type UploadedAttachment,
@@ -76,6 +82,7 @@ import {
 	toMembers,
 	toModelChoices,
 	toModelGroups,
+	toPeople,
 	toProviders,
 	toRights,
 	toRoomRole,
@@ -90,6 +97,7 @@ import type {
 	ChoicePicker,
 	ConversationSummary,
 	EngineSummary,
+	PersonSummary,
 	PickerGroup,
 	ProviderSummary,
 	RoomRights,
@@ -105,6 +113,7 @@ import { shownDraft } from "./draft";
 import type {
 	WireDraft,
 	WireDraftAttachment,
+	WirePerson,
 	WireResolvedAgent,
 	WireSecretEvent,
 	WireSender,
@@ -145,9 +154,9 @@ export type Screen = "conversation" | "settings" | "update";
  * page: what runs and how it keeps itself current, the defaults a new conversation starts from,
  * and the theme. The old `defaults`, `updates` and `install` pages kept no redirect — the
  * release page has its own address now, and an unknown page lands on general. */
-export type SettingsTab = "general" | "providers" | "secrets" | "remote";
+export type SettingsTab = "general" | "providers" | "secrets" | "people" | "remote";
 
-const SETTINGS_TABS: SettingsTab[] = ["general", "providers", "secrets", "remote"];
+const SETTINGS_TABS: SettingsTab[] = ["general", "providers", "secrets", "people", "remote"];
 
 function settingsTabFrom(segment: string | undefined): SettingsTab {
 	return SETTINGS_TABS.includes(segment as SettingsTab) ? (segment as SettingsTab) : "general";
@@ -241,6 +250,11 @@ function read<T>(key: string, fallback: T): T {
 	}
 }
 
+/** What a refusal said, as a page shows it: the gateway writes sentences, and a status code is not one. */
+function messageOf(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
 /** Sort key for the rail: newest first, undated last. */
 function timeOf(updatedAt: Date | undefined): number {
 	return updatedAt instanceof Date ? updatedAt.getTime() : Number.NEGATIVE_INFINITY;
@@ -248,6 +262,13 @@ function timeOf(updatedAt: Date | undefined): number {
 
 /** A login in flight is the dialog's whole state, folded in `auth-flow.ts`. */
 export type { AuthFlow } from "./auth-flow";
+
+/** The book of people as the admin's page reads it: the records, and what a list may be narrowed to. */
+export interface PeopleBook {
+	people: PersonSummary[];
+	/** Every provider and model this install has, never the narrowed list: a list is widened from all. */
+	catalog: ProviderCatalogEntry[];
+}
 
 export interface Platform {
 	ready: boolean;
@@ -269,6 +290,21 @@ export interface Platform {
 	role?: RoomRole | undefined;
 	/** The install's role, not the room's: it is what shows the People page (ADR 0034 §1). */
 	admin: boolean;
+	/** The book of people, for the admin's page; undefined until that page is opened. */
+	people?: PeopleBook | undefined;
+	/** The first read of the book is in flight. */
+	peopleLoading: boolean;
+	/** The last thing the book refused, in its own words: shown on the page it was asked from. */
+	peopleFailure?: string | undefined;
+	/** Name somebody. They are invited until they sign in. */
+	addPerson: (input: { email: string; name: string }) => void;
+	/** Take access away; their name stays in every room. */
+	revokePerson: (email: string) => void;
+	/** Put a revoked person back. */
+	restorePerson: (email: string) => void;
+	setPersonCanCreate: (email: string, canCreate: boolean) => void;
+	/** What they may choose; an empty list is every model. */
+	setPersonModels: (email: string, models: string[]) => void;
 	conversations: ConversationSummary[];
 	deleted: ConversationSummary[];
 	/** The workspaces, with the one in view marked. */
@@ -1410,6 +1446,72 @@ export function usePlatform(): Platform {
 		};
 	}, []);
 
+	// The book of people. It is the admin's file, not the room's, so it does not ride the state stream: it is
+	// read when the page that shows it is opened, and every write answers the whole document, so a write's
+	// answer is the next render and no second read is needed (people.go, ADR 0032 §3).
+	const [peopleBook, setPeopleBook] = useState<PeopleBook | undefined>(undefined);
+	const [peopleLoading, setPeopleLoading] = useState(false);
+	const [peopleFailure, setPeopleFailure] = useState<string | undefined>(undefined);
+	const admin = state?.admin === true;
+	useEffect(() => {
+		if (route.screen !== "settings" || route.settingsTab !== "people" || !admin) return;
+		let cancelled = false;
+		setPeopleLoading(true);
+		setPeopleFailure(undefined);
+		void Promise.all([fetchPeople(), fetchProviderCatalog()])
+			.then(
+				([people, catalog]) => {
+					if (cancelled) return;
+					setPeopleBook({ people: toPeople(people), catalog });
+				},
+				(cause: unknown) => {
+					// A page that cannot read the book says so where the book would be, in the gateway's
+					// words: the People tab is the admin's, and a 403 here is the install saying no.
+					if (!cancelled) setPeopleFailure(messageOf(cause));
+				},
+			)
+			.finally(() => {
+				if (!cancelled) setPeopleLoading(false);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [route.screen, route.settingsTab, admin]);
+
+	/** One write on the book: its answer is the whole document, and a refusal is the page's own sentence. */
+	const writeBook = useCallback((request: Promise<WirePerson[]>): void => {
+		void request.then(
+			(people) => {
+				setPeopleBook((current) =>
+					current === undefined ? current : { ...current, people: toPeople(people) },
+				);
+				setPeopleFailure(undefined);
+			},
+			(cause: unknown) => setPeopleFailure(messageOf(cause)),
+		);
+	}, []);
+	const addPerson = useCallback(
+		(input: { email: string; name: string }) => writeBook(addPersonRequest(input)),
+		[writeBook],
+	);
+	const revokePerson = useCallback(
+		(email: string) => writeBook(revokePersonRequest(email)),
+		[writeBook],
+	);
+	const restorePerson = useCallback(
+		(email: string) => writeBook(restorePersonRequest(email)),
+		[writeBook],
+	);
+	const setPersonCanCreate = useCallback(
+		(email: string, canCreate: boolean) =>
+			writeBook(setPersonCanCreateRequest(email, canCreate)),
+		[writeBook],
+	);
+	const setPersonModels = useCallback(
+		(email: string, models: string[]) => writeBook(setPersonModelsRequest(email, models)),
+		[writeBook],
+	);
+
 	const [remote, setRemote] = useState<RemoteStatus | undefined>(undefined);
 	const [remoteFailure, setRemoteFailure] = useState<string | undefined>(undefined);
 	const [remoteBusy, setRemoteBusy] = useState(false);
@@ -1610,7 +1712,15 @@ export function usePlatform(): Platform {
 		workerError: state?.workerError,
 		can,
 		role: toRoomRole(state?.role),
-		admin: state?.admin === true,
+		admin,
+		people: peopleBook,
+		peopleLoading,
+		peopleFailure,
+		addPerson,
+		revokePerson,
+		restorePerson,
+		setPersonCanCreate,
+		setPersonModels,
 		steerable: state?.capabilities.steer ?? false,
 		model,
 		thinking,

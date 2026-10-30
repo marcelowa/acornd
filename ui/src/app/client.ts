@@ -5,6 +5,8 @@ import type {
 	WireDraft,
 	WireDraftAttachment,
 	WireFrame,
+	WirePeople,
+	WirePerson,
 	WireSecretEvent,
 	WireSender,
 	WireState,
@@ -36,6 +38,59 @@ export async function fetchWorkspaceStatus(workspace: string): Promise<WireWorks
 	const response = await fetch(workspacePath(workspace, "/status"));
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
 	return (await response.json()) as WireWorkspaceStatus;
+}
+
+/* ---------- the book of people ---------- */
+
+/**
+ * The book, as every People route answers it: one document, after whatever the request changed. That is
+ * deliberate — a list refetched between a write and a read could show a state that never existed — so the
+ * write's answer is the page's next render and no second request is needed.
+ *
+ * These routes are the install's own: a person is refused with a 403 before a handler runs, and the tab that
+ * shows the page is only drawn for the admin (ADR 0032 §3, ADR 0034 §1).
+ */
+async function peopleRequest(path: string, method: string, body?: unknown): Promise<WirePerson[]> {
+	const init: RequestInit = { method };
+	if (body !== undefined) {
+		init.headers = { "content-type": "application/json" };
+		init.body = JSON.stringify(body);
+	}
+	const response = await fetch(path, init);
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	return ((await response.json()) as WirePeople).people;
+}
+
+/** Who may use this install, and what they may do on it. */
+export function fetchPeople(): Promise<WirePerson[]> {
+	return peopleRequest("/api/people", "GET");
+}
+
+/** Name somebody. Their record is invited until they first sign in. */
+export function addPerson(input: { email: string; name: string }): Promise<WirePerson[]> {
+	return peopleRequest("/api/people", "POST", input);
+}
+
+/** Take somebody's access away. Their name stays in every room, so restoring them puts them back. */
+export function revokePerson(email: string): Promise<WirePerson[]> {
+	return peopleRequest(`/api/people/${encodeURIComponent(email)}/revoke`, "POST");
+}
+
+/** Put a revoked person back: active if they had signed in, invited if they never did. */
+export function restorePerson(email: string): Promise<WirePerson[]> {
+	return peopleRequest(`/api/people/${encodeURIComponent(email)}/restore`, "POST");
+}
+
+/** What somebody may run. An empty list is every model, which is what the book means by no list. */
+export function setPersonModels(email: string, models: string[]): Promise<WirePerson[]> {
+	return peopleRequest(`/api/people/${encodeURIComponent(email)}/models`, "POST", { models });
+}
+
+/** May they lead a room of their own (ADR 0034 §3). */
+export function setPersonCanCreate(email: string, canCreate: boolean): Promise<WirePerson[]> {
+	return peopleRequest(`/api/people/${encodeURIComponent(email)}/can_create`, "POST", {
+		can_create: canCreate,
+	});
 }
 
 /** One piece of the door: what the apply did with it, and what it is. */

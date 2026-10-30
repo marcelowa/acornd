@@ -51,6 +51,12 @@ test("the secrets page is its own setting", () => {
 	expect(routeFromUrl("/settings/secrets", "?workspace=spikes").settingsTab).toBe("secrets");
 });
 
+// The People page is the admin's, and its address is still an address: a link to it parses, and the screen
+// decides who may see it (ADR 0034 §1).
+test("the people page is its own setting", () => {
+	expect(routeFromUrl("/settings/people", "?workspace=spikes").settingsTab).toBe("people");
+});
+
 test("an unknown settings page lands on general", () => {
 	expect(routeFromUrl("/settings/nope", "").settingsTab).toBe("general");
 });

@@ -18,6 +18,7 @@ import { UpdatesSection } from "@/components/release/updates-section";
 import { ReleaseMark } from "@/components/release/release-mark";
 import { ReleaseScreen } from "@/components/release/release-screen";
 import { ProviderModelsDialog } from "@/components/settings/provider-models-dialog";
+import { PeopleSection } from "@/components/settings/people-section";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { RemoteSection } from "@/components/settings/remote-section";
 import { SecretsSection } from "@/components/settings/secrets-section";
@@ -541,6 +542,22 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		/>
 	);
 
+	// The book of people: the admin's page. The tab that holds it is drawn only for the admin, so this is
+	// never rendered for a member — and the gateway refuses the routes either way (ADR 0034 §1).
+	const people = (
+		<PeopleSection
+			people={platform.people?.people}
+			catalog={platform.people?.catalog}
+			loading={platform.peopleLoading}
+			failure={platform.peopleFailure}
+			onAdd={platform.addPerson}
+			onRevoke={platform.revokePerson}
+			onRestore={platform.restorePerson}
+			onSetCanCreate={platform.setPersonCanCreate}
+			onSetModels={platform.setPersonModels}
+		/>
+	);
+
 	const providers = (
 		<ProvidersSection
 			providers={platform.providers}
@@ -589,6 +606,8 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 				secrets={secrets}
 				install={install}
 				remote={remote}
+				people={people}
+				admin={platform.admin}
 				version={platform.update?.current}
 				onClose={() => platform.showScreen("conversation")}
 			/>

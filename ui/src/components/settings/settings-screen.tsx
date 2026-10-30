@@ -28,6 +28,10 @@ export interface SettingsScreenProps {
 	install: ReactNode;
 	/** The remote-access section: the hostname, the token, and what the apply did. */
 	remote: ReactNode;
+	/** The book of people: who may use this install. The admin's page, and nobody else's. */
+	people: ReactNode;
+	/** The install's role, not the room's: it is what puts the People page in the bar (ADR 0034 §1). */
+	admin?: boolean | undefined;
 	/** The running build, when the gateway answered: shown under the title. */
 	version?: string | undefined;
 	/** Back to the conversation that was in view. */
@@ -55,9 +59,14 @@ export function SettingsScreen({
 	secrets,
 	install,
 	remote,
+	people,
+	admin = false,
 	version,
 	onClose,
 }: SettingsScreenProps) {
+	// A link to the admin's page, opened by somebody who is not the admin, lands on the install page:
+	// the tab is not drawn for them, and a page with no tab selected is a page with no way back.
+	const page = tab === "people" && !admin ? "general" : tab;
 	return (
 		<div data-slot="settings-screen" className="min-h-0 flex-1 overflow-y-auto">
 			<Measure size="page" padding="lg">
@@ -84,9 +93,14 @@ export function SettingsScreen({
 					</Stack>
 
 					<Tabs
-						value={tab}
+						value={page}
 						onValueChange={(next) => {
-							if (next === "general" || next === "providers" || next === "secrets")
+							if (
+								next === "general" ||
+								next === "providers" ||
+								next === "secrets" ||
+								next === "people"
+							)
 								onTabChange(next);
 						}}
 					>
@@ -94,11 +108,13 @@ export function SettingsScreen({
 							<TabsTrigger value="general">General</TabsTrigger>
 							<TabsTrigger value="providers">Providers</TabsTrigger>
 							<TabsTrigger value="secrets">Secrets</TabsTrigger>
+							{/* Only the admin's: a person manages rooms, never the install. */}
+							{admin ? <TabsTrigger value="people">People</TabsTrigger> : null}
 							<TabsTrigger value="remote">Remote</TabsTrigger>
 						</TabsList>
 					</Tabs>
 
-					{tab === "general" ? (
+					{page === "general" ? (
 						<>
 							{/* The install's own facts first: what runs, and how it keeps itself current. */}
 							{install}
@@ -145,9 +161,10 @@ export function SettingsScreen({
 						</>
 					) : null}
 
-					{tab === "providers" ? providers : null}
-					{tab === "secrets" ? secrets : null}
-					{tab === "remote" ? remote : null}
+					{page === "providers" ? providers : null}
+					{page === "secrets" ? secrets : null}
+					{page === "people" ? people : null}
+					{page === "remote" ? remote : null}
 				</Stack>
 			</Measure>
 		</div>
