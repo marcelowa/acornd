@@ -152,3 +152,28 @@ func TestAGuestMayCompactButMayNotReset(t *testing.T) {
 		t.Errorf("a guest could not compact: %v", err)
 	}
 }
+
+// The state carries the answer so the interface disables what a caller may not change, instead of reading a role
+// out of a name and deciding for itself (ADR 0034 §4).
+func TestTheStateSaysWhatACallerMayChange(t *testing.T) {
+	room := Workspace{
+		Name: "house", Kind: KindRoom,
+		Members: []Member{
+			{Email: "me@example.com", Role: RoleOwner},
+			{Email: "ana@example.com", Role: RoleGuest},
+		},
+	}
+	ctl := &Control{opts: Options{Workspace: room}}
+
+	owner := ctl.stateLocked(Caller{Email: "me@example.com"}, stateParts{})
+	if owner.Role != "owner" || !owner.Can.Model || !owner.Can.Create || !owner.Can.Administer {
+		t.Errorf("the owner's state is %+v, role %q", owner.Can, owner.Role)
+	}
+	guest := ctl.stateLocked(Caller{Email: "ana@example.com"}, stateParts{})
+	if guest.Role != "guest" {
+		t.Errorf("the guest's role = %q", guest.Role)
+	}
+	if guest.Can.Model || guest.Can.Create || guest.Can.Fork || guest.Can.Hide || guest.Can.Rename || guest.Can.Administer {
+		t.Errorf("the guest may change something: %+v", guest.Can)
+	}
+}

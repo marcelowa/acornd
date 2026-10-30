@@ -128,6 +128,44 @@ type WorkspaceState struct {
 	Error  string `json:"error,omitempty"`
 }
 
+// workspaceStateOf is one record as the interface reads it, in the state and in the listing (Views has the
+// same mapping for a list; this one is the active room, and the two must not disagree).
+func workspaceStateOf(workspace Workspace, running bool) WorkspaceState {
+	return WorkspaceState{
+		Name:     workspace.Name,
+		Path:     workspace.Path,
+		Title:    workspace.Title,
+		Personal: workspace.Personal(),
+		Kind:     workspace.Kind,
+		Members:  workspace.Members,
+		Running:  running,
+	}
+}
+
+// canIn is the state's copy of the permission table, so the interface disables a control instead of reading a
+// role out of a name.
+func canIn(workspace Workspace, caller Caller) Can {
+	return Can{
+		Create:     workspace.May(caller, ActionCreate),
+		Fork:       workspace.May(caller, ActionFork),
+		Hide:       workspace.May(caller, ActionHide),
+		Rename:     workspace.May(caller, ActionRename),
+		Model:      workspace.May(caller, ActionModel),
+		Administer: workspace.May(caller, ActionAdminister),
+	}
+}
+
+// Can is what the caller may change in this room, so the interface disables what it may not instead of
+// inferring a role from a control's name. It is the state's copy of the one table, `Workspace.May`.
+type Can struct {
+	Create     bool `json:"create"`
+	Fork       bool `json:"fork"`
+	Hide       bool `json:"hide"`
+	Rename     bool `json:"rename"`
+	Model      bool `json:"model"`
+	Administer bool `json:"administer"`
+}
+
 // Inherited reports which fields the active conversation left to the defaults.
 type Inherited struct {
 	Model    bool `json:"model"`
@@ -172,6 +210,10 @@ type State struct {
 	// state so every machine shows the same half-thought in the composer, and so a reload
 	// lands on what was typed a second ago rather than on an empty card.
 	Draft *Draft `json:"draft,omitempty"`
+	// Can is what this caller may change here, and Role is what they are in the room. A guest sees the model
+	// and the agent with their values and cannot pick another (ADR 0034 §4).
+	Can  Can    `json:"can"`
+	Role string `json:"role,omitempty"`
 	// WorkerUp is false when the harness process is gone. Without it a dead backend is
 	// indistinguishable from an idle one, because everything here is served from cache.
 	WorkerUp    bool   `json:"workerUp"`
@@ -576,14 +618,11 @@ func (c *Control) conversationInputs(active string) (resolveInputs, bool) {
 // stateLocked assembles the snapshot for one caller. The caller holds the read lock.
 func (c *Control) stateLocked(caller Caller, parts stateParts) State {
 	active := parts.active
+	workspace := c.opts.Workspace
 	state := State{
-		Workspace: WorkspaceState{
-			Name:     c.opts.Workspace.Name,
-			Path:     c.opts.Workspace.Path,
-			Title:    c.opts.Workspace.Title,
-			Personal: c.opts.Workspace.Personal(),
-			Running:  c.workerUp,
-		},
+		Workspace:     workspaceStateOf(workspace, c.workerUp),
+		Role:          string(workspace.RoleOf(caller.Email)),
+		Can:           canIn(workspace, caller),
 		Workspaces:    parts.workspaces,
 		WorkspacesDir: c.opts.WorkspacesDir,
 		Engines:       c.engineList(),

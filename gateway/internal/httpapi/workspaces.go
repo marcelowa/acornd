@@ -90,7 +90,34 @@ func (b workspaceBody) apply(workspace control.Workspace) control.Workspace {
 	return workspace
 }
 
+// mayMakeRoom is `can_create`: the admin makes rooms always, and a member only when their record says so. A
+// room is the only thing there is to share, so the permission is the install's answer to "may this person lead
+// one", not a room role (ADR 0034 §3).
+func (s *Server) mayMakeRoom(w http.ResponseWriter, r *http.Request) bool {
+	caller := callerOf(r)
+	if caller.Admin {
+		return true
+	}
+	if caller.Email == "" || s.gate.People == nil {
+		http.Error(w, "only the install's admin may make rooms here", http.StatusForbidden)
+		return false
+	}
+	person, found, err := s.gate.People.Find(caller.Email)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return false
+	}
+	if !found || !person.CanCreate {
+		http.Error(w, "this install does not let you make rooms: ask its admin to allow it", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
 func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
+	if !s.mayMakeRoom(w, r) {
+		return
+	}
 	var body workspaceBody
 	if !decode(w, r, &body) {
 		return
@@ -125,7 +152,7 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.listing())
+	writeJSON(w, http.StatusOK, s.listingFor(callerOf(r)))
 }
 
 func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {

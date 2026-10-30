@@ -542,3 +542,29 @@ func TestARoleWrittenBeforeTheRenameLoads(t *testing.T) {
 		t.Errorf("the write did not put the new names back:\n%s", payload)
 	}
 }
+
+// A member may make rooms of their own until the admin says otherwise: a room somebody owns is the only thing
+// there is to share, so a person who cannot make one can never lead a room (ADR 0034 §3).
+func TestANewMemberMayMakeRoomsUntilTheAdminSaysNo(t *testing.T) {
+	opened := book(t)
+	if _, err := opened.Claim("me@example.com", "Me"); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	added, err := opened.Add("ana@example.com", "Ana")
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if !added.CanCreate {
+		t.Error("a new member cannot make a room")
+	}
+	narrowed, err := opened.SetCanCreate("ana@example.com", false)
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	if narrowed.CanCreate {
+		t.Error("the record still allows a room")
+	}
+	if _, err := opened.SetCanCreate("me@example.com", false); err == nil {
+		t.Error("the admin was narrowed")
+	}
+}

@@ -318,11 +318,14 @@ func (b *Book) Add(email, name string) (Person, error) {
 		}
 	}
 	added := Person{
-		Email:   address,
-		Name:    strings.TrimSpace(name),
-		Role:    RoleMember,
-		State:   Invited,
-		Created: b.today(),
+		Email: address,
+		Name:  strings.TrimSpace(name),
+		Role:  RoleMember,
+		State: Invited,
+		// A member may make a room of their own unless the admin says otherwise: a room somebody owns is the
+		// only thing there is to share, so a person who cannot make one can never lead a room (ADR 0034 §3).
+		CanCreate: true,
+		Created:   b.today(),
 	}
 	if err := b.write(append(records, added)); err != nil {
 		return Person{}, err
@@ -386,6 +389,36 @@ func (b *Book) SetModels(email string, models []string) (Person, error) {
 			return Person{}, errors.New("the admin runs any model this install has: there is nobody to narrow it")
 		}
 		records[index].Models = cleaned
+		if err := b.write(records); err != nil {
+			return Person{}, err
+		}
+		return records[index], nil
+	}
+	return Person{}, ErrUnknown{Email: address}
+}
+
+// SetCanCreate says whether a member may make rooms of their own. The admin's own answer is always yes, so
+// narrowing it would be a field that does nothing.
+func (b *Book) SetCanCreate(email string, can bool) (Person, error) {
+	address, err := address(email)
+	if err != nil {
+		return Person{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	release, records, err := b.lock()
+	if err != nil {
+		return Person{}, err
+	}
+	defer release()
+	for index := range records {
+		if records[index].Email != address {
+			continue
+		}
+		if records[index].Role == RoleAdmin {
+			return Person{}, errors.New("the admin makes rooms: there is nobody to narrow it")
+		}
+		records[index].CanCreate = can
 		if err := b.write(records); err != nil {
 			return Person{}, err
 		}

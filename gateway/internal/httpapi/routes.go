@@ -28,6 +28,7 @@ func (s *Server) Handler() http.Handler {
 	s.updateRoutes(mux)
 	s.secretRoutes(mux)
 	s.workspaceRoutes(mux)
+	s.peopleRoutes(mux)
 	s.pageRoutes(mux)
 	// The client's own assets, and nothing else. Every URL the interface routes is registered
 	// above — the whole /settings subtree, one page per conversation and per workspace, the
@@ -123,7 +124,7 @@ func (s *Server) workspaceRoutes(mux *http.ServeMux) {
 	// Making and re-making a workspace is the install's own business: creation becomes a member's when
 	// `can_create` is wired, and not before. Forgetting one is the room's owner's, not the install's: owning
 	// the machine does not mean reading, or ending, somebody's room (ADR 0034 §3, §6).
-	mux.HandleFunc("POST /api/workspaces", s.admin(s.workspaceCreate))
+	mux.HandleFunc("POST /api/workspaces", s.workspaceCreate)
 	mux.HandleFunc("POST /api/workspaces/{ws}/update", s.admin(s.workspaceUpdate))
 	mux.HandleFunc("POST /api/workspaces/{ws}/remove", s.workspaceRemove)
 	// A room's members: its owner invites and removes, and a guest may leave. The book is the edge's, so the
