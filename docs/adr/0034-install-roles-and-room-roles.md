@@ -1,6 +1,6 @@
 # ADR 0034 — Install roles and room roles
 
-Status: accepted (2026-10-31), built; the route-level permission tests are still owed
+Status: accepted (2026-10-31), built
 Date: 2026-10-31
 
 ## Context
@@ -262,11 +262,10 @@ The naming is the plan; each of these is a test that must exist before this is c
 - What a guest may do: `TestMayIsTheRoomsTable` (the whole table), `TestAGuestMayCompactButMayNotReset`
   (through `expandCommand`, not only the route), `TestOnlyTheRoomsOwnerInvites`,
   `TestAGuestLeavesAndTheOwnerRemoves`, `TestForgetIsTheRoomsOwnersAndPersonalIsNeverShared`, and
-  `TestAGuestsListDoesNotBindARoomTheyWereInvitedTo`. The disabled pickers are built and pinned in
-  `ui/test/map.test.ts`. Still owed: the route-level tests for create, fork, hide, rename and the
-  model — the table is tested and every handler asks it, but a test that removes one call would need
-  a fake control the edge does not have. `TestWhatAGuestMayDo` was the plan's name and the table is
-  the built one.
+  `TestAGuestsListDoesNotBindARoomTheyWereInvitedTo`. The disabled pickers are pinned in
+  `ui/test/map.test.ts`, and `TestAGuestSpeaksAndCannotChangeTheRoom` is the route-level proof: a real
+  gateway behind a signed access door refuses create, fork, hide, rename and the model, and accepts a
+  message. `TestWhatAGuestMayDo` was the plan's name and the table is the built one.
 - Personal: `TestAPersonalRoomRefusesAGuest`, `TestAPersonalRoomCannotBeForgotten`,
   `TestARoomSomebodyMadeIsNeither`.
 - Models: `TestAGuestsListDoesNotBindARoomTheyWereInvitedTo`, `TestTheInstallsListStillStopsATurn`.
