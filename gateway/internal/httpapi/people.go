@@ -15,6 +15,7 @@ func (s *Server) peopleRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/people", s.admin(s.peopleList))
 	mux.HandleFunc("POST /api/people", s.admin(s.peopleAdd))
 	mux.HandleFunc("POST /api/people/{email}/revoke", s.admin(s.peopleRevoke))
+	mux.HandleFunc("POST /api/people/{email}/restore", s.admin(s.peopleRestore))
 	mux.HandleFunc("POST /api/people/{email}/models", s.admin(s.peopleModels))
 	mux.HandleFunc("POST /api/people/{email}/can_create", s.admin(s.peopleCanCreate))
 }
@@ -80,6 +81,20 @@ func (s *Server) peopleRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.gate.People.Revoke(r.PathValue("email")); err != nil {
+		http.Error(w, err.Error(), peopleStatus(err))
+		return
+	}
+	s.peopleAnswer(w)
+}
+
+// peopleRestore puts a revoked person back. Their rooms never lost their name, so the door and the rooms agree
+// again on the next request (ADR 0034 §1).
+func (s *Server) peopleRestore(w http.ResponseWriter, r *http.Request) {
+	if s.gate.People == nil {
+		http.Error(w, "this install has no book of people", http.StatusConflict)
+		return
+	}
+	if _, err := s.gate.People.Restore(r.PathValue("email")); err != nil {
 		http.Error(w, err.Error(), peopleStatus(err))
 		return
 	}

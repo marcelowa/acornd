@@ -49,6 +49,11 @@ func TestTheAdminManagesTheBook(t *testing.T) {
 	if revoked.Code != http.StatusOK || personIn(t, revoked.Body.Bytes(), "ana@example.com").State != people.Revoked {
 		t.Errorf("the revoke: %d %s", revoked.Code, revoked.Body.String())
 	}
+
+	restored := do(t, handler, http.MethodPost, "/api/people/ana@example.com/restore", "")
+	if restored.Code != http.StatusOK || personIn(t, restored.Body.Bytes(), "ana@example.com").State != people.Invited {
+		t.Errorf("the restore: %d %s", restored.Code, restored.Body.String())
+	}
 }
 
 func personIn(t *testing.T, payload []byte, email string) people.Person {
