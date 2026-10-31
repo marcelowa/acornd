@@ -452,11 +452,24 @@ func (c *Control) conversationSignature() string {
 	return builder.String()
 }
 
-func (c *Control) workspaceList() []WorkspaceState {
+// workspaceList is the rail: every room for the install's admin, and only the rooms a caller may open for
+// everybody else. It asks the same question `Workspaces.ListFor` answers, because a state that listed the
+// install was a rail that named rooms its reader could not enter (ADR 0032 §4, ADR 0034 §1).
+func (c *Control) workspaceList(caller Caller) []WorkspaceState {
 	if c.opts.Registry == nil {
 		return nil
 	}
-	return Views(c.opts.Registry(), c.opts.Progress)
+	all := c.opts.Registry()
+	if !caller.Admin {
+		visible := make([]Workspace, 0, len(all))
+		for _, workspace := range all {
+			if workspace.Allows(caller) {
+				visible = append(visible, workspace)
+			}
+		}
+		all = visible
+	}
+	return Views(all, c.opts.Progress)
 }
 
 // SetWorkspace applies a changed record: a folder that moved, or trust being granted.
@@ -585,7 +598,7 @@ func (c *Control) stateParts(caller Caller, conversationID string) stateParts {
 		active = c.landingFor(caller)
 	}
 	inputs, child := c.conversationInputs(active)
-	workspaces := c.workspaceList()
+	workspaces := c.workspaceList(caller)
 	fallback, origins := c.effectiveDefaults()
 	return stateParts{
 		active:     active,
