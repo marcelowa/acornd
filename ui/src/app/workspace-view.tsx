@@ -669,6 +669,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 							entries={platform.entries}
 							ready={platform.ready}
 							opening={platform.opening}
+							showAuthor={(platform.share?.members.length ?? 0) > 1}
 							// A guest reads and prompts: branching is the room owner's (ADR 0034 §4).
 							onFork={platform.can.fork ? platform.fork : undefined}
 						/>

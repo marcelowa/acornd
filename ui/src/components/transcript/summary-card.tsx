@@ -17,7 +17,8 @@ export interface SummaryCardProps {
  * never lost, only put away, and a short note stays open with no button.
  */
 export function SummaryCard({ entry, defaultExpanded = false }: SummaryCardProps) {
-	const collapsible = entry.markdown.length > 500;
+	// A compaction note is one of the rest: it folds by default, however short.
+	const collapsible = entry.markdown !== "";
 
 	return (
 		<PaneCard

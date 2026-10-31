@@ -31,6 +31,20 @@ export const OwnWords: Story = {
 	},
 };
 
+/** A shared room: the bubble names who wrote it, from the author the gateway stored — not from the text. */
+export const InARoom: Story = {
+	args: {
+		showAuthor: true,
+		entry: {
+			kind: "user",
+			id: "0",
+			text: "The rail keeps the wrong workspace's conversations after a switch — can you look?",
+			at,
+			author: { email: "arnonzamir@gmail.com", name: "Arnon" },
+		},
+	},
+};
+
 /** A message that can be branched from: the control only exists where the server offers it. */
 export const Branchable: Story = {
 	args: {

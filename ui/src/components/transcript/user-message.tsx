@@ -7,6 +7,8 @@ import { PaneFooter } from "./pane-footer";
 
 export interface UserMessageProps {
 	entry: UserEntry;
+	/** A shared room names who spoke; a personal room has one voice and says nothing. */
+	showAuthor?: boolean | undefined;
 	onOpenConversation?: ((id: string) => void) | undefined;
 	onFork?: ((at: string) => void) | undefined;
 }
@@ -16,7 +18,12 @@ export interface UserMessageProps {
  * a peer or a subagent asking or reporting — rendering it as your bubble would attribute it
  * to you, so it says who sent it and opens the sender instead.
  */
-export function UserMessage({ entry, onOpenConversation, onFork }: UserMessageProps) {
+export function UserMessage({
+	entry,
+	showAuthor = false,
+	onOpenConversation,
+	onFork,
+}: UserMessageProps) {
 	if (entry.sender !== undefined) {
 		const { sender } = entry;
 		const who = `${sender.name === undefined ? "" : `${sender.name} · `}conversation ${sender.conversationId}`;
@@ -49,6 +56,11 @@ export function UserMessage({ entry, onOpenConversation, onFork }: UserMessagePr
 			data-slot="user"
 			className="flex w-fit max-w-full flex-col self-end rounded-lg bg-secondary px-4 py-3"
 		>
+			{showAuthor && entry.author !== undefined ? (
+				<Text as="div" size="2xs" tone="muted" className="pb-1 text-right">
+					{entry.author.name ?? entry.author.email}
+				</Text>
+			) : null}
 			<Text as="div" size="lg" dir="auto" className="whitespace-pre-wrap wrap-anywhere">
 				{entry.text}
 			</Text>

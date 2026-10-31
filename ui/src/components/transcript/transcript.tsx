@@ -49,6 +49,8 @@ export interface TranscriptProps {
 	 * lie the slow network tells.
 	 */
 	ready?: boolean | undefined;
+	/** A shared room names who wrote each message; a personal room has one voice. */
+	showAuthor?: boolean | undefined;
 	onOpenConversation?: ((id: string) => void) | undefined;
 	onFork?: ((at: string) => void) | undefined;
 }
@@ -109,11 +111,13 @@ function useFolds(conversation: string): Folds {
 function Entry({
 	entry,
 	folds,
+	showAuthor,
 	onOpenConversation,
 	onFork,
 }: {
 	entry: TranscriptEntry;
 	folds: Folds;
+	showAuthor?: boolean | undefined;
 	onOpenConversation?: ((id: string) => void) | undefined;
 	onFork?: ((at: string) => void) | undefined;
 }) {
@@ -124,6 +128,7 @@ function Entry({
 			return (
 				<UserMessage
 					entry={entry}
+					showAuthor={showAuthor}
 					onOpenConversation={onOpenConversation}
 					onFork={onFork}
 				/>
