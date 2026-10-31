@@ -30,7 +30,9 @@ export function ThinkingCard({
 	const lines = entry.text === "" ? 0 : entry.text.split("\n").length;
 	// Same rule as a tool card: short reasoning stays open with no button, because a
 	// put-away control for two visible lines is noise, not power.
-	const collapsible = lines > 10 || entry.text.length > 2000;
+	// A settled thinking block always folds, however short: only a user's message and the agent's answer stay open
+	// by default. While it is live it stays open to be read.
+	const collapsible = !open || lines > 10 || entry.text.length > 2000;
 
 	return (
 		<PaneCard

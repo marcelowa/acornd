@@ -256,7 +256,11 @@ func TestAModelOutsideTheAllowlistIsRefusedOnAssignment(t *testing.T) {
 		t.Fatalf("set models: %v", err)
 	}
 
-	server := New(nil, nil, nil, Gate{People: opened})
+	dir := t.TempDir()
+	if _, err := control.SetProviderModels(dir, "faux", []string{"faux-1"}); err != nil {
+		t.Fatalf("allow the install: %v", err)
+	}
+	server := New(nil, nil, nil, Gate{People: opened, Dir: dir})
 	as := func(email string) *http.Request {
 		r := httptest.NewRequest(http.MethodPost, "/api/agent", nil)
 		return r.WithContext(withCaller(r.Context(), control.Caller{Email: email}))
@@ -279,11 +283,15 @@ func TestAModelOutsideTheAllowlistIsRefusedOnAssignment(t *testing.T) {
 		t.Errorf("the refusal does not say what they may run: %q", body)
 	}
 
-	// The admin has no list, and neither does an install with nobody in it.
+	// The admin has no person list, but the install's list binds them too: faux-1 is allowed and anything else is
+	// not.
 	admin := httptest.NewRequest(http.MethodPost, "/api/agent", nil)
 	admin = admin.WithContext(withCaller(admin.Context(), control.Caller{Admin: true}))
-	if recorder := httptest.NewRecorder(); !server.mayRun(recorder, admin, "faux", "anything") {
-		t.Error("the admin was refused a model")
+	if recorder := httptest.NewRecorder(); !server.mayRun(recorder, admin, "faux", "faux-1") {
+		t.Error("the admin was refused the model the install allows")
+	}
+	if recorder := httptest.NewRecorder(); server.mayRun(recorder, admin, "faux", "anything") {
+		t.Error("the admin was allowed a model the install does not")
 	}
 	if recorder := httptest.NewRecorder(); !server.mayRun(recorder, as("ana@example.com"), "", "") {
 		t.Error("a request that named no model was checked against the list")

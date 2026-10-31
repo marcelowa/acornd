@@ -19,8 +19,13 @@ const meta: Meta<typeof ProviderModelsDialog> = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** Nothing narrowed: every model the provider has, which is where an install starts. */
-export const Everything: Story = {};
+/** A new install: nothing allowed until the admin ticks it. */
+export const NothingYet: Story = {};
 
 /** Narrowed to two: the state an owner leaves a key in when the third model is the expensive one. */
 export const Narrowed: Story = { args: { allowed: ["gpt-5", "gpt-5-mini"] } };
+
+/** Everything selected: the same as Select all, and now written as the three models by name. */
+export const AllAllowed: Story = {
+	args: { allowed: ["gpt-5", "gpt-5-mini", "gpt-5-pro"] },
+};

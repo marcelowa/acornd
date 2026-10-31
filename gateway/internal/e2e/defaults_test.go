@@ -3,6 +3,7 @@ package e2e
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -101,10 +102,13 @@ func TestInstallDefaultsApplyToEveryWorkspace(t *testing.T) {
 		t.Errorf("the other workspace should still follow the install, got %q", got.DefaultsOrigin["thinking"])
 	}
 
-	// And clearing the install default leaves no file behind: an empty layer is not a layer.
+	// And clearing the install default leaves no default behind: an empty layer is not a layer. The file may
+	// still hold the allowlist the harness granted, which is a different layer.
 	c.post("/api/defaults/thinking", map[string]any{"level": ""}, nil)
-	if _, err := os.Stat(filepath.Join(s.DataDir, "settings.json")); err == nil {
-		t.Error("clearing the install defaults should leave no file")
+	if payload, err := os.ReadFile(filepath.Join(s.DataDir, "settings.json")); err == nil {
+		if strings.Contains(string(payload), "thinking") || strings.Contains(string(payload), "defaultModel") {
+			t.Errorf("clearing the install defaults left them in the file: %s", payload)
+		}
 	}
 	if got := c.state("second"); got.DefaultsOrigin["thinking"] != "" {
 		t.Errorf("with nothing set anywhere there is no origin, got %q", got.DefaultsOrigin["thinking"])

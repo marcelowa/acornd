@@ -13,7 +13,7 @@ import { Text } from "@/components/typography/text";
 
 export interface ProviderModelsDialogProps {
 	provider: ProviderCatalogEntry;
-	/** What this install may use from it; empty means every model it has. */
+	/** What this install may use from it; empty means none of them. */
 	allowed: string[];
 	onSave: (models: string[]) => void;
 	onClose: () => void;
@@ -23,9 +23,8 @@ export interface ProviderModelsDialogProps {
  * What one provider's key may be spent on.
  *
  * The list belongs to the connection, not to a person: one credentials file is spent by everyone, so "what may this
- * key buy" is a property of the key. Everything starts ticked — an install with no list allows every model it has —
- * and unticking narrows it. Saving with nothing ticked puts it back to "everything", because a list that allows
- * nothing is a key nobody can spend and a provider nobody can use.
+ * key buy" is a property of the key. Nothing starts ticked: an install with no list allows no model, and the admin
+ * ticks what the key may buy. Saving with nothing ticked allows nothing, which is a state the admin may mean.
  */
 export function ProviderModelsDialog({
 	provider,
@@ -33,10 +32,7 @@ export function ProviderModelsDialog({
 	onSave,
 	onClose,
 }: ProviderModelsDialogProps) {
-	const narrowed = allowed.length > 0;
-	const [chosen, setChosen] = useState<Set<string>>(
-		() => new Set(narrowed ? allowed : provider.models.map((one) => one.id)),
-	);
+	const [chosen, setChosen] = useState<Set<string>>(() => new Set(allowed));
 	const toggle = (id: string): void => {
 		setChosen((current) => {
 			const next = new Set(current);
@@ -46,15 +42,14 @@ export function ProviderModelsDialog({
 		});
 	};
 	const saving = provider.models.filter((one) => chosen.has(one.id)).map((one) => one.id);
-	const every = saving.length === provider.models.length;
 	return (
 		<Dialog open onOpenChange={(open) => (open ? undefined : onClose())}>
 			<DialogContent>
 				<DialogHeader>
 					<DialogTitle>{provider.name}: models this install may use</DialogTitle>
 					<DialogDescription>
-						{saving.length} of {provider.models.length} models allowed. Everything
-						allowed is the same as no limit at all.
+						{saving.length} of {provider.models.length} models allowed. Nothing is
+						allowed until you tick it.
 					</DialogDescription>
 				</DialogHeader>
 				<div className="max-h-80 overflow-y-auto">
@@ -77,10 +72,26 @@ export function ProviderModelsDialog({
 					</ul>
 				</div>
 				<DialogFooter>
+					<Button
+						type="button"
+						size="sm"
+						variant="outline"
+						onClick={() => setChosen(new Set(provider.models.map((one) => one.id)))}
+					>
+						Select all
+					</Button>
+					<Button
+						type="button"
+						size="sm"
+						variant="outline"
+						onClick={() => setChosen(new Set())}
+					>
+						Clear
+					</Button>
 					<Button type="button" size="sm" variant="ghost" onClick={onClose}>
 						Cancel
 					</Button>
-					<Button type="button" size="sm" onClick={() => onSave(every ? [] : saving)}>
+					<Button type="button" size="sm" onClick={() => onSave(saving)}>
 						Save
 					</Button>
 				</DialogFooter>

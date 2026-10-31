@@ -17,6 +17,7 @@ func TestTheDefaultModelIsCheckedWhereTheChoiceIsMade(t *testing.T) {
 	notSandbox(t)
 	s := start(t)
 	c := s.client()
+	c.allow("faux", "faux-1", "no-such-model")
 
 	// The dev provider the harness starts with: `faux/faux-1`, which is what every other test in
 	// this suite uses when it needs a model that runs without credentials.

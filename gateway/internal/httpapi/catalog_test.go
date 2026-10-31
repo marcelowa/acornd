@@ -37,7 +37,15 @@ func TestAPersonIsOfferedOnlyTheModelsTheyMayRun(t *testing.T) {
 	if _, err := opened.SetModels("ana@example.com", []string{"anthropic/fast", "openai/cheap"}); err != nil {
 		t.Fatalf("models: %v", err)
 	}
-	server := &Server{gate: Gate{People: opened}}
+	dir := t.TempDir()
+	for provider, models := range map[string][]string{
+		"anthropic": {"fast", "big"}, "openai": {"cheap", "expensive"},
+	} {
+		if _, err := control.SetProviderModels(dir, provider, models); err != nil {
+			t.Fatalf("allow %s: %v", provider, err)
+		}
+	}
+	server := &Server{gate: Gate{People: opened, Dir: dir}}
 	got := offered(server.offerable(stateWith(), control.Caller{Email: "ana@example.com"}))
 	want := []string{"anthropic/fast", "openai/cheap"}
 	if len(got) != len(want) {
@@ -50,24 +58,48 @@ func TestAPersonIsOfferedOnlyTheModelsTheyMayRun(t *testing.T) {
 	}
 }
 
-// The admin keeps the whole list: the install is theirs, and a picker narrowed for them would be a bug wearing a
-// permission.
-func TestTheAdminIsOfferedEverything(t *testing.T) {
+// The admin is offered every model the install allows: the list is the install's, not a person's, so it is not
+// narrowed for them; it is also not lifted for them.
+func TestTheAdminIsOfferedWhatTheInstallAllows(t *testing.T) {
 	opened := book(t)
-	server := &Server{gate: Gate{People: opened}}
+	dir := t.TempDir()
+	for provider, models := range map[string][]string{
+		"anthropic": {"fast", "big"}, "openai": {"cheap", "expensive"},
+	} {
+		if _, err := control.SetProviderModels(dir, provider, models); err != nil {
+			t.Fatalf("allow %s: %v", provider, err)
+		}
+	}
+	server := &Server{gate: Gate{People: opened, Dir: dir}}
 	if got := offered(server.offerable(stateWith(), control.Caller{Admin: true, Email: "admin@example.com"})); len(got) != 4 {
 		t.Errorf("the admin was offered %v", got)
 	}
 }
 
-// A person with no list keeps everything, which is where they start: an empty list is "any model this install has"
-// rather than "none".
-func TestAPersonWithNoListIsOfferedEverything(t *testing.T) {
+// An install that has written no list has allowed no model: the picker is empty until the admin chooses.
+func TestAnInstallWithNoAllowlistOffersNothing(t *testing.T) {
+	server := &Server{gate: Gate{People: book(t), Dir: t.TempDir()}}
+	if got := offered(server.offerable(stateWith(), control.Caller{Admin: true, Email: "admin@example.com"})); len(got) != 0 {
+		t.Errorf("an install with no allowlist offered %v", got)
+	}
+}
+
+// A person with no list keeps every model the install allows, which is where they start: an empty person list is
+// "any model this install has allowed" rather than "none".
+func TestAPersonWithNoListIsOfferedEverythingAllowed(t *testing.T) {
 	opened := book(t)
 	if _, err := opened.Add("ana@example.com", "Ana"); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	server := &Server{gate: Gate{People: opened}}
+	dir := t.TempDir()
+	for provider, models := range map[string][]string{
+		"anthropic": {"fast", "big"}, "openai": {"cheap", "expensive"},
+	} {
+		if _, err := control.SetProviderModels(dir, provider, models); err != nil {
+			t.Fatalf("allow %s: %v", provider, err)
+		}
+	}
+	server := &Server{gate: Gate{People: opened, Dir: dir}}
 	if got := offered(server.offerable(stateWith(), control.Caller{Email: "ana@example.com"})); len(got) != 4 {
 		t.Errorf("a person with no list was offered %v", got)
 	}
@@ -76,15 +108,32 @@ func TestAPersonWithNoListIsOfferedEverything(t *testing.T) {
 // A record that cannot be read leaves the list alone rather than emptying it: the refusal at assignment is the
 // control, and it still says what it said.
 func TestAnUnreadableBookLeavesTheListAlone(t *testing.T) {
-	server := &Server{gate: Gate{People: book(t)}}
+	dir := t.TempDir()
+	for provider, models := range map[string][]string{
+		"anthropic": {"fast", "big"}, "openai": {"cheap", "expensive"},
+	} {
+		if _, err := control.SetProviderModels(dir, provider, models); err != nil {
+			t.Fatalf("allow %s: %v", provider, err)
+		}
+	}
+	server := &Server{gate: Gate{People: book(t), Dir: dir}}
 	if got := offered(server.offerable(stateWith(), control.Caller{Email: "stranger@example.com"})); len(got) != 4 {
 		t.Errorf("an unknown address was offered %v", got)
 	}
 }
 
-// No book at all is the single-admin install of ADR 0020, and there is nobody to narrow for.
-func TestAnInstallWithNoBookOffersEverything(t *testing.T) {
-	server := &Server{}
+// No book at all is the single-admin install of ADR 0020: there is nobody to narrow for, and the install's
+// allowlist still binds.
+func TestAnInstallWithNoBookIsBoundedByTheAllowlist(t *testing.T) {
+	dir := t.TempDir()
+	for provider, models := range map[string][]string{
+		"anthropic": {"fast", "big"}, "openai": {"cheap", "expensive"},
+	} {
+		if _, err := control.SetProviderModels(dir, provider, models); err != nil {
+			t.Fatalf("allow %s: %v", provider, err)
+		}
+	}
+	server := &Server{gate: Gate{Dir: dir}}
 	if got := offered(server.offerable(stateWith(), control.Caller{Email: "anybody@example.com"})); len(got) != 4 {
 		t.Errorf("an install with no book offered %v", got)
 	}

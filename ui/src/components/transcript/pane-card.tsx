@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { PaneFooter } from "./pane-footer";
 
@@ -90,6 +90,12 @@ export function PaneCard({
 	body,
 }: PaneCardProps) {
 	const [own, setOwn] = useState(defaultExpanded);
+	// A card that was open because it was live folds when it settles: the default changes under the same mounted
+	// card, and an uncontrolled card that only read it on the first render stayed open forever. A reader's own
+	// choice (`asked`) wins, and is never overwritten.
+	useEffect(() => {
+		if (asked === undefined) setOwn(defaultExpanded);
+	}, [defaultExpanded, asked]);
 	const expanded = asked ?? own;
 	const folded = fold !== undefined && !expanded;
 	/** Both are told: the card keeps its own answer for the day it is uncontrolled again, and

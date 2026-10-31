@@ -384,6 +384,7 @@ ui-check: build ## the browser suite, with a gateway started for it and stopped 
 		if [ $$attempt -eq 60 ]; then echo "the gateway did not come up:"; tail -20 $(CURDIR)/$(UI_CHECK_DIR)/gateway.log; exit 1; fi; \
 		sleep 1; \
 	done
+	@printf '%s' '{"providerModels":{"faux":["faux-1"]}}' > $(CURDIR)/$(UI_CHECK_DIR)/settings.json
 	@cd tools && CHROME_PATH=$${CHROME_PATH:-/usr/bin/chromium} bun run check-ui.mjs http://127.0.0.1:$(UI_CHECK_PORT) \
 		|| { status=$$?; kill $$(cat $(CURDIR)/$(UI_CHECK_DIR)/pid) 2>/dev/null; \
 			echo "gateway log:"; tail -30 $(CURDIR)/$(UI_CHECK_DIR)/gateway.log; exit $$status; }

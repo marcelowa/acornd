@@ -629,6 +629,7 @@ func TestUnusableChoicesAreRefused(t *testing.T) {
 	notSandbox(t)
 	s := start(t)
 	c := s.client()
+	c.allow("anthropic", "claude-sonnet-4")
 	root := c.waitForConversation("personal")
 	path := c.conversationPath("personal", root) + "/agent"
 

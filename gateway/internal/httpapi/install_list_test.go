@@ -18,6 +18,9 @@ func TestAGuestsListDoesNotBindARoomTheyWereInvitedTo(t *testing.T) {
 	if _, err := opened.SetModels("ana@example.com", []string{"anthropic/fast"}); err != nil {
 		t.Fatalf("set models: %v", err)
 	}
+	if _, err := control.SetProviderModels(dir, "openai", []string{"gpt-5-pro"}); err != nil {
+		t.Fatalf("allow the install: %v", err)
+	}
 	server := &Server{gate: Gate{People: opened, Dir: dir}}
 	asAna := func() *http.Request {
 		request := httptest.NewRequest(http.MethodPost, "/api/messages", nil)

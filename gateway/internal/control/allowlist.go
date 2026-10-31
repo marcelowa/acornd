@@ -11,8 +11,8 @@ import (
 // Which models this install may use from each provider, chosen by the admin when the provider is connected.
 //
 // It lives in the install's settings, not on a person: a key is spent by everyone, so what it may be spent on is a
-// property of the connection. A provider with no entry is a provider nobody has narrowed — every model it has is
-// usable, which is where an install starts.
+// property of the connection. Nothing is allowed until the admin names it: an install starts with no model, and a
+// provider with no entry has none. The list is a white list in the literal sense.
 //
 // The list is enforced in two places and offered in a third: a model outside it is refused when it is assigned,
 // refused again on every turn (so taking one away stops the conversation that was using it), and never offered in
@@ -29,7 +29,7 @@ func (d Defaults) Empty() bool {
 // people edit by hand is two entries to keep in step.
 func providerKey(provider string) string { return strings.ToLower(strings.TrimSpace(provider)) }
 
-// Allowed answers the models this install may use from a provider. Empty means "all of them".
+// Allowed answers the models this install may use from a provider. Empty means "none of them".
 func (d Defaults) Allowed(provider string) []string {
 	if len(d.ProviderModels) == 0 {
 		return nil
@@ -37,12 +37,12 @@ func (d Defaults) Allowed(provider string) []string {
 	return d.ProviderModels[providerKey(provider)]
 }
 
-// ModelAllowed reports whether this install may run one model. A provider with no list allows all of its models, and
-// an empty list for a provider is the same answer: nobody narrowed it.
+// ModelAllowed reports whether this install may run one model. A provider with no list allows none of its models:
+// the list is what grants, and an install that never wrote one has granted nothing.
 func (d Defaults) ModelAllowed(provider, model string) bool {
 	allowed := d.Allowed(provider)
 	if len(allowed) == 0 {
-		return true
+		return false
 	}
 	for _, name := range allowed {
 		if strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(model)) {
@@ -60,8 +60,8 @@ func (d Defaults) AllowedText(provider string) string {
 // ProviderModelsPath is the settings file the list lives in, inside an install folder.
 func ProviderModelsPath(dataDir string) string { return filepath.Join(dataDir, "settings.json") }
 
-// SetProviderModels writes one provider's list and answers the whole map. An empty list clears the entry, which is how
-// an admin says "every model it has" again.
+// SetProviderModels writes one provider's list and answers the whole map. An empty list clears the entry, which is
+// how an admin says "none of it" again.
 func SetProviderModels(dataDir, provider string, models []string) (map[string][]string, error) {
 	key := providerKey(provider)
 	if key == "" {

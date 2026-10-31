@@ -88,9 +88,9 @@ func TestTheAllowlistBindsTheAdmin(t *testing.T) {
 	}
 	server := &Server{gate: Gate{People: opened, Dir: dir}}
 	state := server.offerable(stateWith(), control.Caller{Admin: true, Email: "admin@example.com"})
-	// stateWith offers openai/cheap and openai/expensive; only cheap survives the list written above? It is gpt-5, so
-	// nothing of openai's survives and the anthropic pair is untouched.
-	if got := offered(state); len(got) != 2 || got[0] != "anthropic/fast" {
+	// stateWith offers openai/cheap and openai/expensive; neither is gpt-5, and the install has allowed no other
+	// provider, so the admin is offered nothing. The list binds the owner too.
+	if got := offered(state); len(got) != 0 {
 		t.Errorf("the admin was offered %v", got)
 	}
 }

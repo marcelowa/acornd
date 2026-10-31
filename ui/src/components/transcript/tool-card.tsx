@@ -7,14 +7,6 @@ import { cn } from "cn";
 import { PaneCard } from "./pane-card";
 import { ThinkingDots } from "./thinking-dots";
 
-/**
- * A completed card longer than this many lines — or this many characters — starts
- * collapsed: the header already says what ran, and the footer says how much is waiting.
- * The character rule catches the one-line dump that line counting cannot see.
- */
-const COLLAPSE_AFTER_LINES = 10;
-const COLLAPSE_AFTER_CHARS = 2000;
-
 export interface ToolCardProps {
 	entry: ToolEntry;
 	/** Start expanded; stories use it to show the open form of a long card. */
@@ -43,9 +35,9 @@ export function ToolCard({
 		.trim();
 	const status = entry.isError ? "error" : entry.status;
 	const lineCount = body === "" ? 0 : body.split("\n").length;
-	const collapsible =
-		status === "done" &&
-		(lineCount > COLLAPSE_AFTER_LINES || body.length > COLLAPSE_AFTER_CHARS);
+	// Every settled tool card folds; only a running or failed one stays open, because that is what the reader is
+	// watching.
+	const collapsible = status === "done";
 
 	return (
 		<PaneCard
