@@ -445,6 +445,15 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 		t.Fatalf("%v\n%s", err, s.logs.String())
 	}
 	s.Addr = "http://" + addr
+	// An install starts with no model allowed, and every test here speaks to the scripted provider. The suite
+	// grants that one model unless the test writes a list of its own after start.
+	allow := filepath.Join(s.DataDir, "settings.json")
+	if _, err := os.Stat(allow); errors.Is(err, os.ErrNotExist) {
+		payload := `{"providerModels":{"faux":["faux-1"]}}`
+		if err := os.WriteFile(allow, []byte(payload), 0o600); err != nil {
+			t.Fatalf("allow the scripted provider: %v", err)
+		}
+	}
 	return s
 }
 
@@ -802,6 +811,19 @@ func (c *client) post(path string, body any, out any) {
 	}
 	if out != nil {
 		decodeInto(c.t, path, payload, out)
+	}
+}
+
+// allow names the models the install may run. The harness starts with the scripted provider granted, and a test
+// that speaks about another provider has to grant it first: no model is allowed until it is named.
+func (c *client) allow(provider string, models ...string) {
+	c.t.Helper()
+	status, payload := c.do(http.MethodPut, "/api/providers/allowlist", map[string]any{
+		"provider": provider,
+		"models":   models,
+	})
+	if status != http.StatusOK {
+		c.t.Fatalf("allow %s: %d %s", provider, status, payload)
 	}
 }
 

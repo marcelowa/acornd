@@ -113,9 +113,7 @@ export function ProvidersSection({
 									{statusLine(provider)}
 								</Text>
 							</div>
-							{provider.authenticated &&
-							onModels !== undefined &&
-							provider.authTypes.length > 0 ? (
+							{provider.authenticated && onModels !== undefined ? (
 								<Button
 									type="button"
 									variant="outline"
