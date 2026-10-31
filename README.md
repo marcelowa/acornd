@@ -154,8 +154,8 @@ By hand (same token header while private):
 mkdir -p ~/acornd/release && cd ~/acornd/release
 export ACORND_GITHUB_TOKEN='...'
 AUTH="Authorization: Bearer $ACORND_GITHUB_TOKEN"
-curl -sL -H "$AUTH" -o acornd https://github.com/marcelowa/acornd/releases/download/v0.9.5/acornd-linux-amd64
-curl -sL -H "$AUTH" -o sha256sums.txt https://github.com/marcelowa/acornd/releases/download/v0.9.5/sha256sums.txt
+curl -sL -H "$AUTH" -o acornd https://github.com/marcelowa/acornd/releases/download/v0.31.0/acornd-linux-amd64
+curl -sL -H "$AUTH" -o sha256sums.txt https://github.com/marcelowa/acornd/releases/download/v0.31.0/sha256sums.txt
 sha256sum -c sha256sums.txt --ignore-missing   # must say OK
 chmod +x acornd
 echo "$OPENCODE_API_KEY" | ./acornd provider add opencode-go
