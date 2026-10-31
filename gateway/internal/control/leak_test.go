@@ -99,9 +99,9 @@ func TestAConversationThatCannotBeOpenedIsNotMarkedResolved(t *testing.T) {
 // draft left behind after its message was accepted is sent twice.
 func TestAPictureOnlyDraftIsClearedWhenItIsSent(t *testing.T) {
 	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}, DataDir: t.TempDir()})
-	control.drafts["1"] = Draft{Attachments: []DraftAttachment{{ID: "a1", Name: "screenshot.png"}}, UpdatedAt: 1}
-	control.clearDraft("1")
-	if got := control.drafts["1"]; len(got.Attachments) != 0 || got.Text != "" {
+	control.drafts[draftKey{conversation: "1"}] = Draft{Attachments: []DraftAttachment{{ID: "a1", Name: "screenshot.png"}}, UpdatedAt: 1}
+	control.clearDraft("", "1")
+	if got := control.drafts[draftKey{conversation: "1"}]; len(got.Attachments) != 0 || got.Text != "" {
 		t.Errorf("the attachment should be gone: %+v", got)
 	}
 }

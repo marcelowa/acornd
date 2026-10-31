@@ -8,7 +8,7 @@ import (
 	"github.com/acornfall/acornfall/gateway/internal/protocol"
 )
 
-// Which models this install may use from each provider, chosen by the owner when the provider is connected.
+// Which models this install may use from each provider, chosen by the admin when the provider is connected.
 //
 // It lives in the install's settings, not on a person: a key is spent by everyone, so what it may be spent on is a
 // property of the connection. A provider with no entry is a provider nobody has narrowed — every model it has is
@@ -61,7 +61,7 @@ func (d Defaults) AllowedText(provider string) string {
 func ProviderModelsPath(dataDir string) string { return filepath.Join(dataDir, "settings.json") }
 
 // SetProviderModels writes one provider's list and answers the whole map. An empty list clears the entry, which is how
-// an owner says "every model it has" again.
+// an admin says "every model it has" again.
 func SetProviderModels(dataDir, provider string, models []string) (map[string][]string, error) {
 	key := providerKey(provider)
 	if key == "" {

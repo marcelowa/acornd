@@ -26,7 +26,7 @@ type Server struct {
 // Gate is what the edge admits by: the door that proves who is calling, and the book of people it has to
 // know once it has.
 //
-// The zero Gate is the single owner ADR 0020 describes — no door, no list, every request answered —
+// The zero Gate is the single admin ADR 0020 describes — no door, no list, every request answered —
 // and it is the default on purpose: a guard nothing configured is how a switched-off guard comes back.
 type Gate struct {
 	Door   identity.Door
@@ -79,7 +79,36 @@ func statusFor(err error) int {
 	if errors.Is(err, control.ErrNoWorkspace) {
 		return http.StatusNotFound
 	}
+	if errors.Is(err, control.ErrNotAllowed) {
+		return http.StatusForbidden
+	}
 	return http.StatusConflict
+}
+
+// stateOf is the state a caller gets. The install's two answers — am I its admin, may I lead a room — come from
+// the book, which is the edge's file; control builds the room's answer and cannot read people.json (ADR 0002).
+func (s *Server) stateOf(ctl *control.Control, caller control.Caller, conversation string) control.State {
+	state := ctl.StateFor(caller, conversation)
+	state.Admin = caller.Admin
+	state.Can.MakeRoom = caller.Admin
+	if !caller.Admin && caller.Email != "" && s.gate.People != nil {
+		if person, found, err := s.gate.People.Find(caller.Email); err == nil && found {
+			state.Can.MakeRoom = person.CanCreate
+		}
+	}
+	// Every state the interface receives is filtered, not only the first one: the stream and a mutation answer
+	// with a state too, and an unfiltered frame put every model back in the picker after the first event.
+	return s.offerable(state, caller)
+}
+
+// mayRoom refuses an action this room keeps for its owner. The table is control's; this only decides the status
+// and the sentence, because a 403 here is "the room says no" and a 404 would be "there is no such room".
+func (s *Server) mayRoom(w http.ResponseWriter, r *http.Request, ctl *control.Control, action control.Action) bool {
+	if ctl.May(callerOf(r), action) {
+		return true
+	}
+	http.Error(w, control.ErrNotAllowed.Error(), http.StatusForbidden)
+	return false
 }
 
 // stateChange runs one mutation on the workspace and answers with its state.
@@ -92,7 +121,7 @@ func (s *Server) stateChange(w http.ResponseWriter, r *http.Request, change func
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, ctl.State())
+	writeJSON(w, http.StatusOK, s.stateOf(ctl, callerOf(r), ""))
 }
 
 // stateBody is stateChange with one JSON body read first. A body that will not decode has
@@ -102,7 +131,7 @@ func stateBody[B any](s *Server, w http.ResponseWriter, r *http.Request, change 
 		if err := change(ctl, body); err != nil {
 			return false, err
 		}
-		writeJSON(w, http.StatusOK, ctl.State())
+		writeJSON(w, http.StatusOK, s.stateOf(ctl, callerOf(r), ""))
 		return true, nil
 	})
 }
@@ -156,10 +185,10 @@ func (s *Server) workspaceList(w http.ResponseWriter, r *http.Request) {
 // listing is the one shape every workspace endpoint answers with, so a caller never has to
 // know which operation produced it.
 func (s *Server) listing() map[string]any {
-	return s.listingFor(control.Caller{Owner: true})
+	return s.listingFor(control.Caller{Admin: true})
 }
 
-// listingFor is the list a caller may see: the whole install for its owner, their own workspaces for a
+// listingFor is the list a caller may see: the whole install for its admin, their own workspaces for a
 // person. A person's rail showing rooms they cannot open would be worse than one that shows nothing.
 func (s *Server) listingFor(caller control.Caller) map[string]any {
 	return map[string]any{
@@ -202,7 +231,7 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, s.offerable(ctl.StateFor(r.URL.Query().Get("conversation")), callerOf(r)))
+	writeJSON(w, http.StatusOK, s.stateOf(ctl, callerOf(r), r.URL.Query().Get("conversation")))
 }
 
 // workspaceStatus answers where a workspace is, and never starts it: opening a workspace is the

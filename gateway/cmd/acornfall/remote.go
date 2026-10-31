@@ -1,5 +1,5 @@
 // Remote access: the tunnel a browser comes through, and the Access application that admits only the people
-// the owner named. See docs/adr/0033-remote-access.md.
+// the admin named. See docs/adr/0033-remote-access.md.
 package main
 
 import (
@@ -119,7 +119,7 @@ func remoteApply(argv []string) {
 		logFatal(remote.ErrNoToken)
 	}
 
-	// A command that changes somebody else's account stops when the owner presses Ctrl-C, and the apply reads
+	// A command that changes somebody else's account stops when the admin presses Ctrl-C, and the apply reads
 	// the same context so a cancelled run does not keep creating things.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -207,7 +207,7 @@ func remoteInputs(dir string) (remote.Setup, []string, error) {
 	if len(admitted) == 0 {
 		// A door that admits nobody is a door nobody can open, and an Access application with an empty policy is
 		// the kind of half-setup that looks finished. Said before anything is created.
-		return remote.Setup{}, nil, errors.New("there is nobody to admit yet: `acornfall people claim you@example.com` names the owner, and `people add` names the rest")
+		return remote.Setup{}, nil, errors.New("there is nobody to admit yet: `acornfall people claim you@example.com` names the admin, and `people add` names the rest")
 	}
 	return setup, admitted, nil
 }

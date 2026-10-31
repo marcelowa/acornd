@@ -160,18 +160,32 @@ func TestUpdatingAWorkspaceThatIsNotThereIsRefused(t *testing.T) {
 // update that could rewrite it would be a way to take somebody's room without saying so.
 func TestAnUpdateCannotChangeWhoseRoomIsWhose(t *testing.T) {
 	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: t.TempDir(), WorkspacesDir: t.TempDir()})
-	personal := Workspace{Name: PersonalWorkspaceName, Path: t.TempDir(), Members: []string{"owner@example.com"}}
-	shared := Workspace{Name: "shared", Path: t.TempDir(), Members: []string{"owner@example.com", "ana@example.com"}}
+	personal := Workspace{Name: PersonalWorkspaceName, Path: t.TempDir(), Kind: KindPersonal,
+		Members: []Member{{Email: "admin@example.com", Role: RoleOwner}}}
+	shared := Workspace{Name: "shared", Path: t.TempDir(), Kind: KindRoom,
+		Members: []Member{
+			{Email: "admin@example.com", Role: RoleOwner},
+			{Email: "ana@example.com", Role: RoleGuest},
+		}}
 	workspaces.registry[personal.Name] = personal
 	workspaces.registry[shared.Name] = shared
 
-	claim := shared
-	claim.Members = nil
+	// An update that names nobody and no kind is still the room it was: the membership and the kind are what the
+	// record is, and a settings edit is not a way to take somebody's room or to make one un-forgettable.
+	claim := Workspace{Name: shared.Name, Path: shared.Path}
 	if err := workspaces.Update(claim); err != nil {
 		t.Fatal(err)
 	}
-	if got := workspaces.registry["shared"].Members; len(got) != 2 {
-		t.Errorf("an update rewrote the membership: %v", got)
+	after := workspaces.registry["shared"]
+	if len(after.Members) != 2 || after.Owner() != "admin@example.com" {
+		t.Errorf("an update rewrote the membership: %v", after.Members)
+	}
+	if after.Kind != KindRoom {
+		t.Errorf("an update rewrote the kind: %q", after.Kind)
+	}
+	kept := Workspace{Name: PersonalWorkspaceName, Path: personal.Path}
+	if err := workspaces.Update(kept); err != nil {
+		t.Fatal(err)
 	}
 	if !workspaces.registry[PersonalWorkspaceName].Personal() {
 		t.Error("the personal workspace stopped being personal")
@@ -205,7 +219,7 @@ func TestTheGeneralWorkspaceBecomesPersonal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: dataDir, WorkspacesDir: dir, OwnerEmail: "Me@Example.com"})
+	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: dataDir, WorkspacesDir: dir, AdminEmail: "Me@Example.com"})
 	if err := workspaces.loadRegistry(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -220,8 +234,11 @@ func TestTheGeneralWorkspaceBecomesPersonal(t *testing.T) {
 	if personal.Title != "Personal" {
 		t.Errorf("title = %q, want the label the console shows", personal.Title)
 	}
-	if !slices.Equal(personal.Members, []string{"me@example.com"}) {
-		t.Errorf("members = %v, want the owner, lowercased", personal.Members)
+	if !slices.Equal(personal.Members, []Member{{Email: "me@example.com", Role: RoleOwner}}) {
+		t.Errorf("members = %v, want the admin as its owner, lowercased", personal.Members)
+	}
+	if personal.Kind != KindPersonal {
+		t.Errorf("kind = %q, want %q: the install's own room is never shared", personal.Kind, KindPersonal)
 	}
 	// Everything the folder held is under the new name, and nothing is left behind.
 	for _, name := range []string{"session.sqlite", "session.sqlite-wal", "session.sqlite-shm", "settings.json", "drafts.json"} {
@@ -256,7 +273,7 @@ func TestARenameIsRefusedWhenTheNewFolderIsTaken(t *testing.T) {
 		"general": {Name: "general", Path: "/w/general"},
 		"second":  {Name: "second", Path: "/w/second"},
 	}
-	if err := workspaces.renameGeneralToPersonal(); err == nil {
+	if _, err := workspaces.renameGeneralToPersonal(); err == nil {
 		t.Fatal("a rename over an existing folder was allowed")
 	}
 	if _, ok := workspaces.registry["general"]; !ok {
@@ -271,15 +288,15 @@ func TestBothNamesInTheRegistryIsLeftAlone(t *testing.T) {
 	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: dataDir})
 	workspaces.registry = map[string]Workspace{
 		"general":  {Name: "general", Path: "/w/general"},
-		"personal": {Name: "personal", Path: "/w/personal", Members: []string{"me@example.com"}},
+		"personal": {Name: "personal", Path: "/w/personal", Kind: KindPersonal, Members: []Member{{Email: "me@example.com", Role: RoleOwner}}},
 	}
-	if err := workspaces.renameGeneralToPersonal(); err != nil {
-		t.Fatalf("err = %v", err)
+	if moved, err := workspaces.renameGeneralToPersonal(); err != nil || moved {
+		t.Fatalf("moved = %v, err = %v", moved, err)
 	}
 	if len(workspaces.registry) != 2 {
 		t.Errorf("registry = %+v, want both kept", workspaces.registry)
 	}
-	if got := workspaces.registry["personal"].Members; !slices.Equal(got, []string{"me@example.com"}) {
+	if got := workspaces.registry["personal"].Members; !slices.Equal(got, []Member{{Email: "me@example.com", Role: RoleOwner}}) {
 		t.Errorf("personal members = %v, want them untouched", got)
 	}
 }

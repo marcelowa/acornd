@@ -50,13 +50,13 @@ func TestAPersonIsOfferedOnlyTheModelsTheyMayRun(t *testing.T) {
 	}
 }
 
-// The owner keeps the whole list: the install is theirs, and a picker narrowed for them would be a bug wearing a
+// The admin keeps the whole list: the install is theirs, and a picker narrowed for them would be a bug wearing a
 // permission.
-func TestTheOwnerIsOfferedEverything(t *testing.T) {
+func TestTheAdminIsOfferedEverything(t *testing.T) {
 	opened := book(t)
 	server := &Server{gate: Gate{People: opened}}
-	if got := offered(server.offerable(stateWith(), control.Caller{Owner: true, Email: "owner@example.com"})); len(got) != 4 {
-		t.Errorf("the owner was offered %v", got)
+	if got := offered(server.offerable(stateWith(), control.Caller{Admin: true, Email: "admin@example.com"})); len(got) != 4 {
+		t.Errorf("the admin was offered %v", got)
 	}
 }
 
@@ -82,7 +82,7 @@ func TestAnUnreadableBookLeavesTheListAlone(t *testing.T) {
 	}
 }
 
-// No book at all is the single-owner install of ADR 0020, and there is nobody to narrow for.
+// No book at all is the single-admin install of ADR 0020, and there is nobody to narrow for.
 func TestAnInstallWithNoBookOffersEverything(t *testing.T) {
 	server := &Server{}
 	if got := offered(server.offerable(stateWith(), control.Caller{Email: "anybody@example.com"})); len(got) != 4 {

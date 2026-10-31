@@ -144,7 +144,7 @@ func (f *fakeCloudflare) CreateAccessPolicy(_ context.Context, _, _, group strin
 	return policy, nil
 }
 
-// screen builds the console's handler with a door that proves the owner, a book with one person, and a fake
+// screen builds the console's handler with a door that proves the admin, a book with one person, and a fake
 // account behind the two remote routes.
 func screen(t *testing.T, api *fakeCloudflare) (http.Handler, *people.Book, string) {
 	t.Helper()
@@ -153,13 +153,13 @@ func screen(t *testing.T, api *fakeCloudflare) (http.Handler, *people.Book, stri
 	if err != nil {
 		t.Fatalf("open book: %v", err)
 	}
-	if _, err := opened.Claim("owner@example.com", "Owner"); err != nil {
+	if _, err := opened.Claim("admin@example.com", "Admin"); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	previous := remoteAPI
 	remoteAPI = func(string) remote.API { return api }
 	t.Cleanup(func() { remoteAPI = previous })
-	gate := Gate{Door: stubDoor{caller: identity.Caller{Owner: true}}, People: opened, Dir: dir}
+	gate := Gate{Door: stubDoor{caller: identity.Caller{Admin: true}}, People: opened, Dir: dir}
 	return admitted(t, gate), opened, dir
 }
 

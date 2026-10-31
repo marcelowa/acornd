@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"time"
 
@@ -18,9 +17,10 @@ import (
 // were anyway.
 const maxDraftBytes = 64 << 10
 
-// Draft is one conversation's unsent message: the words, the files that already staged, and
-// when it last moved. It is the console's draft, not a browser's: it lives beside the
-// workspace, so the same half-thought waits in the composer on every machine.
+// Draft is one person's unsent message in one conversation: the words, the files that already
+// staged, and when it last moved. It is the console's draft, not a browser's: it lives beside the
+// workspace, so the same half-thought waits in the composer on every machine — and it is the
+// person's, so two people typing in one conversation stop erasing each other (ADR 0034 §7).
 //
 // A cleared draft stays as an entry with no words and a fresh stamp. The stamp is the point:
 // a client that still holds the words that were just sent is told they are gone, because the
@@ -43,10 +43,23 @@ type DraftAttachment struct {
 	MIME string `json:"mime"`
 }
 
-// persistedDrafts is the file's shape: one map under a key, so the file can grow a field
-// without pretending older files were something else.
+// draftKey names one person's draft in one conversation. The address, not the whole Caller: an
+// install with no admin claimed has one person in it and one key that is empty, which is also what
+// every draft written before drafts were per person belonged to.
+type draftKey struct {
+	conversation string
+	caller       string
+}
+
+// persistedDrafts is the file's shape: drafts[conversation][address]. It is nested rather than one
+// flat key per pair so the file says which conversation and which person in a shape a reader can
+// see, and so a key never has to contain a separator that an address might contain too.
+//
+// A file written before drafts were per person holds one draft per conversation and does not decode
+// as this one. Those drafts are dropped rather than guessed at: a half-typed message attributed to
+// the wrong person is worse than a composer that starts empty.
 type persistedDrafts struct {
-	Drafts map[string]Draft `json:"drafts,omitempty"`
+	Drafts map[string]map[string]Draft `json:"drafts,omitempty"`
 }
 
 // loadDrafts reads this workspace's drafts. A missing or unreadable file is no drafts, not
@@ -66,19 +79,21 @@ func (c *Control) loadDrafts() {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for id, draft := range stored.Drafts {
-		if id == "" {
+	for conversation, byCaller := range stored.Drafts {
+		if conversation == "" {
 			continue
 		}
-		c.drafts[id] = draft
+		for caller, draft := range byCaller {
+			c.drafts[draftKey{conversation: conversation, caller: caller}] = draft
+		}
 	}
 }
 
-// SetDraft records one conversation's unsent message and wakes every attached client, so the
-// words show on the machine they were typed on and on the one that has been open all along.
-// The newest write wins: two machines typing into one room is a race the server cannot
-// untangle, and the last save is the one the person made most recently.
-func (c *Control) SetDraft(conversationID, text string, attachments []DraftAttachment) (Draft, error) {
+// SetDraft records one person's unsent message in one conversation and wakes every attached
+// client, so the words show on the machine they were typed on and on the one that has been open
+// all along. The newest write wins: one person's two machines typing is a race the server cannot
+// untangle, and the last save is the one they made most recently.
+func (c *Control) SetDraft(caller Caller, conversationID, text string, attachments []DraftAttachment) (Draft, error) {
 	if conversationID == "" {
 		return Draft{}, errors.New("conversation id is required")
 	}
@@ -95,7 +110,7 @@ func (c *Control) SetDraft(conversationID, text string, attachments []DraftAttac
 	draft := Draft{Text: text, Attachments: kept, UpdatedAt: time.Now().UnixMilli()}
 
 	c.mu.Lock()
-	c.drafts[conversationID] = draft
+	c.drafts[draftKey{conversation: conversationID, caller: caller.Email}] = draft
 	c.mu.Unlock()
 
 	c.persistDrafts()
@@ -105,18 +120,21 @@ func (c *Control) SetDraft(conversationID, text string, attachments []DraftAttac
 	return draft, nil
 }
 
-// clearDraft empties a room's draft once its message has been accepted. The entry stays with
-// a fresh stamp, which is what tells the other machines the words are no longer theirs to
-// send — a delete alone would leave them with a draft that no state event contradicts.
-func (c *Control) clearDraft(conversationID string) {
+// clearDraft empties the sender's draft once their message has been accepted, and only theirs:
+// sending used to clear the room's one draft, so two people typing in one conversation erased each
+// other (ADR 0034 §7). The entry stays with a fresh stamp, which is what tells the sender's other
+// machines the words are no longer theirs to send — a delete alone would leave them with a draft
+// that no state event contradicts.
+func (c *Control) clearDraft(owner, conversationID string) {
+	key := draftKey{conversation: conversationID, caller: owner}
 	c.mu.RLock()
-	current, found := c.drafts[conversationID]
+	current, found := c.drafts[key]
 	c.mu.RUnlock()
 	if !found || (current.Text == "" && len(current.Attachments) == 0) {
 		return
 	}
 	c.mu.Lock()
-	c.drafts[conversationID] = Draft{UpdatedAt: time.Now().UnixMilli()}
+	c.drafts[key] = Draft{UpdatedAt: time.Now().UnixMilli()}
 	c.mu.Unlock()
 	c.persistDrafts()
 }
@@ -128,9 +146,18 @@ func (c *Control) persistDrafts() {
 	if c.opts.DraftsPath == "" {
 		return
 	}
+	// Nested on the way out, so the file is drafts[conversation][address] and nothing in it depends
+	// on an address never containing a character.
 	c.mu.RLock()
-	drafts := make(map[string]Draft, len(c.drafts))
-	maps.Copy(drafts, c.drafts)
+	drafts := make(map[string]map[string]Draft, len(c.drafts))
+	for key, draft := range c.drafts {
+		byCaller, known := drafts[key.conversation]
+		if !known {
+			byCaller = map[string]Draft{}
+			drafts[key.conversation] = byCaller
+		}
+		byCaller[key.caller] = draft
+	}
 	c.mu.RUnlock()
 
 	payload, err := json.MarshalIndent(persistedDrafts{Drafts: drafts}, "", "  ")

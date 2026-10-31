@@ -7,13 +7,58 @@
  * in Storybook with a literal.
  */
 
+/** What a workspace is: somebody's own room, or a room with an owner and its guests (ADR 0034 §5). */
+export type RoomKind = "personal" | "room";
+
+/** What somebody is in a room, and never what they are on the install (ADR 0034 §1). */
+export type RoomRole = "owner" | "guest";
+
+/** One person in a room. The room's record keeps the address; the name is the book's. */
+export interface RoomMember {
+	email: string;
+	role: RoomRole;
+}
+
+/**
+ * What the caller may change in the room in view: the state's copy of the gateway's one permission table.
+ * A component reads this instead of inferring a right from a role (ADR 0034 §4).
+ */
+export interface RoomRights {
+	/** The install's permission, not the room's: may this caller lead a room of their own. */
+	makeRoom: boolean;
+	create: boolean;
+	fork: boolean;
+	hide: boolean;
+	rename: boolean;
+	model: boolean;
+	/** The room is this caller's: they invite and remove guests. */
+	administer: boolean;
+}
+
+/**
+ * The room in view, as the surface that shares it reads it: who is in it, and whether this caller is the one
+ * who invites. A personal room is never shared, so there is no view model for one.
+ */
+export interface ShareView {
+	name: string;
+	title: string;
+	/** The owner first, then its guests. */
+	members: RoomMember[];
+	/** This caller owns the room: they add and remove guests. False is a guest's list, with no controls. */
+	administer: boolean;
+}
+
 /** One selectable workspace: where it points, what runs it, and whether it is the one in view. */
 export interface WorkspaceSummary {
 	name: string;
 	title: string;
 	path: string;
-	/** This workspace is somebody's own room: derived from membership in the gateway. */
+	/** This workspace is somebody's own room: never shared, never forgotten. */
 	personal: boolean;
+	/** What it is, in the record's words. A room with one member is still a room. */
+	kind: RoomKind;
+	/** Who is in it: the owner first, then its guests. Empty on an install that has not claimed its admin. */
+	members: RoomMember[];
 	/** The worker process for this workspace is up. */
 	running: boolean;
 	active: boolean;
@@ -148,6 +193,11 @@ export interface UserEntry {
 	action?: BusyAction | undefined;
 	/** Set when another conversation's words arrived here. */
 	sender?: AgentSender | undefined;
+	/**
+	 * Who wrote this, when the transcript knows: absent for a message written before authors were recorded,
+	 * and for an agent's. The interface shows nothing for an absent author rather than a guess (ADR 0034 §7).
+	 */
+	author?: { email: string; name?: string | undefined } | undefined;
 	/** Set when this message can be branched from. */
 	forkAt?: string | undefined;
 }
@@ -209,8 +259,7 @@ export interface PendingEntry {
 	action: "steer" | "followUp";
 }
 
-/** One model provider as the settings screen lists it. */
-export interface ProviderSummary {
+/** One model provider as the settings screen lists it. */ export interface ProviderSummary {
 	id: string;
 	name: string;
 	authenticated: boolean;
@@ -223,6 +272,26 @@ export interface ProviderSummary {
 	authTypes: ("api_key" | "oauth")[];
 	/** Models on offer once connected. A count, not a list: the picker owns the list. */
 	modelCount: number;
+}
+
+/** How an install's book may answer for a person: a state, not a role (ADR 0034 §2). */
+export type PersonState = "invited" | "active" | "revoked";
+
+/** What a record may do on the install, and never what it may do in a room. */
+export type InstallRole = "admin" | "member";
+
+/** One person in the book, as the People page lists them. */
+export interface PersonSummary {
+	email: string;
+	name?: string | undefined;
+	role: InstallRole;
+	state: PersonState;
+	/** What they may run, as `provider/modelId`. Empty is every model, which is what no list means. */
+	models: string[];
+	/** May they lead a room of their own (ADR 0034 §3). */
+	canCreate: boolean;
+	created?: string | undefined;
+	lastSeen?: string | undefined;
 }
 
 /** One choice in a picker: the value is what the wire takes, the label is what a person reads. */

@@ -9,6 +9,17 @@
 
 export type WhenBusy = "steer" | "followUp" | "reject";
 
+/**
+ * Who wrote a prompt: the address the door proved, the display name the book has for it, and the speaker the
+ * model is told — empty in a room with one person in it (ADR 0032 §7, ADR 0034 §7).
+ */
+export type Author = {
+	email: string;
+	name?: string;
+	/** The names the gateway would prefix: nothing in a personal room, and a non-owner's name in a shared one. */
+	speaker?: string;
+};
+
 export interface ModelBinding {
 	provider: string;
 	modelId: string;
@@ -34,6 +45,7 @@ export type Command =
 			conversationId: string;
 			text: string;
 			action: "compact" | "reset";
+			author?: Author;
 	  }
 	| { id: string; type: "open"; conversationId: string; agent: ModelBinding }
 	| { id: string; type: "attach"; conversationId: string }
@@ -46,6 +58,8 @@ export type Command =
 			whenBusy?: WhenBusy;
 			/** Stored attachment ids riding with the text. */
 			attachments?: string[];
+			/** Who sent it; absent for an agent, and for an install with no admin to name. */
+			author?: Author;
 	  }
 	| {
 			id: string;
@@ -56,7 +70,13 @@ export type Command =
 			/** Host file the gateway staged; it removes it after the answer. */
 			tempPath: string;
 	  }
-	| { id: string; type: "abort"; conversationId: string }
+	| {
+			id: string;
+			type: "abort";
+			conversationId: string;
+			/** Who stopped the run: the note it lands as names them, because a run has no author of its own. */
+			author?: Author;
+	  }
 	| { id: string; type: "agents" }
 	| { id: string; type: "commands" }
 	| { id: string; type: "expand"; text: string }

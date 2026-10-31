@@ -28,6 +28,8 @@ const workspaces: WorkspaceSummary[] = [
 		title: "acornfall",
 		path: "/home/marcelo/workspace/acornfall",
 		personal: true,
+		kind: "personal",
+		members: [{ email: "me@example.com", role: "owner" }],
 		running: true,
 		active: true,
 		engineLabel: "microVM",
@@ -37,6 +39,11 @@ const workspaces: WorkspaceSummary[] = [
 		title: "Demo",
 		path: "/home/marcelo/workspaces/demo",
 		personal: false,
+		kind: "room",
+		members: [
+			{ email: "me@example.com", role: "owner" },
+			{ email: "ana@example.com", role: "guest" },
+		],
 		running: false,
 		active: false,
 		engine: "bwrap",
@@ -47,6 +54,8 @@ const workspaces: WorkspaceSummary[] = [
 		title: "Something long enough to need the whole row and then some more",
 		path: "/home/marcelo/workspaces/something",
 		personal: false,
+		kind: "room",
+		members: [{ email: "me@example.com", role: "owner" }],
 		running: false,
 		active: false,
 	},
@@ -91,6 +100,52 @@ export const Default: Story = {
 		onRename: noop,
 		onForget: noop,
 		onUpdateSandbox: noop,
+		// The row in view is the personal room, which is never shared: no row offers Share… here.
+		share: undefined,
+		onAddGuest: noop,
+		onRemoveGuest: noop,
+	},
+};
+
+/**
+ * A member without `can_create`: they may be a guest in a room and nothing more, so there is no create
+ * form at all — not a disabled one, and no sentence about a form that cannot work (ADR 0034 §3).
+ */
+export const CannotMakeRoom: Story = {
+	args: { ...Default.args, canMakeRoom: false },
+};
+
+/**
+ * A room in view that its owner runs: that row's menu offers Share…, and the dialog it opens reads the
+ * members the state answered for this room and no other (ADR 0034 §5).
+ */
+export const ShareableRoom: Story = {
+	args: {
+		...Default.args,
+		workspaces: [
+			{
+				name: "team",
+				title: "Team",
+				path: "/home/marcelo/workspaces/team",
+				personal: false,
+				kind: "room",
+				members: [
+					{ email: "me@example.com", role: "owner" },
+					{ email: "ana@example.com", role: "guest" },
+				],
+				running: true,
+				active: true,
+			},
+		],
+		share: {
+			name: "team",
+			title: "Team",
+			members: [
+				{ email: "me@example.com", role: "owner" },
+				{ email: "ana@example.com", role: "guest" },
+			],
+			administer: true,
+		},
 	},
 };
 

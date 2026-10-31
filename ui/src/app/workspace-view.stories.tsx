@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { Platform } from "./use-platform";
-import type { ConversationSummary, TranscriptEntry } from "./view-models";
+import type { ChoicePicker, ConversationSummary, TranscriptEntry } from "./view-models";
 import { WorkspaceView } from "./workspace-view";
 
 const meta = {
@@ -99,6 +99,65 @@ const entries: TranscriptEntry[] = [
 	{ kind: "notice", id: "4", at, text: "context compacted" },
 ];
 
+/** What runs the conversation: the three pickers, named so a story can hand them over disabled. */
+const modelPicker: ChoicePicker = {
+	value: "DeepSeek V4.1 Flash",
+	origin: "workspace default",
+	groups: [
+		{
+			label: "OpenCode Go",
+			options: [
+				{
+					value: "opencode-go/deepseek",
+					label: "DeepSeek V4.1 Flash",
+					detail: "1000k",
+				},
+				{ value: "opencode-go/opus-5", label: "Opus 5", detail: "200k" },
+			],
+		},
+	],
+	onSelect: noop,
+};
+
+const thinkingPicker: ChoicePicker = {
+	value: "max",
+	origin: "workspace default",
+	groups: [
+		{
+			options: [
+				{ value: "max", label: "max" },
+				{ value: "medium", label: "medium" },
+				{ value: "off", label: "off" },
+			],
+		},
+	],
+	onSelect: noop,
+};
+
+const agentPicker: ChoicePicker = {
+	value: "scout",
+	origin: "this conversation",
+	groups: [
+		{
+			label: "workspace",
+			options: [
+				{
+					value: "scout",
+					label: "scout",
+					description: "Reads the repository and reports, without editing anything.",
+				},
+				{
+					value: "release-captain",
+					label: "release-captain",
+					description:
+						"Cuts releases: checks the changelog and the version bumps, and refuses to tag a red build.",
+				},
+			],
+		},
+	],
+	onSelect: noop,
+};
+
 /** A platform as the hook would return it, with literals instead of a gateway. */
 function makePlatform(overrides: Partial<Platform> = {}): Platform {
 	return {
@@ -108,66 +167,34 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		entries,
 		active: streamConversation,
 		workerUp: true,
+		// The owner of their own room: every right the table has (ADR 0034 §4).
+		can: {
+			makeRoom: true,
+			create: true,
+			fork: true,
+			hide: true,
+			rename: true,
+			model: true,
+			administer: true,
+		},
+		role: "owner",
+		admin: true,
+		// The book is read when the People page is opened, and it is the admin's: a story about that page
+		// hands it records.
+		people: undefined,
+		peopleLoading: false,
+		addPerson: noop,
+		revokePerson: noop,
+		restorePerson: noop,
+		setPersonCanCreate: noop,
+		setPersonModels: noop,
 		connection: "live",
 		clearFailure: noop,
 		reload: noop,
 		steerable: true,
-		model: {
-			value: "DeepSeek V4.1 Flash",
-			origin: "workspace default",
-			groups: [
-				{
-					label: "OpenCode Go",
-					options: [
-						{
-							value: "opencode-go/deepseek",
-							label: "DeepSeek V4.1 Flash",
-							detail: "1000k",
-						},
-						{ value: "opencode-go/opus-5", label: "Opus 5", detail: "200k" },
-					],
-				},
-			],
-			onSelect: noop,
-		},
-		thinking: {
-			value: "max",
-			origin: "workspace default",
-			groups: [
-				{
-					options: [
-						{ value: "max", label: "max" },
-						{ value: "medium", label: "medium" },
-						{ value: "off", label: "off" },
-					],
-				},
-			],
-			onSelect: noop,
-		},
-		agent: {
-			value: "scout",
-			origin: "this conversation",
-			groups: [
-				{
-					label: "workspace",
-					options: [
-						{
-							value: "scout",
-							label: "scout",
-							description:
-								"Reads the repository and reports, without editing anything.",
-						},
-						{
-							value: "release-captain",
-							label: "release-captain",
-							description:
-								"Cuts releases: checks the changelog and the version bumps, and refuses to tag a red build.",
-						},
-					],
-				},
-			],
-			onSelect: noop,
-		},
+		model: modelPicker,
+		thinking: thinkingPicker,
+		agent: agentPicker,
 		commands: [
 			{
 				name: "deslop",
@@ -183,6 +210,8 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 				title: "acornfall",
 				path: "/home/marcelo/workspace/acornfall",
 				personal: true,
+				kind: "personal",
+				members: [{ email: "me@example.com", role: "owner" }],
 				running: true,
 				active: true,
 			},
@@ -191,6 +220,11 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 				title: "Demo",
 				path: "/tmp/ws-demo",
 				personal: false,
+				kind: "room",
+				members: [
+					{ email: "me@example.com", role: "owner" },
+					{ email: "ana@example.com", role: "guest" },
+				],
 				running: false,
 				active: false,
 				engine: "bwrap",
@@ -224,6 +258,11 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 			},
 		],
 		selectWorkspace: noop,
+		// The room in view is the personal one, so there is nothing to share: a story that shares a
+		// room gives it a `share` of its own.
+		share: undefined,
+		addGuest: noop,
+		removeGuest: noop,
 		subagent: false,
 		screen: "conversation",
 		showScreen: noop,
@@ -375,6 +414,33 @@ export const RunningWithoutSteering: Story = {
 			steerable: false,
 		}),
 	},
+};
+
+/**
+ * A guest in somebody else's room: the model, the thinking and the agent show their values and cannot be
+ * picked, there is no New conversation, and the rail's rows offer no rename and no delete. Nothing explains
+ * it — the owner decided that (ADR 0034 §4).
+ */
+export const Guest: Story = {
+	args: {
+		platform: makePlatform({
+			can: {
+				makeRoom: false,
+				create: false,
+				fork: false,
+				hide: false,
+				rename: false,
+				model: false,
+				administer: false,
+			},
+			role: "guest",
+			admin: false,
+			model: { ...modelPicker, disabled: true },
+			thinking: { ...thinkingPicker, disabled: true },
+			agent: { ...agentPicker, disabled: true },
+		}),
+	},
+	globals: { viewport: { value: "laptop" } },
 };
 
 /** Nothing authenticated: the pickers are honest about having nothing to offer. */

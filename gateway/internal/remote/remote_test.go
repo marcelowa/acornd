@@ -401,7 +401,7 @@ func TestADesireThatIsNotOneIsRefused(t *testing.T) {
 
 // The token is the thing most likely to be wrong, and "Authentication error" is what Cloudflare says whether a
 // permission is missing or the token is dead. The refusal names the permission the call needed, in the words of
-// the screen the owner creates tokens on (ADR 0033 §2).
+// the screen the admin creates tokens on (ADR 0033 §2).
 func TestARefusedCallNamesThePermissionItNeeded(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer good" {
@@ -443,7 +443,7 @@ func TestAnAnswerThatIsNotTheEnvelopeIsReported(t *testing.T) {
 	}
 }
 
-// The zone is how the owner names a domain instead of memorising two ids, and it answers the account too, so a
+// The zone is how the admin names a domain instead of memorising two ids, and it answers the account too, so a
 // token without Account · Read is enough.
 func TestAZoneNamesItsAccount(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

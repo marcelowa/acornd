@@ -2,7 +2,7 @@
 //
 // ADR 0032 §6 asked for a model allowlist; the decision taken since is that it belongs to the provider connection
 // rather than to a person, because one key is spent by everyone. A person's own list still exists and still narrows
-// on top, but the list the owner sets here is the one that decides what a key may be spent on at all.
+// on top, but the list the admin sets here is the one that decides what a key may be spent on at all.
 package httpapi
 
 import (
@@ -22,7 +22,7 @@ func (s *Server) providerAllowlist(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"providers": allowed})
 }
 
-// setProviderAllowlist writes one provider's list. An empty list clears it, which is how the owner says "every model
+// setProviderAllowlist writes one provider's list. An empty list clears it, which is how the admin says "every model
 // it has" again — the difference between "narrowed to nothing" and "not narrowed" is the entry, not an empty array.
 func (s *Server) setProviderAllowlist(w http.ResponseWriter, r *http.Request) {
 	var body struct {
@@ -40,7 +40,7 @@ func (s *Server) setProviderAllowlist(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"providers": allowed})
 }
 
-// providerCatalog answers every provider with every model it has, unfiltered: it is what the owner chooses from, and
+// providerCatalog answers every provider with every model it has, unfiltered: it is what the admin chooses from, and
 // narrowing it by the allowlist would make the list impossible to widen again from the screen.
 func (s *Server) providerCatalog(w http.ResponseWriter, r *http.Request) {
 	ctl, err := s.controlFor(r)
@@ -48,5 +48,5 @@ func (s *Server) providerCatalog(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"providers": ctl.StateFor("").Providers})
+	writeJSON(w, http.StatusOK, map[string]any{"providers": s.stateOf(ctl, callerOf(r), "").Providers})
 }

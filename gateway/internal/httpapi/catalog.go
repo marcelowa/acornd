@@ -16,7 +16,7 @@ import (
 // offerable narrows a state's providers to the models this caller may run, which is the install's allowlist for that
 // provider and, when the person has one, their own list on top of it.
 //
-// The install's list binds the owner too: a whitelist with a hole for its author is a whitelist nobody has tested.
+// The install's list binds the admin too: a whitelist with a hole for its author is a whitelist nobody has tested.
 func (s *Server) offerable(state control.State, caller control.Caller) control.State {
 	lists, ok := s.modelLists(caller)
 	if !ok {
@@ -71,14 +71,14 @@ func (l modelLists) personalModels(provider string) []string {
 	return names
 }
 
-// modelLists reads the install's allowlist and, for anybody but the owner, the person's own.
+// modelLists reads the install's allowlist and, for anybody but the admin, the person's own.
 func (s *Server) modelLists(caller control.Caller) (modelLists, bool) {
 	install, err := control.InstallAllowlist(s.gate.Dir)
 	if err != nil {
 		return modelLists{}, false
 	}
 	lists := modelLists{install: control.Defaults{ProviderModels: install}}
-	if caller.Owner || s.gate.People == nil {
+	if caller.Admin || s.gate.People == nil {
 		return lists, true
 	}
 	person, found, err := s.gate.People.Find(caller.Email)

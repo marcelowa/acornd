@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -46,29 +47,17 @@ type CompactPreview struct {
 	Turns          int    `json:"turns"`
 }
 
-// Select attaches to one conversation, detaching the previous one so frames
-// describe a single transcript.
-func (c *Control) Select(ctx context.Context, conversationID string) error {
+// Select remembers where one person lands.
+//
+// It no longer detaches the worker from the conversation it was on, and it does not attach the new one: a stream
+// attaches the conversation it shows and refcounts it per conversation, so one person moving must not pull the
+// subscription out from under another tab's live view (ADR 0034 §7). What is left is the landing, which is per
+// person, and the work a conversation needs before it can run.
+func (c *Control) Select(ctx context.Context, caller Caller, conversationID string) error {
 	if conversationID == "" {
 		return errors.New("conversation id is required")
 	}
-	c.mu.RLock()
-	previous := c.active
-	c.mu.RUnlock()
-	if previous == conversationID {
-		return nil
-	}
-	if previous != "" {
-		if _, err := c.worker.Call(ctx, protocol.Command{Type: "detach", ConversationID: previous}); err != nil {
-			workerpool.Log("detach %s: %v", previous, err)
-		}
-	}
-	if _, err := c.worker.Call(ctx, protocol.Command{Type: "attach", ConversationID: conversationID}); err != nil {
-		return err
-	}
-	c.mu.Lock()
-	c.active = conversationID
-	c.mu.Unlock()
+	c.setLanding(caller, conversationID)
 	c.persist()
 	// Refresh now rather than waiting for the next tick: the response to this call
 	// carries the policy, and a stale policy on a fresh conversation reads as a bug.
@@ -108,7 +97,7 @@ func (c *Control) Rename(ctx context.Context, conversationID, title string) erro
 
 // Hide tombstones a conversation. Nothing is removed: storage is append-only, so
 // a hidden conversation keeps its transcript and can be restored.
-func (c *Control) Hide(ctx context.Context, conversationID string, hidden bool) error {
+func (c *Control) Hide(ctx context.Context, caller Caller, conversationID string, hidden bool) error {
 	if _, err := c.worker.Call(ctx, protocol.Command{
 		Type:           "hide",
 		ConversationID: conversationID,
@@ -121,12 +110,12 @@ func (c *Control) Hide(ctx context.Context, conversationID string, hidden bool) 
 		return err
 	}
 	// Hiding what you are looking at has to move you somewhere.
-	if hidden && c.activeConversation() == conversationID {
+	if hidden && c.landingFor(caller) == conversationID {
 		if next := firstVisible(conversations); next != "" {
-			if err := c.Select(ctx, next); err != nil {
+			if err := c.Select(ctx, caller, next); err != nil {
 				return err
 			}
-		} else if err := c.Create(ctx); err != nil {
+		} else if err := c.Create(ctx, caller); err != nil {
 			return err
 		}
 	}
@@ -136,7 +125,7 @@ func (c *Control) Hide(ctx context.Context, conversationID string, hidden bool) 
 
 // Fork branches a conversation at an entry. The fork inherits the transcript up
 // to that entry and the agent in effect at that point.
-func (c *Control) Fork(ctx context.Context, conversationID, at string) error {
+func (c *Control) Fork(ctx context.Context, caller Caller, conversationID, at string) error {
 	var response struct {
 		ConversationID string `json:"conversationId"`
 	}
@@ -165,7 +154,7 @@ func (c *Control) Fork(ctx context.Context, conversationID, at string) error {
 	if _, err := c.listConversations(ctx); err != nil {
 		return err
 	}
-	if err := c.Select(ctx, response.ConversationID); err != nil {
+	if err := c.Select(ctx, caller, response.ConversationID); err != nil {
 		return err
 	}
 	if parent.Provider == "" {
@@ -210,34 +199,39 @@ func (c *Control) CompactPreview(ctx context.Context, conversationID string) (Co
 	return response, nil
 }
 
-// Reset starts a fresh context: the next turn sees nothing before the cut, and the
-// transcript keeps a notice where it was.
-// Create makes a new conversation and selects it.
-func (c *Control) Create(ctx context.Context) error {
+// Create makes a new conversation and lands the person who made it on it.
+func (c *Control) Create(ctx context.Context, caller Caller) error {
+	conversationID, err := c.createConversation(ctx)
+	if err != nil {
+		return err
+	}
+	return c.Select(ctx, caller, conversationID)
+}
+
+// createConversation makes one and configures it, without landing anybody on it: the first conversation of a
+// workspace is made before this control has met a caller, so it is the workspace's rather than a person's.
+func (c *Control) createConversation(ctx context.Context) (string, error) {
 	var response struct {
 		ConversationID string `json:"conversationId"`
 	}
 	if err := c.worker.CallInto(ctx, protocol.Command{Type: "create"}, &response); err != nil {
-		return err
+		return "", err
 	}
 	if response.ConversationID == "" {
-		return errors.New("worker returned no conversation id")
+		return "", errors.New("worker returned no conversation id")
 	}
 	if _, err := c.listConversations(ctx); err != nil {
-		return err
-	}
-	if err := c.Select(ctx, response.ConversationID); err != nil {
-		return err
+		return "", err
 	}
 	// A conversation with no model cannot run: configure it now rather than
 	// failing on its first prompt. It still counts as "no explicit model".
 	if err := c.ensureConversation(ctx, response.ConversationID); err != nil && !errors.Is(err, ErrNoProvider) {
-		return err
+		return "", err
 	}
 	// Then it stops inheriting: what resolved when it was created is what it runs, and a
 	// default changed tomorrow must not move it (ADR 0017).
 	c.pinOne(response.ConversationID)
-	return nil
+	return response.ConversationID, nil
 }
 
 // ensureConversation configures a conversation that has no explicit model, so it
@@ -326,6 +320,48 @@ func (c *Control) activeConversation() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.active
+}
+
+// landingFor is the conversation one caller lands on: their own remembered one, and the workspace's when they have
+// none — a new browser, or somebody who has not chosen since this workspace first opened (ADR 0034 §7).
+func (c *Control) landingFor(caller Caller) string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if landing := c.landing[caller.Email]; landing != "" {
+		return landing
+	}
+	return c.active
+}
+
+// setLanding remembers where one person lands. The workspace's fallback follows whoever moved last, so a tab with no
+// landing of its own opens where the install was last used rather than on a conversation nobody has opened.
+func (c *Control) setLanding(caller Caller, conversationID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.landing[caller.Email] = conversationID
+	c.active = conversationID
+}
+
+// landedConversations is every conversation somebody lands on: each person's, and the workspace's fallback. It is
+// what a catalog change has to re-resolve, because somebody is looking at each of them. Sorted, so two runs over the
+// same landings do the same work in the same order.
+func (c *Control) landedConversations() []string {
+	c.mu.RLock()
+	seen := make(map[string]bool, len(c.landing)+1)
+	list := make([]string, 0, len(c.landing)+1)
+	for _, id := range c.landing {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		list = append(list, id)
+	}
+	if c.active != "" && !seen[c.active] {
+		list = append(list, c.active)
+	}
+	c.mu.RUnlock()
+	slices.Sort(list)
+	return list
 }
 
 // runActive is the one busy rule the interface reads. The worker's run record is the

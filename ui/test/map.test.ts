@@ -9,7 +9,9 @@ import {
 	toConversation,
 	toEngines,
 	toModelChoices,
+	toPeople,
 	toProviders,
+	toRights,
 	toSandbox,
 	toScopeDefaults,
 	toTranscript,
@@ -282,6 +284,36 @@ describe("the wire mapping", () => {
 		};
 		const entries = toTranscript(view, {}, false, { "7": "steer" });
 		expect(entries[0]?.kind === "user" ? entries[0].action : undefined).toBe("steer");
+	});
+
+	test("a message carries who wrote it, and one written before that carries nothing", () => {
+		// The gateway places a person's message as `acornfall.message` with its author (ADR 0034 §7); an entry
+		// written before authors were recorded has none, and the interface shows nothing rather than a guess.
+		const view: WireView = {
+			entries: [
+				{
+					id: 9,
+					kind: "acornfall.message",
+					model: [{ content: "can you check the build?" }],
+					data: {
+						author: {
+							email: "ana@example.com",
+							name: "Ana Silva",
+							speaker: "Ana Silva",
+						},
+					},
+				},
+				{ id: 10, kind: "acornfall.message", model: [{ content: "and again" }] },
+				{ id: 11, kind: "pi.user", model: [{ content: "from another conversation" }] },
+			],
+		};
+		const entries = toTranscript(view, {});
+		const authorOf = (index: number) =>
+			entries[index]?.kind === "user" ? entries[index].author : undefined;
+		expect(authorOf(0)).toEqual({ email: "ana@example.com", name: "Ana Silva" });
+		expect(authorOf(1)).toBeUndefined();
+		// An agent's message to another conversation is `pi.user`, and is nobody's words.
+		expect(authorOf(2)).toBeUndefined();
 	});
 
 	test("a message with no claimed mark shows none", () => {
@@ -651,5 +683,144 @@ describe("why an engine cannot be chosen", () => {
 		expect(bwrap?.problem).toBe(
 			"bubblewrap is not installed (install it: apt install bubblewrap)",
 		);
+	});
+});
+
+describe("the room's rights and members", () => {
+	/** A guest's state: what a room somebody else set up answers (ADR 0034 §4). */
+	const guest = {
+		makeRoom: false,
+		create: false,
+		fork: false,
+		hide: false,
+		rename: false,
+		model: false,
+		administer: false,
+	};
+
+	test("the state's answers reach the interface unchanged", () => {
+		expect(toRights(guest)).toEqual(guest);
+		expect(toRights({ ...guest, makeRoom: true, model: true, administer: true })).toEqual({
+			...guest,
+			makeRoom: true,
+			model: true,
+			administer: true,
+		});
+	});
+
+	// A right is granted, never assumed: a state this layer cannot read offers nothing rather
+	// than everything, and the absence a literal leaves must not read as "may".
+	test("a state with no rights offers none", () => {
+		expect(toRights(undefined)).toEqual(guest);
+	});
+
+	test("a room's members reach the row, and an address with no role is a guest", () => {
+		const [room] = toWorkspaces(
+			[
+				{
+					name: "team",
+					title: "Team",
+					path: "/tmp/team",
+					personal: false,
+					kind: "room",
+					members: [
+						{ email: "me@example.com", role: "owner" },
+						{ email: "ana@example.com", role: "" },
+					],
+					running: false,
+				},
+			],
+			"team",
+		);
+		expect(room?.kind).toBe("room");
+		expect(room?.members).toEqual([
+			{ email: "me@example.com", role: "owner" },
+			{ email: "ana@example.com", role: "guest" },
+		]);
+	});
+
+	// The kind came back to the record in ADR 0034 §5; a workspace written before it has only
+	// `personal`, which answers the same question, so an older record is never read as a room.
+	test("a workspace with no kind reads it from the flag it has", () => {
+		const [personal, made] = toWorkspaces(
+			[
+				{
+					name: "general",
+					title: "acornfall",
+					path: "/acornfall",
+					personal: true,
+					running: true,
+				},
+				{ name: "demo", title: "Demo", path: "/tmp/demo", personal: false, running: false },
+			],
+			"general",
+		);
+		expect(personal?.kind).toBe("personal");
+		expect(made?.kind).toBe("room");
+		// An install that has not claimed its admin writes a room with nobody in it.
+		expect(personal?.members).toEqual([]);
+	});
+});
+
+describe("the book of people", () => {
+	test("a record's role and state reach the page", () => {
+		expect(
+			toPeople([
+				{
+					email: "me@example.com",
+					name: "Me",
+					role: "admin",
+					state: "active",
+					created: "2026-10-01",
+					last_seen: "2026-10-31",
+				},
+				{ email: "ana@example.com", role: "member", state: "invited" },
+			]),
+		).toEqual([
+			{
+				email: "me@example.com",
+				name: "Me",
+				role: "admin",
+				state: "active",
+				models: [],
+				canCreate: false,
+				created: "2026-10-01",
+				lastSeen: "2026-10-31",
+			},
+			{
+				email: "ana@example.com",
+				name: undefined,
+				role: "member",
+				state: "invited",
+				models: [],
+				canCreate: false,
+				created: undefined,
+				lastSeen: undefined,
+			},
+		]);
+	});
+
+	// The book omits `can_create` when it is not allowed and `models` when the person may run
+	// anything, so the two absences mean opposite things and neither can be defaulted once.
+	test("an absent list is every model, and an absent can_create is no", () => {
+		const [person] = toPeople([
+			{
+				email: "ana@example.com",
+				role: "member",
+				state: "active",
+				models: ["opencode-go/x"],
+			},
+		]);
+		expect(person?.models).toEqual(["opencode-go/x"]);
+		expect(person?.canCreate).toBe(false);
+		expect(
+			toPeople([{ email: "bo@example.com", role: "member", state: "active" }])[0]?.models,
+		).toEqual([]);
+	});
+
+	test("a state this layer does not know is not a state that lets somebody in", () => {
+		expect(
+			toPeople([{ email: "x@example.com", role: "member", state: "pending" }])[0]?.state,
+		).toBe("invited");
 	});
 });

@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronRight } from "lucide-react";
-import type { ConversationSummary } from "@/app/view-models";
+import type { ConversationSummary, RoomRights } from "@/app/view-models";
 import { Text } from "@/components/typography/text";
 import { Button } from "@/components/ui/button";
 import { cn } from "cn";
@@ -13,6 +13,8 @@ export interface ConversationListProps {
 	/** Tombstoned conversations, restorable. An empty list renders no group. */
 	deleted: ConversationSummary[];
 	activeId?: string | undefined;
+	/** What this caller may do with a conversation here: a guest is not offered rename or delete. */
+	can?: Pick<RoomRights, "rename" | "hide"> | undefined;
 	onSelect?: ((id: string) => void) | undefined;
 	onRename?: ((id: string) => void) | undefined;
 	onSecrets?: ((id: string) => void) | undefined;
@@ -147,6 +149,7 @@ export function ConversationList({
 	conversations,
 	deleted,
 	activeId,
+	can,
 	className,
 	onSelect,
 	onRename,
@@ -174,6 +177,7 @@ export function ConversationList({
 		<ConversationRow
 			conversation={conversation}
 			active={conversation.id === activeId}
+			can={can}
 			onSelect={onSelect}
 			onRename={onRename}
 			onSecrets={onSecrets}

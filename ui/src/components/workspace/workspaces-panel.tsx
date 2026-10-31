@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import type { EngineSummary, WorkspaceSummary } from "@/app/view-models";
+import type { EngineSummary, ShareView, WorkspaceSummary } from "@/app/view-models";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RenameDialog } from "@/components/ui/rename-dialog";
 import { Text } from "@/components/typography/text";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { SandboxDialog } from "./sandbox-dialog";
+import { ShareDialog } from "./share-dialog";
 import { WorkspaceRow } from "./workspace-row";
 
 export interface WorkspacesPanelProps {
@@ -14,6 +15,12 @@ export interface WorkspacesPanelProps {
 	onSelect: (name: string) => void;
 	/** A new workspace, on the engine chosen for it. */
 	onCreate: (name: string, engine?: string) => void;
+	/**
+	 * May this caller lead a room of their own: the install's answer, `can_create` (ADR 0034 §3). A
+	 * member without it may be a guest and nothing more, so the form is not offered at all rather than
+	 * offered and refused by the server.
+	 */
+	canMakeRoom?: boolean | undefined;
 	/** The engines to choose from, strongest first, with this machine's answer for each. */
 	engines: EngineSummary[];
 	onRename: (name: string, title: string) => void;
@@ -23,6 +30,15 @@ export interface WorkspacesPanelProps {
 		name: string,
 		change: { image: string; network: string; keepAlive: boolean; private: boolean },
 	) => void;
+	/**
+	 * The room in view, when it can be shared: who is in it and whether this caller runs it. Absent on a
+	 * personal room, which is never shared — and on every other row, because a room's members are the
+	 * state's answer for the room somebody is in and for no other (ADR 0034 §5).
+	 */
+	share?: ShareView | undefined;
+	/** Put somebody the book names into a room, and take a guest out. Both are the owner's. */
+	onAddGuest?: ((name: string, email: string) => void) | undefined;
+	onRemoveGuest?: ((name: string, email: string) => void) | undefined;
 	/** The last refusal, in the server's words: the sandbox dialog shows its own. */
 	failure?: string | undefined;
 }
@@ -43,10 +59,14 @@ export function WorkspacesPanel({
 	workspaces,
 	onSelect,
 	onCreate,
+	canMakeRoom = true,
 	engines,
 	onRename,
 	onForget,
 	onUpdateSandbox,
+	share,
+	onAddGuest,
+	onRemoveGuest,
 	failure,
 }: WorkspacesPanelProps) {
 	const [name, setName] = useState("");
@@ -67,6 +87,8 @@ export function WorkspacesPanel({
 	const [renaming, setRenaming] = useState<WorkspaceSummary | undefined>(undefined);
 	/** The workspace whose sandbox is being changed, if any. */
 	const [sandboxFor, setSandboxFor] = useState<WorkspaceSummary | undefined>(undefined);
+	/** The room whose members are open, if any. */
+	const [sharing, setSharing] = useState(false);
 	const create = (): void => {
 		if (name.trim() === "") return;
 		onCreate(name.trim(), engine === "" ? undefined : engine);
@@ -87,85 +109,96 @@ export function WorkspacesPanel({
 						onRename={setRenaming}
 						onSandbox={setSandboxFor}
 						onForget={onForget}
+						// Only the room in view: its members are what the state answered, and a
+						// personal room is never shared.
+						onShare={
+							share !== undefined && share.name === workspace.name
+								? () => setSharing(true)
+								: undefined
+						}
 					/>
 				))}
 			</div>
 
 			{/* The rail is narrow and the list scrolls: the form stays at the bottom, in reach
-			 * under a thumb, and it wraps rather than clipping the button off the edge. */}
-			<div data-slot="workspaces-create" className="flex shrink-0 flex-col gap-1">
-				{/* The sandbox is chosen before the workspace exists: it decides what the
-				 * workspace's tools can reach, and changing it later is a different decision
-				 * (the sandbox is rebuilt). An engine this machine cannot run is shown with
-				 * the reason, disabled rather than hidden. */}
-				{engines.length > 0 ? (
-					<ToggleGroup
-						type="single"
-						value={engine}
-						onValueChange={(next) => {
-							if (next !== "") setEngine(next);
-						}}
-						variant="outline"
-						size="sm"
-						spacing={0}
-						className="flex-wrap"
-						aria-label="Sandbox engine for the new workspace"
-					>
-						{engines.map((candidate) => (
-							<ToggleGroupItem
-								key={candidate.name}
-								value={candidate.name}
-								disabled={!candidate.usable}
-								title={candidate.problem}
-							>
-								{candidate.label}
-							</ToggleGroupItem>
-						))}
-					</ToggleGroup>
-				) : null}
-				{/* Why an engine cannot be chosen, and what choosing one costs, in words: the switch is
-				 * disabled and its tooltip never opens, and a download that starts with the first
-				 * workspace is worth saying before the name is typed. */}
-				{engines.map((candidate) => {
-					const note = !candidate.usable
-						? (candidate.problem ?? "not available on this machine")
-						: candidate.downloads
-							? "downloads on first start"
-							: "";
-					return note === "" ? null : (
-						<Text key={candidate.name} size="2xs" tone="muted">
-							{candidate.label}: {note}
-						</Text>
-					);
-				})}
-				<div className="flex flex-wrap items-center gap-2">
-					<Input
-						inputSize="sm"
-						value={name}
-						placeholder="a folder name"
-						aria-label="New workspace name"
-						onChange={(event) => setName(event.target.value)}
-						onKeyDown={(event) => {
-							if (event.key !== "Enter") return;
-							event.preventDefault();
-							create();
-						}}
-					/>
-					<Button
-						size="sm"
-						variant="outline"
-						disabled={name.trim() === ""}
-						onClick={create}
-					>
-						Create
-					</Button>
+			 * under a thumb, and it wraps rather than clipping the button off the edge. It is absent
+			 * when the install does not let this caller lead a room: the only thing to say about a
+			 * form that cannot work is nothing. */}
+			{canMakeRoom ? (
+				<div data-slot="workspaces-create" className="flex shrink-0 flex-col gap-1">
+					{/* The sandbox is chosen before the workspace exists: it decides what the
+					 * workspace's tools can reach, and changing it later is a different decision
+					 * (the sandbox is rebuilt). An engine this machine cannot run is shown with
+					 * the reason, disabled rather than hidden. */}
+					{engines.length > 0 ? (
+						<ToggleGroup
+							type="single"
+							value={engine}
+							onValueChange={(next) => {
+								if (next !== "") setEngine(next);
+							}}
+							variant="outline"
+							size="sm"
+							spacing={0}
+							className="flex-wrap"
+							aria-label="Sandbox engine for the new workspace"
+						>
+							{engines.map((candidate) => (
+								<ToggleGroupItem
+									key={candidate.name}
+									value={candidate.name}
+									disabled={!candidate.usable}
+									title={candidate.problem}
+								>
+									{candidate.label}
+								</ToggleGroupItem>
+							))}
+						</ToggleGroup>
+					) : null}
+					{/* Why an engine cannot be chosen, and what choosing one costs, in words: the switch is
+					 * disabled and its tooltip never opens, and a download that starts with the first
+					 * workspace is worth saying before the name is typed. */}
+					{engines.map((candidate) => {
+						const note = !candidate.usable
+							? (candidate.problem ?? "not available on this machine")
+							: candidate.downloads
+								? "downloads on first start"
+								: "";
+						return note === "" ? null : (
+							<Text key={candidate.name} size="2xs" tone="muted">
+								{candidate.label}: {note}
+							</Text>
+						);
+					})}
+					<div className="flex flex-wrap items-center gap-2">
+						<Input
+							inputSize="sm"
+							value={name}
+							placeholder="a folder name"
+							aria-label="New workspace name"
+							onChange={(event) => setName(event.target.value)}
+							onKeyDown={(event) => {
+								if (event.key !== "Enter") return;
+								event.preventDefault();
+								create();
+							}}
+						/>
+						<Button
+							size="sm"
+							variant="outline"
+							disabled={name.trim() === ""}
+							onClick={create}
+						>
+							Create
+						</Button>
+					</div>
+					<Text size="2xs" tone="muted">
+						The folder is created inside the workspaces folder, and the new workspace
+						opens with an empty conversation. The sandbox engine is fixed when the
+						workspace is made.
+					</Text>
 				</div>
-				<Text size="2xs" tone="muted">
-					The folder is created inside the workspaces folder, and the new workspace opens
-					with an empty conversation. The sandbox engine is fixed when the workspace is
-					made.
-				</Text>
-			</div>
+			) : null}
 
 			<RenameDialog
 				open={renaming !== undefined}
@@ -182,6 +215,13 @@ export function WorkspacesPanel({
 				failure={failure}
 				onSave={onUpdateSandbox}
 				onClose={() => setSandboxFor(undefined)}
+			/>
+			<ShareDialog
+				room={sharing ? share : undefined}
+				failure={failure}
+				onAdd={(name, email) => onAddGuest?.(name, email)}
+				onRemove={(name, email) => onRemoveGuest?.(name, email)}
+				onClose={() => setSharing(false)}
 			/>
 		</div>
 	);

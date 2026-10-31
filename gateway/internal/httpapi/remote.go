@@ -1,6 +1,6 @@
 // The remote-access screen's two calls: what this install recorded, and the one that makes Cloudflare match it.
 //
-// They exist so the first contact with the door does not need a terminal: the owner pastes the API token and the
+// They exist so the first contact with the door does not need a terminal: the admin pastes the API token and the
 // hostname, and the console does what `acornfall remote apply` does. The token is used for the call and dropped
 // — it is the most powerful credential in the install and ADR 0033 §4 says the running process does not keep it.
 package httpapi
@@ -60,7 +60,7 @@ func (s *Server) remoteStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// remoteApply makes Cloudflare match what the owner asks for, and answers the steps it took — the same list the
+// remoteApply makes Cloudflare match what the admin asks for, and answers the steps it took — the same list the
 // command prints, in the same words, because it is the same apply.
 func (s *Server) remoteApply(w http.ResponseWriter, r *http.Request) {
 	request, ok := s.remoteRequest(w, r)

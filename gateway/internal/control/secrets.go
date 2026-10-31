@@ -225,7 +225,7 @@ func (c *Control) SecretNeedsHost() bool {
 
 // resolveSecrets reads the workspace's effective set and asks what this engine can do with
 // each entry. A substitute engine needs an allowed host; an environment engine needs the
-// owner to have allowed the value inside. A blocked entry stays visible with its reason.
+// admin to have allowed the value inside. A blocked entry stays visible with its reason.
 func (c *Control) resolveSecrets(delivery sandbox.Delivery) sandboxSecrets {
 	resolved := sandboxSecrets{}
 	if c.opts.Vault == nil {
@@ -516,7 +516,8 @@ func (c *Control) resumeAfterSecrets(ctx context.Context) {
 		} else {
 			text += "s " + strings.Join(names, ", ") + "."
 		}
-		if err := c.Prompt(ctx, conversationID, text, protocol.WhenBusyFollowUp, nil); err != nil {
+		// The continuation is the install's own words, not a person's: nobody is named, so nothing is prefixed.
+		if err := c.Prompt(ctx, Caller{Admin: true}, nil, conversationID, text, protocol.WhenBusyFollowUp, nil); err != nil {
 			workerpool.Log("automatic continuation for %s: %v", conversationID, err)
 		}
 	}

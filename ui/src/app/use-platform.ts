@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	abortConversation,
+	addMember,
+	addPerson as addPersonRequest,
 	applyRemote,
 	checkRemote as checkRemoteRequest,
 	fetchProviderAllowlist,
@@ -16,6 +18,7 @@ import {
 	compactConversation,
 	createConversation as createConversationRequest,
 	fetchCompactPreview,
+	fetchPeople,
 	fetchUpdateStatus,
 	createWorkspace as createWorkspaceRequest,
 	fetchCommands,
@@ -26,6 +29,9 @@ import {
 	logoutProvider,
 	openStream,
 	refreshProviders,
+	removeMember,
+	restorePerson as restorePersonRequest,
+	revokePerson as revokePersonRequest,
 	removeWorkspace as removeWorkspaceRequest,
 	restartUpdate,
 	renameConversation,
@@ -37,6 +43,8 @@ import {
 	setDefaultAgent,
 	setDefaultModel,
 	setDefaultThinking,
+	setPersonCanCreate as setPersonCanCreateRequest,
+	setPersonModels as setPersonModelsRequest,
 	setUpdatePrefs as saveUpdatePrefs,
 	startProviderLogin,
 	type UploadedAttachment,
@@ -71,9 +79,13 @@ import {
 	toAgentGroups,
 	toConversation,
 	toEngines,
+	toMembers,
 	toModelChoices,
 	toModelGroups,
+	toPeople,
 	toProviders,
+	toRights,
+	toRoomRole,
 	toSandbox,
 	toScopeDefaults,
 	toThinkingGroups,
@@ -85,9 +97,13 @@ import type {
 	ChoicePicker,
 	ConversationSummary,
 	EngineSummary,
+	PersonSummary,
 	PickerGroup,
 	ProviderSummary,
+	RoomRights,
+	RoomRole,
 	SandboxSummary,
+	ShareView,
 	SlashCommand,
 	TranscriptEntry,
 	WorkspaceSummary,
@@ -97,6 +113,7 @@ import { shownDraft } from "./draft";
 import type {
 	WireDraft,
 	WireDraftAttachment,
+	WirePerson,
 	WireResolvedAgent,
 	WireSecretEvent,
 	WireSender,
@@ -137,12 +154,20 @@ export type Screen = "conversation" | "settings" | "update";
  * page: what runs and how it keeps itself current, the defaults a new conversation starts from,
  * and the theme. The old `defaults`, `updates` and `install` pages kept no redirect — the
  * release page has its own address now, and an unknown page lands on general. */
-export type SettingsTab = "general" | "providers" | "secrets" | "remote";
+export type SettingsTab = "general" | "providers" | "secrets" | "people" | "remote";
 
-const SETTINGS_TABS: SettingsTab[] = ["general", "providers", "secrets", "remote"];
+export const SETTINGS_TABS: SettingsTab[] = ["general", "providers", "secrets", "people", "remote"];
+
+/**
+ * Whether a string names a settings page this build has. It is the one list: the URL parser and the tab bar
+ * both ask it, so a page added here cannot be drawn by one and refused by the other.
+ */
+export function isSettingsTab(value: string | undefined): value is SettingsTab {
+	return value !== undefined && (SETTINGS_TABS as string[]).includes(value);
+}
 
 function settingsTabFrom(segment: string | undefined): SettingsTab {
-	return SETTINGS_TABS.includes(segment as SettingsTab) ? (segment as SettingsTab) : "general";
+	return isSettingsTab(segment) ? segment : "general";
 }
 
 /**
@@ -233,6 +258,11 @@ function read<T>(key: string, fallback: T): T {
 	}
 }
 
+/** What a refusal said, as a page shows it: the gateway writes sentences, and a status code is not one. */
+function messageOf(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
 /** Sort key for the rail: newest first, undated last. */
 function timeOf(updatedAt: Date | undefined): number {
 	return updatedAt instanceof Date ? updatedAt.getTime() : Number.NEGATIVE_INFINITY;
@@ -240,6 +270,13 @@ function timeOf(updatedAt: Date | undefined): number {
 
 /** A login in flight is the dialog's whole state, folded in `auth-flow.ts`. */
 export type { AuthFlow } from "./auth-flow";
+
+/** The book of people as the admin's page reads it: the records, and what a list may be narrowed to. */
+export interface PeopleBook {
+	people: PersonSummary[];
+	/** Every provider and model this install has, never the narrowed list: a list is widened from all. */
+	catalog: ProviderCatalogEntry[];
+}
 
 export interface Platform {
 	ready: boolean;
@@ -255,10 +292,36 @@ export interface Platform {
 	opening?: { stage: string } | undefined;
 	workerUp: boolean;
 	workerError?: string | undefined;
+	/** What this caller may change in the room in view: the state's one table, not a guess from a role. */
+	can: RoomRights;
+	/** What this caller is in the room in view; undefined when they are not in it. */
+	role?: RoomRole | undefined;
+	/** The install's role, not the room's: it is what shows the People page (ADR 0034 §1). */
+	admin: boolean;
+	/** The book of people, for the admin's page; undefined until that page is opened. */
+	people?: PeopleBook | undefined;
+	/** The first read of the book is in flight. */
+	peopleLoading: boolean;
+	/** The last thing the book refused, in its own words: shown on the page it was asked from. */
+	peopleFailure?: string | undefined;
+	/** Name somebody. They are invited until they sign in. */
+	addPerson: (input: { email: string; name: string }) => void;
+	/** Take access away; their name stays in every room. */
+	revokePerson: (email: string) => void;
+	/** Put a revoked person back. */
+	restorePerson: (email: string) => void;
+	setPersonCanCreate: (email: string, canCreate: boolean) => void;
+	/** What they may choose; an empty list is every model. */
+	setPersonModels: (email: string, models: string[]) => void;
 	conversations: ConversationSummary[];
 	deleted: ConversationSummary[];
 	/** The workspaces, with the one in view marked. */
 	workspaces: WorkspaceSummary[];
+	/** The room in view, when it can be shared: who is in it, and whether this caller runs it. */
+	share?: ShareView | undefined;
+	/** Put somebody the book names into a room, and take a guest out. Both are the room's owner's. */
+	addGuest: (workspace: string, email: string) => void;
+	removeGuest: (workspace: string, email: string) => void;
 	/** The screen in view: a conversation or settings. The workspaces list is a level of the rail
 	 * over the conversations, not a screen (`workspacesOpen`). */
 	screen: Screen;
@@ -693,7 +756,9 @@ export function usePlatform(): Platform {
 				const conversation = activeIdRef.current;
 				const claims: Record<string, BusyAction> = {};
 				for (const entry of nextView.entries ?? []) {
-					if (entry.kind !== "pi.user") continue;
+					// A person's message is placed as `acornfall.message` (ADR 0034 §7); `pi.user` is an
+					// agent's message to another conversation.
+					if (entry.kind !== "pi.user" && entry.kind !== "acornfall.message") continue;
 					const text = (entry.model ?? [])
 						.map((message) => textOf(message.content))
 						.join("\n")
@@ -882,7 +947,22 @@ export function usePlatform(): Platform {
 	// A subagent runs what its creator gave it: the pickers show that rather than offering a
 	// change the gateway would not apply.
 	const subagent = state?.subagent === true;
-	const fixed = activeId === "" || subagent;
+	// A guest sees the agent, the model and the thinking with their values and cannot pick another, and no
+	// explanatory sentence: the state carries the answer, so this is the one place that reads it (ADR 0034 §4).
+	const can = toRights(state?.can);
+	const fixed = activeId === "" || subagent || !can.model;
+	// A personal room is never shared, on any install: journey 1 is "make a room and invite people", not
+	// "open my room" (ADR 0034 §5). So the surface that shares one has nothing to say about it.
+	const share = useMemo<ShareView | undefined>(() => {
+		const room = state?.workspace;
+		if (room === undefined || room.personal) return undefined;
+		return {
+			name: room.name,
+			title: room.title,
+			members: toMembers(room.members),
+			administer: can.administer,
+		};
+	}, [state, can.administer]);
 	const pinnedModel = modelChoices.find((choice) => choice.value === effectiveModel);
 
 	/** Every picker can go back to inheriting: a choice has to be undoable. */
@@ -1202,6 +1282,21 @@ export function usePlatform(): Platform {
 		[act, reload],
 	);
 
+	// The room's members. Both answer the workspace listing, and a refusal — an address the book does not
+	// hold says to ask the admin — lands in `failure`, which the dialog shows where the address was typed.
+	const addGuest = useCallback(
+		(name: string, email: string) => {
+			act(addMember(name, email), () => void reload());
+		},
+		[act, reload],
+	);
+	const removeGuest = useCallback(
+		(name: string, email: string) => {
+			act(removeMember(name, email), () => void reload());
+		},
+		[act, reload],
+	);
+
 	// Provider logins. The start answers 202 with a flow id; every step after that
 	// arrives as an auth frame on the stream, matched to the dialog that started it.
 	const startLogin = useCallback(
@@ -1358,6 +1453,72 @@ export function usePlatform(): Platform {
 			window.clearInterval(timer);
 		};
 	}, []);
+
+	// The book of people. It is the admin's file, not the room's, so it does not ride the state stream: it is
+	// read when the page that shows it is opened, and every write answers the whole document, so a write's
+	// answer is the next render and no second read is needed (people.go, ADR 0032 §3).
+	const [peopleBook, setPeopleBook] = useState<PeopleBook | undefined>(undefined);
+	const [peopleLoading, setPeopleLoading] = useState(false);
+	const [peopleFailure, setPeopleFailure] = useState<string | undefined>(undefined);
+	const admin = state?.admin === true;
+	useEffect(() => {
+		if (route.screen !== "settings" || route.settingsTab !== "people" || !admin) return;
+		let cancelled = false;
+		setPeopleLoading(true);
+		setPeopleFailure(undefined);
+		void Promise.all([fetchPeople(), fetchProviderCatalog()])
+			.then(
+				([people, catalog]) => {
+					if (cancelled) return;
+					setPeopleBook({ people: toPeople(people), catalog });
+				},
+				(cause: unknown) => {
+					// A page that cannot read the book says so where the book would be, in the gateway's
+					// words: the People tab is the admin's, and a 403 here is the install saying no.
+					if (!cancelled) setPeopleFailure(messageOf(cause));
+				},
+			)
+			.finally(() => {
+				if (!cancelled) setPeopleLoading(false);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [route.screen, route.settingsTab, admin]);
+
+	/** One write on the book: its answer is the whole document, and a refusal is the page's own sentence. */
+	const writeBook = useCallback((request: Promise<WirePerson[]>): void => {
+		void request.then(
+			(people) => {
+				setPeopleBook((current) =>
+					current === undefined ? current : { ...current, people: toPeople(people) },
+				);
+				setPeopleFailure(undefined);
+			},
+			(cause: unknown) => setPeopleFailure(messageOf(cause)),
+		);
+	}, []);
+	const addPerson = useCallback(
+		(input: { email: string; name: string }) => writeBook(addPersonRequest(input)),
+		[writeBook],
+	);
+	const revokePerson = useCallback(
+		(email: string) => writeBook(revokePersonRequest(email)),
+		[writeBook],
+	);
+	const restorePerson = useCallback(
+		(email: string) => writeBook(restorePersonRequest(email)),
+		[writeBook],
+	);
+	const setPersonCanCreate = useCallback(
+		(email: string, canCreate: boolean) =>
+			writeBook(setPersonCanCreateRequest(email, canCreate)),
+		[writeBook],
+	);
+	const setPersonModels = useCallback(
+		(email: string, models: string[]) => writeBook(setPersonModelsRequest(email, models)),
+		[writeBook],
+	);
 
 	const [remote, setRemote] = useState<RemoteStatus | undefined>(undefined);
 	const [remoteFailure, setRemoteFailure] = useState<string | undefined>(undefined);
@@ -1557,6 +1718,17 @@ export function usePlatform(): Platform {
 		opening,
 		workerUp: state?.workerUp ?? false,
 		workerError: state?.workerError,
+		can,
+		role: toRoomRole(state?.role),
+		admin,
+		people: peopleBook,
+		peopleLoading,
+		peopleFailure,
+		addPerson,
+		revokePerson,
+		restorePerson,
+		setPersonCanCreate,
+		setPersonModels,
 		steerable: state?.capabilities.steer ?? false,
 		model,
 		thinking,
@@ -1564,6 +1736,9 @@ export function usePlatform(): Platform {
 		commands,
 		context: contextFold,
 		workspaces,
+		share,
+		addGuest,
+		removeGuest,
 		sandbox,
 		selectWorkspace,
 		defaults,

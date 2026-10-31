@@ -33,7 +33,7 @@ func TestAnyAdmitsTheFirstDoorThatProves(t *testing.T) {
 }
 
 // One refusal is not enough information: "denied" on a console reached through a tunnel with no
-// assertion is the sentence that tells the owner the door is misconfigured, and dropping the reasons
+// assertion is the sentence that tells the admin the door is misconfigured, and dropping the reasons
 // is how that becomes a support thread.
 func TestAnyReportsEveryDoorsReason(t *testing.T) {
 	door := Any(

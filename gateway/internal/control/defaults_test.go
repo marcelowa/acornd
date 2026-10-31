@@ -200,7 +200,7 @@ func TestLastResortPrefersAnExplicitModel(t *testing.T) {
 // still reads as "these are the install's", not as "this workspace chose".
 func TestInheritedDefaultsReportTheirOrigin(t *testing.T) {
 	control := layered(t, Defaults{}, Defaults{Model: binding("opencode-go", "deepseek-v4.1-flash"), Thinking: "high"}, protocol.ModelBinding{})
-	state := control.StateFor("any")
+	state := control.StateFor(Caller{}, "any")
 	if state.DefaultsOrigin.Model != originInstall || state.DefaultsOrigin.Thinking != originInstall {
 		t.Errorf("expected install origins, got %+v", state.DefaultsOrigin)
 	}

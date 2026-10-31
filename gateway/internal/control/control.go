@@ -97,11 +97,15 @@ type WorkspaceState struct {
 	Name  string `json:"name"`
 	Path  string `json:"path"`
 	Title string `json:"title"`
-	// Personal is this workspace being somebody's own room, derived from its membership: at most one member
-	// (ADR 0032 §9). It decides the rail's order and whether the interface may offer to forget it.
-	Personal bool   `json:"personal"`
-	Image    string `json:"image,omitempty"`
-	Network  string `json:"network,omitempty"`
+	// Personal is this workspace being somebody's own room, by its stored kind (ADR 0034 §5). It decides the
+	// rail's order, and it is why the interface never offers to share or forget one.
+	Personal bool `json:"personal"`
+	// Kind is "personal" or "room", and Members is who is in it: an owner and its guests. A room's members
+	// are shown to the room, which is what the share dialog reads.
+	Kind    string   `json:"kind,omitempty"`
+	Members []Member `json:"members,omitempty"`
+	Image   string   `json:"image,omitempty"`
+	Network string   `json:"network,omitempty"`
 	// Private is whether this workspace's sandbox may reach private networks as this machine.
 	Private bool `json:"private,omitempty"`
 	// KeepAlive is whether this workspace's sandbox is exempt from idle eviction.
@@ -122,6 +126,46 @@ type WorkspaceState struct {
 	Status string `json:"status,omitempty"`
 	Stage  string `json:"stage,omitempty"`
 	Error  string `json:"error,omitempty"`
+}
+
+// workspaceStateOf is one record as the interface reads it, in the state and in the listing (Views has the
+// same mapping for a list; this one is the active room, and the two must not disagree).
+func workspaceStateOf(workspace Workspace, running bool) WorkspaceState {
+	return WorkspaceState{
+		Name:     workspace.Name,
+		Path:     workspace.Path,
+		Title:    workspace.Title,
+		Personal: workspace.Personal(),
+		Kind:     workspace.Kind,
+		Members:  workspace.Members,
+		Running:  running,
+	}
+}
+
+// canIn is the state's copy of the permission table, so the interface disables a control instead of reading a
+// role out of a name.
+func canIn(workspace Workspace, caller Caller) Can {
+	return Can{
+		Create:     workspace.May(caller, ActionCreate),
+		Fork:       workspace.May(caller, ActionFork),
+		Hide:       workspace.May(caller, ActionHide),
+		Rename:     workspace.May(caller, ActionRename),
+		Model:      workspace.May(caller, ActionModel),
+		Administer: workspace.May(caller, ActionAdminister),
+	}
+}
+
+// Can is what the caller may change in this room, so the interface disables what it may not instead of
+// inferring a role from a control's name. It is the state's copy of the one table, `Workspace.May`.
+type Can struct {
+	// MakeRoom is the install's permission, not the room's: may this caller lead a room of their own.
+	MakeRoom   bool `json:"makeRoom"`
+	Create     bool `json:"create"`
+	Fork       bool `json:"fork"`
+	Hide       bool `json:"hide"`
+	Rename     bool `json:"rename"`
+	Model      bool `json:"model"`
+	Administer bool `json:"administer"`
 }
 
 // Inherited reports which fields the active conversation left to the defaults.
@@ -168,6 +212,13 @@ type State struct {
 	// state so every machine shows the same half-thought in the composer, and so a reload
 	// lands on what was typed a second ago rather than on an empty card.
 	Draft *Draft `json:"draft,omitempty"`
+	// Can is what this caller may change here, and Role is what they are in the room. A guest sees the model
+	// and the agent with their values and cannot pick another (ADR 0034 §4).
+	Can  Can    `json:"can"`
+	Role string `json:"role,omitempty"`
+	// Admin is the install's role, not the room's: it is what shows the People screen. Owning the install does
+	// not make the caller a member of anybody's room (ADR 0034 §1).
+	Admin bool `json:"admin"`
 	// WorkerUp is false when the harness process is gone. Without it a dead backend is
 	// indistinguishable from an idle one, because everything here is served from cache.
 	WorkerUp    bool   `json:"workerUp"`
@@ -282,9 +333,14 @@ type Control struct {
 	// clients watching different conversations is what makes browser tabs work.
 	subscriberConversation map[int]string
 	attachments            map[string]int
-	// drafts holds one unsent message per conversation, keyed by the harness's own id.
-	// Loaded at open, persisted on every save: a draft outlives the process that took it.
-	drafts map[string]Draft
+	// drafts holds one unsent message per person per conversation, keyed by the harness's own id
+	// and the address of the person typing. Loaded at open, persisted on every save: a draft
+	// outlives the process that took it.
+	drafts map[draftKey]Draft
+	// landing is where each person lands, by address, and active is the workspace's fallback for a
+	// caller with no landing of their own. One landing per workspace is what selecting used to mean,
+	// and it made one person's move move everybody (ADR 0034 §7).
+	landing map[string]string
 	// secretRequests are tools waiting for a person to set a secret. The worker asks; the
 	// card answers through the gateway, which owns the vault and the answer.
 	secretMu       sync.Mutex
@@ -327,7 +383,8 @@ func New(opts Options) *Control {
 		policies:               map[string]json.RawMessage{},
 		promptedAt:             map[string]int64{},
 		actionAt:               map[string]int64{},
-		drafts:                 map[string]Draft{},
+		drafts:                 map[draftKey]Draft{},
+		landing:                map[string]string{},
 		secretRequests:         map[string]*pendingSecret{},
 		continuations:          map[string][]string{},
 	}
@@ -395,14 +452,34 @@ func (c *Control) conversationSignature() string {
 	return builder.String()
 }
 
-func (c *Control) workspaceList() []WorkspaceState {
+// workspaceList is the rail: only the rooms a caller may open, for everybody including the install's admin.
+// Owning the machine is not membership, and a rail that named rooms its reader would get a 404 from is a rail
+// that lies. The admin's API list is still the install (`Workspaces.ListFor`), because lifecycle is the install's;
+// the console's rail is not that list (ADR 0032 §4, ADR 0034 §1).
+func (c *Control) workspaceList(caller Caller) []WorkspaceState {
 	if c.opts.Registry == nil {
 		return nil
 	}
-	return Views(c.opts.Registry(), c.opts.Progress)
+	all := c.opts.Registry()
+	visible := make([]Workspace, 0, len(all))
+	for _, workspace := range all {
+		if workspace.Allows(caller) {
+			visible = append(visible, workspace)
+		}
+	}
+	return Views(visible, c.opts.Progress)
 }
 
 // SetWorkspace applies a changed record: a folder that moved, or trust being granted.
+// May answers whether this control's room lets a caller do something. It is the same table every handler asks,
+// read under the lock because SetWorkspace replaces the record a membership change is written into.
+func (c *Control) May(caller Caller, action Action) bool {
+	c.mu.RLock()
+	workspace := c.opts.Workspace
+	c.mu.RUnlock()
+	return workspace.May(caller, action)
+}
+
 func (c *Control) SetWorkspace(workspace Workspace) {
 	c.mu.Lock()
 	changed := c.opts.Workspace.Engine != workspace.Engine
@@ -483,20 +560,16 @@ func (c *Control) Describe() protocol.Describe {
 	return c.describe
 }
 
-func (c *Control) State() State {
-	c.mu.RLock()
-	active := c.active
-	c.mu.RUnlock()
-	return c.StateFor(active)
-}
-
+// State is everything a client needs for the conversation this caller lands on.
 // StateFor is everything a client needs for one conversation. Each tab asks for its own,
-// so two tabs can show two conversations without agreeing on an "active" one.
-func (c *Control) StateFor(conversationID string) State {
-	parts := c.stateParts(conversationID)
+// so two tabs can show two conversations without agreeing on an "active" one — and each
+// person asks as themselves, because the landing conversation and the draft are theirs
+// (ADR 0034 §7).
+func (c *Control) StateFor(caller Caller, conversationID string) State {
+	parts := c.stateParts(caller, conversationID)
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.stateLocked(parts)
+	return c.stateLocked(caller, parts)
 }
 
 // stateParts is what a state needs and cannot read under the snapshot lock. The effective
@@ -517,13 +590,13 @@ type stateParts struct {
 	origins    DefaultOrigins
 }
 
-func (c *Control) stateParts(conversationID string) stateParts {
+func (c *Control) stateParts(caller Caller, conversationID string) stateParts {
 	active := conversationID
 	if active == "" {
-		active = c.activeConversation()
+		active = c.landingFor(caller)
 	}
 	inputs, child := c.conversationInputs(active)
-	workspaces := c.workspaceList()
+	workspaces := c.workspaceList(caller)
 	fallback, origins := c.effectiveDefaults()
 	return stateParts{
 		active:     active,
@@ -554,17 +627,14 @@ func (c *Control) conversationInputs(active string) (resolveInputs, bool) {
 	return inputs, true
 }
 
-// stateLocked assembles the snapshot. The caller holds the read lock.
-func (c *Control) stateLocked(parts stateParts) State {
+// stateLocked assembles the snapshot for one caller. The caller holds the read lock.
+func (c *Control) stateLocked(caller Caller, parts stateParts) State {
 	active := parts.active
+	workspace := c.opts.Workspace
 	state := State{
-		Workspace: WorkspaceState{
-			Name:     c.opts.Workspace.Name,
-			Path:     c.opts.Workspace.Path,
-			Title:    c.opts.Workspace.Title,
-			Personal: c.opts.Workspace.Personal(),
-			Running:  c.workerUp,
-		},
+		Workspace:     workspaceStateOf(workspace, c.workerUp),
+		Role:          string(workspace.RoleOf(caller.Email)),
+		Can:           canIn(workspace, caller),
 		Workspaces:    parts.workspaces,
 		WorkspacesDir: c.opts.WorkspacesDir,
 		Engines:       c.engineList(),
@@ -609,7 +679,9 @@ func (c *Control) stateLocked(parts stateParts) State {
 	// The draft travels with the state, not with the transcript: it is the composer's, and
 	// the conversation it belongs to is the one this state is about. A copy, so the client
 	// reads a value rather than a map that a keystroke on another machine can change under it.
-	if draft, found := c.drafts[active]; found {
+	// It is this caller's draft: somebody else's half-typed message is not theirs to see, and
+	// showing it would put words in a composer that person never typed (ADR 0034 §7).
+	if draft, found := c.drafts[draftKey{conversation: active, caller: caller.Email}]; found {
 		state.Draft = &draft
 	}
 	// The conversation this call asked for, not the one the worker happens to be attached
@@ -653,7 +725,11 @@ func (c *Control) notifyState() {
 }
 
 type persistedSettings struct {
-	Active          string                           `json:"active,omitempty"`
+	Active string `json:"active,omitempty"`
+	// Landing is where each person lands, by address (ADR 0034 §7). Active stays beside it as the
+	// workspace's fallback: it is what a caller with no landing of their own opens, a new browser for
+	// instance, and it is what an install written before landings were per person already had.
+	Landing         map[string]string                `json:"landing,omitempty"`
 	GeneralPinned   bool                             `json:"generalPinned,omitempty"`
 	DefaultModel    protocol.ModelBinding            `json:"defaultModel,omitzero"`
 	DefaultThinking string                           `json:"defaultThinking,omitempty"`
@@ -707,6 +783,11 @@ func (c *Control) applySettings(settings persistedSettings) {
 	c.defaultThinking = settings.DefaultThinking
 	c.defaultAgent = settings.DefaultAgent
 	c.generalPinned = settings.GeneralPinned
+	for caller, landing := range settings.Landing {
+		if landing != "" {
+			c.landing[caller] = landing
+		}
+	}
 	for id, binding := range settings.Agents {
 		if binding.Provider == "" && binding.ModelID == "" && binding.Definition == "" {
 			continue
@@ -725,11 +806,17 @@ func (c *Control) persist() {
 	// would outrank every layer below for good.
 	settings := persistedSettings{
 		Active:          c.active,
+		Landing:         map[string]string{},
 		GeneralPinned:   c.generalPinned,
 		DefaultModel:    c.defaultModel,
 		DefaultThinking: c.defaultThinking,
 		DefaultAgent:    c.defaultAgent,
 		Agents:          map[string]protocol.ModelBinding{},
+	}
+	for caller, landing := range c.landing {
+		if landing != "" {
+			settings.Landing[caller] = landing
+		}
 	}
 	for id, binding := range c.bindings {
 		if binding.Provider == "" && binding.ModelID == "" && binding.Definition == "" {

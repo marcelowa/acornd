@@ -1,5 +1,5 @@
-// Package people is who may use this install: one record per person, exactly one owner, and the rule
-// that nobody the owner has not named reaches the process at all. See
+// Package people is who may use this install: one record per person, exactly one admin, and the rule
+// that nobody the admin has not named reaches the process at all. See
 // docs/adr/0032-who-may-call-the-console.md.
 //
 // The file is the authority and the door only enforces it. A second list — an Access policy edited by
@@ -21,7 +21,7 @@ import (
 )
 
 // File is the book inside the install folder. ADR 0014 keeps the install folder out of every sandbox
-// mount, which is what makes an owner's list of people a file an agent cannot read.
+// mount, which is what makes an admin's list of people a file an agent cannot read.
 const File = "people.json"
 
 // Role is what a record may do at the install level. There are two, deliberately: a viewer or an
@@ -30,23 +30,23 @@ const File = "people.json"
 type Role string
 
 const (
-	// RoleOwner is the install's owner: lifecycle, credentials, policy. Deliberately not a member of
+	// RoleAdmin is the install's admin: lifecycle, credentials, policy. Deliberately not a member of
 	// anyone else's workspace.
-	RoleOwner Role = "owner"
-	// RolePerson is everybody else: their own personal workspace, and the rooms they were added to.
-	RolePerson Role = "person"
+	RoleAdmin Role = "admin"
+	// RoleMember is everybody else: their own personal workspace, and the rooms they were added to.
+	RoleMember Role = "member"
 )
 
 // State is where a record is in its life. There is no pending: a stranger never gets a record, and an
-// address the owner named becomes active on its first sign-in.
+// address the admin named becomes active on its first sign-in.
 type State string
 
 const (
-	// Invited is an address the owner added that has not signed in yet.
+	// Invited is an address the admin added that has not signed in yet.
 	Invited State = "invited"
 	// Active is someone who has signed in.
 	Active State = "active"
-	// Revoked is someone the owner removed. Every request from them refuses from the next one.
+	// Revoked is someone the admin removed. Every request from them refuses from the next one.
 	Revoked State = "revoked"
 )
 
@@ -57,7 +57,7 @@ type Person struct {
 	Name  string `json:"name,omitempty"`
 	Role  Role   `json:"role"`
 	State State  `json:"state"`
-	// Models is what this person may run. Empty means any model, which is the owner's default.
+	// Models is what this person may run. Empty means any model, which is the admin's default.
 	Models []string `json:"models,omitempty"`
 	// CanCreate is whether they may create workspaces of their own.
 	CanCreate bool `json:"can_create,omitempty"`
@@ -70,8 +70,8 @@ type Person struct {
 // The refusals. Each is a sentence the person reads, because the people behind this file are family
 // and friends rather than operators with a log to check.
 var (
-	ErrNoOwner  = errors.New("this install has no owner yet: run `acornfall people claim you@example.com` on the machine that runs it")
-	ErrHasOwner = errors.New("this install already has an owner")
+	ErrNoAdmin  = errors.New("this install has no admin yet: run `acornfall people claim you@example.com` on the machine that runs it")
+	ErrHasAdmin = errors.New("this install already has an admin")
 	ErrExists   = errors.New("that address is already in the list")
 )
 
@@ -79,18 +79,18 @@ var (
 type ErrUnknown struct{ Email string }
 
 func (e ErrUnknown) Error() string {
-	return fmt.Sprintf("this install has no record of %s: ask the owner to add you", e.Email)
+	return fmt.Sprintf("this install has no record of %s: ask the admin to add you", e.Email)
 }
 
-// ErrRevoked is the refusal for someone the owner removed. It says so rather than pretending the
+// ErrRevoked is the refusal for someone the admin removed. It says so rather than pretending the
 // address is unknown, because being told "ask again" after being removed is a lie.
 type ErrRevoked struct{ Email string }
 
 func (e ErrRevoked) Error() string {
-	return fmt.Sprintf("%s no longer has access to this install: ask the owner", e.Email)
+	return fmt.Sprintf("%s no longer has access to this install: ask the admin", e.Email)
 }
 
-// DisplayName is what a shared room puts in front of this person's words: the name the owner gave, or the part of
+// DisplayName is what a shared room puts in front of this person's words: the name the admin gave, or the part of
 // the address before the @ when they gave none. It is never empty for a person that exists.
 func (p Person) DisplayName() string {
 	if name := strings.TrimSpace(p.Name); name != "" {
@@ -104,8 +104,8 @@ func (p Person) DisplayName() string {
 
 // Allows reports whether this person may run a model, named as "provider/modelId".
 //
-// An empty list is "any model this install has", which is the owner's default and what a person has until the
-// owner narrows it. The list is a proxy for cost rather than a ceiling — a cheap model in a runaway loop still
+// An empty list is "any model this install has", which is the admin's default and what a person has until the
+// admin narrows it. The list is a proxy for cost rather than a ceiling — a cheap model in a runaway loop still
 // spends — which is why spend is shown per person and a cap is a separate decision (ADR 0032 §6).
 func (p Person) Allows(provider, model string) bool {
 	if len(p.Models) == 0 {
@@ -152,7 +152,7 @@ type document struct {
 }
 
 // Open reads a book, or starts an empty one when the file is not there. An install with no book is the
-// single owner ADR 0020 describes rather than an error: the file appears the first time somebody is
+// single admin ADR 0020 describes rather than an error: the file appears the first time somebody is
 // named.
 func Open(path string) (*Book, error) {
 	if strings.TrimSpace(path) == "" {
@@ -168,7 +168,7 @@ func Open(path string) (*Book, error) {
 	return &Book{path: abs}, nil
 }
 
-// List answers every record, owner first and then by address, so two runs of the same book print the
+// List answers every record, admin first and then by address, so two runs of the same book print the
 // same list.
 func (b *Book) List() ([]Person, error) {
 	records, err := b.read()
@@ -177,28 +177,28 @@ func (b *Book) List() ([]Person, error) {
 	}
 	sort.SliceStable(records, func(i, j int) bool {
 		if records[i].Role != records[j].Role {
-			return records[i].Role == RoleOwner
+			return records[i].Role == RoleAdmin
 		}
 		return records[i].Email < records[j].Email
 	})
 	return records, nil
 }
 
-// Owner answers the install's owner.
-func (b *Book) Owner() (Person, bool, error) {
+// Admin answers the install's admin.
+func (b *Book) Admin() (Person, bool, error) {
 	records, err := b.read()
 	if err != nil {
 		return Person{}, false, err
 	}
 	for _, record := range records {
-		if record.Role == RoleOwner {
+		if record.Role == RoleAdmin {
 			return record, true, nil
 		}
 	}
 	return Person{}, false, nil
 }
 
-// Admitted is who may come in: everybody the owner has named and not revoked, in the order the book holds them.
+// Admitted is who may come in: everybody the admin has named and not revoked, in the order the book holds them.
 // It is what the door's group is derived from, on every apply, which is what makes the book the only allowlist
 // there is (ADR 0033 §3).
 func (b *Book) Admitted() ([]string, error) {
@@ -219,15 +219,15 @@ func (b *Book) Admitted() ([]string, error) {
 // Find answers one record by address, because a door that proved somebody has to be answered about rather than
 // looked up by scanning a list.
 // promote is Claim's decision, apart from the file: the address keeps the record it already had, becomes the
-// owner, and any twin of it is dropped. Two records for one address make "who is this" a question about line
-// order, and an owner whose first line says "person" is locked out of their own install.
+// admin, and any twin of it is dropped. Two records for one address make "who is this" a question about line
+// order, and an admin whose first line says "person" is locked out of their own install.
 func promote(records []Person, address, name, today string) (Person, []Person, error) {
 	var claimed Person
 	found := false
 	kept := make([]Person, 0, len(records)+1)
 	for _, record := range records {
-		if record.Role == RoleOwner && record.Email != address {
-			return Person{}, nil, ErrHasOwner
+		if record.Role == RoleAdmin && record.Email != address {
+			return Person{}, nil, ErrHasAdmin
 		}
 		if record.Email != address {
 			kept = append(kept, record)
@@ -238,7 +238,7 @@ func promote(records []Person, address, name, today string) (Person, []Person, e
 		}
 	}
 	claimed.Email = address
-	claimed.Role = RoleOwner
+	claimed.Role = RoleAdmin
 	claimed.State = Active
 	if name != "" {
 		claimed.Name = name
@@ -266,15 +266,15 @@ func (b *Book) Find(email string) (Person, bool, error) {
 		}
 		// An address should appear once, and Claim is what keeps it that way. A book written before that was
 		// true can still hold two records for one address, and the answer then must not depend on line order:
-		// the strongest record wins, because the door proved the address and the owner is the same person.
-		if !matched || (record.Role == RoleOwner && found.Role != RoleOwner) {
+		// the strongest record wins, because the door proved the address and the admin is the same person.
+		if !matched || (record.Role == RoleAdmin && found.Role != RoleAdmin) {
 			found, matched = record, true
 		}
 	}
 	return found, matched, nil
 }
 
-// Claim names the install's owner, once. It is a command-line operation on purpose: the token already
+// Claim names the install's admin, once. It is a command-line operation on purpose: the token already
 // proves ownership, so there is no first-come race through the API and no self-promotion (ADR 0032 §3).
 func (b *Book) Claim(email, name string) (Person, error) {
 	address, err := address(email)
@@ -318,11 +318,14 @@ func (b *Book) Add(email, name string) (Person, error) {
 		}
 	}
 	added := Person{
-		Email:   address,
-		Name:    strings.TrimSpace(name),
-		Role:    RolePerson,
-		State:   Invited,
-		Created: b.today(),
+		Email: address,
+		Name:  strings.TrimSpace(name),
+		Role:  RoleMember,
+		State: Invited,
+		// A member may make a room of their own unless the admin says otherwise: a room somebody owns is the
+		// only thing there is to share, so a person who cannot make one can never lead a room (ADR 0034 §3).
+		CanCreate: true,
+		Created:   b.today(),
 	}
 	if err := b.write(append(records, added)); err != nil {
 		return Person{}, err
@@ -330,7 +333,7 @@ func (b *Book) Add(email, name string) (Person, error) {
 	return added, nil
 }
 
-// Revoke takes access away. The record stays: "who was here" is a question the owner asks later, and a
+// Revoke takes access away. The record stays: "who was here" is a question the admin asks later, and a
 // deletion answers it wrong. Their workspace is not touched — ADR 0011 keeps removal a separate,
 // explicit command.
 func (b *Book) Revoke(email string) error {
@@ -349,10 +352,10 @@ func (b *Book) Revoke(email string) error {
 		if records[index].Email != address {
 			continue
 		}
-		if records[index].Role == RoleOwner {
-			// Revoking the owner is how an install locks itself out of the door it needs to add anybody,
+		if records[index].Role == RoleAdmin {
+			// Revoking the admin is how an install locks itself out of the door it needs to add anybody,
 			// and there is no recovery command that does not start with the token.
-			return errors.New("the owner cannot be revoked: there would be no one left to add anybody")
+			return errors.New("the admin cannot be revoked: there would be no one left to add anybody")
 		}
 		records[index].State = Revoked
 		return b.write(records)
@@ -360,8 +363,42 @@ func (b *Book) Revoke(email string) error {
 	return ErrUnknown{Email: address}
 }
 
+// Restore names a revoked person again. Their rooms never lost their name, so this is the whole of coming back:
+// the door admits them, and the rooms they were in are theirs again (ADR 0034 §1). Somebody who never signed in
+// returns to invited rather than active.
+func (b *Book) Restore(email string) (Person, error) {
+	address, err := address(email)
+	if err != nil {
+		return Person{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	release, records, err := b.lock()
+	if err != nil {
+		return Person{}, err
+	}
+	defer release()
+	for index := range records {
+		if records[index].Email != address {
+			continue
+		}
+		if records[index].Role == RoleAdmin {
+			return Person{}, errors.New("the admin was never revoked: there is nothing to restore")
+		}
+		records[index].State = Invited
+		if records[index].LastSeen != "" {
+			records[index].State = Active
+		}
+		if err := b.write(records); err != nil {
+			return Person{}, err
+		}
+		return records[index], nil
+	}
+	return Person{}, ErrUnknown{Email: address}
+}
+
 // SetModels narrows what somebody may run. An empty list is every model this install has, which is where a
-// person starts; the owner is never narrowed, because the install is theirs.
+// person starts; the admin is never narrowed, because the install is theirs.
 func (b *Book) SetModels(email string, models []string) (Person, error) {
 	address, err := address(email)
 	if err != nil {
@@ -382,10 +419,40 @@ func (b *Book) SetModels(email string, models []string) (Person, error) {
 		if records[index].Email != address {
 			continue
 		}
-		if records[index].Role == RoleOwner {
-			return Person{}, errors.New("the owner runs any model this install has: there is nobody to narrow it")
+		if records[index].Role == RoleAdmin {
+			return Person{}, errors.New("the admin runs any model this install has: there is nobody to narrow it")
 		}
 		records[index].Models = cleaned
+		if err := b.write(records); err != nil {
+			return Person{}, err
+		}
+		return records[index], nil
+	}
+	return Person{}, ErrUnknown{Email: address}
+}
+
+// SetCanCreate says whether a member may make rooms of their own. The admin's own answer is always yes, so
+// narrowing it would be a field that does nothing.
+func (b *Book) SetCanCreate(email string, can bool) (Person, error) {
+	address, err := address(email)
+	if err != nil {
+		return Person{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	release, records, err := b.lock()
+	if err != nil {
+		return Person{}, err
+	}
+	defer release()
+	for index := range records {
+		if records[index].Email != address {
+			continue
+		}
+		if records[index].Role == RoleAdmin {
+			return Person{}, errors.New("the admin makes rooms: there is nobody to narrow it")
+		}
+		records[index].CanCreate = can
 		if err := b.write(records); err != nil {
 			return Person{}, err
 		}
@@ -487,6 +554,19 @@ func (b *Book) load() ([]Person, error) {
 		// A file nobody can parse is reported by name: rewriting it would delete the list, and starting
 		// empty would admit nobody while looking like it worked.
 		return nil, fmt.Errorf("%s is not a people file: %w", b.path, err)
+	}
+	// A book written before the roles were renamed says "owner" and "person". They are the same two
+	// roles under their old names, and a book is a file people keep: they are read as the new ones and
+	// the next write puts the new names back (ADR 0034).
+	for i := range parsed.People {
+		switch parsed.People[i].Role {
+		case RoleAdmin, RoleMember:
+			// Already the current names.
+		case "owner":
+			parsed.People[i].Role = RoleAdmin
+		case "person":
+			parsed.People[i].Role = RoleMember
+		}
 	}
 	return parsed.People, nil
 }

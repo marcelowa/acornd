@@ -28,6 +28,8 @@ export interface WorkspaceRowProps {
 	onRename: (workspace: WorkspaceSummary) => void;
 	onSandbox: (workspace: WorkspaceSummary) => void;
 	onForget: (name: string) => void;
+	/** Open who is in this room. Absent on a personal room, which is never shared (ADR 0034 §5). */
+	onShare?: ((workspace: WorkspaceSummary) => void) | undefined;
 }
 
 export function WorkspaceRow({
@@ -36,6 +38,7 @@ export function WorkspaceRow({
 	onRename,
 	onSandbox,
 	onForget,
+	onShare,
 }: WorkspaceRowProps) {
 	return (
 		<div
@@ -102,6 +105,11 @@ export function WorkspaceRow({
 						<DropdownMenuItem onSelect={() => onSandbox(workspace)}>
 							Sandbox…
 						</DropdownMenuItem>
+						{onShare === undefined ? null : (
+							<DropdownMenuItem onSelect={() => onShare(workspace)}>
+								Share…
+							</DropdownMenuItem>
+						)}
 						<DropdownMenuItem onSelect={() => onRename(workspace)}>
 							Rename
 						</DropdownMenuItem>

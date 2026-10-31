@@ -1,8 +1,10 @@
 # Drafts
 
-A half-typed message belongs to the room it was written in, not to the page it was typed on.
-The workspace holds it, so it is there after a reload, after a switch to another conversation,
-and on the other machine. Written 2026-10-16, after the owner asked for a draft that stays put.
+A half-typed message belongs to the person who wrote it, in the room they wrote it in, and not to
+the page it was typed on. The workspace holds it, so it is there after a reload, after a switch to
+another conversation, and on the other machine. Written 2026-10-16, after the owner asked for a
+draft that stays put; made per person on 2026-10-31, when a shared room showed two people typing in
+one conversation erasing each other (ADR 0034 §7).
 
 ## Where a draft lives
 
@@ -11,17 +13,26 @@ and on the other machine. Written 2026-10-16, after the owner asked for a draft 
 keystroke and the settings rarely, and one file holding both would rewrite the choices every
 time someone typed.
 
+It is keyed by conversation and then by address: one person's half-thought is not another's, and a
+state that carried somebody else's words would put them in a composer they never typed.
+
 ```json
 {
   "drafts": {
     "3": {
-      "text": "half a thought",
-      "attachments": [{ "id": "…", "name": "shot.png", "size": 12000, "mime": "image/png" }],
-      "updatedAt": 1760000000000
+      "ana@example.com": {
+        "text": "half a thought",
+        "attachments": [{ "id": "…", "name": "shot.png", "size": 12000, "mime": "image/png" }],
+        "updatedAt": 1760000000000
+      }
     }
   }
 }
 ```
+
+An install with no admin claimed has one person in it and one key that is empty. A file written
+before this holds one draft per conversation instead; it does not decode as this one, and those
+drafts are dropped rather than guessed at.
 
 The console writes through `POST /api/workspaces/{ws}/conversations/{id}/draft`, and the answer
 is what was stored, stamp included. Empty words and no files clear the entry. A cleared entry
@@ -34,10 +45,11 @@ queue: what is queued is the worker's own inbox, and it is visible there.
 
 ## Riding the state
 
-The active conversation's draft rides `State.draft`, so every machine and tab watching the room
-hears it move — the same signal the rail uses (`publish` → `notifyState`), one state event per
-write. The gateway clears the draft when it accepts a prompt, in the same call that turns the
-words into a message, so the clearing is announced by the state event the prompt already sends.
+The active conversation's draft rides `State.draft`, which is built per caller: every machine and
+tab of the person who typed hears it move — the same signal the rail uses (`publish` →
+`notifyState`), one state event per write. The gateway clears the sender's draft when it accepts
+their prompt, in the same call that turns the words into a message, so the clearing is announced by
+the state event the prompt already sends, and nobody else's draft is touched.
 
 The console batches its writes: 400 ms after the last keystroke, plus the moments a page cannot
 wait through — the tab going hidden, `pagehide`, the stream coming back, and the workspace
@@ -64,9 +76,8 @@ the whole rule:
    save, and letting it win would put older words back on the screen with nothing to correct
    them until the next keystroke.
 
-Two machines typing into one room at once is settled by arrival, last write wins. The console
-does not merge and does not lock: the person is one person, and the room's shelf holds one
-message.
+Two machines of one person typing at once is settled by arrival, last write wins. The console
+does not merge and does not lock: the person is one person, and their shelf holds one message.
 
 ## Files
 
@@ -77,7 +88,7 @@ it, and it does not survive. A draft with files and no words is a message, and i
 
 ## What is not built
 
-- **A draft per machine.** The room's shelf is one shelf. A console cannot hold a different
+- **A draft per machine.** The person's shelf is one shelf. A console cannot hold a different
   half-sentence than the phone does.
 - **A marker in the rail.** A conversation with a draft looks like any other row.
 - **Pruning.** A conversation that goes away leaves its draft behind, one entry at most. Sent

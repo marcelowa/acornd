@@ -72,6 +72,11 @@ func (f *fakeWorker) CallInto(_ context.Context, command protocol.Command, out a
 	if err != nil {
 		return err
 	}
+	// A command with no answer to decode into is one control only needs to have sent, which is how the real worker's
+	// CallInto treats a nil out.
+	if out == nil {
+		return nil
+	}
 	return json.Unmarshal(payload, out)
 }
 
@@ -359,5 +364,48 @@ func TestASignOutSurvivesAWorldWithNoProvider(t *testing.T) {
 	}
 	if got := control.bindings["1"]; got.Provider != "" {
 		t.Errorf("the binding should be cleared: %+v", got)
+	}
+}
+
+// Who wrote the words travels with them. The worker stores it on the entry and composes the prefix the model reads
+// from it (ADR 0034 §7), so control's half is that the caller is named on the command that carries their words — and
+// that a stop carries the person and not a speaker, because a stop is not a message.
+func TestTheCommandCarriesTheAuthor(t *testing.T) {
+	worker := newFakeWorker()
+	control := controlWithWorker(t, worker)
+	control.applyDescribe(protocol.Describe{Providers: []protocol.ProviderInfo{{
+		ID: "faux", Authenticated: true, Models: []protocol.ModelInfo{{ID: "faux-1"}},
+	}}})
+	control.resolved["1"] = &protocol.ResolvedAgent{Model: "faux/faux-1"}
+	control.bindings["1"] = protocol.ModelBinding{Provider: "faux", ModelID: "faux-1"}
+
+	author := &protocol.Author{Email: "ana@example.com", Name: "Ana Silva", Speaker: "Ana Silva"}
+	if err := control.Prompt(context.Background(), Caller{Admin: true}, author, "1", "hello", protocol.WhenBusyFollowUp, nil); err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	asked := worker.asked()
+	var sent *protocol.Command
+	for index := range asked {
+		if asked[index].Type == "prompt" {
+			sent = &asked[index]
+		}
+	}
+	if sent == nil {
+		t.Fatalf("no prompt was sent, asked %+v", asked)
+	}
+	if sent.Author == nil || *sent.Author != *author {
+		t.Errorf("the prompt should name its author, got %+v", sent.Author)
+	}
+
+	if err := control.AbortBy(context.Background(), author, "1"); err != nil {
+		t.Fatalf("abort: %v", err)
+	}
+	asked = worker.asked()
+	last := asked[len(asked)-1]
+	if last.Type != "abort" || last.Author == nil || last.Author.Email != author.Email {
+		t.Fatalf("the abort should name who stopped it, got %+v", last)
+	}
+	if last.Author.Speaker != "" {
+		t.Errorf("a stop is not a message, so it carries no speaker: %+v", last.Author)
 	}
 }

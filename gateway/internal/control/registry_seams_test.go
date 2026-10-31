@@ -16,10 +16,11 @@ import (
 // releases because a map iterated in a different order.
 func TestTheSidebarIsPersonalFirstThenByName(t *testing.T) {
 	workspaces := NewWorkspaces(WorkspacesOptions{WorkspacesDir: t.TempDir()})
-	shared := []string{"a@example.com", "b@example.com"}
-	workspaces.registry["zulu"] = Workspace{Name: "zulu", Path: "/z", Members: shared}
-	workspaces.registry[PersonalWorkspaceName] = Workspace{Name: PersonalWorkspaceName, Path: "/g", Members: []string{"a@example.com"}}
-	workspaces.registry["alpha"] = Workspace{Name: "alpha", Path: "/a", Members: shared}
+	shared := []Member{{Email: "a@example.com", Role: RoleOwner}, {Email: "b@example.com", Role: RoleGuest}}
+	workspaces.registry["zulu"] = Workspace{Name: "zulu", Path: "/z", Kind: KindRoom, Members: shared}
+	workspaces.registry[PersonalWorkspaceName] = Workspace{Name: PersonalWorkspaceName, Path: "/g", Kind: KindPersonal,
+		Members: []Member{{Email: "a@example.com", Role: RoleOwner}}}
+	workspaces.registry["alpha"] = Workspace{Name: "alpha", Path: "/a", Kind: KindRoom, Members: shared}
 
 	names := make([]string, 0, 3)
 	for _, workspace := range workspaces.List() {

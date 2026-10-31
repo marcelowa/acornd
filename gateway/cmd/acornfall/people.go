@@ -1,5 +1,5 @@
 // The command line for the book of people: who may use this install, and what they may do. It is the
-// owner's door — claiming is here rather than in the API because the token already proves ownership, so
+// admin's door — claiming is here rather than in the API because the token already proves ownership, so
 // there is no first-come race and nothing to self-promote (ADR 0032 §3).
 package main
 
@@ -44,7 +44,7 @@ func peopleUsage(w *os.File) {
 	fmt.Fprint(w, `usage: acornfall people <command>
 
   list                      everyone who may use this install, and their state
-  claim <email>             name this install's owner, once; --name "Their Name"
+  claim <email>             name this install's admin, once; --name "Their Name"
   add <email>               invite someone; they become active on their first sign-in
   revoke <email>            take access away; their record stays
   models <email> [a/b ...]  what they may run; with no models, every model the install has
@@ -73,7 +73,7 @@ func peopleList(argv []string) {
 		logFatal(err)
 	}
 	if len(list) == 0 {
-		fmt.Println("nobody yet: `acornfall people claim you@example.com` names this install's owner")
+		fmt.Println("nobody yet: `acornfall people claim you@example.com` names this install's admin")
 		return
 	}
 	rows := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -96,11 +96,11 @@ func peopleList(argv []string) {
 
 func peopleClaim(argv []string) {
 	request := parse("people claim", argv, true, true)
-	owner, err := request.book.Claim(request.address, request.name)
+	admin, err := request.book.Claim(request.address, request.name)
 	if err != nil {
 		logFatal(err)
 	}
-	fmt.Printf("%s owns this install\n", owner.Email)
+	fmt.Printf("%s administers this install\n", admin.Email)
 }
 
 func peopleAdd(argv []string) {

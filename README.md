@@ -88,7 +88,7 @@ Every command answers `-h`, and `acornfall` with no arguments lists them:
 start      run the gateway
 setup      check this machine, and make it able to run sandboxes
 doctor     report what the sandbox engines can do here; changes nothing
-workspace  list, add, and remove workspaces
+workspace  list, add, forget, and purge workspaces
 secret     list, add, show, rotate, and remove secrets
 provider   list, add, and remove model provider keys
 model      list or choose the default model
@@ -284,6 +284,14 @@ make dev
 
 ## What works
 
+- **People and rooms**: the install's admin names people from the console or with
+  `acornfall people`; every person gets a personal workspace and may lead rooms of their
+  own, and a room's owner invites guests. A guest speaks in the room's conversations,
+  compacts them and stops a run, and cannot create, fork, hide, rename, `/clear` or choose
+  a model. Forgetting a room unregisters it; `acornfall workspace purge` is the only thing
+  that deletes. Remote access is a Cloudflare tunnel with a one-time PIN; see
+  [ADR 0032](docs/adr/0032-who-may-call-the-console.md) and
+  [ADR 0034](docs/adr/0034-install-roles-and-room-roles.md).
 - **Multiple conversations** per workspace in the left rail, with a real id from the
   harness. Rename, branch, and delete from the rail; see
   [ADR 0005](docs/adr/0005-multi-conversation.md) and
@@ -399,7 +407,7 @@ without restarting anything. Resolution rules and their rationale are in
 
 ## What does not exist yet
 
-Memory, MCP, codemode, multi-user, triggers, versioned agent definitions, and the parts of
+Memory, MCP, codemode, triggers, versioned agent definitions, and the parts of
 the interface that are being rebuilt. `docs/adr/` holds the designs they will land against;
 ADR 0012 lists what the sandbox deliberately does not cover yet.
 

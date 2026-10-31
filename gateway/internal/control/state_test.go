@@ -26,7 +26,7 @@ func TestStateForDescribesTheConversationItWasAskedFor(t *testing.T) {
 	// which of the two the answer describes is then visible in the inherited flags too.
 	control.bindings["asked"] = protocol.ModelBinding{Provider: "p", ModelID: "m"}
 
-	asked := control.StateFor("asked")
+	asked := control.StateFor(Caller{}, "asked")
 	if asked.Conversation == nil {
 		t.Fatal("no conversation in the state")
 	}
@@ -41,7 +41,7 @@ func TestStateForDescribesTheConversationItWasAskedFor(t *testing.T) {
 	}
 
 	// And with nothing named, it is the attached one, which is what "the" conversation means.
-	open := control.State()
+	open := control.StateFor(Caller{}, "")
 	if open.Conversation == nil || open.Conversation.ID != "attached" {
 		t.Fatalf("with no conversation named, the state should describe the attached one, got %+v", open.Conversation)
 	}
@@ -67,7 +67,7 @@ func TestRunningMeansLiveOrJustPrompted(t *testing.T) {
 	}
 	control.promptedAt["prompted"] = now
 
-	state := control.State()
+	state := control.StateFor(Caller{}, "")
 	byID := map[string]Conversation{}
 	for _, conversation := range state.Conversations {
 		byID[conversation.ID] = conversation
@@ -103,7 +103,7 @@ func TestASettlementEndsThePromptGrace(t *testing.T) {
 	// after its settlement, so it holds a fresh stamp.
 	control.promptedAt["queued"] = now - 2_000
 
-	state := control.State()
+	state := control.StateFor(Caller{}, "")
 	byID := map[string]Conversation{}
 	for _, conversation := range state.Conversations {
 		byID[conversation.ID] = conversation
@@ -126,7 +126,7 @@ func TestConversationsCarryLastActivity(t *testing.T) {
 		{ID: "fresh"},
 	}
 
-	state := control.State()
+	state := control.StateFor(Caller{}, "")
 	if len(state.Conversations) != 2 {
 		t.Fatalf("expected two conversations, got %d", len(state.Conversations))
 	}
@@ -356,7 +356,7 @@ func TestStateCarriesUpdateSummary(t *testing.T) {
 			return UpdateSummary{Current: "v0.9.0", Latest: "v0.9.1", Available: true}
 		},
 	})
-	state := control.State()
+	state := control.StateFor(Caller{}, "")
 	if !state.Update.Available || state.Update.Current != "v0.9.0" || state.Update.Latest != "v0.9.1" {
 		t.Fatalf("state must carry the summary: %+v", state.Update)
 	}
@@ -364,7 +364,7 @@ func TestStateCarriesUpdateSummary(t *testing.T) {
 
 func TestStateWithoutUpdateIsEmpty(t *testing.T) {
 	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
-	if state := control.State(); state.Update != (UpdateSummary{}) {
+	if state := control.StateFor(Caller{}, ""); state.Update != (UpdateSummary{}) {
 		t.Fatalf("no update tier must read empty, got %+v", state.Update)
 	}
 }

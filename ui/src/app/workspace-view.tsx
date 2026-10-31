@@ -18,6 +18,7 @@ import { UpdatesSection } from "@/components/release/updates-section";
 import { ReleaseMark } from "@/components/release/release-mark";
 import { ReleaseScreen } from "@/components/release/release-screen";
 import { ProviderModelsDialog } from "@/components/settings/provider-models-dialog";
+import { PeopleSection } from "@/components/settings/people-section";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { RemoteSection } from "@/components/settings/remote-section";
 import { SecretsSection } from "@/components/settings/secrets-section";
@@ -334,10 +335,14 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					workspaces={platform.workspaces}
 					onSelect={platform.selectWorkspace}
 					onCreate={platform.createWorkspace}
+					canMakeRoom={platform.can.makeRoom}
 					engines={platform.engines}
 					onRename={platform.renameWorkspace}
 					onForget={platform.removeWorkspace}
 					onUpdateSandbox={platform.setWorkspaceSandbox}
+					share={platform.share}
+					onAddGuest={platform.addGuest}
+					onRemoveGuest={platform.removeGuest}
 					failure={platform.failure}
 				/>
 			}
@@ -357,6 +362,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 					conversations={platform.conversations}
 					deleted={platform.deleted}
 					activeId={platform.active?.id}
+					can={platform.can}
 					onSelect={platform.select}
 					onRename={(id) =>
 						setRenaming(
@@ -370,16 +376,20 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			}
 			foot={
 				<>
-					<Button
-						variant="ghost"
-						size="sm"
-						className="justify-start"
-						aria-label="New conversation"
-						onClick={platform.newConversation}
-					>
-						<Plus />
-						New conversation
-					</Button>
+					{/* A guest speaks in the conversations the room already has: making one is the owner's,
+					 * and an affordance that the server refuses is worse than none (ADR 0034 §4). */}
+					{platform.can.create ? (
+						<Button
+							variant="ghost"
+							size="sm"
+							className="justify-start"
+							aria-label="New conversation"
+							onClick={platform.newConversation}
+						>
+							<Plus />
+							New conversation
+						</Button>
+					) : null}
 					<Button
 						variant="ghost"
 						size="sm"
@@ -532,6 +542,22 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		/>
 	);
 
+	// The book of people: the admin's page. The tab that holds it is drawn only for the admin, so this is
+	// never rendered for a member — and the gateway refuses the routes either way (ADR 0034 §1).
+	const people = (
+		<PeopleSection
+			people={platform.people?.people}
+			catalog={platform.people?.catalog}
+			loading={platform.peopleLoading}
+			failure={platform.peopleFailure}
+			onAdd={platform.addPerson}
+			onRevoke={platform.revokePerson}
+			onRestore={platform.restorePerson}
+			onSetCanCreate={platform.setPersonCanCreate}
+			onSetModels={platform.setPersonModels}
+		/>
+	);
+
 	const providers = (
 		<ProvidersSection
 			providers={platform.providers}
@@ -580,6 +606,8 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 				secrets={secrets}
 				install={install}
 				remote={remote}
+				people={people}
+				admin={platform.admin}
 				version={platform.update?.current}
 				onClose={() => platform.showScreen("conversation")}
 			/>
@@ -638,7 +666,8 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 							entries={platform.entries}
 							ready={platform.ready}
 							opening={platform.opening}
-							onFork={platform.fork}
+							// A guest reads and prompts: branching is the room owner's (ADR 0034 §4).
+							onFork={platform.can.fork ? platform.fork : undefined}
 						/>
 					)
 				}

@@ -44,6 +44,14 @@ import {
 	type AttachmentMeta,
 } from "./attachments.ts";
 import { activityOf } from "./activity.ts";
+import {
+	abortNotice,
+	authorEntry,
+	authorsExtension,
+	isPersonMessage,
+	MESSAGE_KIND,
+	NOTICE_KIND,
+} from "./authors.ts";
 import { thinkingLevelFor } from "./thinking.ts";
 import { PREAMBLE } from "./preamble.ts";
 import { parseSecrets, secretSection, type SecretInfo } from "./secrets.ts";
@@ -286,6 +294,7 @@ registry.install(
 registry.install(
 	guardsExtension({ harness, storage, catalog: () => catalog, workspaceRoot: args.workspace }),
 );
+registry.install(authorsExtension({ harness, storage, catalog: () => catalog }));
 
 /** Live handles by conversation id; created on first use. */
 const handles = new Map<string, Conversation>();
@@ -411,7 +420,7 @@ async function nameOf(
 async function deriveTitle(conversation: Conversation): Promise<string> {
 	const page = await conversation.entries({}, TITLE_SCAN_LIMIT, undefined, CONTEXT);
 	for (const entry of page.items) {
-		if (entry.kind !== "pi.user") continue;
+		if (!isPersonMessage(entry)) continue;
 		const message = (entry.model ?? [])[0] as { content?: unknown } | undefined;
 		const text =
 			typeof message?.content === "string"
@@ -897,7 +906,7 @@ async function handle(command: HandledCommand): Promise<unknown> {
 				const page = await conversation.entries({}, 200, cursor, CONTEXT);
 				for (const entry of page.items) {
 					entries += 1;
-					if (entry.kind === "pi.user") turns += 1;
+					if (isPersonMessage(entry)) turns += 1;
 				}
 				if (page.next === undefined) break;
 				cursor = page.next;
@@ -940,7 +949,7 @@ async function handle(command: HandledCommand): Promise<unknown> {
 					const after = await conversation.context(CONTEXT);
 					const kept = new Set(after.entries.map((entry) => entry.id));
 					const folded = before.entries.filter((entry) => !kept.has(entry.id));
-					const foldedTurns = folded.filter((entry) => entry.kind === "pi.user").length;
+					const foldedTurns = folded.filter(isPersonMessage).length;
 					notice =
 						folded.length === 0
 							? "Context compacted into one note."
@@ -953,8 +962,13 @@ async function handle(command: HandledCommand): Promise<unknown> {
 				{
 					type: "write",
 					entry: {
-						kind: "pi.user",
+						kind: MESSAGE_KIND,
 						model: [{ role: "user", content: command.text, timestamp: Date.now() }],
+						// A builtin is somebody's act, so the record names them; the model reads the command
+						// itself, because a prefix would turn `/compact` into a sentence about compacting.
+						...(command.author === undefined
+							? {}
+							: { data: { author: command.author } }),
 					},
 					requestId: crypto.randomUUID(),
 				},
@@ -967,7 +981,7 @@ async function handle(command: HandledCommand): Promise<unknown> {
 				const noted = await conversation.submit(
 					{
 						type: "write",
-						entry: { kind: "acornfall.notice", data: { text: notice } },
+						entry: { kind: NOTICE_KIND, data: { text: notice } },
 						requestId: crypto.randomUUID(),
 					},
 					CONTEXT,
@@ -1026,12 +1040,16 @@ async function handle(command: HandledCommand): Promise<unknown> {
 				command.text,
 				await attachmentFiles(command.attachments ?? []),
 			);
+			// The author rides the same commit as the words: the run starts the moment the entry
+			// lands, so a prefix stored afterwards would miss the first request.
+			const entry = authorEntry(command.author);
 			const submission = await conversation.submit(
 				{
 					type: "input",
 					content,
 					whenBusy: command.whenBusy ?? "followUp",
 					requestId: crypto.randomUUID(),
+					...(entry === undefined ? {} : { entry }),
 				},
 				CONTEXT,
 			);
@@ -1055,7 +1073,28 @@ async function handle(command: HandledCommand): Promise<unknown> {
 		}
 		case "abort": {
 			const conversation = await conversationFor(command.conversationId);
+			// Whether there is anything to stop is read before the abort takes it away: a note that
+			// says a run was stopped when none was running is a sentence that teaches the reader to
+			// ignore the notes.
+			const live = await harness.snapshot(
+				LiveDoc,
+				conversationIdOf(command.conversationId),
+				CONTEXT,
+			);
+			const stopping = live?.run !== undefined;
 			await conversation.abort(CONTEXT);
+			if (stopping) {
+				// Display only: no model messages, so who stopped a run never joins the context.
+				const noted = await conversation.submit(
+					{
+						type: "write",
+						entry: abortNotice(command.author),
+						requestId: crypto.randomUUID(),
+					},
+					CONTEXT,
+				);
+				await noted.wait(CONTEXT);
+			}
 			return undefined;
 		}
 		case "messages": {
