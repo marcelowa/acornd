@@ -13,8 +13,13 @@ import (
 // it found, and installs nothing unless it was told to. This is the path a script uses, and the
 // one that has to work when nothing else is up.
 func TestTheCommandLineChecksForAnUpdateWithoutAGateway(t *testing.T) {
-	t.Parallel()
+	// Not parallel: the answer is faked through the environment, which the whole process shares.
 	dir := t.TempDir()
+	// A fake github, so the check never leaves the machine. What is under test is that the
+	// command asks and says what it found; pointing it at the real api.github.com made a test
+	// that fails whenever the repository is renamed, and passes for the wrong reason on any
+	// machine that happens to have network.
+	t.Setenv("ACORND_UPDATE_URL", fakeReleases(t).URL+"/repos/owner/repo/releases/latest")
 
 	// A development build has no version, so nothing is offered and the answer says so rather
 	// than printing an offer it cannot compare.
