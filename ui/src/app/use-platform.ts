@@ -4,6 +4,7 @@ import {
 	addMember,
 	addPerson as addPersonRequest,
 	applyRemote,
+	forgetRemoteToken,
 	checkRemote as checkRemoteRequest,
 	fetchProviderAllowlist,
 	fetchProviderCatalog,
@@ -400,6 +401,8 @@ export interface Platform {
 	remote?: RemoteStatus | undefined;
 	/** One press of the remote form: make Cloudflare match what the owner typed. */
 	applyRemote: (request: { hostname: string; zone: string; token: string }) => Promise<void>;
+	/** Forget the stored token, so the door stops following the book until a new one is pasted. */
+	forgetRemote: () => Promise<void>;
 	remoteBusy: boolean;
 	remoteFailure?: string | undefined;
 	/** The last answer from outside, and whether a check is in flight. */
@@ -1587,6 +1590,18 @@ export function usePlatform(): Platform {
 		[],
 	);
 
+	const forgetRemoteNow = useCallback(async (): Promise<void> => {
+		setRemoteBusy(true);
+		setRemoteFailure(undefined);
+		try {
+			setRemote(await forgetRemoteToken());
+		} catch (cause) {
+			setRemoteFailure(cause instanceof Error ? cause.message : String(cause));
+		} finally {
+			setRemoteBusy(false);
+		}
+	}, []);
+
 	const checkRemoteNow = useCallback((): void => {
 		setRemoteChecking(true);
 		void checkRemoteRequest()
@@ -1766,6 +1781,7 @@ export function usePlatform(): Platform {
 		settingsTab: route.settingsTab,
 		remote,
 		applyRemote: applyRemoteNow,
+		forgetRemote: forgetRemoteNow,
 		remoteBusy,
 		remoteFailure,
 		remoteCheck,

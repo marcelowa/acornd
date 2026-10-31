@@ -357,6 +357,7 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		rollbackUpdateNow: noop,
 		setUpdatePrefs: noop,
 		applyRemote: async () => undefined,
+		forgetRemote: async () => undefined,
 		remoteBusy: false,
 		checkRemote: noop,
 		remoteChecking: false,

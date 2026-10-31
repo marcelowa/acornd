@@ -104,6 +104,8 @@ export interface RemoteStep {
 /** What the install recorded about how a browser reaches it. Never a token: the API token is used and dropped. */
 export interface RemoteStatus {
 	configured: boolean;
+	/** The API token is on this machine, so the door follows the book without a service unit carrying it. */
+	tokenStored?: boolean | undefined;
 	hostname?: string | undefined;
 	zoneId?: string | undefined;
 	accountId?: string | undefined;
@@ -175,8 +177,8 @@ export async function fetchRemote(): Promise<RemoteStatus> {
 }
 
 /**
- * Make Cloudflare match what the owner types. The token is the account's, the call uses it and nothing keeps
- * it — so it travels in the body of this one request and never comes back.
+ * Make Cloudflare match what the owner types. A token that works is kept on this machine (0600) so the door can
+ * follow the book; it never comes back from the gateway, and the status only says whether it is there.
  */
 export async function applyRemote(request: {
 	hostname: string;
@@ -193,6 +195,13 @@ export async function applyRemote(request: {
 		const text = (await response.text()).trim();
 		throw new Error(text || response.statusText);
 	}
+	return (await response.json()) as RemoteStatus;
+}
+
+/** Forget the stored API token. What is at Cloudflare stays; the door stops following the book until a new one. */
+export async function forgetRemoteToken(): Promise<RemoteStatus> {
+	const response = await fetch("/api/remote/forget-token", { method: "POST" });
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
 	return (await response.json()) as RemoteStatus;
 }
 

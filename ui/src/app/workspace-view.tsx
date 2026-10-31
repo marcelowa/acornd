@@ -503,6 +503,9 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			onApply={(request) => {
 				void platform.applyRemote(request);
 			}}
+			onForgetToken={() => {
+				void platform.forgetRemote();
+			}}
 		/>
 	);
 

@@ -89,6 +89,7 @@ func (s *Server) updateRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/remote", s.admin(s.remoteStatus))
 	mux.HandleFunc("POST /api/remote/apply", s.admin(s.remoteApply))
 	mux.HandleFunc("POST /api/remote/check", s.admin(s.remoteCheck))
+	mux.HandleFunc("POST /api/remote/forget-token", s.admin(s.remoteForgetToken))
 	// What a provider's key may be spent on, and the catalog it is chosen from: the install's own business.
 	mux.HandleFunc("GET /api/providers/allowlist", s.admin(s.providerAllowlist))
 	mux.HandleFunc("PUT /api/providers/allowlist", s.admin(s.setProviderAllowlist))

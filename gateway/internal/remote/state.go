@@ -19,6 +19,10 @@ const File = "remote.json"
 type Setup struct {
 	Desired Desired `json:"desired"`
 	State   State   `json:"state"`
+	// APIToken is the Cloudflare token the admin pasted in the console, kept 0600 beside the tunnel's. It is what
+	// makes the door follow the book: a person added, revoked or restored is in the group at the next reconcile.
+	// It is never returned by the status API and never logged (ADR 0033 §4 as amended).
+	APIToken string `json:"api_token,omitempty"`
 	// Updated is when the last apply wrote this, so a status screen can say how old the answer is.
 	Updated string `json:"updated,omitempty"`
 }

@@ -15,8 +15,10 @@ export const NothingYet: Story = {};
 /** After an apply: what a browser reaches, and what the press did, one line per piece. */
 export const Made: Story = {
 	args: {
+		onForgetToken: () => undefined,
 		status: {
 			configured: true,
+			tokenStored: true,
 			hostname: "console.example.com",
 			audience: "c52dbf9750d9619950bffb6e96106adba22bdd4f8957362c0505a14718873982",
 			updated: "2026-10-30T21:47:20Z",
@@ -26,6 +28,19 @@ export const Made: Story = {
 				{ name: "dns", created: true, detail: "console.example.com" },
 				{ name: "access group", created: false, detail: "2 addresses" },
 			],
+		},
+	},
+};
+
+/** The door made, but the token was never kept: the group will not follow People until one is pasted. */
+export const NotFollowingPeople: Story = {
+	args: {
+		status: {
+			configured: true,
+			tokenStored: false,
+			hostname: "console.example.com",
+			audience: "c52dbf9750d9619950bffb6e96106adba22bdd4f8957362c0505a14718873982",
+			updated: "2026-10-30T21:47:20Z",
 		},
 	},
 };

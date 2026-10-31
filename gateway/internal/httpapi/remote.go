@@ -8,6 +8,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -23,6 +24,10 @@ var remoteAPI = func(token string) remote.API { return &remote.Client{Token: tok
 // point where somebody presses the button again.
 const remoteApplyBudget = 120 * time.Second
 
+// peopleReconcileBudget is how long the door may take to follow a change in the book. It runs beside the write,
+// so a slow Cloudflare delays nothing the person is looking at.
+const peopleReconcileBudget = 30 * time.Second
+
 type remoteStep struct {
 	Name    string `json:"name"`
 	Created bool   `json:"created"`
@@ -31,14 +36,17 @@ type remoteStep struct {
 }
 
 type remoteState struct {
-	Configured bool         `json:"configured"`
-	Hostname   string       `json:"hostname,omitempty"`
-	ZoneID     string       `json:"zoneId,omitempty"`
-	AccountID  string       `json:"accountId,omitempty"`
-	Audience   string       `json:"audience,omitempty"`
-	Updated    string       `json:"updated,omitempty"`
-	TunnelID   string       `json:"tunnelId,omitempty"`
-	Steps      []remoteStep `json:"steps,omitempty"`
+	Configured bool `json:"configured"`
+	// TokenStored says the API token is on this machine, so the door follows the book without anybody running a
+	// command. The token itself never crosses this boundary.
+	TokenStored bool         `json:"tokenStored"`
+	Hostname    string       `json:"hostname,omitempty"`
+	ZoneID      string       `json:"zoneId,omitempty"`
+	AccountID   string       `json:"accountId,omitempty"`
+	Audience    string       `json:"audience,omitempty"`
+	Updated     string       `json:"updated,omitempty"`
+	TunnelID    string       `json:"tunnelId,omitempty"`
+	Steps       []remoteStep `json:"steps,omitempty"`
 }
 
 // remoteStatus answers what is recorded. Nothing secret: the tunnel's token and the API token never leave the
@@ -49,15 +57,21 @@ func (s *Server) remoteStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, remoteState{
-		Configured: setup.Configured(),
-		Hostname:   setup.Desired.Hostname,
-		ZoneID:     setup.Desired.ZoneID,
-		AccountID:  setup.Desired.AccountID,
-		Audience:   setup.State.Audience,
-		Updated:    setup.Updated,
-		TunnelID:   setup.State.TunnelID,
-	})
+	writeJSON(w, http.StatusOK, remoteStateFor(setup))
+}
+
+// remoteStateFor is what the screen reads: ids and a yes/no about the token, never the token.
+func remoteStateFor(setup remote.Setup) remoteState {
+	return remoteState{
+		Configured:  setup.Configured(),
+		TokenStored: setup.APIToken != "",
+		Hostname:    setup.Desired.Hostname,
+		ZoneID:      setup.Desired.ZoneID,
+		AccountID:   setup.Desired.AccountID,
+		Audience:    setup.State.Audience,
+		Updated:     setup.Updated,
+		TunnelID:    setup.State.TunnelID,
+	}
 }
 
 // remoteApply makes Cloudflare match what the admin asks for, and answers the steps it took — the same list the
@@ -77,13 +91,21 @@ func (s *Server) remoteApply(w http.ResponseWriter, r *http.Request) {
 	}
 	desire := remote.Desired{Hostname: request.hostname, ZoneID: zone.ID, AccountID: zone.Account}
 	state, steps, applyErr := (&remote.Provisioner{API: api}).Apply(ctx, desire, request.setup.State, request.admitted)
+	// The token is stored only when the apply worked: a token that could not make the door is not a token the
+	// boot should keep trying. A failed apply keeps whatever was stored before, so a working door is not
+	// overwritten by a typo.
+	stored := request.setup.APIToken
+	if applyErr == nil {
+		stored = request.token
+	}
 	// Written whatever happened: what an apply made before it failed is what a resume reads instead of starting
 	// over, and losing it is how a second tunnel appears.
-	if saveErr := remote.Save(s.gate.Dir, remote.Setup{Desired: desire, State: state}, time.Now()); saveErr != nil {
+	if saveErr := remote.Save(s.gate.Dir, remote.Setup{Desired: desire, State: state, APIToken: stored}, time.Now()); saveErr != nil {
 		http.Error(w, "the apply ran but its ids could not be written: "+saveErr.Error(), http.StatusInternalServerError)
 		return
 	}
 	answer := answerFor(desire, state, steps)
+	answer.TokenStored = stored != ""
 	if applyErr != nil {
 		// 502: Cloudflare, or the way to it, is what failed; the steps so far travel with the refusal so the
 		// screen can show what did get made.
@@ -122,8 +144,19 @@ func (s *Server) remoteRequest(w http.ResponseWriter, r *http.Request) (applyReq
 		http.Error(w, "a hostname and the zone it belongs to are both needed", http.StatusBadRequest)
 		return applyRequest{}, false
 	}
+	// The stored token is the fallback behind the body and the environment: the admin pasted it once, the door
+	// follows the book from then on (ADR 0033 §3, §4 as amended).
+	setup, err := remote.Load(s.gate.Dir)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return applyRequest{}, false
+	}
+	request.setup = setup
 	if request.token == "" {
 		request.token = strings.TrimSpace(os.Getenv("ACORNFALL_CLOUDFLARE_TOKEN"))
+	}
+	if request.token == "" {
+		request.token = strings.TrimSpace(setup.APIToken)
 	}
 	if request.token == "" {
 		http.Error(w, remote.ErrNoToken.Error(), http.StatusBadRequest)
@@ -139,13 +172,52 @@ func (s *Server) remoteRequest(w http.ResponseWriter, r *http.Request) (applyReq
 		return applyRequest{}, false
 	}
 	request.admitted = admitted
+	return request, true
+}
+
+// remoteForgetToken removes the stored token. What is at Cloudflare stays; what stops is the door following the
+// book until somebody pastes a token again.
+func (s *Server) remoteForgetToken(w http.ResponseWriter, r *http.Request) {
 	setup, err := remote.Load(s.gate.Dir)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return applyRequest{}, false
+		return
 	}
-	request.setup = setup
-	return request, true
+	setup.APIToken = ""
+	if err := remote.Save(s.gate.Dir, setup, time.Now()); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, remoteStateFor(setup))
+}
+
+// reconcileAfterPeople makes Cloudflare's group match the book after a person is added, revoked or restored.
+// It is the same apply the boot runs, at the moment the change happened; it runs beside the write, so a slow
+// Cloudflare delays nothing the person is looking at, and it needs a stored token — without one there is nobody
+// to ask (ADR 0033 §3).
+func (s *Server) reconcileAfterPeople() {
+	if s.gate.People == nil {
+		return
+	}
+	setup, err := remote.Load(s.gate.Dir)
+	if err != nil || !setup.Configured() || setup.APIToken == "" {
+		return
+	}
+	admitted, err := s.gate.People.Admitted()
+	if err != nil {
+		log.Printf("tunnel: the door did not follow the book: %v", err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), peopleReconcileBudget)
+	defer cancel()
+	state, _, err := (&remote.Provisioner{API: remoteAPI(setup.APIToken)}).Apply(ctx, setup.Desired, setup.State, admitted)
+	if err != nil {
+		log.Printf("tunnel: the door did not follow the book: %v", err)
+		return
+	}
+	if err := remote.Save(s.gate.Dir, remote.Setup{Desired: setup.Desired, State: state, APIToken: setup.APIToken}, time.Now()); err != nil {
+		log.Printf("tunnel: the door followed the book but its ids could not be written: %v", err)
+	}
 }
 
 // answerFor is what the screen renders: the state it will show next time, and what this press changed.

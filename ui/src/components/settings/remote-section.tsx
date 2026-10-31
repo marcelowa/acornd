@@ -13,6 +13,8 @@ export interface RemoteSectionProps {
 	/** Whether a press is in flight: the button says so rather than the screen going quiet. */
 	busy?: boolean | undefined;
 	onApply: (request: { hostname: string; zone: string; token: string }) => void;
+	/** Forget the stored token. Absent when there is none, or when the page is a story. */
+	onForgetToken?: (() => void) | undefined;
 	/** The last answer from outside, once somebody pressed the check. */
 	check?: DoorReport | undefined;
 	checking?: boolean | undefined;
@@ -29,9 +31,9 @@ function stepLine(step: RemoteStep): string {
 
 /**
  * The door, from inside the console: what a browser reaches this install at, the one token that talks to
- * Cloudflare, and the list of what the apply did. It replaces the first terminal a family install needed — and
- * the token lives only in the form: it is used for the press and never shown again, because what the running
- * process keeps is the tunnel's token, not the account's (ADR 0033 §4).
+ * Cloudflare, and the list of what the apply did. A token that works is kept 0600 in the install folder so the
+ * door follows the book when People changes; it is never shown again, and the screen only says whether it is
+ * there (ADR 0033 §3, §4 as amended).
  */
 export function RemoteSection({
 	status,
@@ -40,6 +42,7 @@ export function RemoteSection({
 	check,
 	checking = false,
 	onApply,
+	onForgetToken,
 	onCheck,
 }: RemoteSectionProps) {
 	const [hostname, setHostname] = useState(status?.hostname ?? "");
@@ -83,6 +86,21 @@ export function RemoteSection({
 								</dd>
 							</>
 						)}
+						<dt>
+							<Text size="2xs" tone="muted">
+								API token
+							</Text>
+						</dt>
+						<dd>
+							<Text
+								size="2xs"
+								tone={status.tokenStored === true ? "muted" : "default"}
+							>
+								{status.tokenStored === true
+									? "stored on this machine, 0600 — the door follows People"
+									: "not stored — adding somebody will not reach the door"}
+							</Text>
+						</dd>
 						{status.updated === undefined ? null : (
 							<>
 								<dt>
@@ -136,18 +154,22 @@ export function RemoteSection({
 					</label>
 					<label className="flex flex-col gap-1">
 						<Text size="2xs" tone="muted">
-							API token — used now, never stored
+							API token — kept on this machine so the door follows People
 						</Text>
 						<Input
 							name="token"
 							type="password"
 							value={token}
-							placeholder="Paste it here"
+							placeholder={
+								status?.tokenStored === true
+									? "Paste a new one to replace it"
+									: "Paste it here"
+							}
 							autoComplete="off"
 							onChange={(event) => setToken(event.target.value)}
 						/>
 					</label>
-					<div>
+					<div className="flex items-center gap-2">
 						<Button
 							type="submit"
 							size="sm"
@@ -159,6 +181,17 @@ export function RemoteSection({
 									? "Apply again"
 									: "Make the door"}
 						</Button>
+						{status?.tokenStored !== true || onForgetToken === undefined ? null : (
+							<Button
+								type="button"
+								size="sm"
+								variant="outline"
+								disabled={busy}
+								onClick={onForgetToken}
+							>
+								Forget token
+							</Button>
+						)}
 					</div>
 				</form>
 
