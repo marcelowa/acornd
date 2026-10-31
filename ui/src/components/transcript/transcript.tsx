@@ -182,6 +182,7 @@ export function Transcript({
 	entries,
 	ready = true,
 	opening,
+	showAuthor = false,
 	onOpenConversation,
 	onFork,
 }: TranscriptProps) {
@@ -300,6 +301,7 @@ export function Transcript({
 												key={entryKey(entry)}
 												entry={entry}
 												folds={folds}
+												showAuthor={showAuthor}
 												onOpenConversation={onOpenConversation}
 												onFork={onFork}
 											/>
