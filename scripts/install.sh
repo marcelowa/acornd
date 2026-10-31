@@ -2,7 +2,7 @@
 # Install acornd from a release: picks the binary for this machine,
 # verifies its checksum, and runs preflight. Needs curl and sha256sum.
 #
-#   ACORND_GITHUB_TOKEN=... sh install.sh [--dir DIR] [--version TAG]
+#   sh install.sh [--dir DIR] [--version TAG]
 #
 # While the repo is private the token is required (fine-grained,
 # read-only, this repo); releases answer 404 without it. --dir defaults
@@ -58,7 +58,7 @@ fi
 echo "install.sh: release $VERSION, asset $asset"
 
 release="$(api "https://api.github.com/repos/marcelowa/acornd/releases/tags/$VERSION" | tr -d '\n ')" || {
-	echo "install.sh: cannot read release $VERSION (private repo needs ACORND_GITHUB_TOKEN)"
+	echo "install.sh: cannot read release $VERSION"
 	exit 2
 }
 asset_id() {
@@ -87,7 +87,6 @@ echo "install.sh: preflight"
 "$DIR/acornd" doctor || true
 cat <<EOF
 install.sh: next
-  export ACORND_GITHUB_TOKEN='...'   # while the repo is private
   export PATH="\$PATH:$DIR"
   echo "\$OPENCODE_API_KEY" | acornd provider add opencode-go
   acornd start
