@@ -6,7 +6,7 @@ compositions; every control and card they use is the product's own.
 
 ## How to look
 
-- **The catalogue**: http://100.64.0.16:6006 · http://localhost:6006 —
+- **The catalogue**: http://localhost:6006 —
   group **Mocks/Release**, below Screens. The toolbar switches light and dark; the phone stories
   are pinned to Phone (390).
 - The console itself is not part of this round: none of this exists in the product yet, so the

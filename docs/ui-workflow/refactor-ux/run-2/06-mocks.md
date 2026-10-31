@@ -8,7 +8,6 @@ platform, and the folder (`ui/src/mocks/`) is deleted in step 09 once each direc
 The dev catalogue is already running in this sandbox on port 6006, so the owner can open it from
 their own machine or phone:
 
-- http://100.64.0.16:6006
 - http://localhost:6006
 
 The group is **Mocks** in the sidebar, below Screens. Every story is pinned to the Phone (390)
