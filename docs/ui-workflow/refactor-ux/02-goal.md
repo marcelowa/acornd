@@ -4,7 +4,7 @@ Status: **confirmed by the owner, 2026-08-29.** Approved as written, with the fo
 
 ## The goal statement
 
-Acornfall is a local-first agent console for one technical operator — the owner. A Go gateway
+Acornd is a local-first agent console for one technical operator — the owner. A Go gateway
 supervises a bun worker and a microVM sandbox per workspace; `ui/` is the only face of it that
 speaks. Working well means the owner can:
 

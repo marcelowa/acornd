@@ -32,7 +32,7 @@ export const Done: Story = {
 			status: "done",
 			isError: false,
 			args: { command: "go test ./internal/workerpool" },
-			output: "ok  \tgithub.com/acornfall/acornfall/gateway/internal/workerpool\t0.21s",
+			output: "ok  \tgithub.com/marcelowa/acornd/gateway/internal/workerpool\t0.21s",
 		},
 	},
 };

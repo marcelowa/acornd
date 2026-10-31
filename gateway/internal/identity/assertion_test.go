@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	testIssuer   = "https://acornfall.cloudflareaccess.com"
+	testIssuer   = "https://acornd.cloudflareaccess.com"
 	testAudience = "0123456789abcdef"
 	testEmail    = "ana@example.com"
 )

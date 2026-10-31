@@ -13,8 +13,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/people"
-	"github.com/acornfall/acornfall/gateway/internal/remote"
+	"github.com/marcelowa/acornd/gateway/internal/people"
+	"github.com/marcelowa/acornd/gateway/internal/remote"
 )
 
 func remoteCommand(argv []string) {
@@ -36,11 +36,11 @@ func remoteCommand(argv []string) {
 }
 
 func remoteUsage(w *os.File) {
-	fmt.Fprint(w, `usage: acornfall remote <command>
+	fmt.Fprint(w, `usage: acornd remote <command>
 
   status                  what this install recorded, and whether it is ready
   apply --zone DOMAIN     make Cloudflare match it, for --hostname HOST
-                          --token T, or ACORNFALL_CLOUDFLARE_TOKEN
+                          --token T, or ACORND_CLOUDFLARE_TOKEN
 
 The API token needs Account · Cloudflare Tunnel · Edit, Zone · DNS · Edit, and
 Access: Apps and Policies · Edit plus Organizations, IdP and Groups · Edit.
@@ -51,7 +51,7 @@ creates nothing and a run that died halfway resumes.
 
 func remoteStatus(argv []string) {
 	flags := flag.NewFlagSet("remote status", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder (default: ~/.acornfall)")
+	dataDir := flags.String("data-dir", "", "the acornd folder (default: ~/.acornd)")
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
@@ -64,7 +64,7 @@ func remoteStatus(argv []string) {
 		logFatal(err)
 	}
 	if !setup.Configured() {
-		fmt.Println("no remote access yet: `acornfall remote apply --zone DOMAIN --hostname HOST` sets it up")
+		fmt.Println("no remote access yet: `acornd remote apply --zone DOMAIN --hostname HOST` sets it up")
 		return
 	}
 	rows := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -91,16 +91,16 @@ func remoteStatus(argv []string) {
 		logFatal(err)
 	}
 	if !setup.State.Ready() {
-		fmt.Println("\nnot ready: run `acornfall remote apply` again once the missing pieces can be made")
+		fmt.Println("\nnot ready: run `acornd remote apply` again once the missing pieces can be made")
 	}
 }
 
 func remoteApply(argv []string) {
 	flags := flag.NewFlagSet("remote apply", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder (default: ~/.acornfall)")
+	dataDir := flags.String("data-dir", "", "the acornd folder (default: ~/.acornd)")
 	hostname := flags.String("hostname", "", "the hostname the console answers on")
 	zoneName := flags.String("zone", "", "the Cloudflare zone the hostname belongs to")
-	token := flags.String("token", "", "the Cloudflare API token (default: ACORNFALL_CLOUDFLARE_TOKEN)")
+	token := flags.String("token", "", "the Cloudflare API token (default: ACORND_CLOUDFLARE_TOKEN)")
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
@@ -113,7 +113,7 @@ func remoteApply(argv []string) {
 	}
 	apiToken := *token
 	if apiToken == "" {
-		apiToken = os.Getenv("ACORNFALL_CLOUDFLARE_TOKEN")
+		apiToken = os.Getenv("ACORND_CLOUDFLARE_TOKEN")
 	}
 	if apiToken == "" {
 		logFatal(remote.ErrNoToken)
@@ -147,7 +147,7 @@ func applyRemote(ctx context.Context, dir, hostname, zoneName, apiToken string) 
 	for _, step := range steps {
 		fmt.Printf("%-8s %s%s\n", stepVerb(step), step.Name, stepDetail(step))
 	}
-	fmt.Printf("\n%s now reaches this machine; the door needs ACORNFALL_IDENTITY=access and the audience %s\n", desire.Hostname, state.Audience)
+	fmt.Printf("\n%s now reaches this machine; the door needs ACORND_IDENTITY=access and the audience %s\n", desire.Hostname, state.Audience)
 	return nil
 }
 
@@ -207,7 +207,7 @@ func remoteInputs(dir string) (remote.Setup, []string, error) {
 	if len(admitted) == 0 {
 		// A door that admits nobody is a door nobody can open, and an Access application with an empty policy is
 		// the kind of half-setup that looks finished. Said before anything is created.
-		return remote.Setup{}, nil, errors.New("there is nobody to admit yet: `acornfall people claim you@example.com` names the admin, and `people add` names the rest")
+		return remote.Setup{}, nil, errors.New("there is nobody to admit yet: `acornd people claim you@example.com` names the admin, and `people add` names the rest")
 	}
 	return setup, admitted, nil
 }

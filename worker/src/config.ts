@@ -3,7 +3,7 @@
  *
  * Three layers contribute to one resolved agent:
  *   global    <data-dir>/config.json + <data-dir>/agents/<name>.md
- *   workspace <workspace>/.acornfall/config.json + agents/<name>.md
+ *   workspace <workspace>/.acornd/config.json + agents/<name>.md
  *   agent     the definition file itself
  *
  * Resolution is deterministic and explainable: every resolved field records
@@ -378,11 +378,11 @@ export interface Catalog {
  *
  * `.agents` is the rest of the ecosystem's name for it — the Agent Skills convention for
  * `skills/`, and what the other harnesses look for — so a bundle written for one of them
- * works here. `.acornfall` is ours. A folder that has both uses ours: the interchange copy is
+ * works here. `.acornd` is ours. A folder that has both uses ours: the interchange copy is
  * the one you share, and the local one is the one that overrides it.
  */
 const ECOSYSTEM_DIR = ".agents";
-const NATIVE_DIR = ".acornfall";
+const NATIVE_DIR = ".acornd";
 
 /**
  * The folders one install reads, least specific first: each may hold `config.json`, `agents/`,

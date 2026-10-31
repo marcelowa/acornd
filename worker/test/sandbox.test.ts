@@ -16,14 +16,14 @@ const CONTEXT = BACKGROUND_CONTEXT;
 
 /** An in-memory sandbox: the engine contract without a hypervisor. */
 class FakeSandbox implements SandboxClient {
-	readonly name = "acornfall-fake-0000";
+	readonly name = "acornd-fake-0000";
 	files = new Map<string, Uint8Array>();
 	directories = new Set<string>(["/"]);
 	execs: { command: string | readonly string[]; options: ExecOptions }[] = [];
 	renameCalls: { from: string; to: string }[] = [];
 	/** Chunks a command produces, keyed by nothing: whatever `exec` is called with next. */
 	respond = (command: string): { code: number; stdout?: string; stderr?: string } => {
-		if (command.startsWith("mktemp")) return { code: 0, stdout: "/tmp/acornfall-tmp.a1b2c3\n" };
+		if (command.startsWith("mktemp")) return { code: 0, stdout: "/tmp/acornd-tmp.a1b2c3\n" };
 		if (command.startsWith("readlink")) return { code: 1 };
 		if (command.startsWith("truncate")) return { code: 0 };
 		return { code: 0 };
@@ -280,16 +280,16 @@ test("a command that runs too long reports a timeout and carries its spilt outpu
 	if (result.ok) return;
 	expect(result.error.code).toBe("timeout");
 	// The output that did happen is still reachable, which is what the spill file is for.
-	expect(result.error.spillPath).toBe("/tmp/acornfall-tmp.a1b2c3");
-	expect(await sandbox.read("/tmp/acornfall-tmp.a1b2c3")).toBe("x".repeat(64));
+	expect(result.error.spillPath).toBe("/tmp/acornd-tmp.a1b2c3");
+	expect(await sandbox.read("/tmp/acornd-tmp.a1b2c3")).toBe("x".repeat(64));
 });
 
 test("output that crosses the spill thresholds is written to a file, and small output is not", async () => {
 	const { sandbox, env } = environment();
 	sandbox.stream = ["line\n".repeat(10)];
 	const spilled = await env.exec("big", { spill: { afterBytes: 8, afterLines: 1000 } }, CONTEXT);
-	expect(spilled.ok && spilled.value.spillPath).toBe("/tmp/acornfall-tmp.a1b2c3");
-	expect(await sandbox.read("/tmp/acornfall-tmp.a1b2c3")).toBe("line\n".repeat(10));
+	expect(spilled.ok && spilled.value.spillPath).toBe("/tmp/acornd-tmp.a1b2c3");
+	expect(await sandbox.read("/tmp/acornd-tmp.a1b2c3")).toBe("line\n".repeat(10));
 
 	const small = environment();
 	small.sandbox.stream = ["one line\n"];
@@ -415,13 +415,13 @@ test("creating a directory without recursion needs its parent to exist", async (
 
 test("temporary files are created inside the sandbox", async () => {
 	const { sandbox, env } = environment();
-	const file = await env.createTempFile({ prefix: "acornfall" }, CONTEXT);
-	expect(file.ok && file.value).toBe("/tmp/acornfall-tmp.a1b2c3");
-	const directory = await env.createTempDir("acornfall", CONTEXT);
-	expect(directory.ok && directory.value).toBe("/tmp/acornfall-tmp.a1b2c3");
+	const file = await env.createTempFile({ prefix: "acornd" }, CONTEXT);
+	expect(file.ok && file.value).toBe("/tmp/acornd-tmp.a1b2c3");
+	const directory = await env.createTempDir("acornd", CONTEXT);
+	expect(directory.ok && directory.value).toBe("/tmp/acornd-tmp.a1b2c3");
 	// The template is quoted: a temporary directory is still a path in a shell command.
-	expect(sandbox.execs[0]?.command).toContain("mktemp '/tmp/acornfall.XXXXXX'");
-	expect(sandbox.execs[1]?.command).toContain("mktemp -d '/tmp/acornfall.XXXXXX'");
+	expect(sandbox.execs[0]?.command).toContain("mktemp '/tmp/acornd.XXXXXX'");
+	expect(sandbox.execs[1]?.command).toContain("mktemp -d '/tmp/acornd.XXXXXX'");
 });
 
 test("line readers hand back one line at a time and stop at the end", async () => {

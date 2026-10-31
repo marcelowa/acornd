@@ -41,7 +41,7 @@ type Driver interface {
 	Isolated() bool
 	// InstallDir is where the engine itself lives; StateDir is where its sandboxes, images,
 	// and snapshots live. Both are inside the installation folder so that removing
-	// acornfall removes all of it.
+	// acornd removes all of it.
 	InstallDir() string
 	StateDir() string
 	// Env is what a process needs in its environment to find this engine's sandboxes. The
@@ -105,7 +105,7 @@ func (i Instance) Running() bool { return strings.EqualFold(i.Status, "running")
 
 // Options configures a manager. DataDir and Driver are required.
 type Options struct {
-	// DataDir is the acornfall installation folder.
+	// DataDir is the acornd installation folder.
 	DataDir string
 	// Driver is the engine in use.
 	Driver Driver

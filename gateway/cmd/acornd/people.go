@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"text/tabwriter"
 
-	"github.com/acornfall/acornfall/gateway/internal/people"
+	"github.com/marcelowa/acornd/gateway/internal/people"
 )
 
 func peopleCommand(argv []string) {
@@ -41,7 +41,7 @@ func peopleCommand(argv []string) {
 }
 
 func peopleUsage(w *os.File) {
-	fmt.Fprint(w, `usage: acornfall people <command>
+	fmt.Fprint(w, `usage: acornd people <command>
 
   list                      everyone who may use this install, and their state
   claim <email>             name this install's admin, once; --name "Their Name"
@@ -49,7 +49,7 @@ func peopleUsage(w *os.File) {
   revoke <email>            take access away; their record stays
   models <email> [a/b ...]  what they may run; with no models, every model the install has
 
-acornfall people <command> -h    explains that command's flags
+acornd people <command> -h    explains that command's flags
 
 The list is people.json in the install folder, and it is the only allowlist: the door's list is
 derived from it, so revoking somebody here revokes them everywhere.
@@ -73,7 +73,7 @@ func peopleList(argv []string) {
 		logFatal(err)
 	}
 	if len(list) == 0 {
-		fmt.Println("nobody yet: `acornfall people claim you@example.com` names this install's admin")
+		fmt.Println("nobody yet: `acornd people claim you@example.com` names this install's admin")
 		return
 	}
 	rows := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -157,7 +157,7 @@ type request struct {
 
 func parse(verb string, argv []string, withAddress, withName bool) request {
 	flags := flag.NewFlagSet(verb, flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder (default: ~/.acornfall)")
+	dataDir := flags.String("data-dir", "", "the acornd folder (default: ~/.acornd)")
 	// Only the verbs that record a name offer the flag: a flag on a verb that ignores it is a flag that
 	// does nothing (ADR 0027).
 	name := ""
@@ -168,7 +168,7 @@ func parse(verb string, argv []string, withAddress, withName bool) request {
 		os.Exit(2)
 	}
 	if withAddress && flags.NArg() != 1 {
-		fmt.Fprintf(os.Stderr, "acornfall: %s needs exactly one email address\n", verb)
+		fmt.Fprintf(os.Stderr, "acornd: %s needs exactly one email address\n", verb)
 		os.Exit(2)
 	}
 	book, err := openBook(*dataDir)
@@ -191,12 +191,12 @@ type modelsRequest struct {
 
 func parseModels(verb string, argv []string) modelsRequest {
 	flags := flag.NewFlagSet(verb, flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder (default: ~/.acornfall)")
+	dataDir := flags.String("data-dir", "", "the acornd folder (default: ~/.acornd)")
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
 	if flags.NArg() < 1 {
-		fmt.Fprintf(os.Stderr, "acornfall: %s needs one email address, and any models after it\n", verb)
+		fmt.Fprintf(os.Stderr, "acornd: %s needs one email address, and any models after it\n", verb)
 		os.Exit(2)
 	}
 	book, err := openBook(*dataDir)

@@ -67,7 +67,7 @@ makes it the record's everyday name. The storage concept is still a workspace.
 | `person` | **`member`** |
 | `invited`, `active`, `revoked` | unchanged, and still states rather than roles |
 
-One admin, claimed from the command line (`acornfall people claim`), proved by the token file.
+One admin, claimed from the command line (`acornd people claim`), proved by the token file.
 Everyone else in the book is a member. `admin` says what the role is — administering the install —
 where `owner` claimed the machine, the credentials and the folders as well.
 
@@ -75,7 +75,7 @@ The member word is `member`, not "normal", "general" or "common": those are adje
 is still loaded from the workspace that used to carry that name, and `member` is the noun the
 codebase already uses for somebody in the book — free the moment a room has roles of its own.
 `person` stays the noun for the record and for the screen: the **People** screen, `people.json`,
-`acornfall people`.
+`acornd people`.
 
 **The rename is one commit with nothing else in it**, and it lands before any room work, because
 every later diff that says "owner" would otherwise need a reader to work out which of the two it
@@ -155,7 +155,7 @@ unique (`ana`, then `ana-2`). The console labels all of them **Personal**.
   its state untouched. The room's owner does it from the console. The install's admin can do it
   from the command line, and there is **no console button for a room you do not own** — the
   destructive power stays where it is visible.
-- **Purge** is the only thing that deletes: `acornfall workspace purge <name>`. It prints the
+- **Purge** is the only thing that deletes: `acornd workspace purge <name>`. It prints the
   folder **and the state**, requires the name or `--yes`, refuses when the record is missing, and is
   never behind an API route or a button.
 - **Two folders, both deleted.** A name means the workspace's own folder and `<data-dir>/state/<name>`
@@ -164,7 +164,7 @@ unique (`ana`, then `ana-2`). The console labels all of them **Personal**.
   folder is still there until it is purged.
 - **The order between them is the trap.** Purge needs the record to know the folder, so it runs
   instead of forget, never after it. Once forgotten, that folder is just a folder.
-- `acornfall doctor` names every folder under the workspaces directory with no record, so an
+- `acornd doctor` names every folder under the workspaces directory with no record, so an
   orphan is seen once rather than forgotten twice.
 
 ### 7. Authors, drafts, and where a room lands
@@ -245,7 +245,7 @@ that is a different sharing model rather than one more permission.
 - **The People screen.** ADR 0032 §3 promised it, and it is built in this change: it shows the roles
   this decision gives, and every write goes through the book's own routes.
 - **Per-person provider credentials, spend caps, encryption at rest.** Unchanged from ADR 0032.
-- **Email sent by acornfall.** The door proves the mailbox; an invitation is still a message the
+- **Email sent by acornd.** The door proves the mailbox; an invitation is still a message the
   admin sends.
 - **The order the work lands in.** The decision is here; the plan follows it.
 

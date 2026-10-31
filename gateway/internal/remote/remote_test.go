@@ -471,7 +471,7 @@ func TestAGroupIsAListOfAddresses(t *testing.T) {
 	var posted map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&posted)
-		_, _ = w.Write([]byte(`{"success":true,"result":{"id":"g1","name":"acornfall","include":[{"email":{"email":"ana@example.com"}},{"email":{"email":"bo@example.com"}}]}}`))
+		_, _ = w.Write([]byte(`{"success":true,"result":{"id":"g1","name":"acornd","include":[{"email":{"email":"ana@example.com"}},{"email":{"email":"bo@example.com"}}]}}`))
 	}))
 	defer server.Close()
 	group, err := (&Client{Token: "t", Base: server.URL}).CreateAccessGroup(context.Background(), "acc", GroupName, []string{"ana@example.com", "bo@example.com"})
@@ -550,10 +550,10 @@ func TestTheSetupNamesTheIdentityConfiguration(t *testing.T) {
 	setup := Setup{State: State{Audience: "aud-1"}}
 	env := setup.Env("https://team.cloudflareaccess.com/")
 	for name, want := range map[string]string{
-		"ACORNFALL_IDENTITY":          "access",
-		"ACORNFALL_IDENTITY_AUDIENCE": "aud-1",
-		"ACORNFALL_IDENTITY_ISSUER":   "https://team.cloudflareaccess.com",
-		"ACORNFALL_IDENTITY_KEYS":     "https://team.cloudflareaccess.com/cdn-cgi/access/certs",
+		"ACORND_IDENTITY":          "access",
+		"ACORND_IDENTITY_AUDIENCE": "aud-1",
+		"ACORND_IDENTITY_ISSUER":   "https://team.cloudflareaccess.com",
+		"ACORND_IDENTITY_KEYS":     "https://team.cloudflareaccess.com/cdn-cgi/access/certs",
 	} {
 		if env[name] != want {
 			t.Errorf("%s = %q, want %q", name, env[name], want)

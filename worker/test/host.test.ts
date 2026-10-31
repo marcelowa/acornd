@@ -12,7 +12,7 @@ import type { SandboxClient } from "../src/sandbox.ts";
  * runs in the fast tier, and the microVM one needs /dev/kvm.
  */
 async function open(): Promise<{ dir: string; client: SandboxClient; done: () => Promise<void> }> {
-	const dir = await realpath(await mkdtemp(join(tmpdir(), "acornfall-host-")));
+	const dir = await realpath(await mkdtemp(join(tmpdir(), "acornd-host-")));
 	const client = await openSandbox("unused", dir);
 	return { dir, client, done: () => rm(dir, { recursive: true, force: true }) };
 }

@@ -93,7 +93,7 @@ const listFor = (current: string): UpdateRelease[] => [
 		"Favicon follows the new brand mark: one logo everywhere.",
 		current,
 	),
-	release("v0.9.24", "2026-10-11", "New brand mark: the long acornfall logo.", current),
+	release("v0.9.24", "2026-10-11", "New brand mark: the long acornd logo.", current),
 ];
 
 const candidateFor = (current: string): UpdateRelease =>
@@ -203,7 +203,7 @@ export const RunsAreLive: Story = {
 				status={status({
 					runsActive: true,
 					runs: [
-						{ workspace: "acornfall", runs: 2 },
+						{ workspace: "acornd", runs: 2 },
 						{ workspace: "hello-omri", runs: 3 },
 					],
 				})}
@@ -407,7 +407,7 @@ export const SourceRefused: Story = {
 				onRollback={noop}
 				loadReleases={async () => {
 					throw new Error(
-						"releases: github answered 404 Not Found — a private repo needs ACORNFALL_GITHUB_TOKEN",
+						"releases: github answered 404 Not Found — a private repo needs ACORND_GITHUB_TOKEN",
 					);
 				}}
 				loadRelease={fixtureFor("v0.9.28").loadRelease}
@@ -474,7 +474,7 @@ export const ThePhone: Story = {
 			<div className="flex flex-col">
 				<div className="flex h-(--bar-height) items-center gap-2 border-b border-border px-1">
 					<Text as="span" size="sm" weight="semibold">
-						acornfall
+						acornd
 					</Text>
 					<div className="min-w-0 flex-1" />
 					<ReleaseMark status={status()} onOpen={noop} />
@@ -515,21 +515,21 @@ export const TheMark: Story = {
 				<div className="flex flex-col gap-2 rounded-lg border border-border">
 					<div className="flex h-(--bar-height) items-center gap-2 border-b border-border px-1">
 						<Text as="span" size="sm" weight="semibold">
-							acornfall
+							acornd
 						</Text>
 						<div className="min-w-0 flex-1" />
 						<ReleaseMark status={status()} onOpen={noop} />
 					</div>
 					<div className="flex h-(--bar-height) items-center gap-2 border-b border-border px-1">
 						<Text as="span" size="sm" weight="semibold">
-							acornfall
+							acornd
 						</Text>
 						<div className="min-w-0 flex-1" />
 						<ReleaseMark status={status({ restartRequired: true })} onOpen={noop} />
 					</div>
 					<div className="flex h-14 items-center gap-2 px-3">
 						<Text as="span" size="sm" weight="semibold">
-							acornfall
+							acornd
 						</Text>
 						<div className="min-w-0 flex-1" />
 						<ReleaseMark status={status({ available: false })} onOpen={noop} />

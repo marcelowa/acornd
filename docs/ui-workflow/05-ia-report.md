@@ -1,4 +1,4 @@
-# Information Architecture Report — Acornfall
+# Information Architecture Report — Acornd
 
 ## Navigation Model
 Single workspace context at a time. Rail = conversations (primary nav). Workspace switcher = context switch. Settings/Workspaces = places (replace transcript, rail stays = way back). Inspector = question overlay (→ docked panel), never a place.

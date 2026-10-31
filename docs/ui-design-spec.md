@@ -1,4 +1,4 @@
-# UI Design Spec — Acornfall Redesign (Calibrated Instrument)
+# UI Design Spec — Acornd Redesign (Calibrated Instrument)
 
 ## 1. Product and User Context
 Personal agent console for an owner-operator: dozens of conversations per workspace, tool-heavy turns, sandboxed execution. UI must make long runs readable, steerable, auditable. Desktop-first web (gateway-served), phone-responsive, light+dark.

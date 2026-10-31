@@ -50,7 +50,7 @@ type Runner interface {
 	Run(ctx context.Context, args ...string) (string, error)
 }
 
-// Version is the engine release acornfall pins. The SDK the worker uses ships the same
+// Version is the engine release acornd pins. The SDK the worker uses ships the same
 // version, and the two share their on-disk state, so this is not a free upgrade.
 //
 // 0.7.6 is pinned on purpose, not left behind. 0.7.7 added a CPUID mask to its krun crate
@@ -98,7 +98,7 @@ func (m *Microsandbox) InstallDir() string {
 }
 
 // StateDir is the engine's own store: images, sandbox disks, snapshots. It is inside the
-// installation folder so removing acornfall removes all of it, and outside the engine
+// installation folder so removing acornd removes all of it, and outside the engine
 // directory, which is replaced wholesale on upgrade.
 func (m *Microsandbox) StateDir() string {
 	if m.state != "" {
@@ -395,7 +395,7 @@ func (m *Microsandbox) Create(ctx context.Context, policy Policy, policyDir stri
 	}
 	if len(m.StateDir()) > statePathLimit {
 		return fmt.Errorf(
-			"%w: the sandbox state folder is %d characters (%s) and the engine's sockets need %d or fewer, so acornfall cannot be installed this deep: use a shorter --data-dir",
+			"%w: the sandbox state folder is %d characters (%s) and the engine's sockets need %d or fewer, so acornd cannot be installed this deep: use a shorter --data-dir",
 			ErrUnavailable, len(m.StateDir()), m.StateDir(), statePathLimit,
 		)
 	}
@@ -406,7 +406,7 @@ func (m *Microsandbox) Create(ctx context.Context, policy Policy, policyDir stri
 	if err := os.WriteFile(path, policy.Render(), 0o644); err != nil {
 		return err
 	}
-	args := []string{"create", "--conf", path, "--name", Name(policy.Workspace), "--label", "acornfall"}
+	args := []string{"create", "--conf", path, "--name", Name(policy.Workspace), "--label", "acornd"}
 	// The engine is told about nesting only if it knows the flag, but then it is told either
 	// way: allowed and possible is `--nested-virt`, refused is `--nested-virt=false` —
 	// explicit, so that a default in the engine's own configuration cannot overrule the

@@ -16,8 +16,8 @@ import (
 // The test skips when the switch is not set, because then the sandbox tier is meant to run:
 // `make test` sets it, `make test-sandbox` does not.
 func TestForcedNoSandboxRefusesInsteadOfFallingBack(t *testing.T) {
-	if os.Getenv("ACORNFALL_NO_SANDBOX") == "" {
-		t.Skip("ACORNFALL_NO_SANDBOX=1 is what this asserts; make test sets it")
+	if os.Getenv("ACORND_NO_SANDBOX") == "" {
+		t.Skip("ACORND_NO_SANDBOX=1 is what this asserts; make test sets it")
 	}
 	t.Parallel()
 	notSandbox(t)

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
-	"github.com/acornfall/acornfall/gateway/internal/workerpool"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/workerpool"
 )
 
 // expandCommand asks the worker to expand a slash command, because that is where the templates
@@ -268,7 +268,7 @@ func (c *Control) Subscribe(
 			ConversationID: conversationID,
 			Seq:            cached.seq,
 			Value:          append([]byte(nil), cached.value...),
-			Acornfall:      append(json.RawMessage(nil), cached.annotation...),
+			Acornd:         append(json.RawMessage(nil), cached.annotation...),
 		}
 		initial = &frame
 	}
@@ -357,7 +357,7 @@ func (c *Control) publish(frame protocol.Frame) {
 	if frame.Type == "view" {
 		c.views[frame.ConversationID] = cachedView{
 			value:      append([]byte(nil), frame.Value...),
-			annotation: append(json.RawMessage(nil), frame.Acornfall...),
+			annotation: append(json.RawMessage(nil), frame.Acornd...),
 			seq:        frame.Seq,
 		}
 	}

@@ -287,13 +287,13 @@ describe("the wire mapping", () => {
 	});
 
 	test("a message carries who wrote it, and one written before that carries nothing", () => {
-		// The gateway places a person's message as `acornfall.message` with its author (ADR 0034 §7); an entry
+		// The gateway places a person's message as `acornd.message` with its author (ADR 0034 §7); an entry
 		// written before authors were recorded has none, and the interface shows nothing rather than a guess.
 		const view: WireView = {
 			entries: [
 				{
 					id: 9,
-					kind: "acornfall.message",
+					kind: "acornd.message",
 					model: [{ content: "can you check the build?" }],
 					data: {
 						author: {
@@ -303,7 +303,7 @@ describe("the wire mapping", () => {
 						},
 					},
 				},
-				{ id: 10, kind: "acornfall.message", model: [{ content: "and again" }] },
+				{ id: 10, kind: "acornd.message", model: [{ content: "and again" }] },
 				{ id: 11, kind: "pi.user", model: [{ content: "from another conversation" }] },
 			],
 		};
@@ -329,8 +329,8 @@ describe("the wire mapping", () => {
 			[
 				{
 					name: "general",
-					title: "acornfall",
-					path: "/acornfall",
+					title: "acornd",
+					path: "/acornd",
 					personal: true,
 					running: true,
 				},
@@ -357,8 +357,8 @@ describe("the wire mapping", () => {
 			[
 				{
 					name: "general",
-					title: "acornfall",
-					path: "/acornfall",
+					title: "acornd",
+					path: "/acornd",
 					personal: true,
 					running: true,
 				},
@@ -746,8 +746,8 @@ describe("the room's rights and members", () => {
 			[
 				{
 					name: "general",
-					title: "acornfall",
-					path: "/acornfall",
+					title: "acornd",
+					path: "/acornd",
 					personal: true,
 					running: true,
 				},

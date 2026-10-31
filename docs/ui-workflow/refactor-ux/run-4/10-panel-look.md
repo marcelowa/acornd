@@ -82,7 +82,7 @@ boxes, and composited pixel colours, not the rendering by eye.
    release with the backup note, the Keep VMs / Start clean toggles, and a disabled Install, so the
    whole cost-and-press band does nothing while the state line says "Up to date". Change: for the
    running relation, keep the notes, cut the backup note, the VM choice and the Install button.
-10. **Small stuff.** The running tag prints three times in the first screen (header `acornfall
+10. **Small stuff.** The running tag prints three times in the first screen (header `acornd
     v0.9.28`, state facts, picker row); a pre-release row says it three ways (tag `-rc.1`, the `pre`
     mark, "pre-release" in the facts line) — keep one of the latter two.
 
@@ -218,7 +218,7 @@ Fixed, with the numbers to prove it (all re-measured in the browser, both themes
 | The running mark | Mono muted word, not a badge: off the 4.39:1 background and back on the page's 4.62:1 |
 | The phone gutter | `Measure padding="lg"`, the same step Settings uses: measured x=16 |
 | The stories drawing their own bar | They render the app's bar (`h-(--bar-height) px-1`) |
-| Runs were invisible until the modal | A runs fact under the state line at `2xs`: "5 runs are live across acornfall (2), hello-omri (3) · installing asks first" |
+| Runs were invisible until the modal | A runs fact under the state line at `2xs`: "5 runs are live across acornd (2), hello-omri (3) · installing asks first" |
 | Install still offered while a swap waits | The card drops its cost band and press when `restartRequired`: Restart above is the action |
 | The restart mark read 2.97:1 in light | `text-warning-subtle-foreground` — 3.49:1 light, 9.17:1 dark, both over the graphic floor — and the word "Restart" shows at ≥sm |
 | The mark's accent was `--primary` | `text-primary-subtle-foreground`: measured 1.48:1 for primary on the light bar, 3.17:1 for this step (9.85:1 dark) |
@@ -255,7 +255,7 @@ reviewers' pass and says so; run 1 recorded the same limit once.
 | OWNER 3, DELEGATOR 10 | The phone ladder's toggles and tabs | 44 measured in both |
 | OWNER 5 | The phone bar 48px | Live `--bar-height` 56px at 390, 48px at 1280 |
 | OWNER 10b | The phone gutter | Live: content starts at x=16, as Settings does |
-| DELEGATOR 1 | Runs invisible before the press | The `RunsAreLive` story: "5 runs are live across acornfall (2), hello-omri (3) · installing asks first" |
+| DELEGATOR 1 | Runs invisible before the press | The `RunsAreLive` story: "5 runs are live across acornd (2), hello-omri (3) · installing asks first" |
 | DELEGATOR 4 | The restart mark 2.97:1, no word | `warning-subtle-foreground`: 3.49:1 light, 9.17:1 dark; the word "Restart" shows at ≥sm |
 | DELEGATOR 7 | The runs-stopping sentence faintest | One step up, foreground |
 | DELEGATOR 8 | "Installing" with no time base | The `Installing` story: "…asked 18:54:11" |

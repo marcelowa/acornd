@@ -6,13 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/identity"
+	"github.com/marcelowa/acornd/gateway/internal/identity"
 )
 
 // The door is off unless this run names a publisher. That is ADR 0020's install: one admin, no people,
 // and no credential to present.
 func TestADoorIsOffUnlessThisRunNamesOne(t *testing.T) {
-	t.Setenv("ACORNFALL_IDENTITY", "")
+	t.Setenv("ACORND_IDENTITY", "")
 	door, err := identityDoor(t.TempDir(), "127.0.0.1")
 	if err != nil {
 		t.Fatalf("err = %v", err)
@@ -25,7 +25,7 @@ func TestADoorIsOffUnlessThisRunNamesOne(t *testing.T) {
 // A console with a door listens on loopback only: the door is reached through a proxy on this machine,
 // and a listener on every interface is reachable without one (ADR 0033).
 func TestAConsoledWithADoorListensOnLoopbackOnly(t *testing.T) {
-	t.Setenv("ACORNFALL_IDENTITY", "token")
+	t.Setenv("ACORND_IDENTITY", "token")
 	_, err := identityDoor(t.TempDir(), "0.0.0.0")
 	if err == nil {
 		t.Fatal("a door was built for a listener on every interface")
@@ -38,18 +38,18 @@ func TestAConsoledWithADoorListensOnLoopbackOnly(t *testing.T) {
 // An assertion door with no audience accepts an assertion minted for anything else at the same edge.
 // The refusal comes at boot, naming every missing value, rather than at the first browser.
 func TestTheAccessDoorNeedsItsThreeValues(t *testing.T) {
-	t.Setenv("ACORNFALL_IDENTITY", "access")
-	t.Setenv("ACORNFALL_IDENTITY_AUDIENCE", "")
-	t.Setenv("ACORNFALL_IDENTITY_ISSUER", "")
-	t.Setenv("ACORNFALL_IDENTITY_KEYS", "")
+	t.Setenv("ACORND_IDENTITY", "access")
+	t.Setenv("ACORND_IDENTITY_AUDIENCE", "")
+	t.Setenv("ACORND_IDENTITY_ISSUER", "")
+	t.Setenv("ACORND_IDENTITY_KEYS", "")
 	_, err := identityDoor(t.TempDir(), "127.0.0.1")
 	if err == nil {
 		t.Fatal("an assertion door was built with nothing to check against")
 	}
 	for _, name := range []string{
-		"ACORNFALL_IDENTITY_AUDIENCE",
-		"ACORNFALL_IDENTITY_ISSUER",
-		"ACORNFALL_IDENTITY_KEYS",
+		"ACORND_IDENTITY_AUDIENCE",
+		"ACORND_IDENTITY_ISSUER",
+		"ACORND_IDENTITY_KEYS",
 	} {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("the refusal does not name %s: %v", name, err)
@@ -62,7 +62,7 @@ func TestTheAccessDoorNeedsItsThreeValues(t *testing.T) {
 // for it at all.
 func TestAConfiguredDoorMintsTheInstallToken(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("ACORNFALL_IDENTITY", "token")
+	t.Setenv("ACORND_IDENTITY", "token")
 	door, err := identityDoor(dir, "127.0.0.1")
 	if err != nil {
 		t.Fatalf("err = %v", err)
@@ -82,7 +82,7 @@ func TestAConfiguredDoorMintsTheInstallToken(t *testing.T) {
 // A name this build does not have is a typo, and a typo that silently built the local door would be a
 // console that looks locked and is not.
 func TestADoorThisBuildDoesNotHaveIsRefused(t *testing.T) {
-	t.Setenv("ACORNFALL_IDENTITY", "okta")
+	t.Setenv("ACORND_IDENTITY", "okta")
 	_, err := identityDoor(t.TempDir(), "127.0.0.1")
 	if err == nil || !strings.Contains(err.Error(), "okta") {
 		t.Fatalf("err = %v, want a refusal naming the value", err)
@@ -140,10 +140,10 @@ func TestTheTokenCommandRotates(t *testing.T) {
 // the command line that has to get in when the proxy is what broke.
 func TestARunThatNamesAccessGetsBothDoors(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("ACORNFALL_IDENTITY", "access")
-	t.Setenv("ACORNFALL_IDENTITY_AUDIENCE", "aud-tag")
-	t.Setenv("ACORNFALL_IDENTITY_ISSUER", "https://team.cloudflareaccess.com")
-	t.Setenv("ACORNFALL_IDENTITY_KEYS", "https://team.cloudflareaccess.com/cdn-cgi/access/certs")
+	t.Setenv("ACORND_IDENTITY", "access")
+	t.Setenv("ACORND_IDENTITY_AUDIENCE", "aud-tag")
+	t.Setenv("ACORND_IDENTITY_ISSUER", "https://team.cloudflareaccess.com")
+	t.Setenv("ACORND_IDENTITY_KEYS", "https://team.cloudflareaccess.com/cdn-cgi/access/certs")
 	door, err := identityDoor(dir, "127.0.0.1")
 	if err != nil {
 		t.Fatalf("err = %v", err)

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/control"
-	"github.com/acornfall/acornfall/gateway/internal/vault"
+	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/vault"
 )
 
 // secretBody is one create or update. A pointer field means "not mentioned": an update

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
 // A transcript frame belongs to one conversation and must reach only the clients watching it.
@@ -63,7 +63,7 @@ func TestAFrameWithNoConversationReachesEveryWatcher(t *testing.T) {
 	}
 }
 
-// An ACORNFALL_MODEL that is not `provider/model` is a configuration mistake, and a mistake that
+// An ACORND_MODEL that is not `provider/model` is a configuration mistake, and a mistake that
 // is silently ignored runs every conversation on a model nobody chose.
 func TestAMalformedLastResortModelIsReported(t *testing.T) {
 	worker := newFakeWorker()
@@ -71,7 +71,7 @@ func TestAMalformedLastResortModelIsReported(t *testing.T) {
 	control := controlWithWorker(t, worker)
 	control.opts.Model = "not-a-provider-slash-model"
 	if err := control.Refresh(context.Background()); err == nil {
-		t.Fatal("a malformed ACORNFALL_MODEL should be reported, not ignored")
+		t.Fatal("a malformed ACORND_MODEL should be reported, not ignored")
 	}
 }
 

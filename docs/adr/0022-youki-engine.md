@@ -10,12 +10,12 @@ ADR 0012 made microsandbox the engine and left the seam open; ADR 0015 filled it
 `host`. Two requirements now push for a third engine:
 
 1. **Cheap on resources.** A microVM per workspace costs a boot, a 2 GB cap and a hypervisor.
-2. **A workspace that can run acornfall.** That is the ADR 0018 problem restated: today it
+2. **A workspace that can run acornd.** That is the ADR 0018 problem restated: today it
    needs nested virtualization, a pinned engine that has no switch, and a 2 CPU / 2 GB guest
    inside a 2 CPU / 2 GB one.
 
 This records a spike, not a decision. Everything below was measured on one machine
-(Debian 13, kernel 7.0.14, `bwrap` 0.11 present, no passwordless root) **inside an acornfall
+(Debian 13, kernel 7.0.14, `bwrap` 0.11 present, no passwordless root) **inside an acornd
 workspace** — a microsandbox guest, whose user is itself in a user namespace
 (`uid_map 0 100000 65536`). So the spike ran in the nesting scenario it was testing, one
 level deeper than the product would.
@@ -80,12 +80,12 @@ Honest downgrade, already written down in ADR 0021: with egress on, a command ca
 value and send it. Rotation means a restart, which the host engine already reports as
 `RestartRequired`.
 
-## Requirement 4 — acornfall inside acornfall: yes, if the inner engine is chosen
+## Requirement 4 — acornd inside acornd: yes, if the inner engine is chosen
 
 | measured | result |
 |---|---|
-| the acornfall binary inside a youki sandbox | runs |
-| acornfall serving in a youki sandbox (`--sandbox-engine host`) | worker ready, workspace started, **HTTP 200** |
+| the acornd binary inside a youki sandbox | runs |
+| acornd serving in a youki sandbox (`--sandbox-engine host`) | worker ready, workspace started, **HTTP 200** |
 | **youki inside youki** | **refused by the kernel** |
 | microsandbox inside youki | needs a deliberate `/dev/kvm` bind |
 
@@ -96,7 +96,7 @@ inside a bwrap at the same depth, and `unshare -U -r -p -f -m --mount-proc` does
 the bare user namespace either. So the kernel rule is about *where* the mount happens, not a
 blanket ban on containers in containers, and youki's ordering is the wrong side of it.
 
-So a youki workspace can run acornfall, and the inner acornfall must pick `host` or `bwrap`.
+So a youki workspace can run acornd, and the inner acornd must pick `host` or `bwrap`.
 It cannot run its own youki engine inside.
 
 ## What youki does not do, and the engine would have to
@@ -129,7 +129,7 @@ and boots it as a disk. youki does not build anything: `config.json` names a dir
 that directory becomes `/`. An empty one is a sandbox with no `sh` and no `apt`. In the spike
 the directory was made by hand — download the `debian:stable-slim` layer (29.8 MB), `tar xzf`
 it into `rootfs/` (82 MB), point `root.path` at it. Everything installed afterwards landed in
-*that* directory: `curl` from apt, bun in `rootfs/root/.bun`, acornfall in `rootfs/opt`. The
+*that* directory: `curl` from apt, bun in `rootfs/root/.bun`, acornd in `rootfs/opt`. The
 host was never touched. What is unbuilt is the bookkeeping around it — one shared base plus a
 private writable layer per workspace, update, prune — which is what podman normally owns.
 
@@ -145,13 +145,13 @@ os.execv("/bin/sh", ["sh", "-c", 'exec "$@"', "sh", *cmd])
 ```
 
 It cannot be JavaScript: the worker is bun, and bun cannot call `setns`. So it is a binary the
-worker runs, and the acornfall binary is its natural home — `acornfall sandbox-exec --pid N --
+worker runs, and the acornd binary is its natural home — `acornd sandbox-exec --pid N --
 <command>`. It also fixes kill: the joiner is inside the pid namespace and can kill the group.
 
-**Nesting.** Inside an acornfall workspace, a second acornfall starts and wants a sandbox of
+**Nesting.** Inside an acornd workspace, a second acornd starts and wants a sandbox of
 its own: a box in a box. Two questions hide in that, and they have different answers. Does
-acornfall *run* in a youki box — yes, measured: server started, worker ready, `HTTP 200`. Can
-the inner acornfall make a youki box — no. The outer engine decides what the inner one can be:
+acornd *run* in a youki box — yes, measured: server started, worker ready, `HTTP 200`. Can
+the inner acornd make a youki box — no. The outer engine decides what the inner one can be:
 
 | outer \\ inner | microsandbox | youki | bwrap | host |
 |---|---|---|---|---|
@@ -171,7 +171,7 @@ not inside itself. A VM has its own kernel, so namespaces start clean inside it.
 | idle accounted memory | 384 KB | a 2 GB cap |
 | first output chunk | +18 ms | +31 ms |
 | image | ours to unpack (29.8 MB → 82 MB) | the engine's |
-| nesting as the outer engine | acornfall yes, youki no | acornfall yes (needs nested KVM) |
+| nesting as the outer engine | acornd yes, youki no | acornd yes (needs nested KVM) |
 
 ## What building bwrap solved for youki
 
@@ -180,7 +180,7 @@ already written, tested, and in use — a youki driver uses it rather than reimp
 
 | what the spike said youki needed | what exists now |
 |---|---|
-| a joiner for its broken rootless `exec` | **not needed any more.** `acornfall sandbox-supervisor` (ADR 0024) runs inside the sandbox as its first process and runs commands itself: no `setns`, no fd ordering, no per-command sandbox. Its protocol is `run` / `kill` / `shutdown` over a Unix socket. |
+| a joiner for its broken rootless `exec` | **not needed any more.** `acornd sandbox-supervisor` (ADR 0024) runs inside the sandbox as its first process and runs commands itself: no `setns`, no fd ordering, no per-command sandbox. Its protocol is `run` / `kill` / `shutdown` over a Unix socket. |
 | an image unpacked into a directory | `internal/sandbox/image.go`: registry auth by challenge, platform choice out of an index, per-layer digest verification, whiteouts, and a cached unpack. `copytree.go` gives a workspace its own copy. youki names the result in `root.path`. |
 | a lifecycle with create/start/stop/remove | ADR 0024: the four verbs, `List`/`Status` from our own record, a pid and a socket, adoption after a crash, `keep_alive`, and control as the only owner of the idle rule. A youki container is an instance like any other. |
 | secrets | the supervisor starts every command with exactly the environment it is sent, so secrets are the environment row ADR 0021 already has. youki's own secret surface is not needed. |

@@ -1,6 +1,6 @@
 ---
 name: refactor-ux-03-draft-journeys
-description: Draft the console journeys acornfall should have — from the owner's real pains — before any pixels. Step 3 of the refactor-ux chain.
+description: Draft the console journeys acornd should have — from the owner's real pains — before any pixels. Step 3 of the refactor-ux chain.
 ---
 
 # Draft the desired journeys

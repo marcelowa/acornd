@@ -25,8 +25,8 @@ const noop = (): void => undefined;
 const workspaces: WorkspaceSummary[] = [
 	{
 		name: "general",
-		title: "acornfall",
-		path: "/home/marcelo/workspace/acornfall",
+		title: "acornd",
+		path: "/home/marcelo/workspace/acornd",
 		personal: true,
 		kind: "personal",
 		members: [{ email: "me@example.com", role: "owner" }],

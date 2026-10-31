@@ -93,9 +93,9 @@ func Save(dir string, setup Setup, now time.Time) error {
 func (s Setup) Env(teamDomain string) map[string]string {
 	domain := strings.TrimSuffix(strings.TrimSpace(teamDomain), "/")
 	return map[string]string{
-		"ACORNFALL_IDENTITY":          "access",
-		"ACORNFALL_IDENTITY_AUDIENCE": s.State.Audience,
-		"ACORNFALL_IDENTITY_ISSUER":   domain,
-		"ACORNFALL_IDENTITY_KEYS":     domain + "/cdn-cgi/access/certs",
+		"ACORND_IDENTITY":          "access",
+		"ACORND_IDENTITY_AUDIENCE": s.State.Audience,
+		"ACORND_IDENTITY_ISSUER":   domain,
+		"ACORND_IDENTITY_KEYS":     domain + "/cdn-cgi/access/certs",
 	}
 }

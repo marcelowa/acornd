@@ -10,12 +10,12 @@
 # commit reads 81.9% here and 77.8% in CI. The floor sits at the low one — a floor that a machine
 # without a tool cannot meet is a red run that says nothing about the change.
 #
-# `cmd/acornfall` and `internal/update` move by a few tenths between runs, because their coverage
+# `cmd/acornd` and `internal/update` move by a few tenths between runs, because their coverage
 # comes from child processes writing counters as they exit: a test that re-execs the gateway (the
 # restart switch) leaves a process alive until cleanup, and its counters may miss the merge. The
 # floors sit below the low observation on purpose — a ratchet that flaps is worse than a loose one.
 
-cmd/acornfall                     76  -- 77 statements need root: probeAs runs the probe as another account, runPlanAsRoot applies the plan through sudo, configureNamespace is the sandbox's first process inside a namespace. No privileged job runs, and a test here would prove the kernel's permissions rather than this code.
+cmd/acornd                     76  -- 77 statements need root: probeAs runs the probe as another account, runPlanAsRoot applies the plan through sudo, configureNamespace is the sandbox's first process inside a namespace. No privileged job runs, and a test here would prove the kernel's permissions rather than this code.
 internal/control                     85
 internal/httpapi                   84
 internal/identity                  90  -- what is left is the os and network failure paths (CreateTemp, Chmod, Write, Rename, a body that stops mid-read), each needing a seam that would exist only to be broken

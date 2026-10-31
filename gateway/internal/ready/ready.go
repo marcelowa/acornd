@@ -1,4 +1,4 @@
-// Package ready is the install's readiness list: every thing acornfall
+// Package ready is the install's readiness list: every thing acornd
 // needs from a machine, each with a plain fix. Doctor prints it, boot
 // logs what is missing. A missing piece is a sentence with a fix, never
 // a crash and never a silent fallback.
@@ -16,7 +16,7 @@ import (
 	"runtime"
 	"syscall"
 
-	"github.com/acornfall/acornfall/gateway/internal/update"
+	"github.com/marcelowa/acornd/gateway/internal/update"
 )
 
 // Requirement is one thing the install needs: whether it holds, what it
@@ -97,7 +97,7 @@ func dataDirWritable(dataDir string) Requirement {
 		dir = filepath.Dir(dataDir)
 		created = "will be created inside writable " + dir
 	}
-	probe := dir + "/.acornfall-writable"
+	probe := dir + "/.acornd-writable"
 	if err := os.WriteFile(probe, []byte("ok"), 0o600); err != nil {
 		return Requirement{"data-dir", false, "cannot write " + dir + ": " + err.Error(), "run with a writable --data-dir"}
 	}
@@ -173,7 +173,7 @@ func credentials(input Input) Requirement {
 	if input.HasCredential {
 		return Requirement{"credentials", true, "at least one provider stored", ""}
 	}
-	return Requirement{"credentials", false, "no provider stored", "acornfall provider add <provider> <key> (the dev provider needs none)"}
+	return Requirement{"credentials", false, "no provider stored", "acornd provider add <provider> <key> (the dev provider needs none)"}
 }
 
 func disk(dataDir string) Requirement {

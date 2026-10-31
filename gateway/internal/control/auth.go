@@ -9,8 +9,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
-	"github.com/acornfall/acornfall/gateway/internal/workerpool"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/workerpool"
 )
 
 // Login runs a provider login flow in the worker. It returns the flow id as soon as the

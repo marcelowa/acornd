@@ -9,9 +9,9 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/acornfall/acornfall/gateway/internal/control"
-	"github.com/acornfall/acornfall/gateway/internal/identity"
-	"github.com/acornfall/acornfall/gateway/internal/people"
+	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/identity"
+	"github.com/marcelowa/acornd/gateway/internal/people"
 )
 
 // admit refuses a request no door proved, refuses a state-changing one that came from another site,

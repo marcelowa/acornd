@@ -40,11 +40,11 @@ credentials, defaults, model bindings, subscribers, and the registry itself.
 
 ## Layout
 
-`--data-dir` is the installation folder, configurable, default `~/.acornfall`. It holds
+`--data-dir` is the installation folder, configurable, default `~/.acornd`. It holds
 configuration, credentials, and runtime state, and it is hidden.
 
 **Workspaces are created in a separate, visible folder**: `--workspaces-dir`, default
-`~/acornfall/workspaces`. Two folders rather than one because they are two different things:
+`~/acornd/workspaces`. Two folders rather than one because they are two different things:
 installation state is ours and hidden, while a workspace is the reader's own content and
 belongs somewhere they would look. The folder is recorded in `workspaces.json` rather than
 in the global config, because that config is what shapes prompts and a control-plane path
@@ -66,17 +66,17 @@ moved — but only an operator can point it there. See below.
       AGENTS.md
       .agents/                its resources, the ecosystem's name: config.json, agents/,
                               skills/, commands/ — shared, and committed with the project
-      .acornfall/             the same bundle under our name, which wins when both exist
+      .acornd/             the same bundle under our name, which wins when both exist
       projects/               cloned or created projects
 ```
 
 **Runtime state lives outside the workspace folder.** The agent has `bash`; its own
 database should not be a file it can delete.
 
-**Workspace resources live in `<ws>/.agents/` or `<ws>/.acornfall/`**, with one exception:
+**Workspace resources live in `<ws>/.agents/` or `<ws>/.acornd/`**, with one exception:
 `AGENTS.md` sits at the workspace root, where the convention puts it. Both names read the same
 bundle; ours wins when a folder has both (ADR 0004). The split is useful in practice: the
-`.agents` copy is the one a project shares, and the `.acornfall` copy is the one you keep to
+`.agents` copy is the one a project shares, and the `.acornd` copy is the one you keep to
 yourself — which is why this repository commits the first and ignores the second.
 
 The first version looked for `skills/`, `agents/`, and `commands/` at the root as well, so
@@ -206,7 +206,7 @@ the same way deleting a conversation is a tombstone.
 `<workspaces-dir>/<name>` — created if absent, adopted if a folder of that name is already
 there. A `path` in the request is **refused rather than ignored**, because accepting and
 dropping it would be a field that does nothing; the error says which command to use
-instead. Pointing a workspace at a folder anywhere else is `acornfall workspace add <name>
+instead. Pointing a workspace at a folder anywhere else is `acornd workspace add <name>
 <folder>`, an operator's command, and the registry is one file with one owner so the
 command line and the server cannot disagree about its shape.
 

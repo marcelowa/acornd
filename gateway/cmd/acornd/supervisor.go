@@ -9,15 +9,15 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/acornfall/acornfall/gateway/internal/supervise"
+	"github.com/marcelowa/acornd/gateway/internal/supervise"
 )
 
-// supervisorCommand is the acornfall binary's other life: it is what runs as a sandbox's first
+// supervisorCommand is the acornd binary's other life: it is what runs as a sandbox's first
 // process, holding the namespaces open and running the commands a workspace asks for.
 //
 // It is a subcommand rather than a second binary because it is the same code either way and the
 // binary is already on disk; the sandbox binds it read-only at a fixed path so a workspace does
-// not need acornfall installed inside its image. Nothing here names a sandbox engine: an engine
+// not need acornd installed inside its image. Nothing here names a sandbox engine: an engine
 // starts it and gives it a socket, and this runs whatever argv it is sent.
 func supervisorCommand(argv []string) {
 	flags := flag.NewFlagSet("sandbox-supervisor", flag.ContinueOnError)
@@ -27,7 +27,7 @@ func supervisorCommand(argv []string) {
 		os.Exit(2)
 	}
 	if *socket == "" {
-		fmt.Fprintln(os.Stderr, "usage: acornfall internal sandbox-supervisor --socket PATH [--idle-timeout 30m]")
+		fmt.Fprintln(os.Stderr, "usage: acornd internal sandbox-supervisor --socket PATH [--idle-timeout 30m]")
 		os.Exit(2)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -83,7 +83,7 @@ func ReadToken(dir string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("%w: run `acornfall token --rotate`", ErrNoToken)
+			return "", fmt.Errorf("%w: run `acornd token --rotate`", ErrNoToken)
 		}
 		return "", err
 	}

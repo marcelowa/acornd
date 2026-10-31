@@ -8,7 +8,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/acornfall/acornfall/gateway/internal/people"
+	"github.com/marcelowa/acornd/gateway/internal/people"
 )
 
 func (s *Server) peopleRoutes(mux *http.ServeMux) {

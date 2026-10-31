@@ -21,10 +21,10 @@ import type { StateDeps } from "./delegation.ts";
 import type { Author } from "./protocol.ts";
 
 /** The kind a person's message is placed as. Never `pi.user`: the author has to land with the words. */
-export const MESSAGE_KIND = "acornfall.message";
+export const MESSAGE_KIND = "acornd.message";
 
 /** The display-only kind a transcript note lands as; `data.text` is what the interface shows. */
-export const NOTICE_KIND = "acornfall.notice";
+export const NOTICE_KIND = "acornd.notice";
 
 /**
  * authorEntry is the entry a prompt is placed as: the words, plus who wrote them. Absent when the prompt
@@ -168,7 +168,7 @@ export function abortNotice(author: Author | undefined): {
  */
 export function authorsExtension(deps: StateDeps) {
 	return defineExtension({
-		name: "acornfall-authors",
+		name: "acornd-authors",
 		hooks: [
 			hook(GenerationTask, {
 				beforeRequest: async (request, api, context: Context) => {

@@ -12,13 +12,13 @@ import { hostFiles } from "../src/files.ts";
 afterAll(cleanupScratch);
 
 async function scratch(): Promise<{ home: string; workspace: string; user: string }> {
-	const root = await tempDir("acornfall-config-");
+	const root = await tempDir("acornd-config-");
 	const home = join(root, "home");
 	const workspace = join(root, "workspace");
 	// The user's home is a temp directory too: a test must never read the real `~/.agents`
 	// that happens to be on the machine running it.
 	const user = join(root, "user");
-	await mkdir(join(workspace, ".acornfall"), { recursive: true });
+	await mkdir(join(workspace, ".acornd"), { recursive: true });
 	await mkdir(join(home, "agents"), { recursive: true });
 	await mkdir(user, { recursive: true });
 	return { home, workspace, user };
@@ -37,7 +37,7 @@ describe("the catalog", () => {
 			"---\nname: global\ndescription: from the install\n---\nBody",
 		);
 		await write(
-			join(workspace, ".acornfall", "agents", "local.md"),
+			join(workspace, ".acornd", "agents", "local.md"),
 			"---\nname: local\ndescription: from this workspace\n---\nBody",
 		);
 
@@ -56,7 +56,7 @@ describe("the catalog", () => {
 			"---\nname: same\ndescription: global\n---\nGlobal",
 		);
 		await write(
-			join(workspace, ".acornfall", "agents", "same.md"),
+			join(workspace, ".acornd", "agents", "same.md"),
 			"---\nname: same\ndescription: local\n---\nLocal",
 		);
 
@@ -71,11 +71,11 @@ describe("the catalog", () => {
 	test("a workspace's own config and definitions are read", async () => {
 		const { home, workspace, user } = await scratch();
 		await write(
-			join(workspace, ".acornfall", "config.json"),
+			join(workspace, ".acornd", "config.json"),
 			`{"defaults":{"instructions":"WORKSPACE"}}`,
 		);
 		await write(
-			join(workspace, ".acornfall", "agents", "local.md"),
+			join(workspace, ".acornd", "agents", "local.md"),
 			"---\nname: local\ndescription: x\n---\nBody",
 		);
 		await write(join(home, "config.json"), `{"defaults":{"instructions":"GLOBAL"}}`);
@@ -125,13 +125,10 @@ describe("folding the layers", () => {
 		const { home, workspace, user } = await scratch();
 		await write(join(home, "config.json"), `{"defaults":{"instructions":"GLOBAL"}}`);
 		await write(
-			join(workspace, ".acornfall", "config.json"),
+			join(workspace, ".acornd", "config.json"),
 			`{"defaults":{"instructions":"WORKSPACE"}}`,
 		);
-		await write(
-			join(workspace, ".acornfall", "agents", "one.md"),
-			"---\nname: one\n---\nAGENT",
-		);
+		await write(join(workspace, ".acornd", "agents", "one.md"), "---\nname: one\n---\nAGENT");
 
 		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
 		expect(resolveAgent(catalog, "one").instructions).toBe("GLOBAL\n\nWORKSPACE\n\nAGENT");
@@ -145,12 +142,9 @@ describe("folding the layers", () => {
 	test("the last model and thinking win, the definition beating the broadest layer", async () => {
 		const { home, workspace, user } = await scratch();
 		await write(join(home, "config.json"), `{"defaults":{"model":"p/base","thinking":"low"}}`);
+		await write(join(workspace, ".acornd", "config.json"), `{"defaults":{"thinking":"high"}}`);
 		await write(
-			join(workspace, ".acornfall", "config.json"),
-			`{"defaults":{"thinking":"high"}}`,
-		);
-		await write(
-			join(workspace, ".acornfall", "agents", "one.md"),
+			join(workspace, ".acornd", "agents", "one.md"),
 			"---\nname: one\nmodel: p/agent\n---\nBody",
 		);
 
@@ -167,7 +161,7 @@ describe("folding the layers", () => {
 			`{"defaults":{"skills":["a"],"denyTools":["bash"]}}`,
 		);
 		await write(
-			join(workspace, ".acornfall", "config.json"),
+			join(workspace, ".acornd", "config.json"),
 			`{"defaults":{"skills":["b","a"],"allowTools":["bash","read"],"denyTools":["write"]}}`,
 		);
 
@@ -182,7 +176,7 @@ describe("folding the layers", () => {
 	test("the delegation policy is the default unless a layer overrides it", async () => {
 		const { home, workspace, user } = await scratch();
 		await write(
-			join(workspace, ".acornfall", "config.json"),
+			join(workspace, ".acornd", "config.json"),
 			`{"defaults":{"delegation":{"child":false,"maxChildren":1}}}`,
 		);
 		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
@@ -197,7 +191,7 @@ describe("folding the layers", () => {
 	test("`delegation: none` reads as both permissions off", async () => {
 		const { home, workspace, user } = await scratch();
 		await write(
-			join(workspace, ".acornfall", "agents", "leaf.md"),
+			join(workspace, ".acornd", "agents", "leaf.md"),
 			"---\nname: leaf\ndelegation: none\n---\nBody",
 		);
 		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
@@ -217,7 +211,7 @@ describe("folding the layers", () => {
 		for (const testCase of cases) {
 			const { home, workspace, user } = await scratch();
 			await write(
-				join(workspace, ".acornfall", "agents", "one.md"),
+				join(workspace, ".acornd", "agents", "one.md"),
 				`---\nname: one\ndelegation: ${testCase.delegation}\n---\nBody`,
 			);
 			const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
@@ -230,7 +224,7 @@ describe("folding the layers", () => {
 	test("an unknown delegation word is refused, naming what it got", async () => {
 		const { home, workspace, user } = await scratch();
 		await write(
-			join(workspace, ".acornfall", "agents", "one.md"),
+			join(workspace, ".acornd", "agents", "one.md"),
 			"---\nname: one\ndelegation: both\n---\nBody",
 		);
 		expect(loadCatalog(rootsOf({ home, workspace, user }), hostFiles)).rejects.toThrow(
@@ -241,7 +235,7 @@ describe("folding the layers", () => {
 	test("an empty list states no opinion, so the defaults stand", async () => {
 		const { home, workspace, user } = await scratch();
 		await write(
-			join(workspace, ".acornfall", "agents", "one.md"),
+			join(workspace, ".acornd", "agents", "one.md"),
 			"---\nname: one\ndelegation:\n---\nBody",
 		);
 		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);
@@ -253,7 +247,7 @@ describe("folding the layers", () => {
 	test("an unknown delegation key in config is refused", async () => {
 		const { home, workspace, user } = await scratch();
 		await write(
-			join(workspace, ".acornfall", "config.json"),
+			join(workspace, ".acornd", "config.json"),
 			`{"defaults":{"delegation":{"spawn":false}}}`,
 		);
 		expect(loadCatalog(rootsOf({ home, workspace, user }), hostFiles)).rejects.toThrow(
@@ -276,7 +270,7 @@ describe("guards", () => {
 	test("a guard without a reason is refused: the model is told it", async () => {
 		const { home, workspace, user } = await scratch();
 		await write(
-			join(workspace, ".acornfall", "config.json"),
+			join(workspace, ".acornd", "config.json"),
 			`{"defaults":{"hooks":{"guards":[{"tool":"bash","arg":"command","pattern":"rm -rf"}]}}}`,
 		);
 		expect(loadCatalog(rootsOf({ home, workspace, user }), hostFiles)).rejects.toThrow(
@@ -287,7 +281,7 @@ describe("guards", () => {
 	test("a guard with neither matcher is refused", async () => {
 		const { home, workspace, user } = await scratch();
 		await write(
-			join(workspace, ".acornfall", "config.json"),
+			join(workspace, ".acornd", "config.json"),
 			`{"defaults":{"hooks":{"guards":[{"tool":"bash","arg":"command","reason":"because"}]}}}`,
 		);
 		expect(loadCatalog(rootsOf({ home, workspace, user }), hostFiles)).rejects.toThrow(
@@ -298,7 +292,7 @@ describe("guards", () => {
 	test("a pattern that does not compile is refused where it is written", async () => {
 		const { home, workspace, user } = await scratch();
 		await write(
-			join(workspace, ".acornfall", "config.json"),
+			join(workspace, ".acornd", "config.json"),
 			`{"defaults":{"hooks":{"guards":[{"tool":"bash","arg":"command","pattern":"([","reason":"because"}]}}}`,
 		);
 		expect(loadCatalog(rootsOf({ home, workspace, user }), hostFiles)).rejects.toThrow(
@@ -346,7 +340,7 @@ describe("guards", () => {
 			"---\nname: same\ndescription: ecosystem\n---\nEco",
 		);
 		await write(
-			join(workspace, ".acornfall", "agents", "same.md"),
+			join(workspace, ".acornd", "agents", "same.md"),
 			"---\nname: same\ndescription: native\n---\nNative",
 		);
 		await write(
@@ -358,7 +352,7 @@ describe("guards", () => {
 			`{"defaults":{"instructions":"WORKSPACE ECOSYSTEM"}}`,
 		);
 		await write(
-			join(workspace, ".acornfall", "config.json"),
+			join(workspace, ".acornd", "config.json"),
 			`{"defaults":{"instructions":"WORKSPACE NATIVE"}}`,
 		);
 
@@ -373,7 +367,7 @@ describe("guards", () => {
 		expect(catalog.defaults.map((layer) => layer.path)).toEqual([
 			join(user, ".agents", "config.json"),
 			join(workspace, ".agents", "config.json"),
-			join(workspace, ".acornfall", "config.json"),
+			join(workspace, ".acornd", "config.json"),
 		]);
 	});
 
@@ -402,7 +396,7 @@ describe("guards", () => {
 			`{"defaults":{"hooks":{"guards":[{"tool":"bash","arg":"command","pattern":"sudo","reason":"global"}]}}}`,
 		);
 		await write(
-			join(workspace, ".acornfall", "config.json"),
+			join(workspace, ".acornd", "config.json"),
 			`{"defaults":{"hooks":{"guards":[{"tool":"write","arg":"path","outside":true,"reason":"workspace"}]}}}`,
 		);
 		const catalog = await loadCatalog(rootsOf({ home, workspace, user }), hostFiles);

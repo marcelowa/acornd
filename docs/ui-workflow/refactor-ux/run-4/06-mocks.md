@@ -68,5 +68,5 @@ and **no horizontal overflow** (the only 404 is Storybook's own `favicon.ico`). 
    is not here?
 6. **The settings page**: running build, auto-check, and the Releases row as the door. Is that the
    door you want?
-7. **The runs dialog**: "5 runs are active across acornfall and hello-omri", with **Not now** and
+7. **The runs dialog**: "5 runs are active across acornd and hello-omri", with **Not now** and
    **Stop runs and install**. Enough to decide, every time?

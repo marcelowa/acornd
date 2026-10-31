@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/supervise"
+	"github.com/marcelowa/acornd/gateway/internal/supervise"
 )
 
 // The bubblewrap engine writes one config per workspace and reads it back when the sandbox starts,
@@ -136,7 +136,7 @@ func TestOnlyGlobalsThatExistAreMounted(t *testing.T) {
 // A resolver file the sandbox was given is used; without one it reads the machine's, because a
 // sandbox with no DNS resolves nothing.
 func TestTheResolverIsTheOneTheConfigNamesOrTheMachines(t *testing.T) {
-	if got := resolverOrHost(bwrapConfig{ResolvConf: "/run/acornfall/resolv.conf"}); got != "/run/acornfall/resolv.conf" {
+	if got := resolverOrHost(bwrapConfig{ResolvConf: "/run/acornd/resolv.conf"}); got != "/run/acornd/resolv.conf" {
 		t.Errorf("resolver = %q", got)
 	}
 	if got := resolverOrHost(bwrapConfig{}); got != "/etc/resolv.conf" {

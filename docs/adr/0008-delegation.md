@@ -255,7 +255,7 @@ Fixed by recording provenance rather than inferring it:
 
 - A submission's settled record carries the **entry id** it placed (`settled.entry`), so
   the sender is recorded against the exact entry instead of being guessed from its text.
-- A per-conversation `acornfall.messages` document maps entry id → sender
+- A per-conversation `acornd.messages` document maps entry id → sender
   (`{conversationId, name, kind: task | send | report}`).
 - The interface renders an attributed entry as an agent message: an amber block naming
   the sender, markdown-rendered, with a link to open that conversation. The prefix stays

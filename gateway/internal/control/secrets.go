@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
-	"github.com/acornfall/acornfall/gateway/internal/secretsproxy"
-	"github.com/acornfall/acornfall/gateway/internal/workerpool"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/secretsproxy"
+	"github.com/marcelowa/acornd/gateway/internal/workerpool"
 )
 
 // SandboxSecret is one secret's delivery state, without its value.
@@ -151,7 +151,7 @@ func (c *Control) forgetSecretsProxy(proxy *secretsproxy.Proxy) {
 // secretProxyPolicy is what the engine needs to carry the proxy: the URL a command puts in
 // HTTPS_PROXY, and the CA a client inside has to trust.
 func (c *Control) secretProxyPolicy(proxy *secretsproxy.Proxy) *sandbox.SecretProxy {
-	credential := url.UserPassword("acornfall", proxy.Token())
+	credential := url.UserPassword("acornd", proxy.Token())
 	return &sandbox.SecretProxy{
 		URL:    "http://" + credential.String() + "@" + proxy.Addr(),
 		CAFile: secretsproxy.CAPath(filepath.Join(c.opts.DataDir, "proxy")),

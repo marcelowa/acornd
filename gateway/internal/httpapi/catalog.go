@@ -7,8 +7,8 @@
 package httpapi
 
 import (
-	"github.com/acornfall/acornfall/gateway/internal/control"
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 	"sort"
 	"strings"
 )

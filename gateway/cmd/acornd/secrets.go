@@ -11,8 +11,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/control"
-	"github.com/acornfall/acornfall/gateway/internal/vault"
+	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/vault"
 )
 
 // secretCommand is the headless way to set a tool secret. The value comes from stdin,
@@ -47,7 +47,7 @@ func secretCommand(argv []string) {
 }
 
 func secretUsage(w *os.File) {
-	fmt.Fprint(w, `usage: acornfall secret <command>
+	fmt.Fprint(w, `usage: acornd secret <command>
 
   list                  every secret; --workspace NAME for what one workspace receives
   add <NAME>            store one, from stdin: --global or --workspace NAME, --description,
@@ -56,7 +56,7 @@ func secretUsage(w *os.File) {
   rotate <NAME>         replace the value, from stdin
   remove <NAME>         delete it
 
-acornfall secret <command> -h    explains that command's flags
+acornd secret <command> -h    explains that command's flags
 
 The value is read from stdin, never argv. It is never printed again.`)
 }
@@ -131,7 +131,7 @@ func secretAdd(argv []string) {
 	scope := secretScope{}
 	scope.register(flags)
 	values := addFlags{}
-	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	dataDir := flags.String("data-dir", "", "the acornd folder")
 	flags.StringVar(&values.description, "description", "", "what the secret is for, shown in lists")
 	flags.StringVar(&values.hosts, "hosts", "", "comma-separated hosts the secret may reach")
 	flags.BoolVar(&values.query, "query", false, "allow substitution in the URL query")
@@ -139,14 +139,14 @@ func secretAdd(argv []string) {
 	flags.BoolVar(&values.noHeaders, "no-headers", false, "refuse substitution in request headers")
 	flags.BoolVar(&values.noEnv, "no-env", false, "keep the value out of a container sandbox")
 	flags.Usage = func() {
-		fmt.Fprint(os.Stderr, `usage: acornfall secret add <NAME> < value [flags]
+		fmt.Fprint(os.Stderr, `usage: acornd secret add <NAME> < value [flags]
 
   --global | --workspace NAME   which workspaces receive it (exactly one)
   --description TEXT            what it is for, shown in lists
   --hosts a,b                   the hosts it may reach; anything else gets no value
   --query --body --no-headers   where in the request it may be substituted
   --no-env                      keep the value out of a container sandbox
-  --data-dir DIR                the acornfall folder (default: ~/.acornfall)
+  --data-dir DIR                the acornd folder (default: ~/.acornd)
 `)
 	}
 	flagArgs, positional := splitFlags(argv, map[string]bool{
@@ -210,9 +210,9 @@ func secretRotate(argv []string) {
 	flags := flag.NewFlagSet("secret rotate", flag.ContinueOnError)
 	scope := secretScope{}
 	scope.register(flags)
-	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	dataDir := flags.String("data-dir", "", "the acornd folder")
 	flags.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: acornfall secret rotate <NAME> < value [--global|--workspace NAME]\n\nThe value is read from stdin; nothing else changes.\n")
+		fmt.Fprint(os.Stderr, "usage: acornd secret rotate <NAME> < value [--global|--workspace NAME]\n\nThe value is read from stdin; nothing else changes.\n")
 	}
 	flagArgs, positional := splitFlags(argv, map[string]bool{"data-dir": true, "workspace": true})
 	if err := flags.Parse(flagArgs); err != nil {
@@ -243,9 +243,9 @@ func secretRemove(argv []string) {
 	flags := flag.NewFlagSet("secret remove", flag.ContinueOnError)
 	scope := secretScope{}
 	scope.register(flags)
-	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	dataDir := flags.String("data-dir", "", "the acornd folder")
 	flags.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: acornfall secret remove <NAME> [--global|--workspace NAME]\n")
+		fmt.Fprint(os.Stderr, "usage: acornd secret remove <NAME> [--global|--workspace NAME]\n")
 	}
 	flagArgs, positional := splitFlags(argv, map[string]bool{"data-dir": true, "workspace": true})
 	if err := flags.Parse(flagArgs); err != nil {
@@ -272,9 +272,9 @@ func secretRemove(argv []string) {
 // this hold a value for", which is the question a secret raises.
 func secretShow(argv []string) {
 	flags := flag.NewFlagSet("secret show", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	dataDir := flags.String("data-dir", "", "the acornd folder")
 	flags.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: acornfall secret show <NAME>\n\nThe value is not printed, or stored anywhere it could be printed.\n")
+		fmt.Fprint(os.Stderr, "usage: acornd secret show <NAME>\n\nThe value is not printed, or stored anywhere it could be printed.\n")
 	}
 	flagArgs, positional := splitFlags(argv, map[string]bool{"data-dir": true})
 	if err := flags.Parse(flagArgs); err != nil {
@@ -347,7 +347,7 @@ func substitutionLabel(substitution vault.Substitution) string {
 
 func secretList(argv []string) {
 	flags := flag.NewFlagSet("secret list", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	dataDir := flags.String("data-dir", "", "the acornd folder")
 	workspace := flags.String("workspace", "", "show what this workspace receives, by name")
 	flagArgs, _ := splitFlags(argv, map[string]bool{"data-dir": true, "workspace": true})
 	if err := flags.Parse(flagArgs); err != nil {
@@ -424,7 +424,7 @@ func oneName(positional []string) (string, bool) {
 }
 
 func secretFail(err error) {
-	fmt.Fprintf(os.Stderr, "acornfall secret: %v\n", err)
+	fmt.Fprintf(os.Stderr, "acornd secret: %v\n", err)
 	os.Exit(1)
 }
 

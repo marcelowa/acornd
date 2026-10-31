@@ -27,7 +27,7 @@ func TestPolicyRenderKeepsSecretValuesOut(t *testing.T) {
 	for _, want := range []string{
 		"secrets:",
 		"GITHUB_TOKEN:",
-		"value: { $msb_env: ACORNFALL_SECRET_0 }",
+		"value: { $msb_env: ACORND_SECRET_0 }",
 		"allow: [api.github.com, \"*.githubusercontent.com\"]",
 		"substitution: { headers: true, query: false, body: false }",
 		"require_tls_identity: true",
@@ -77,7 +77,7 @@ func TestCreatePassesSecretValuesInTheProcessEnvironment(t *testing.T) {
 			createEnv = recorder.envs[index]
 		}
 	}
-	if !contains(createEnv, "ACORNFALL_SECRET_0=ghp-value") {
+	if !contains(createEnv, "ACORND_SECRET_0=ghp-value") {
 		t.Fatalf("the value should be in the create process environment, got %v", createEnv)
 	}
 	written, err := os.ReadFile(filepath.Join(dir, "sandbox.yaml"))

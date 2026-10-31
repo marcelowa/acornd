@@ -1,6 +1,6 @@
 ---
 name: visual-answers
-description: Shape an answer as a picture before a paragraph — callouts, checklists, tables, diffs, diagrams — when the user reads it in the acornfall console. Use when wording a reply, a report, or a plan for the owner.
+description: Shape an answer as a picture before a paragraph — callouts, checklists, tables, diffs, diagrams — when the user reads it in the acornd console. Use when wording a reply, a report, or a plan for the owner.
 ---
 
 # Visual answers

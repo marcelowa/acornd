@@ -197,7 +197,7 @@ export class SandboxExecutionEnv implements ExecutionEnv {
 		sink: Awaited<ReturnType<SandboxClient["writeStream"]>> | undefined;
 	}> {
 		const scratch = await this.sandbox
-			.exec("mktemp /tmp/acornfall-output.XXXXXX", {})
+			.exec("mktemp /tmp/acornd-output.XXXXXX", {})
 			.catch(() => null);
 		if (scratch === null || scratch.code !== 0) return { path: "", sink: undefined };
 		const path = text(scratch.stdout).trim();
@@ -644,14 +644,14 @@ export class SandboxExecutionEnv implements ExecutionEnv {
 		prefix: string | undefined,
 		_context: Context,
 	): Promise<Result<string, FileError>> {
-		return this.temp(prefix ?? "acornfall-dir", true);
+		return this.temp(prefix ?? "acornd-dir", true);
 	}
 
 	async createTempFile(
 		options: { prefix?: string; suffix?: string } | undefined,
 		_context: Context,
 	): Promise<Result<string, FileError>> {
-		return this.temp(options?.prefix ?? "acornfall-tmp", false);
+		return this.temp(options?.prefix ?? "acornd-tmp", false);
 	}
 
 	private async temp(name: string, directory: boolean): Promise<Result<string, FileError>> {

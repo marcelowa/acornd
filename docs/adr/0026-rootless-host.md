@@ -4,11 +4,11 @@ Status: accepted (2026-10-26), built; vendoring rejected (2026-10-26)
 
 ## The problem
 
-acornfall was only ever run on a machine where root had prepared things: `apt install bubblewrap
+acornd was only ever run on a machine where root had prepared things: `apt install bubblewrap
 passt iproute2`, and a `/dev/kvm` whose group the user was in. Every piece of that was invisible
 until it was missing, and then it was a kernel error in the middle of a turn.
 
-Two questions followed. Can acornfall run for a user with no root at all? And what engine does a
+Two questions followed. Can acornd run for a user with no root at all? And what engine does a
 workspace get when nobody chose one?
 
 ## What needs root, and what does not
@@ -20,7 +20,7 @@ Measured on a machine where the gateway ran as an ordinary user:
 | user namespaces, mounts, the sandbox itself | **no** — `bwrap` needs only an unprivileged user namespace |
 | the sandbox's network, its address, its routes | **no** — `pasta` makes a namespace, and setting it up needs `CAP_NET_ADMIN` there, not here |
 | installing into the sandbox, pulling images, running commands | **no** |
-| the acornfall gateway, its console, its updates | **no** — port 7777 is above 1024 and its folder is the user's |
+| the acornd gateway, its console, its updates | **no** — port 7777 is above 1024 and its folder is the user's |
 
 What does need root, once, and can never be vendored:
 
@@ -33,13 +33,13 @@ What does need root, once, and can never be vendored:
 
 ## The decision
 
-**1. One command says what the machine needs, and does it** (`acornfall setup`), in whichever of
+**1. One command says what the machine needs, and does it** (`acornd setup`), in whichever of
 three shapes the machine allows: already root, the plan is shown and applied on a `y`; an ordinary
 user, the plan is shown and `sudo` asks for the password; neither, the plan is printed as commands
-that can be run. The probes belong to the **account that runs acornfall**, never the one typing:
+that can be run. The probes belong to the **account that runs acornd**, never the one typing:
 root can open `/dev/kvm` and make a user namespace whatever the policy says, so a check run as
 root would report a machine that works while the service's workspaces cannot boot. That account is
-the owner of the acornfall folder, else the user its systemd unit runs as, else root itself — and
+the owner of the acornd folder, else the user its systemd unit runs as, else root itself — and
 `--for` overrides all three, because a guess that is wrong should be visible in the output rather
 than discovered later. When the account is not this process's, root re-executes the same binary
 with that account's ids and groups to ask. When a step needs
@@ -47,12 +47,12 @@ root the command writes it to a plan, says why, and runs the same binary through
 reads the plan as data and builds the commands itself, refusing anything outside its own short
 vocabulary, so escalation is "these four machine-level steps" rather than "whatever a file said".
 `--apply` no longer exists: a second invocation with a flag teaches the wrong habit. iproute2 is
-gone entirely: the sandbox's address and routes are set over netlink by `acornfall netns` (a
+gone entirely: the sandbox's address and routes are set over netlink by `acornd netns` (a
 subcommand pasta runs as the sandbox's first process), so a refusal that cannot be installed fails
 the start instead of being swallowed by a shell script.
 
 **What the step changes, and for how long.** The user-namespace policy is written to
-`/etc/sysctl.d/99-acornfall-userns.conf` and not only applied, because a fix that disappears at the
+`/etc/sysctl.d/99-acornd-userns.conf` and not only applied, because a fix that disappears at the
 next reboot is worse than one that was never made; `/dev/net/tun` likewise gets a
 `/etc/tmpfiles.d` rule so the device is there after a boot. In a container neither is the answer:
 the policy and the device belong to whoever started the container, so the command says so and
@@ -70,7 +70,7 @@ considered and dropped for good:
 - the price it removes is one `apt install` at setup, once, which the command already names and
   performs.
 
-So the tools come from the distribution, `acornfall setup` installs them, and the seamlessness
+So the tools come from the distribution, `acornd setup` installs them, and the seamlessness
 this ADR promised is one command rather than zero — permanently. If a future machine cannot
 install packages at all, that is a different problem (an image to build), not a reason to carry
 three C libraries through our own release pipeline.
@@ -84,14 +84,14 @@ driver answers that with `Egress`, separately from `Usable`, because a machine c
 without being able to give it a network. An engine that cannot is not a default.
 
 **3. The choice is recorded when the workspace is made**, by the console, the API, and
-`acornfall workspace add`, each of which asks this machine the same question. An empty field means
+`acornd workspace add`, each of which asks this machine the same question. An empty field means
 "whatever this machine prefers", which is exactly the drift the engine rules forbid: a workspace
 that woke up on another machine would silently run somewhere nobody chose.
 
 A record that still names no engine — everything made before this change — is *not* rewritten
 automatically: it was running the old default, microsandbox, and resolving it to the new
 preference would move a running workspace onto another engine without anybody choosing. Those are
-recorded by hand (`acornfall workspace list` shows which), and until they are, they follow the
+recorded by hand (`acornd workspace list` shows which), and until they are, they follow the
 machine's preference, which on a machine that can run bubblewrap means bubblewrap.
 
 ## What this trades
@@ -105,10 +105,10 @@ not a substitute — the microVM gap is still open (ADR 0025 says so).
 
 ## Not in scope
 
-- **No silent privilege.** `acornfall doctor` reports what this machine needs; nothing runs `sudo`
+- **No silent privilege.** `acornd doctor` reports what this machine needs; nothing runs `sudo`
   on its own, and no sysctl is written by a daemon.
 - **No rootless microVM.** `/dev/kvm` is a device; there is no rootless variant of it.
-- **A container host** may deny user namespaces through seccomp, which no acornfall change can
+- **A container host** may deny user namespaces through seccomp, which no acornd change can
   fix; the refusal says so and names the flag.
 
 ## Tests

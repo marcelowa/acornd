@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
 // Where a frame goes. The worker speaks JSONL on stdout and the reader is the only thing that

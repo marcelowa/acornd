@@ -18,7 +18,7 @@ same terms: explicit, gated, reversible.
 ## Decision
 
 **GitHub releases first, tree builds second.** v1 reads
-`https://api.github.com/repos/marcelowa/acornfall/releases/latest` only.
+`https://api.github.com/repos/marcelowa/acornd/releases/latest` only.
 Tag shape `v0.9.0`. Notes come from the tag message. A second channel
 `main` (local `git pull + make build`, dev hosts only) lands later.
 Reason: releases are tested and checksummed. Tree builds break often
@@ -42,7 +42,7 @@ before serving. One script per release in `scripts/migrate/`, e.g.
 `v0.9.0.sh`. Non-zero exit stops boot and starts rollback. No silent
 fix-ups in app code.
 
-**Last good binary stays.** `acornfall.bak` plus a version file.
+**Last good binary stays.** `acornd.bak` plus a version file.
 Staged binaries must execute (`version` names the tag) before swapping.
 `GET /healthz` names the build; the 30s must-pass window after start is
 the operator's (service restart on failure), not the gateway's. Migrate
@@ -143,10 +143,10 @@ covers the common case; clean covers format changes.
 
 ## Open (asked, not decided)
 
-- Release asset shape: decided binary per OS (`acornfall-<goos>-<goarch>`).
+- Release asset shape: decided binary per OS (`acornd-<goos>-<goarch>`).
 - Checksum verify: checksum file (`sha256sums.txt`) for v1; minisign later
   when releases are public and scripted. Cosign rejected: heavy for one file.
-- Private repo auth: `ACORNFALL_GITHUB_TOKEN` (fine-grained, read-only,
+- Private repo auth: `ACORND_GITHUB_TOKEN` (fine-grained, read-only,
   this repo) while the repo is private; dropped when releases go public.
 
 ## Live drill (v0.9.0, 2026-10-10)

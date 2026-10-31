@@ -46,7 +46,7 @@ and a process in another. So:
 and runs it as the sandbox's first process, after pasta when the workspace has egress.
 
 ```
-control ──spawns──► pasta ──► bubblewrap ──► acornfall sandbox-supervisor
+control ──spawns──► pasta ──► bubblewrap ──► acornd sandbox-supervisor
                                                     │  JSON lines over a Unix socket
 worker ────────────────connects to the socket───────┘  run / kill / shutdown
 ```

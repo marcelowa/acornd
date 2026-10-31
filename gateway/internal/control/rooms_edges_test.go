@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
 // A prompt with no words and no files is not a message: it is refused before anything is configured, so an empty

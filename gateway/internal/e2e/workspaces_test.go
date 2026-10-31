@@ -72,13 +72,13 @@ func TestWorkspaceCreationTakesANameAndRefusesAPath(t *testing.T) {
 
 	status, body := c.postStatus("/api/workspaces", map[string]any{"name": "with-a-path", "path": "/etc"})
 	if status == 400 {
-		if !strings.Contains(body, "acornfall workspace add") {
+		if !strings.Contains(body, "acornd workspace add") {
 			t.Errorf("the refusal should say what to use instead, got %q", body)
 		}
 	} else {
 		t.Errorf("a path should be refused, got %d", status)
 	}
-	if _, err := os.Stat("/etc/.acornfall"); err == nil {
+	if _, err := os.Stat("/etc/.acornd"); err == nil {
 		t.Error("a workspace must never be created outside the workspaces folder")
 	}
 
@@ -160,9 +160,9 @@ func TestAWorkspacesOwnResourcesAreRead(t *testing.T) {
 		}),
 		withSetup(func(t *testing.T, s *system) {
 			s.writeWorkspace(t, "AGENTS.md", "WORKSPACE RULES MARKER: keep the build directory")
-			s.writeWorkspace(t, ".acornfall/config.json", guard)
-			s.writeWorkspace(t, ".acornfall/agents/local.md", "---\nname: local-agent\ndescription: from this workspace\n---\nBody.")
-			s.writeWorkspace(t, ".acornfall/commands/local.md", "---\nname: local-command\ndescription: from this workspace\n---\nDo the local thing.")
+			s.writeWorkspace(t, ".acornd/config.json", guard)
+			s.writeWorkspace(t, ".acornd/agents/local.md", "---\nname: local-agent\ndescription: from this workspace\n---\nBody.")
+			s.writeWorkspace(t, ".acornd/commands/local.md", "---\nname: local-command\ndescription: from this workspace\n---\nDo the local thing.")
 		}),
 	)
 	c := s.client()

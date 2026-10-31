@@ -105,7 +105,7 @@ The definition's `medium` is impossible. Two answers are defensible:
 | **`high`** | take the install default, a value someone actually chose |
 | `off` | ignore the default and approximate `medium` downward |
 
-Acornfall answers `high`. The reason is what `off` *means*: not thinking at all. On a
+Acornd answers `high`. The reason is what `off` *means*: not thinking at all. On a
 scale with a gap, "step down from medium" does not land on slightly-less-thinking, it
 falls past `low` and `minimal` into `off` — so the approximation is not a weaker
 `medium`, it is the opposite of it. A supported value from a broader layer is a real
@@ -157,7 +157,7 @@ workspace on that model" has no answer in the interface.
 ## The last resort
 
 When no layer has chosen a model, control prefers `deepseek-v4.1-flash` among what the
-credentials actually offer, then `ACORNFALL_MODEL` (a last resort for a script or a test), then the first model of the first
+credentials actually offer, then `ACORND_MODEL` (a last resort for a script or a test), then the first model of the first
 authenticated provider. The preference exists because the end of the line used to be
 "whatever is listed first" (alphabetically `minimax-m3`), which is not a decision anyone
 made.

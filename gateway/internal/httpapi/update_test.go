@@ -9,13 +9,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/update"
+	"github.com/marcelowa/acornd/gateway/internal/update"
 )
 
 func updateServer(t *testing.T) (*Server, *update.Manager) {
 	t.Helper()
 	dataDir := t.TempDir()
-	bin := filepath.Join(t.TempDir(), "acornfall")
+	bin := filepath.Join(t.TempDir(), "acornd")
 	if err := os.WriteFile(bin, []byte("old"), 0o755); err != nil {
 		t.Fatal(err)
 	}

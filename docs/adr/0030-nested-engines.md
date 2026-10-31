@@ -1,14 +1,14 @@
-# ADR 0030 — Nested engines: a bwrap workspace can run another acornfall
+# ADR 0030 — Nested engines: a bwrap workspace can run another acornd
 
 Status: accepted, built
 Date: 2026-10-29
 
 ## Context
 
-A bwrap workspace is how acornfall is developed: `acornfall-dev-01` holds the repository,
-an agent runs in it, and the natural next step is that the checked-out acornfall runs inside
+A bwrap workspace is how acornd is developed: `acornd-dev-01` holds the repository,
+an agent runs in it, and the natural next step is that the checked-out acornd runs inside
 the workspace. The host engine would make that trivial, but it is an escape hatch for tests:
-the working version must be an honest acornfall with its own sandbox and its own network.
+the working version must be an honest acornd with its own sandbox and its own network.
 An agent inside a bwrap workspace reported that `/dev/net/tun` and `/dev/kvm` were missing,
 that nested pasta failed, and that a pre-fix probe could stall for ten minutes. The report
 was right about the failure path and wrong about the host: on `the host` the workspace was
@@ -36,12 +36,12 @@ pasta already made, not another unshare inside it.
 ## Decision
 
 1. **Devices on by default.** A bwrap workspace binds the host's `/dev/net/tun` and
-   `/dev/kvm` when they exist, and adds `--cap-add ALL` and `--setenv ACORNFALL_NESTED=1`.
-   The caps are what nested pasta needs; the marker is how the inner acornfall knows it is
+   `/dev/kvm` when they exist, and adds `--cap-add ALL` and `--setenv ACORND_NESTED=1`.
+   The caps are what nested pasta needs; the marker is how the inner acornd knows it is
    inside a sandbox. A workspace can withdraw them: `disable_devices` in the registry, the
-   API, `acornfall workspace add --no-devices`, or the same field on an update. Absent means
+   API, `acornd workspace add --no-devices`, or the same field on an update. Absent means
    on. A missing device is skipped, not a failed boot.
-2. **The nested bwrap reuses pasta's user namespace.** `ACORNFALL_NESTED=1` makes the bwrap
+2. **The nested bwrap reuses pasta's user namespace.** `ACORND_NESTED=1` makes the bwrap
    engine record `nested: true`. With a network, it runs pasta and then bubblewrap without
    `--unshare-user` or `--uid/--gid`, with the individual unshare flags for pid, uts, ipc
    and cgroup, and `--share-net`. The sandbox's user namespace is the one pasta made; the
@@ -50,7 +50,7 @@ pasta already made, not another unshare inside it.
 3. **A probe must not trust a zero exit when pasta says it failed.** `probePastaWithin`
    refuses output containing `Couldn't configure user mappings` or
    `Couldn't write to /proc/self/uid_map`, because pasta can print those and still run the
-   command. Without this the inner acornfall would choose bwrap and then have no network.
+   command. Without this the inner acornd would choose bwrap and then have no network.
 4. **Removing a sandbox stops it first.** `Bwrap.Remove` used to delete the config and the
    files while the supervisor, its bubblewrap, and its commands kept running. The lifecycle
    test called `Remove` after `Start` and passed because `List` reads only configs; it left
@@ -59,7 +59,7 @@ pasta already made, not another unshare inside it.
 5. **The fast tier does not depend on the machine's KVM.** `/dev/kvm` is gathered by the
    caller and passed into `ready.Check`; `TestSatisfiedInstallIsQuiet` states the fact
    instead of reading it. A bwrap workspace can run `make check` on a machine without a
-   hypervisor, which is the same workspace the nested acornfall is developed in.
+   hypervisor, which is the same workspace the nested acornd is developed in.
 6. **The microVM boundary is decided by the same grant.** `Bwrap.Nesting` reports available
    when the machine has `/dev/kvm`; the control hides it when the workspace withdrew the
    devices. A real microVM boots inside the bwrap with the host's `msb` and store; the
@@ -68,13 +68,13 @@ pasta already made, not another unshare inside it.
 ## Security
 
 - The caps are in the **outer sandbox's user namespace**, not the host's. The outer bwrap is
-  still the boundary; a nested acornfall is a guest of it.
+  still the boundary; a nested acornd is a guest of it.
 - A nested sandbox's egress is the outer workspace's egress: the outer pasta and its routes
   decide what is reachable, so the outer grant is the ceiling and an inner private grant
   cannot exceed it.
 - `/dev/kvm` is a virtualization grant. `disable_devices` withdraws it with the tun device.
   The outer workspace's `--refuse-private` still fences the network.
-- The inner acornfall's console has no token by default and binds inside the outer netns.
+- The inner acornd's console has no token by default and binds inside the outer netns.
   The owner reaches it with Tailscale inside the workspace or a deliberate forward, not by
   the host's tailnet address.
 

@@ -63,7 +63,7 @@ are unique within a scope, not across scopes: two workspaces may both define `DB
 with different values, and a workspace `GITHUB_TOKEN` replaces the global one for that
 workspace. The name is the environment variable the guest sees, so it is
 `[A-Z][A-Z0-9_]*` and a small reserved list (`PATH`, `HOME`, `SHELL`, `TERM`, `USER`,
-`HOSTNAME`, `PWD`, `MSB_*`, `ACORNFALL_*`) is refused.
+`HOSTNAME`, `PWD`, `MSB_*`, `ACORND_*`) is refused.
 
 **Stored beside the provider credentials.** `<home>/secrets.json`, mode 0600, a JSON
 object with a version and an array of entries: name, description, scope, workspace path for
@@ -111,7 +111,7 @@ is the placeholder.
 
 **The vault is engine-neutral; only the driver knows the engine.** Control builds the
 effective set and passes named grants to the sandbox policy. The microsandbox driver
-renders `value: { $msb_env: ACORNFALL_SECRET_<n> }` in `sandbox.yaml` and sets those
+renders `value: { $msb_env: ACORND_SECRET_<n> }` in `sandbox.yaml` and sets those
 variables only in the `msb create` process environment. The worker never sees a value: it
 attaches to the guest, where the env var holds the placeholder. A container driver will
 set the variables in `docker run`/`podman run` and say `environment`; the vault, policy,
@@ -153,7 +153,7 @@ secret added mid-conversation shows up without a restart.
 
 **Management is part of the console.** Settings > Secrets manages global entries; a
 workspace's settings manages its own and shows the global ones it inherits, marking the
-ones its own value overrides. Add, rotate, delete, and a CLI (`acornfall secret
+ones its own value overrides. Add, rotate, delete, and a CLI (`acornd secret
 add|rotate|rm`, value from stdin, never argv) for a headless install. The console is open by
 default (ADR 0020): anyone who can reach it can add a secret or ask the agent to use a
 granted one. They cannot read a value. On a container engine a global secret is readable

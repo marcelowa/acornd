@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
 // maxDraftBytes is how many bytes of words one draft may hold. A message is bounded by the

@@ -115,7 +115,7 @@ export function PeopleSection({
 						This install has no admin yet. Claim it from the machine that runs it, and
 						then everybody else can be named here:
 					</Text>
-					<Code>acornfall people claim you@example.com</Code>
+					<Code>acornd people claim you@example.com</Code>
 				</Stack>
 			) : (
 				<div className="flex flex-col gap-1">

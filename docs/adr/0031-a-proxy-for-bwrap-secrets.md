@@ -96,7 +96,7 @@ by that: measured, `-T 18443` opens exactly one port and leaves `127.0.0.1:2222`
 picks the port when it writes the sandbox's config, and a workspace with `network: off` gets no
 proxy at all — the proxy is the host's own egress, and a workspace with no network must not have one.
 
-**The sandbox stops inheriting acornfall's environment.** `Start` gives the sandbox's own processes
+**The sandbox stops inheriting acornd's environment.** `Start` gives the sandbox's own processes
 three variables — a `PATH`, the workspace's private `HOME`, a locale — and the bwrap argv carries
 `--clearenv` before anything sets one. The worker starts each command with the handful a shell needs
 (`TERM`, `LANG`, `LC_ALL`, `TZ`), whatever the caller passes, the workspace's own home and path, and

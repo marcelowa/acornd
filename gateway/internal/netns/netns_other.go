@@ -1,7 +1,7 @@
 //go:build !linux
 
 // Package netns configures a sandbox's network namespace. Netlink is the Linux kernel's own
-// interface, so this file is what the other platforms build: acornfall still runs on them — the
+// interface, so this file is what the other platforms build: acornd still runs on them — the
 // host engine, the console, and the microVM engine care nothing for namespaces — and a bwrap
 // workspace is refused with a sentence rather than a build that does not exist.
 package netns

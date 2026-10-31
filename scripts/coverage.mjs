@@ -12,7 +12,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const MODULE = "acornfall/gateway/";
+const MODULE = "acornd/gateway/";
 
 // The profiles spell a file as its import path; the ignore list and the table are easier to
 // read, and to review, relative to the gateway.

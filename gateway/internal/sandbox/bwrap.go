@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/supervise"
+	"github.com/marcelowa/acornd/gateway/internal/supervise"
 )
 
 // Bwrap is the bubblewrap engine: user, mount, pid, network, ipc and uts namespaces built
@@ -64,7 +64,7 @@ type hostDevices struct {
 // nestedEnv marks a process that is already inside a sandbox. The outer bwrap sets it for
 // the workspace's processes; a bwrap engine that finds it reuses the user namespace pasta
 // made instead of creating a third one inside it.
-const nestedEnv = "ACORNFALL_NESTED"
+const nestedEnv = "ACORND_NESTED"
 
 // NewBwrap builds the driver. Unlike the microVM engine it installs nothing: bubblewrap is a
 // distribution package, and installing one is the operator's business, not a gateway's.
@@ -163,7 +163,7 @@ func (b *Bwrap) StateDir() string { return b.state }
 
 // Env is where the worker finds the configs this engine writes. The worker's client reads
 // `<state>/<name>.json`, the same file a person can read.
-func (b *Bwrap) Env() []string { return []string{"ACORNFALL_BWRAP_STATE=" + b.state} }
+func (b *Bwrap) Env() []string { return []string{"ACORND_BWRAP_STATE=" + b.state} }
 
 func (b *Bwrap) Installed() bool {
 	_, err := b.look("bwrap")
@@ -328,8 +328,8 @@ func sandboxProcessEnv(config bwrapConfig) []string {
 // short on purpose: a Unix socket address is limited, and the host side of the same socket
 // carries the workspace's name.
 const (
-	guestSupervisor = "/usr/local/bin/acornfall"
-	guestRunDir     = "/run/acornfall"
+	guestSupervisor = "/usr/local/bin/acornd"
+	guestRunDir     = "/run/acornd"
 	guestSocketPath = guestRunDir + "/s.sock"
 )
 
@@ -389,7 +389,7 @@ const (
 
 // refusePrivate is the flag that asks the namespace's own configuration to install the routes
 // refusing private ranges. The list is not here: it lives where the routes are installed
-// (cmd/acornfall/netns.go), so one file decides what a workspace without a grant cannot reach.
+// (cmd/acornd/netns.go), so one file decides what a workspace without a grant cannot reach.
 const refusePrivate = "--refuse-private"
 
 // Create resolves the policy into a config and the workspace's images, then boots it: control's
@@ -653,7 +653,7 @@ func (b *Bwrap) Start(ctx context.Context, name string, _ []Secret) error {
 	defer logFile.Close()
 	command := exec.Command(argv[0], argv[1:]...)
 	// Its own environment, and only that: the sandbox's first process reads flags. What it inherited
-	// instead was everything acornfall was started with, readable from inside at
+	// instead was everything acornd was started with, readable from inside at
 	// /proc/<pid>/environ — a workspace is not a place to keep the machine's credentials.
 	command.Env = sandboxProcessEnv(config)
 	// Its own session: the sandbox outlives the gateway that started it, so that a restart can
@@ -782,7 +782,7 @@ func (b *Bwrap) Remove(ctx context.Context, name string) error {
 // overlay, and no cleanup beyond removing the folder.
 func (b *Bwrap) workspaceRootfs(policy Policy, name, image string) (string, error) {
 	rootfs := filepath.Join(b.workspaceDir(name), "rootfs")
-	if info, err := os.Stat(filepath.Join(rootfs, ".acornfall-rootfs")); err == nil && !info.IsDir() {
+	if info, err := os.Stat(filepath.Join(rootfs, ".acornd-rootfs")); err == nil && !info.IsDir() {
 		return rootfs, nil
 	}
 	// The workspace's own copy is the slow part of a first start — 84 MB of image, more after the
@@ -798,14 +798,14 @@ func (b *Bwrap) workspaceRootfs(policy Policy, name, image string) (string, erro
 	if err := copyTree(base, rootfs); err != nil {
 		return "", fmt.Errorf("sandbox: copying the image for this workspace: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(rootfs, ".acornfall-rootfs"), []byte(image+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(rootfs, ".acornd-rootfs"), []byte(image+"\n"), 0o644); err != nil {
 		return "", err
 	}
 	// apt's own sandbox drops to _apt with setgroups, which a single-mapping user namespace
 	// denies; as root inside a root that is the workspace's own, dropping is not needed.
 	aptDir := filepath.Join(rootfs, "etc", "apt", "apt.conf.d")
 	if err := os.MkdirAll(aptDir, 0o755); err == nil {
-		_ = os.WriteFile(filepath.Join(aptDir, "99-acornfall"), []byte("APT::Sandbox::User \"root\";\n"), 0o644)
+		_ = os.WriteFile(filepath.Join(aptDir, "99-acornd"), []byte("APT::Sandbox::User \"root\";\n"), 0o644)
 	}
 	return rootfs, nil
 }
@@ -1085,7 +1085,7 @@ func (b *Bwrap) bootArgv(config bwrapConfig) ([]string, error) {
 	argv := []string{
 		config.Network.Pasta, "-q",
 		// Outbound only. pasta's port forwarding defaults to "auto", which mirrors every service
-		// the machine listens on into the sandbox's loopback — the acornfall API on 7777 and sshd
+		// the machine listens on into the sandbox's loopback — the acornd API on 7777 and sshd
 		// on 22 among them — and that is the machine's own surface, not the workspace's. Nothing in
 		// the sandbox needs a port opened for it, and nothing here is a port the machine should
 		// offer into a workspace.
@@ -1284,7 +1284,7 @@ func (b *Bwrap) resolveResolv(name string, network bwrapNetwork) (string, error)
 		return b.resolverFile(b.workspaceDir(name))
 	}
 	path := filepath.Join(b.workspaceDir(name), "pasta-resolv.conf")
-	content := "# written by acornfall: pasta forwards these queries to the machine's resolver\n" +
+	content := "# written by acornd: pasta forwards these queries to the machine's resolver\n" +
 		"nameserver " + sandboxDNS + "\n"
 	if err := os.MkdirAll(b.workspaceDir(name), 0o700); err != nil {
 		return "", err

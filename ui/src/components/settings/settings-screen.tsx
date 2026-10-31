@@ -87,7 +87,7 @@ export function SettingsScreen({
 						</Text>
 						{version === undefined || version === "" ? null : (
 							<Text size="2xs" tone="muted">
-								acornfall {version}
+								acornd {version}
 							</Text>
 						)}
 					</Stack>

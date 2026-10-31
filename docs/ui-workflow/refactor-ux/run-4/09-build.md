@@ -61,7 +61,7 @@ pre-releases, a picked version, the phone, the mark, and the install-wide sectio
 
 The owner pressed **Install** on the review install, and it ran end to end: backup, download, verify,
 stop runs (none), swap, self-restart. `/healthz` then named `v0.9.33` — the released binary took the
-review binary's place on disk, and the branch build sits beside it as `acornfall-review.bak`.
+review binary's place on disk, and the branch build sits beside it as `acornd-review.bak`.
 
 Two things they saw, both explained and neither a defect:
 

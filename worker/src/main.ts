@@ -1,5 +1,5 @@
 /**
- * Acornfall harness worker.
+ * Acornd harness worker.
  *
  * One worker owns one Harness over one storage: a workspace's conversations and
  * all the subagent conversations they spawn. It speaks the JSONL protocol in
@@ -128,7 +128,7 @@ function parseArgs(argv: readonly string[]): Args {
 		index += 1;
 	}
 	const workspace = resolve(values.get("workspace") ?? process.cwd());
-	const defaults = (name: string) => join(workspace, ".acornfall", name);
+	const defaults = (name: string) => join(workspace, ".acornd", name);
 	const credentials = resolve(values.get("credentials") ?? defaults("credentials.json"));
 	const home = resolve(values.get("home") ?? dirname(credentials));
 	return {
@@ -190,7 +190,7 @@ async function sandboxEngine(name: string): Promise<SandboxEngine | undefined> {
 }
 
 // Every resource folder this install reads: the user's, then the workspace's, each with the
-// ecosystem's `.agents` before our own `.acornfall`.
+// ecosystem's `.agents` before our own `.acornd`.
 //
 // The workspace's own files live inside the sandbox and the user's live on the host, so reads
 // are routed per path: there is one door to the workspace, and this is it.
@@ -218,11 +218,11 @@ async function loadWorkspaceRules(): Promise<string | undefined> {
 // different agents at once.
 const skillFilterByConversation = new Map<string, readonly string[] | null>();
 
-const devScript = process.env.ACORNFALL_DEV_SCRIPT;
+const devScript = process.env.ACORND_DEV_SCRIPT;
 if (devScript !== undefined && devScript !== "") {
 	const dev = scriptedDevProvider(devScript);
 	models.setProvider(dev.provider);
-} else if (process.env.ACORNFALL_DEV_PROVIDER === "1") {
+} else if (process.env.ACORND_DEV_PROVIDER === "1") {
 	const dev = devProvider();
 	models.setProvider(dev.provider);
 }
@@ -232,7 +232,7 @@ const registry = createRegistry();
 // skills are available, and finally the agent's own instructions, which durable renders.
 registry.install(
 	defineExtension({
-		name: "acornfall-prompt",
+		name: "acornd-prompt",
 		sections: [
 			section("preamble", () => PREAMBLE, { tag: false }),
 			section("cwd", (input) => input.env?.cwd),
@@ -587,7 +587,7 @@ function enqueueView(conversationId: string, value: unknown): void {
 			conversationId,
 			seq: nextSeq(conversationId),
 			value,
-			...(Object.keys(senders).length === 0 ? {} : { acornfall: { senders } }),
+			...(Object.keys(senders).length === 0 ? {} : { acornd: { senders } }),
 		});
 	});
 	viewChains.set(conversationId, next);

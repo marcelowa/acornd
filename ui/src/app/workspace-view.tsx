@@ -294,7 +294,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		<span className="flex shrink-0 items-center gap-2">
 			<BrandMark />
 			<Text as="span" size="sm" weight="semibold">
-				Acornfall
+				Acornd
 			</Text>
 		</span>
 	);
@@ -413,7 +413,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	const now = useNow();
 	const run = runState(busy, platform.active?.updatedAt, now);
 	const topbarTitle =
-		platform.screen === "settings" ? "Settings" : (platform.active?.title ?? "Acornfall");
+		platform.screen === "settings" ? "Settings" : (platform.active?.title ?? "Acornd");
 	const barTitle = (
 		<span className="flex min-w-0 items-center gap-2">
 			{run !== "idle" && platform.screen === "conversation" ? (

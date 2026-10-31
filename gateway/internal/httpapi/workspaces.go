@@ -6,7 +6,7 @@ package httpapi
 
 import (
 	"fmt"
-	"github.com/acornfall/acornfall/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/control"
 	"io"
 	"net/http"
 	"strings"
@@ -125,7 +125,7 @@ func (s *Server) workspaceCreate(w http.ResponseWriter, r *http.Request) {
 	if body.Path != nil {
 		// Refused rather than ignored: accepting and dropping it would be a field that does
 		// nothing, and pointing at a folder elsewhere is the operator's command.
-		http.Error(w, "workspaces are created inside "+s.workspaces.Dir()+"; use `acornfall workspace add` for a folder elsewhere", http.StatusBadRequest)
+		http.Error(w, "workspaces are created inside "+s.workspaces.Dir()+"; use `acornd workspace add` for a folder elsewhere", http.StatusBadRequest)
 		return
 	}
 	if refusal := body.refusal(); refusal != "" {
@@ -183,7 +183,7 @@ func (s *Server) workspaceUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 // workspaceRemove forgets a room. It is the room's owner's act, not the install's: the admin's route to the same
-// power is `acornfall workspace remove` on the machine, where it is visible (ADR 0034 §6). A room the caller is
+// power is `acornd workspace remove` on the machine, where it is visible (ADR 0034 §6). A room the caller is
 // not in is a 404, the same refusal as one that does not exist, so a status cannot enumerate.
 func (s *Server) workspaceRemove(w http.ResponseWriter, r *http.Request) {
 	caller := callerOf(r)
@@ -218,7 +218,7 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.gate.People == nil {
-		http.Error(w, "this install has no book of people yet: run `acornfall people claim you@example.com` first", http.StatusBadRequest)
+		http.Error(w, "this install has no book of people yet: run `acornd people claim you@example.com` first", http.StatusBadRequest)
 		return
 	}
 	if _, found, err := s.gate.People.Find(email); err != nil {

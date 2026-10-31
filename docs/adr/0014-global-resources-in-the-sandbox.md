@@ -74,4 +74,4 @@ what they open; the platform cannot enumerate that. The folder is the unit.
   reaches the prompt comes from; the model's own file tools and every command see the same
   paths through the mount.
 - Global instructions stay per install. A workspace that needs different ones uses its own
-  `.agents/` or `.acornfall/` bundle, which was already true.
+  `.agents/` or `.acornd/` bundle, which was already true.

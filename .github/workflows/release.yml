@@ -1,5 +1,5 @@
 # A tag `v*` ships the self-update binaries: one per OS/arch, named the
-# way the gateway's update check picks them (`acornfall-<goos>-<goarch>`),
+# way the gateway's update check picks them (`acornd-<goos>-<goarch>`),
 # plus the checksum file the gateway verifies against. See ADR 0019.
 name: release
 
@@ -49,13 +49,13 @@ jobs:
           cd gateway &&
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }}
           go build
-          -ldflags "-X github.com/acornfall/acornfall/gateway/internal/update.BuildVersion=${{ github.ref_name }}"
-          -o ../acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
-          ./cmd/acornfall
+          -ldflags "-X github.com/marcelowa/acornd/gateway/internal/update.BuildVersion=${{ github.ref_name }}"
+          -o ../acornd-${{ matrix.goos }}-${{ matrix.goarch }}
+          ./cmd/acornd
       - uses: actions/upload-artifact@v7
         with:
-          name: acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: acornd-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: acornd-${{ matrix.goos }}-${{ matrix.goarch }}
 
   worker-sources:
     # Platform-independent: one tarball for every leg. Sources only, never
@@ -88,7 +88,7 @@ jobs:
           merge-multiple: true
       # The checksum file is what the gateway verifies downloads against
       # before swapping or staging. No checksum file, no verify — see ADR 0019.
-      - run: cd dist && sha256sum acornfall-* worker.tar.gz > sha256sums.txt && ls -la
+      - run: cd dist && sha256sum acornd-* worker.tar.gz > sha256sums.txt && ls -la
       # The release body is the tag message, which is what the update page
       # reads as "what changed". Every release before this step shipped a null
       # body, so the gateway falls back to the tag annotation for those.

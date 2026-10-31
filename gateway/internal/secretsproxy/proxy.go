@@ -133,7 +133,7 @@ func (p *Proxy) build() *goproxy.ProxyHttpServer {
 	// Not a proxy request: a client that asked for a relative path did not configure a proxy at
 	// all, and answering it would look like an origin server that happens to be on a proxy port.
 	server.NonproxyHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "this port is acornfall's secrets proxy, not a web server: send an absolute URL or a CONNECT", http.StatusBadRequest)
+		http.Error(w, "this port is acornd's secrets proxy, not a web server: send an absolute URL or a CONNECT", http.StatusBadRequest)
 	})
 	server.OnRequest().HandleConnectFunc(p.connect)
 	server.OnRequest().DoFunc(p.request)
@@ -337,7 +337,7 @@ func replaceBody(req *http.Request, body []byte) {
 func refusal(req *http.Request, status int, reason string) *http.Response {
 	resp := goproxy.NewResponse(req, "text/plain; charset=utf-8", status, reason+"\n")
 	if status == http.StatusProxyAuthRequired {
-		resp.Header.Set("Proxy-Authenticate", `Basic realm="acornfall secrets proxy"`)
+		resp.Header.Set("Proxy-Authenticate", `Basic realm="acornd secrets proxy"`)
 	}
 	return resp
 }

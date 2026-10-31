@@ -64,14 +64,14 @@ func TestTheGlobalConfigIsMountedOnlyWhenItExists(t *testing.T) {
 }
 
 func TestNameIsStableAndReadable(t *testing.T) {
-	name := Name("/home/marcelo/workspace/acornfall")
-	if !strings.HasPrefix(name, "acornfall-acornfall-") {
+	name := Name("/home/marcelo/workspace/acornd")
+	if !strings.HasPrefix(name, "acornd-acornd-") {
 		t.Errorf("name should name the folder, got %q", name)
 	}
-	if name != Name("/home/marcelo/workspace/acornfall") {
+	if name != Name("/home/marcelo/workspace/acornd") {
 		t.Error("the same workspace must produce the same name; the engine's state is keyed by it")
 	}
-	if Name("/a/acornfall") == Name("/b/acornfall") {
+	if Name("/a/acornd") == Name("/b/acornd") {
 		t.Error("two folders with the same base name must not share a sandbox")
 	}
 }

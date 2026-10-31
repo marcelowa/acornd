@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
 // Idle eviction keeps an install with many workspaces cheap, which means the rules about what

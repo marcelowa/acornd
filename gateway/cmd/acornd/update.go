@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/identity"
-	"github.com/acornfall/acornfall/gateway/internal/update"
+	"github.com/marcelowa/acornd/gateway/internal/identity"
+	"github.com/marcelowa/acornd/gateway/internal/update"
 )
 
 // updateCommand checks for a release and installs it.
@@ -27,14 +27,14 @@ import (
 // and takes effect at the next start — the pending marker the update tier already uses.
 func updateCommand(argv []string) {
 	flags := flag.NewFlagSet("update", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder (default: ~/.acornfall)")
+	dataDir := flags.String("data-dir", "", "the acornd folder (default: ~/.acornd)")
 	host := flags.String("host", "127.0.0.1", "the running gateway's interface")
 	port := flags.Int("port", 7777, "the running gateway's port")
 	assumeYes := flags.Bool("yes", false, "install without asking")
 	checkOnly := flags.Bool("check", false, "check only; install nothing")
 	stopRuns := flags.Bool("stop-runs", false, "stop active runs instead of waiting for them to finish")
 	flags.Usage = func() {
-		fmt.Fprint(os.Stderr, `usage: acornfall update [flags]
+		fmt.Fprint(os.Stderr, `usage: acornd update [flags]
 
   --check       report what is available and stop
   --yes         install without asking
@@ -96,7 +96,7 @@ func runUpdateThroughGateway(dir, address string, checkOnly, assumeYes, stopRuns
 		logFatal(err)
 	}
 	if !status.Available {
-		fmt.Printf("acornfall is up to date (%s)\n", status.Current)
+		fmt.Printf("acornd is up to date (%s)\n", status.Current)
 		return
 	}
 	printUpdateOffer(status)
@@ -195,7 +195,7 @@ func runUpdateOffline(dir string, checkOnly, assumeYes bool) {
 	}
 	status := manager.Status()
 	if !status.Available {
-		fmt.Printf("acornfall is up to date (%s)\n", status.Current)
+		fmt.Printf("acornd is up to date (%s)\n", status.Current)
 		return
 	}
 	printUpdateOffer(updateStatus{Current: status.Current, Latest: status.Latest, Notes: status.Notes, Available: true})
@@ -215,13 +215,13 @@ func runUpdateOffline(dir string, checkOnly, assumeYes bool) {
 	if err := manager.Apply(ctx, update.ApplyOptions{Tag: status.Latest, Drain: "stop"}); err != nil {
 		logFatal(err)
 	}
-	fmt.Printf("installed %s; it takes effect the next time acornfall starts\n", status.Latest)
+	fmt.Printf("installed %s; it takes effect the next time acornd starts\n", status.Latest)
 }
 
 // printUpdateOffer is the same three lines on both paths: what you have, what is there, and the
 // first of what changed.
 func printUpdateOffer(status updateStatus) {
-	fmt.Printf("acornfall %s → %s\n", status.Current, status.Latest)
+	fmt.Printf("acornd %s → %s\n", status.Current, status.Latest)
 	for _, line := range firstLines(status.Notes, 5) {
 		fmt.Printf("  %s\n", line)
 	}
@@ -248,7 +248,7 @@ func firstLines(notes string, limit int) []string {
 }
 
 // confirmYes is the other prompt in this program: it defaults to yes, because someone who ran
-// `acornfall update` already asked for the update.
+// `acornd update` already asked for the update.
 func confirmYes(prompt string) (bool, error) {
 	fmt.Print(prompt)
 	reader := bufio.NewReader(stdinForTest)

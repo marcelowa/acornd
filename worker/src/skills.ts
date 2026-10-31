@@ -61,7 +61,7 @@ async function isDirectory(files: Files, path: string): Promise<boolean> {
 /** Discovery is shallow on purpose: one level of grouping, then skill directories. */
 export async function loadSkills(roots: readonly string[], files: Files): Promise<Skill[]> {
 	// Later roots shadow earlier ones, the same way agents and commands do: a workspace skill
-	// with a global skill's name replaces it, and `.acornfall` replaces `.agents`.
+	// with a global skill's name replaces it, and `.acornd` replaces `.agents`.
 	const byName = new Map<string, Skill>();
 	for (const root of roots) {
 		const base = isAbsolute(root) ? root : resolve(process.cwd(), root);
@@ -118,7 +118,7 @@ export function skillsExtension(
 		return names === null ? skills : skills.filter((skill) => names.includes(skill.name));
 	};
 	return defineExtension({
-		name: "acornfall-skills",
+		name: "acornd-skills",
 		sections: [
 			section("skills", (input) =>
 				renderSkills(skills, allowedFor(String(input.conversationId))),

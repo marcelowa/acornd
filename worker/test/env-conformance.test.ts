@@ -21,7 +21,7 @@ registerEnvConformance(
 	{ describe, expect, it },
 	"SandboxExecutionEnv (host engine) conformance",
 	async (use) => {
-		const dir = await realpath(await mkdtemp(join(tmpdir(), "acornfall-envconf-")));
+		const dir = await realpath(await mkdtemp(join(tmpdir(), "acornd-envconf-")));
 		const sandbox = await openSandbox("conformance", dir);
 		try {
 			await use(new SandboxExecutionEnv(sandbox, dir));
@@ -46,8 +46,8 @@ const bwrapUsable =
 		0;
 
 // `make test-bwrap` is the run that says this tier ran, so a skip there would be a green run that
-// tested nothing on the one machine meant to test it: with ACORNFALL_BWRAP_ONLY it fails instead.
-if (!bwrapUsable && process.env.ACORNFALL_BWRAP_ONLY === "1") {
+// tested nothing on the one machine meant to test it: with ACORND_BWRAP_ONLY it fails instead.
+if (!bwrapUsable && process.env.ACORND_BWRAP_ONLY === "1") {
 	throw new Error(
 		"no usable bubblewrap on this machine (apt install bubblewrap): the bwrap tier needs it",
 	);
@@ -59,10 +59,10 @@ if (bwrapUsable) {
 		"SandboxExecutionEnv (bwrap engine) conformance",
 		async (use) => {
 			const workspace = await realpath(
-				await mkdtemp(join(tmpdir(), "acornfall-envconf-bwrap-")),
+				await mkdtemp(join(tmpdir(), "acornd-envconf-bwrap-")),
 			);
-			const state = await mkdtemp(join(tmpdir(), "acornfall-envconf-state-"));
-			const name = "acornfall-envconf";
+			const state = await mkdtemp(join(tmpdir(), "acornd-envconf-state-"));
+			const name = "acornd-envconf";
 			// The conformance suite is about the harness contract, not about isolation: a
 			// supervisor that answers the protocol is enough, and the real one is the end-to-end
 			// tests' business.
@@ -82,13 +82,13 @@ if (bwrapUsable) {
 			);
 			await mkdir(join(state, "home"), { recursive: true });
 			await mkdir(join(state, "hidden"), { recursive: true });
-			process.env.ACORNFALL_BWRAP_STATE = state;
+			process.env.ACORND_BWRAP_STATE = state;
 			const sandbox = await openBwrap(name, workspace);
 			try {
 				await use(new SandboxExecutionEnv(sandbox, workspace));
 			} finally {
 				await fake.close();
-				delete process.env.ACORNFALL_BWRAP_STATE;
+				delete process.env.ACORND_BWRAP_STATE;
 				await rm(workspace, { recursive: true, force: true });
 				await rm(state, { recursive: true, force: true });
 			}

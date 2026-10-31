@@ -362,7 +362,7 @@ func TestANewRoomCannotInheritAForgottenOne(t *testing.T) {
 	if err == nil {
 		t.Fatal("a room was made over the state of a forgotten one")
 	}
-	if !strings.Contains(err.Error(), "acornfall workspace purge team") || !strings.Contains(err.Error(), left) {
+	if !strings.Contains(err.Error(), "acornd workspace purge team") || !strings.Contains(err.Error(), left) {
 		t.Errorf("the refusal should name the command and the folder, got %q", err)
 	}
 	// Refused before anything was created: no record, and no folder for the next Create to adopt either.

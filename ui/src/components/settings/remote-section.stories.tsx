@@ -23,7 +23,7 @@ export const Made: Story = {
 			audience: "c52dbf9750d9619950bffb6e96106adba22bdd4f8957362c0505a14718873982",
 			updated: "2026-10-30T21:47:20Z",
 			steps: [
-				{ name: "tunnel", created: true, detail: "acornfall" },
+				{ name: "tunnel", created: true, detail: "acornd" },
 				{ name: "ingress", created: true, detail: "http://127.0.0.1:7777" },
 				{ name: "dns", created: true, detail: "console.example.com" },
 				{ name: "access group", created: false, detail: "2 addresses" },

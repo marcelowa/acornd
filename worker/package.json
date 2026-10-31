@@ -1,5 +1,5 @@
 {
-	"name": "@acornfall/worker",
+	"name": "@acornd/worker",
 	"private": true,
 	"type": "module",
 	"scripts": {

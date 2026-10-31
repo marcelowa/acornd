@@ -36,7 +36,7 @@ func TestACommandOnACorruptFileSaysWhichFileAndWhy(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("a corrupt secrets file should fail, exit 0\n%s", stderr)
 	}
-	if !strings.Contains(stderr, "acornfall secret") {
+	if !strings.Contains(stderr, "acornd secret") {
 		t.Errorf("the error should be reported as the secret command's: %q", stderr)
 	}
 }
@@ -49,7 +49,7 @@ func TestShowingOneSecretAnswersByName(t *testing.T) {
 
 	if _, stderr, code := cli(t, dir, "", "secret", "show", "--data-dir", dir); code != 2 {
 		t.Errorf("show with no name: exit %d, want 2\n%s", code, stderr)
-	} else if !strings.Contains(stderr, "usage: acornfall secret show") {
+	} else if !strings.Contains(stderr, "usage: acornd secret show") {
 		t.Errorf("the refusal should print the usage: %q", stderr)
 	}
 

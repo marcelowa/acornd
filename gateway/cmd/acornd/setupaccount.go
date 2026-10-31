@@ -12,7 +12,7 @@ import (
 )
 
 // setupAccount is the account the question is about. "Can this machine run a workspace" is really
-// "can *this account* run one", and on a machine where root installed acornfall the two are not
+// "can *this account* run one", and on a machine where root installed acornd the two are not
 // the same: root can open /dev/kvm and make a user namespace whatever the policy says, so probing
 // as root would report a machine that works while the service's workspaces cannot boot.
 type setupAccount struct {
@@ -25,11 +25,11 @@ type setupAccount struct {
 	UID uint32
 	GID uint32
 	// DataDir is the account's own home: the child gets it so a tool that reads ~/.config reads that
-	// account's, not the acornfall folder's.
+	// account's, not the acornd folder's.
 	DataDir string
 }
 
-// accountFor decides which account setup is about. The owner of the acornfall folder is the
+// accountFor decides which account setup is about. The owner of the acornd folder is the
 // honest default — it is the account the install belongs to — and --for overrides it.
 func accountFor(requested string, root bool, dataDir string) (setupAccount, error) {
 	if requested != "" {
@@ -56,7 +56,7 @@ func accountFor(requested string, root bool, dataDir string) (setupAccount, erro
 		return account, nil
 	}
 	// Nothing to go on: root is the only answer, and the basis says so rather than pretending.
-	self.Basis = "nothing says otherwise; pass --for if another account runs acornfall"
+	self.Basis = "nothing says otherwise; pass --for if another account runs acornd"
 	return self, nil
 }
 
@@ -75,19 +75,19 @@ func actingFor(dataDir string) (setupAccount, bool) {
 			return account, true
 		}
 	}
-	// A machine where acornfall is a service says so itself, which is the answer when the folder
-	// root would look in does not exist — the common case when acornfall was installed for an
+	// A machine where acornd is a service says so itself, which is the answer when the folder
+	// root would look in does not exist — the common case when acornd was installed for an
 	// account other than root's.
 	if name := serviceUser(); name != "" {
 		if account, err := lookupAccount(name); err == nil {
-			account.Basis = "the acornfall service runs as " + name
+			account.Basis = "the acornd service runs as " + name
 			return account, true
 		}
 	}
 	return setupAccount{}, false
 }
 
-// serviceUser is the account the acornfall system service runs as, or empty when there is no such
+// serviceUser is the account the acornd system service runs as, or empty when there is no such
 // unit or no systemd to ask. It is the machine's own record of who runs this, which beats the
 // guess "root, because nothing said otherwise".
 func serviceUser() string {
@@ -100,7 +100,7 @@ func serviceUser() string {
 // serviceUserLookup is the machine's answer, as a variable: a test can say there is a unit without
 // installing one.
 var serviceUserLookup = func() string {
-	out, err := exec.Command("systemctl", "show", "acornfall.service", "--property=User", "--value").Output()
+	out, err := exec.Command("systemctl", "show", "acornd.service", "--property=User", "--value").Output()
 	if err != nil {
 		return ""
 	}
@@ -247,7 +247,7 @@ type probeWire struct {
 func writeProbe(dataDir string) {
 	payload, err := json.Marshal(wireOf(gatherSetup(dataDir)))
 	if err != nil {
-		logf("acornfall setup: %v", err)
+		logf("acornd setup: %v", err)
 		os.Exit(1)
 	}
 	fmt.Println(string(payload))

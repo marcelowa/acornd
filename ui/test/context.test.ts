@@ -17,7 +17,7 @@ const entries: WireEntry[] = [
 				sections: {
 					skills: "skills text",
 					preamble: "preamble text",
-					cwd: "<cwd>\n/acornfall\n</cwd>",
+					cwd: "<cwd>\n/acornd\n</cwd>",
 				},
 				toolsAdded: [
 					{ name: "read", description: "read a file", parameters: { type: "object" } },

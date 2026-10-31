@@ -1,4 +1,4 @@
-module github.com/acornfall/acornfall/gateway
+module github.com/marcelowa/acornd/gateway
 
 go 1.27.3
 

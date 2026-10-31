@@ -70,7 +70,7 @@ type Person struct {
 // The refusals. Each is a sentence the person reads, because the people behind this file are family
 // and friends rather than operators with a log to check.
 var (
-	ErrNoAdmin  = errors.New("this install has no admin yet: run `acornfall people claim you@example.com` on the machine that runs it")
+	ErrNoAdmin  = errors.New("this install has no admin yet: run `acornd people claim you@example.com` on the machine that runs it")
 	ErrHasAdmin = errors.New("this install already has an admin")
 	ErrExists   = errors.New("that address is already in the list")
 )
@@ -650,7 +650,7 @@ func waitFor(file *os.File) error {
 			return err
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("another acornfall process has been writing the book of people for over %s: try again", lockBudget)
+			return fmt.Errorf("another acornd process has been writing the book of people for over %s: try again", lockBudget)
 		}
 		time.Sleep(lockRetry)
 	}

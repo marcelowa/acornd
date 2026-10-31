@@ -84,17 +84,17 @@ func TestAPlanRunsWhatItDecidedForThisMachine(t *testing.T) {
 			name:  "the user-namespace restriction, which has to survive a reboot",
 			plan:  rootPlan{Userns: true},
 			want:  []step{{"sysctl", []string{"-w", "kernel.apparmor_restrict_unprivileged_userns=0"}}},
-			files: []string{"/etc/sysctl.d/99-acornfall-userns.conf"},
+			files: []string{"/etc/sysctl.d/99-acornd-userns.conf"},
 		},
 		{
 			name: "the tun device, in the order that makes it usable",
 			plan: rootPlan{Tun: true},
 			want: []step{
 				{"modprobe", []string{"tun"}},
-				{"systemd-tmpfiles", []string{"--create", "/etc/tmpfiles.d/acornfall-tun.conf"}},
+				{"systemd-tmpfiles", []string{"--create", "/etc/tmpfiles.d/acornd-tun.conf"}},
 				{"chmod", []string{"0666", "/dev/net/tun"}},
 			},
-			files: []string{"/etc/tmpfiles.d/acornfall-tun.conf"},
+			files: []string{"/etc/tmpfiles.d/acornd-tun.conf"},
 		},
 		{
 			// The account has to be one that exists: the plan is validated against the machine
@@ -137,16 +137,16 @@ func TestAPlanWritesFilesThatMakeItStick(t *testing.T) {
 	if err := applyPlan(rootPlan{Userns: true, Tun: true}); err != nil {
 		t.Fatal(err)
 	}
-	userns := (*files)["/etc/sysctl.d/99-acornfall-userns.conf"]
+	userns := (*files)["/etc/sysctl.d/99-acornd-userns.conf"]
 	if !strings.Contains(userns, "kernel.apparmor_restrict_unprivileged_userns=0") {
 		t.Errorf("the sysctl file does not set the setting: %q", userns)
 	}
 	// A sysctl without the file is a fix that disappears at the next reboot, which is why the
 	// comment says who wrote it.
-	if !strings.Contains(userns, "acornfall") {
+	if !strings.Contains(userns, "acornd") {
 		t.Errorf("the file should say who wrote it: %q", userns)
 	}
-	tun := (*files)["/etc/tmpfiles.d/acornfall-tun.conf"]
+	tun := (*files)["/etc/tmpfiles.d/acornd-tun.conf"]
 	if !strings.Contains(tun, "c! /dev/net/tun 0666 root root 10 200") {
 		t.Errorf("the tmpfiles rule should create the device: %q", tun)
 	}

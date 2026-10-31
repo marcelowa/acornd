@@ -25,7 +25,7 @@ const brand = (
 	<span className="flex items-center gap-2">
 		<BrandMark />
 		<Text as="span" size="sm" weight="semibold">
-			Acornfall
+			Acornd
 		</Text>
 	</span>
 );

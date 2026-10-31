@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/acornfall/acornfall/gateway/internal/httpapi"
-	"github.com/acornfall/acornfall/gateway/internal/identity"
-	"github.com/acornfall/acornfall/gateway/internal/people"
+	"github.com/marcelowa/acornd/gateway/internal/httpapi"
+	"github.com/marcelowa/acornd/gateway/internal/identity"
+	"github.com/marcelowa/acornd/gateway/internal/people"
 )
 
 // tokenCommand prints the install's token, minting one on first use.
@@ -21,7 +21,7 @@ import (
 // output is a credential must not mix a note into it.
 func tokenCommand(argv []string) {
 	flags := flag.NewFlagSet("token", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder (default: ~/.acornfall)")
+	dataDir := flags.String("data-dir", "", "the acornd folder (default: ~/.acornd)")
 	rotate := flags.Bool("rotate", false, "mint a new token; the old one stops working at once")
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
@@ -43,7 +43,7 @@ func printToken(out, notes io.Writer, dir string, rotate bool) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(notes, "acornfall: the previous token no longer works")
+		fmt.Fprintln(notes, "acornd: the previous token no longer works")
 		fmt.Fprintln(out, token)
 		return nil
 	}
@@ -53,7 +53,7 @@ func printToken(out, notes io.Writer, dir string, rotate bool) error {
 	}
 	if minted {
 		// Said out loud, because the file appearing is otherwise a credential nobody asked for.
-		fmt.Fprintln(notes, "acornfall: this install had no token; a new one is in the install folder")
+		fmt.Fprintln(notes, "acornd: this install had no token; a new one is in the install folder")
 	}
 	fmt.Fprintln(out, token)
 	return nil
@@ -81,7 +81,7 @@ func openGate(dir, host string) (httpapi.Gate, error) {
 	} else if !claimed {
 		// Loud at boot rather than at the first browser: a console with a door and no admin is one only
 		// the machine can get into, and the fix is one command.
-		fmt.Fprintln(os.Stderr, "acornfall: this install has people but no admin yet; `acornfall people claim you@example.com` names one")
+		fmt.Fprintln(os.Stderr, "acornd: this install has people but no admin yet; `acornd people claim you@example.com` names one")
 	}
 	return httpapi.Gate{Door: door, People: book, Dir: dir}, nil
 }
@@ -90,12 +90,12 @@ func openGate(dir, host string) (httpapi.Gate, error) {
 // describes. The door is off unless this run names a publisher, so an install that never turns people
 // on behaves exactly as it did before there was a door.
 //
-// ACORNFALL_IDENTITY=access means a browser arrives through Cloudflare Access, with the assertion it
+// ACORND_IDENTITY=access means a browser arrives through Cloudflare Access, with the assertion it
 // signs; `token` means only the command line, which is what a machine behind somebody else's proxy
 // wants. The token door is in the set either way: the command line is how the admin reaches a console
 // that has people, and how they get back in when the proxy is what broke.
 func identityDoor(dir, host string) (identity.Door, error) {
-	kind := strings.TrimSpace(os.Getenv("ACORNFALL_IDENTITY"))
+	kind := strings.TrimSpace(os.Getenv("ACORND_IDENTITY"))
 	if kind == "" {
 		return nil, nil
 	}
@@ -103,12 +103,12 @@ func identityDoor(dir, host string) (identity.Door, error) {
 	// machine (ADR 0033), and a listener on every interface would be reachable without one — a door on
 	// one address and a hole on the others.
 	if !loopback(host) {
-		return nil, fmt.Errorf("a console with people listens on loopback only, and --host %q is not one: reach it through cloudflared, or unset ACORNFALL_IDENTITY for a single-admin install", host)
+		return nil, fmt.Errorf("a console with people listens on loopback only, and --host %q is not one: reach it through cloudflared, or unset ACORND_IDENTITY for a single-admin install", host)
 	}
 	if _, minted, err := identity.EnsureToken(dir); err != nil {
 		return nil, err
 	} else if minted {
-		fmt.Fprintln(os.Stderr, "acornfall: this install had no token; `acornfall token` prints the new one")
+		fmt.Fprintln(os.Stderr, "acornd: this install had no token; `acornd token` prints the new one")
 	}
 
 	remote, err := remoteDoor(kind)
@@ -137,7 +137,7 @@ func remoteDoor(kind string) (identity.Door, error) {
 			Keys:     &identity.Keys{URL: keys},
 		}, nil
 	default:
-		return nil, fmt.Errorf("ACORNFALL_IDENTITY=%q is not a door this build has: access or token", kind)
+		return nil, fmt.Errorf("ACORND_IDENTITY=%q is not a door this build has: access or token", kind)
 	}
 }
 
@@ -145,21 +145,21 @@ func remoteDoor(kind string) (identity.Door, error) {
 // is at boot rather than at the first browser: an assertion door with no audience accepts an assertion
 // minted for anything else at the same edge.
 func accessValues() (audience, issuer, keys string, err error) {
-	audience = os.Getenv("ACORNFALL_IDENTITY_AUDIENCE")
-	issuer = os.Getenv("ACORNFALL_IDENTITY_ISSUER")
-	keys = os.Getenv("ACORNFALL_IDENTITY_KEYS")
+	audience = os.Getenv("ACORND_IDENTITY_AUDIENCE")
+	issuer = os.Getenv("ACORND_IDENTITY_ISSUER")
+	keys = os.Getenv("ACORND_IDENTITY_KEYS")
 	var missing []string
 	for _, value := range []struct{ name, value string }{
-		{"ACORNFALL_IDENTITY_AUDIENCE", audience},
-		{"ACORNFALL_IDENTITY_ISSUER", issuer},
-		{"ACORNFALL_IDENTITY_KEYS", keys},
+		{"ACORND_IDENTITY_AUDIENCE", audience},
+		{"ACORND_IDENTITY_ISSUER", issuer},
+		{"ACORND_IDENTITY_KEYS", keys},
 	} {
 		if value.value == "" {
 			missing = append(missing, value.name)
 		}
 	}
 	if len(missing) > 0 {
-		return "", "", "", fmt.Errorf("ACORNFALL_IDENTITY=access needs %s", strings.Join(missing, ", "))
+		return "", "", "", fmt.Errorf("ACORND_IDENTITY=access needs %s", strings.Join(missing, ", "))
 	}
 	return audience, issuer, keys, nil
 }

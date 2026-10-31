@@ -34,7 +34,7 @@ func TestArtifactForNamesTheReleaseAssets(t *testing.T) {
 }
 
 func TestTheEngineAndItsStateAreApartAndVersioned(t *testing.T) {
-	driver := NewMicrosandbox("/home/me/.acornfall")
+	driver := NewMicrosandbox("/home/me/.acornd")
 	if driver.InstallDir() == driver.StateDir() {
 		t.Fatal("the engine directory is replaced on upgrade; the state must not live in it")
 	}
@@ -189,11 +189,11 @@ func TestRenderPinsTheWholePolicy(t *testing.T) {
 // scripts, and a write into them from inside the sandbox is refused rather than quietly
 // changing the instructions every future conversation will read.
 func TestRenderMountsTheGlobalsReadOnly(t *testing.T) {
-	policy := Policy{Workspace: "/w", Global: []string{"/home/me/.agents", "/home/me/.acornfall/config.json"}}
+	policy := Policy{Workspace: "/w", Global: []string{"/home/me/.agents", "/home/me/.acornd/config.json"}}
 	got := string(policy.render(owner{mapFiles: false}))
 	for _, want := range []string{
 		"  - /home/me/.agents:/home/me/.agents:ro\n",
-		"  - /home/me/.acornfall/config.json:/home/me/.acornfall/config.json:ro\n",
+		"  - /home/me/.acornd/config.json:/home/me/.acornd/config.json:ro\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the global resource %q should be mounted read-only, got:\n%s", want, got)

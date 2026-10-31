@@ -28,7 +28,7 @@ export const RenamingAWorkspace: Story = {
 	args: {
 		open: true,
 		title: "Rename workspace",
-		initial: "acornfall",
+		initial: "acornd",
 		onSave: noop,
 		onCancel: noop,
 	},

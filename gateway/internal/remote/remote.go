@@ -19,10 +19,10 @@ import (
 // Names this package creates. They are stable strings rather than generated ones, because a reconcile that
 // cannot find what it made last time makes a second one.
 const (
-	TunnelName = "acornfall"
-	GroupName  = "acornfall"
-	AppName    = "acornfall"
-	DSPrefix   = "acornfall-"
+	TunnelName = "acornd"
+	GroupName  = "acornd"
+	AppName    = "acornd"
+	DSPrefix   = "acornd-"
 )
 
 // Desired is what the admin asked for: the hostname the console answers on, the zone it belongs to, and the
@@ -52,7 +52,7 @@ func (d Desired) Validate() error {
 	host := strings.TrimSpace(d.Hostname)
 	switch {
 	case host == "":
-		return errors.New("remote access needs a hostname, such as acornfall.example.com")
+		return errors.New("remote access needs a hostname, such as acornd.example.com")
 	case !strings.Contains(host, "."):
 		return fmt.Errorf("%q is not a hostname", d.Hostname)
 	case d.ZoneID == "":
@@ -396,7 +396,7 @@ func (p *Provisioner) policy(ctx context.Context, desired Desired, prior State, 
 }
 
 // pickTunnel is the one place that decides which tunnel is ours: the id a previous run wrote, and otherwise
-// the one named acornfall. A tunnel somebody made for something else is never adopted, whatever its name.
+// the one named acornd. A tunnel somebody made for something else is never adopted, whatever its name.
 func pickTunnel(tunnels []Tunnel, id, name string) (Tunnel, bool) {
 	for _, tunnel := range tunnels {
 		if id != "" && tunnel.ID == id {

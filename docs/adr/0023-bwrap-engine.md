@@ -52,8 +52,8 @@ sandbox. `--clearenv` plus explicit `--setenv` is mandatory, not tidiness.
 
 **4. Nesting: yes, and this is where it wins.** A bwrap inside a bwrap runs, with distinct user
 and pid namespaces (`4026535932` → `4026535853`), a fresh procfs, and five pids in each.
-youki at the same depth dies mounting `/proc`. So a bwrap workspace can run acornfall and that
-acornfall can use bwrap again.
+youki at the same depth dies mounting `/proc`. So a bwrap workspace can run acornd and that
+acornd can use bwrap again.
 
 ## The five extras
 
@@ -89,7 +89,7 @@ Two consequences worth stating:
   the one claim this ADR made that the code did not hold. pasta's port forwarding defaults to
   `auto`, which mirrors every service the machine listens on into the sandbox's loopback, and its
   gateway translation maps 10.0.2.2 onto that same loopback: a workspace could open
-  `127.0.0.1:7777` and talk to the acornfall that ran it, which serves its API with no
+  `127.0.0.1:7777` and talk to the acornd that ran it, which serves its API with no
   authentication. It could also read every other listener on the machine — sshd, a database, a dev
   server. `-t none -u none -T none -U none --no-map-gw` closes both routes, and
   `TestABwrapSandboxCannotReachTheMachinesLoopback` is what keeps them closed.
@@ -163,9 +163,9 @@ cgroup and exec plumbing — plumbing that did not work rootless in this environ
 ## What is built
 
 bwrap is an engine a workspace can choose, by name, at creation: `POST /api/workspaces` with
-`engine`, `acornfall workspace add --sandbox bwrap`, or the engine switch on the create form.
+`engine`, `acornd workspace add --sandbox bwrap`, or the engine switch on the create form.
 The choice is stored on the workspace record like its image and its network, and it decides
-which engine the worker is started with (`ACORNFALL_SANDBOX_ENGINE` since ADR 0027) — so one
+which engine the worker is started with (`ACORND_SANDBOX_ENGINE` since ADR 0027) — so one
 install can hold a microVM workspace and a bwrap one.
 
 The shape is the one this ADR predicted, and it is small:
@@ -221,7 +221,7 @@ Two things are still deliberately missing, and this is a beta because of them:
 
 A bwrap workspace therefore needs a registry once, as the microVM engine needs one for its
 first image (ADR 0012). A failed fetch is a refusal — a workspace is created with its image or
-not at all — and the e2e tests that create one run under `ACORNFALL_IMAGE_TEST=1`, because
+not at all — and the e2e tests that create one run under `ACORND_IMAGE_TEST=1`, because
 `make test` stays offline.
 
 ## What this does not settle

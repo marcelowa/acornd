@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/identity"
-	"github.com/acornfall/acornfall/gateway/internal/people"
-	"github.com/acornfall/acornfall/gateway/internal/remote"
+	"github.com/marcelowa/acornd/gateway/internal/identity"
+	"github.com/marcelowa/acornd/gateway/internal/people"
+	"github.com/marcelowa/acornd/gateway/internal/remote"
 )
 
 // fakeCloudflare is the account the screen talks to: enough of it to see the order the handler works in.
@@ -54,7 +54,7 @@ func (f *fakeCloudflare) Tunnels(context.Context, string) ([]remote.Tunnel, erro
 }
 
 func (f *fakeCloudflare) CreateTunnel(context.Context, string, string) (remote.Tunnel, error) {
-	tunnel := remote.Tunnel{ID: f.id("t"), Name: "acornfall"}
+	tunnel := remote.Tunnel{ID: f.id("t"), Name: "acornd"}
 	f.tunnels = append(f.tunnels, tunnel)
 	f.createdIn = append(f.createdIn, "tunnel")
 	return tunnel, nil
@@ -232,7 +232,7 @@ func TestRemoteApplyReportsAFailedApplyWithItsSteps(t *testing.T) {
 
 // A form with no token to use is refused before anything is created, and the refusal names what to fix.
 func TestRemoteApplyWithoutATokenCreatesNothing(t *testing.T) {
-	t.Setenv("ACORNFALL_CLOUDFLARE_TOKEN", "")
+	t.Setenv("ACORND_CLOUDFLARE_TOKEN", "")
 	api := newCloudflare()
 	handler, _, dir := screen(t, api)
 	body := strings.NewReader(`{"hostname":"console.example.com","zone":"example.com"}`)
@@ -345,8 +345,8 @@ func TestAPersonAddedInTheBookReachesTheDoor(t *testing.T) {
 // The check answers from what the install recorded, and it needs no API token: an install whose token was deleted
 // can still ask whether the door opens.
 func TestTheDoorCheckNeedsNoApiToken(t *testing.T) {
-	t.Setenv("ACORNFALL_CLOUDFLARE_TOKEN", "")
-	t.Setenv("ACORNFALL_IDENTITY_ISSUER", "")
+	t.Setenv("ACORND_CLOUDFLARE_TOKEN", "")
+	t.Setenv("ACORND_IDENTITY_ISSUER", "")
 	api := newCloudflare()
 	handler, _, dir := screen(t, api)
 	if err := remote.Save(dir, remote.Setup{Desired: remote.Desired{Hostname: "127.0.0.1:1", ZoneID: "z", AccountID: "a"}}, time.Now()); err != nil {

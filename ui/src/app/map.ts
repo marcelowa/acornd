@@ -448,10 +448,10 @@ export function toTranscript(
 		const id = String(entry.id);
 
 		switch (entry.kind) {
-			// A person's message: the gateway places it as `acornfall.message` so the author lands with the
+			// A person's message: the gateway places it as `acornd.message` so the author lands with the
 			// words (ADR 0034 §7), and `pi.user` is still what an agent's message to another conversation is.
 			case "pi.user":
-			case "acornfall.message": {
+			case "acornd.message": {
 				const text = messages
 					.map((message) => textOf(message.content))
 					.join("\n")
@@ -534,7 +534,7 @@ export function toTranscript(
 				});
 				break;
 			}
-			case "acornfall.notice": {
+			case "acornd.notice": {
 				const text = (entry.data?.text ?? "").trim();
 				if (text === "") break;
 				transcript.push({ kind: "notice", id, text, at: at(first) });

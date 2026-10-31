@@ -40,7 +40,7 @@ to follow yourself:
 ## The shape of the repository
 
 ```
-gateway/cmd/acornfall/     one binary, flags, wiring, logging, signals. Nothing else.
+gateway/cmd/acornd/     one binary, flags, wiring, logging, signals. Nothing else.
 gateway/internal/control/  the domain: workspaces, conversations, defaults, resolution
 gateway/internal/httpapi/  the transport edge: routes, auth, streaming
 gateway/internal/protocol/ the wire types, mirrored by the worker
@@ -244,7 +244,7 @@ with a deadline:
 | Recovery created a second conversation, landed on it, and skipped the settings a first start reads — so a workspace whose first start failed answered nothing. | S8 |
 | A workspace that had never saved settings never read the install defaults. | S2 (the test that caught it) |
 | `auth_answer` was handled before the command queue on purpose (queueing it would deadlock), so the switch looked incomplete. | T3 — the fix was to say it in the type, not to reorder the code. |
-| The end-to-end cleanup removed every sandbox labelled `acornfall` — every test's, not the finishing test's — so a parallel sandbox run failed in a different set of tests each time. | G16 |
+| The end-to-end cleanup removed every sandbox labelled `acornd` — every test's, not the finishing test's — so a parallel sandbox run failed in a different set of tests each time. | G16 |
 | metricside's components invented `text-[11px]`, `px-2.5`, and `text-white` while its token file sat beside them, and nothing objected. | T12 |
 | The registry's repair said it kept "the first" general workspace; the registry is a map, so which one survived was whatever the iteration produced, and the same file could open differently on two runs. | S2 — the test failed on its second run, which is what a map hiding an order looks like |
 | `Close` stopped a workspace's worker and left `workerUp` true, so a list built after a shutdown said every workspace was still running. | G5 — one act, one flag: `stopWorker` had always cleared it |

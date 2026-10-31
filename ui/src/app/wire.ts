@@ -445,7 +445,7 @@ export interface WireFrame {
 	type: string;
 	conversationId?: string | undefined;
 	value?: WireView | undefined;
-	acornfall?: { senders?: Record<string, WireSender> | undefined } | undefined;
+	acornd?: { senders?: Record<string, WireSender> | undefined } | undefined;
 	authId?: string | undefined;
 	event?: WireAuthEvent | undefined;
 	secret?: WireSecretEvent | undefined;

@@ -1,17 +1,17 @@
 #!/bin/sh
-# Install acornfall from a release: picks the binary for this machine,
+# Install acornd from a release: picks the binary for this machine,
 # verifies its checksum, and runs preflight. Needs curl and sha256sum.
 #
-#   ACORNFALL_GITHUB_TOKEN=... sh install.sh [--dir DIR] [--version TAG]
+#   ACORND_GITHUB_TOKEN=... sh install.sh [--dir DIR] [--version TAG]
 #
 # While the repo is private the token is required (fine-grained,
 # read-only, this repo); releases answer 404 without it. --dir defaults
-# to ~/.acornfall/bin, --version to the latest release.
+# to ~/.acornd/bin, --version to the latest release.
 set -eu
 
-DIR="${ACORNFALL_BIN_DIR:-$HOME/.acornfall/bin}"
+DIR="${ACORND_BIN_DIR:-$HOME/.acornd/bin}"
 VERSION=""
-TOKEN="${ACORNFALL_GITHUB_TOKEN:-}"
+TOKEN="${ACORND_GITHUB_TOKEN:-}"
 
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -38,10 +38,10 @@ fi
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"
 case "$os/$arch" in
-	linux/x86_64) asset="acornfall-linux-amd64" ;;
-	linux/aarch64|linux/arm64) asset="acornfall-linux-arm64" ;;
-	darwin/x86_64) asset="acornfall-darwin-amd64" ;;
-	darwin/aarch64|darwin/arm64) asset="acornfall-darwin-arm64" ;;
+	linux/x86_64) asset="acornd-linux-amd64" ;;
+	linux/aarch64|linux/arm64) asset="acornd-linux-arm64" ;;
+	darwin/x86_64) asset="acornd-darwin-amd64" ;;
+	darwin/aarch64|darwin/arm64) asset="acornd-darwin-arm64" ;;
 	*) echo "install.sh: no release for $os/$arch"; exit 2 ;;
 esac
 
@@ -52,13 +52,13 @@ api() {
 # The tag: explicit, or the latest release. Compact the JSON first so one
 # grep answers instead of a parser nobody guaranteed.
 if [ -z "$VERSION" ]; then
-	VERSION="$(api https://api.github.com/repos/marcelowa/acornfall/releases/latest | tr -d '\n ' | grep -o '"tag_name":"[^"]*"' | head -n 1 | cut -d'"' -f4)"
+	VERSION="$(api https://api.github.com/repos/marcelowa/acornd/releases/latest | tr -d '\n ' | grep -o '"tag_name":"[^"]*"' | head -n 1 | cut -d'"' -f4)"
 	[ -n "$VERSION" ] || { echo "install.sh: no releases yet, or the token is missing"; exit 2; }
 fi
 echo "install.sh: release $VERSION, asset $asset"
 
-release="$(api "https://api.github.com/repos/marcelowa/acornfall/releases/tags/$VERSION" | tr -d '\n ')" || {
-	echo "install.sh: cannot read release $VERSION (private repo needs ACORNFALL_GITHUB_TOKEN)"
+release="$(api "https://api.github.com/repos/marcelowa/acornd/releases/tags/$VERSION" | tr -d '\n ')" || {
+	echo "install.sh: cannot read release $VERSION (private repo needs ACORND_GITHUB_TOKEN)"
 	exit 2
 }
 asset_id() {
@@ -71,24 +71,24 @@ sums_id="$(asset_id sha256sums.txt)"
 mkdir -p "$DIR"
 get() {
 	curl -fsSL ${TOKEN:+-H "Authorization: Bearer $TOKEN"} -H "Accept: application/octet-stream" \
-		"https://api.github.com/repos/marcelowa/acornfall/releases/assets/$1" -o "$2"
+		"https://api.github.com/repos/marcelowa/acornd/releases/assets/$1" -o "$2"
 }
-get "$gateway_id" "$DIR/acornfall"
+get "$gateway_id" "$DIR/acornd"
 get "$sums_id" "$DIR/sha256sums.txt"
 
 want="$(grep " $asset\$" "$DIR/sha256sums.txt" | cut -d" " -f1)"
 [ -n "$want" ] || { echo "install.sh: checksum file names no $asset"; exit 2; }
-# Names differ (acornfall vs acornfall-<os>-<arch>), hashes do not: compare.
-[ "$(sum "$DIR/acornfall")" = "$want" ] || { echo "install.sh: CHECKSUM MISMATCH, refusing"; exit 1; }
+# Names differ (acornd vs acornd-<os>-<arch>), hashes do not: compare.
+[ "$(sum "$DIR/acornd")" = "$want" ] || { echo "install.sh: CHECKSUM MISMATCH, refusing"; exit 1; }
 echo "install.sh: checksum OK"
-chmod +x "$DIR/acornfall"
+chmod +x "$DIR/acornd"
 
 echo "install.sh: preflight"
-"$DIR/acornfall" doctor || true
+"$DIR/acornd" doctor || true
 cat <<EOF
 install.sh: next
-  export ACORNFALL_GITHUB_TOKEN='...'   # while the repo is private
+  export ACORND_GITHUB_TOKEN='...'   # while the repo is private
   export PATH="\$PATH:$DIR"
-  echo "\$OPENCODE_API_KEY" | acornfall provider add opencode-go
-  acornfall start
+  echo "\$OPENCODE_API_KEY" | acornd provider add opencode-go
+  acornd start
 EOF

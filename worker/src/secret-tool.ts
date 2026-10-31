@@ -119,7 +119,7 @@ function answerText(answer: SecretAnswer): string {
 
 export function secretExtension() {
 	return defineExtension({
-		name: "acornfall-secrets",
+		name: "acornd-secrets",
 		tools: [
 			defineTool({
 				name: "secret",

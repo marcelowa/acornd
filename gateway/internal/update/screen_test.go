@@ -18,17 +18,17 @@ import (
 // repository looks like a 404 and has its own fix, while anything else is a machine that could not
 // ask.
 func TestAnUnreachableCheckSaysWhichProblemItIs(t *testing.T) {
-	t.Setenv("ACORNFALL_GITHUB_TOKEN", "")
+	t.Setenv("ACORND_GITHUB_TOKEN", "")
 	missing := releaseProblem(httpError("404 Not Found"))
-	if !strings.Contains(missing, "ACORNFALL_GITHUB_TOKEN") {
+	if !strings.Contains(missing, "ACORND_GITHUB_TOKEN") {
 		t.Errorf("a 404 with no token should name the token: %q", missing)
 	}
 	if !strings.Contains(missing, "no releases exist yet") {
 		t.Errorf("a 404 may also mean there are none yet: %q", missing)
 	}
 	// With a token the 404 is not about authentication, so it is reported as it is.
-	t.Setenv("ACORNFALL_GITHUB_TOKEN", "ghp_example")
-	if got := releaseProblem(httpError("404 Not Found")); strings.Contains(got, "ACORNFALL_GITHUB_TOKEN") {
+	t.Setenv("ACORND_GITHUB_TOKEN", "ghp_example")
+	if got := releaseProblem(httpError("404 Not Found")); strings.Contains(got, "ACORND_GITHUB_TOKEN") {
 		t.Errorf("a 404 with a token is not a token problem: %q", got)
 	}
 	// Anything else is unreachable, with the reason kept.
@@ -106,7 +106,7 @@ func TestThePickerClampsItsLimit(t *testing.T) {
 // not.
 func TestTheScreenSaysWhichWorkerThisIs(t *testing.T) {
 	// A source checkout: no version file, so the version is dev.
-	checkout := New(t.TempDir(), filepath.Join(t.TempDir(), "acornfall"))
+	checkout := New(t.TempDir(), filepath.Join(t.TempDir(), "acornd"))
 	checkout.migrateDir = t.TempDir()
 	checkout.client = serverlessClient()
 	if err := checkout.Open(); err != nil {

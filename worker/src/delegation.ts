@@ -701,7 +701,7 @@ export function delegationExtension(deps: DelegationDeps) {
 				{
 					type: "input",
 					content: args.task,
-					requestId: `acornfall:delegate:${api.taskId}`,
+					requestId: `acornd:delegate:${api.taskId}`,
 				},
 				context,
 			);
@@ -725,7 +725,7 @@ export function delegationExtension(deps: DelegationDeps) {
 	});
 
 	self = defineExtension({
-		name: "acornfall-delegation",
+		name: "acornd-delegation",
 		// The task definitions ship with the extension, so pending reporters resume
 		// after a restart as soon as it is installed again.
 		tasks: [Anchor, reporterTask(deps)],

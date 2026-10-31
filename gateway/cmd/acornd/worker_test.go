@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/update"
+	"github.com/marcelowa/acornd/gateway/internal/update"
 )
 
 func TestResolveWorkerPrefersExplicit(t *testing.T) {
@@ -30,7 +30,7 @@ func TestResolveWorkerEnvDirUsesSystemBun(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sources, "src", "main.ts"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("ACORNFALL_WORKER", sources)
+	t.Setenv("ACORND_WORKER", sources)
 	got, dir, managed := resolveWorker("", manager)
 	if !slices.Equal(got, []string{"bun", "run", "src/main.ts"}) {
 		t.Fatalf("worker dir must mean system bun, got %q", got)

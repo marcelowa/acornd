@@ -14,7 +14,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 )
 
 // setupCommand answers "can this machine run a workspace, and if not, what does it need" — and
@@ -24,12 +24,12 @@ import (
 //	an ordinary user     the plan is shown, then sudo asks for the password
 //	neither             the plan is printed as commands to run
 //
-// One command is the whole interface: `acornfall setup`. The privileged half is the same binary
+// One command is the whole interface: `acornd setup`. The privileged half is the same binary
 // with `--privileged --plan FILE`, which this command runs itself and nobody types.
 func setupCommand(argv []string) {
 	flags := flag.NewFlagSet("setup", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder")
-	forUser := flags.String("for", "", "the account that runs acornfall (default: the owner of the acornfall folder)")
+	dataDir := flags.String("data-dir", "", "the acornd folder")
+	forUser := flags.String("for", "", "the account that runs acornd (default: the owner of the acornd folder)")
 	probe := flags.Bool("probe", false, "internal: print what this account can do, as JSON (setup runs this as the account)")
 	privileged := flags.Bool("privileged", false, "internal: run a plan as root (setup runs this through sudo)")
 	planPath := flags.String("plan", "", "internal: the plan to run with --privileged")
@@ -37,10 +37,10 @@ func setupCommand(argv []string) {
 	// The three flags above are the interface. The rest of this command's flags are how setup
 	// calls itself, and printing them would offer a person switches that exist to avoid them.
 	flags.Usage = func() {
-		fmt.Fprint(os.Stderr, `usage: acornfall setup [--data-dir DIR] [--for USER] [--yes]
+		fmt.Fprint(os.Stderr, `usage: acornd setup [--data-dir DIR] [--for USER] [--yes]
 
-  --data-dir DIR  the acornfall folder (default: ~/.acornfall)
-  --for USER      the account that runs acornfall (default: the owner of that folder)
+  --data-dir DIR  the acornd folder (default: ~/.acornd)
+  --for USER      the account that runs acornd (default: the owner of that folder)
   --yes           apply the steps without asking first
 
 It checks this machine, explains each step, and asks for your password only for the steps that
@@ -59,7 +59,7 @@ need root. Run with nothing to see what this machine needs.
 		fail(2, err)
 	}
 	if *probe {
-		// The hidden half of "probe as the account that runs acornfall": root re-executes this
+		// The hidden half of "probe as the account that runs acornd": root re-executes this
 		// binary with that account's credentials, and all it does is answer with the checks.
 		writeProbe(folder)
 		return
@@ -70,7 +70,7 @@ need root. Run with nothing to see what this machine needs.
 		fail(2, err)
 	}
 	if root {
-		fmt.Printf("checking for the account that runs acornfall: %s (%s)\n\n", account.Name, account.Basis)
+		fmt.Printf("checking for the account that runs acornd: %s (%s)\n\n", account.Name, account.Basis)
 	}
 	report, err := probeAs(account, folder)
 	if err != nil {
@@ -92,7 +92,7 @@ need root. Run with nothing to see what this machine needs.
 // fail reports a setup failure and exits with the code that failure deserves: 2 is "this could
 // not be asked", 1 is "this was asked and the answer is no".
 func fail(code int, err error) {
-	logf("acornfall setup: %v", err)
+	logf("acornd setup: %v", err)
 	os.Exit(code)
 }
 
@@ -225,7 +225,7 @@ func containerAdvice(report setupReport) string {
 	}
 	return "this looks like a container: a sandbox needs the container started with\n" +
 		"  --security-opt seccomp=unconfined --device /dev/net/tun\n" +
-		"which is a decision for whoever runs the container, not something acornfall can change from inside."
+		"which is a decision for whoever runs the container, not something acornd can change from inside."
 }
 
 // errNoEscalation is the machine where a password cannot be asked for: no sudo, or no terminal.
@@ -246,7 +246,7 @@ func escalate(plan rootPlan) error {
 		// sudo would fail with "a terminal is required"; saying so before it tries is kinder.
 		return errNoEscalation
 	}
-	dir, err := os.MkdirTemp("", "acornfall-setup-")
+	dir, err := os.MkdirTemp("", "acornd-setup-")
 	if err != nil {
 		return err
 	}
@@ -467,7 +467,7 @@ func printedFixes(report setupReport, userName string) []string {
 		fixes = append(fixes, fmt.Sprintf("install %s with this distribution's package manager", strings.Join(missingPackages(report), " ")))
 	}
 	if report.InstallErr != nil {
-		fixes = append(fixes, "reinstall into a folder you own: sh scripts/install.sh --dir ~/.acornfall/bin")
+		fixes = append(fixes, "reinstall into a folder you own: sh scripts/install.sh --dir ~/.acornd/bin")
 	}
 	return fixes
 }
@@ -579,7 +579,7 @@ func installFolder() (string, error) {
 		return "", err
 	}
 	dir := filepath.Dir(executable)
-	probe, err := os.CreateTemp(dir, ".acornfall-setup-*")
+	probe, err := os.CreateTemp(dir, ".acornd-setup-*")
 	if err != nil {
 		return dir, fmt.Errorf("%s is not writable by this user, so the update is refused before it downloads", dir)
 	}

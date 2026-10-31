@@ -5,7 +5,7 @@ Date: 2026-10-07
 
 ## Context
 
-The interface is being rebuilt on what the platform already serves ([#10](https://github.com/marcelowa/acornfall/issues/10)), and the rebuild starts with the system the screens are drawn from ([#27](https://github.com/marcelowa/acornfall/issues/27)). The foundation comes from the metricside client: tokens as plain variables, Tailwind reading them through `@theme inline`, light and dark as a variable swap behind `.dark`, shadcn's semantic names on top. The pattern is good. What it lacks is teeth.
+The interface is being rebuilt on what the platform already serves ([#10](https://github.com/marcelowa/acornd/issues/10)), and the rebuild starts with the system the screens are drawn from ([#27](https://github.com/marcelowa/acornd/issues/27)). The foundation comes from the metricside client: tokens as plain variables, Tailwind reading them through `@theme inline`, light and dark as a variable swap behind `.dark`, shadcn's semantic names on top. The pattern is good. What it lacks is teeth.
 
 In metricside the pattern is a convention, and it has already drifted: the button is typed as `text-[11px]`, `px-2.5`, and `text-white` while the token file sits next to it, and nothing objects. Tailwind does not fail on a class it does not know; it drops it, and the UI ships mildly wrong. The design system is also a showcase page — a screen someone has to keep honest — and the screens themselves mix styling, fetching, and rendering, so a state can only be reviewed by running the product.
 

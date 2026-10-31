@@ -1,4 +1,4 @@
-# Interaction Experience Report — Acornfall
+# Interaction Experience Report — Acornd
 
 ## Interaction Principles
 Keyboard-first, never keyboard-only. Running work is always interruptible and its pending input always visible. Evidence is never lost (collapse ≠ delete). Every overlay has Esc + focus trap + return-focus.

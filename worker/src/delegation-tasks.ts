@@ -68,7 +68,7 @@ export type MessagesState = {
  * the missing half: which of those entries were not the user's.
  */
 export const MessagesDoc = defineDoc<MessagesState>({
-	kind: "acornfall.messages",
+	kind: "acornd.messages",
 	version: 1,
 	scope: "conversation",
 	history: "latest",
@@ -80,7 +80,7 @@ export const MessagesDoc = defineDoc<MessagesState>({
 });
 
 export const DelegationDoc = defineDoc<DelegationState>({
-	kind: "acornfall.delegation",
+	kind: "acornd.delegation",
 	version: 1,
 	scope: "conversation",
 	history: "latest",
@@ -92,7 +92,7 @@ export const DelegationDoc = defineDoc<DelegationState>({
 });
 
 export const Anchor = defineTask<null, { phase: "done" }, null>({
-	name: "acornfall.subagent-anchor",
+	name: "acornd.subagent-anchor",
 	version: 1,
 	initial: () => ({ phase: "done" }),
 	phases: {
@@ -129,7 +129,7 @@ function textOf(message: AssistantMessage | undefined): string {
 
 export function reporterTask(deps: StateDeps) {
 	return defineTask<ReporterInput, ReporterState, null>({
-		name: "acornfall.subagent-reporter",
+		name: "acornd.subagent-reporter",
 		version: 1,
 		initial: () => ({ phase: "deliver" }),
 		phases: {
@@ -145,7 +145,7 @@ export function reporterTask(deps: StateDeps) {
 					whenBusy: followUp ? ("followUp" as const) : ("steer" as const),
 				} as const;
 				const submission = await subagent!.submit(
-					{ ...request, requestId: `acornfall:subagent:${reporter.id}` },
+					{ ...request, requestId: `acornd:subagent:${reporter.id}` },
 					context,
 				);
 				const settled = await submission.wait(context);
@@ -238,7 +238,7 @@ export function reporterTask(deps: StateDeps) {
 							type: "input",
 							content: text,
 							whenBusy: "followUp",
-							requestId: `acornfall:subagent-report:${reporter.id}`,
+							requestId: `acornd:subagent-report:${reporter.id}`,
 						},
 						context,
 					);

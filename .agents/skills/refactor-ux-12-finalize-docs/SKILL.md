@@ -19,7 +19,7 @@ Right after step 11, same session, never standalone.
 2. **Write `icp.md` at the repo root** — the final persona set (the three modes), the feedback
    format, what each approved in both passes, and why no multi-user persona is in it yet.
 3. **Mirror the chain into the repo:** copy `.agents/skills/refactor-ux-*` from the workspace into
-   `acornfall/.agents/skills/`, and add `docs/ui-workflow/refactor-ux/README.md` listing the twelve
+   `acornd/.agents/skills/`, and add `docs/ui-workflow/refactor-ux/README.md` listing the twelve
    steps so the next session finds them.
 4. **Mark every todo from step 01 complete.**
 5. **Hand off to a simplify pass** over the diff — the repo's `/deslop` prompt — before the change

@@ -7,7 +7,7 @@ statement below is those plus the release clause, which is the part open to corr
 
 ## The goal statement, as a claim
 
-Acornfall is a local-first agent console for one technical operator. A Go gateway supervises a bun
+Acornd is a local-first agent console for one technical operator. A Go gateway supervises a bun
 worker and a microVM sandbox per workspace, and `ui/` is the only face of it. Working well, from run
 1: find the right conversation in a rail of dozens, read a tool-heavy turn without losing the place,
 intervene mid-run with no doubt about the control, change a setting once and know it stuck, and see

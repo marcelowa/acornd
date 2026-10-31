@@ -66,7 +66,7 @@ func TestDiskSpaceFallsBackAndThenAssumesRoom(t *testing.T) {
 	if !requirement.OK {
 		t.Errorf("a real folder has space: %+v", requirement)
 	}
-	unreadable := disk("/nonexistent-acornfall-check/deeper")
+	unreadable := disk("/nonexistent-acornd-check/deeper")
 	if !unreadable.OK || !strings.Contains(unreadable.Detail, "assuming room") {
 		t.Errorf("an unreadable path should assume room: %+v", unreadable)
 	}

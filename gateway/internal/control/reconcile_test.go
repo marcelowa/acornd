@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 )
 
 // A sandbox that was here before a secret changed has to be brought up to date, and no worker is

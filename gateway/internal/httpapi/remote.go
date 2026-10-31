@@ -1,7 +1,7 @@
 // The remote-access screen's two calls: what this install recorded, and the one that makes Cloudflare match it.
 //
 // They exist so the first contact with the door does not need a terminal: the admin pastes the API token and the
-// hostname, and the console does what `acornfall remote apply` does. The token is used for the call and dropped
+// hostname, and the console does what `acornd remote apply` does. The token is used for the call and dropped
 // — it is the most powerful credential in the install and ADR 0033 §4 says the running process does not keep it.
 package httpapi
 
@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/remote"
+	"github.com/marcelowa/acornd/gateway/internal/remote"
 )
 
 // remoteAPI is how the handler reaches Cloudflare. A variable so a test can answer without an account.
@@ -153,7 +153,7 @@ func (s *Server) remoteRequest(w http.ResponseWriter, r *http.Request) (applyReq
 	}
 	request.setup = setup
 	if request.token == "" {
-		request.token = strings.TrimSpace(os.Getenv("ACORNFALL_CLOUDFLARE_TOKEN"))
+		request.token = strings.TrimSpace(os.Getenv("ACORND_CLOUDFLARE_TOKEN"))
 	}
 	if request.token == "" {
 		request.token = strings.TrimSpace(setup.APIToken)
@@ -252,7 +252,7 @@ func (s *Server) remoteCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, remote.CheckDoor(ctx, nil, setup.Desired.Hostname, os.Getenv("ACORNFALL_IDENTITY_ISSUER")))
+	writeJSON(w, http.StatusOK, remote.CheckDoor(ctx, nil, setup.Desired.Hostname, os.Getenv("ACORND_IDENTITY_ISSUER")))
 }
 
 // remoteStatusFor maps a Cloudflare refusal onto an HTTP one: a token that cannot do this is the person's to fix

@@ -17,13 +17,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/control"
-	"github.com/acornfall/acornfall/gateway/internal/httpapi"
-	"github.com/acornfall/acornfall/gateway/internal/ready"
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
-	"github.com/acornfall/acornfall/gateway/internal/update"
-	"github.com/acornfall/acornfall/gateway/internal/vault"
-	"github.com/acornfall/acornfall/gateway/web"
+	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/httpapi"
+	"github.com/marcelowa/acornd/gateway/internal/ready"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/update"
+	"github.com/marcelowa/acornd/gateway/internal/vault"
+	"github.com/marcelowa/acornd/gateway/web"
 )
 
 func main() {
@@ -38,7 +38,7 @@ func main() {
 	}
 	command, known := commands[args[0]]
 	if !known {
-		fmt.Fprintf(os.Stderr, "acornfall: no such command %q\n\n", args[0])
+		fmt.Fprintf(os.Stderr, "acornd: no such command %q\n\n", args[0])
 		usage(os.Stderr)
 		os.Exit(2)
 	}
@@ -51,7 +51,7 @@ func main() {
 var commands = map[string]func([]string){
 	"start": func(args []string) {
 		if err := serve(args); err != nil {
-			log.Fatalf("acornfall: %v", err)
+			log.Fatalf("acornd: %v", err)
 		}
 	},
 	"setup":     setupCommand,
@@ -84,7 +84,7 @@ func internalCommand(argv []string) {
 			return
 		}
 	}
-	fmt.Fprintln(os.Stderr, "usage: acornfall internal <netns|sandbox-supervisor> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: acornd internal <netns|sandbox-supervisor> [flags]")
 	os.Exit(2)
 }
 
@@ -92,7 +92,7 @@ func internalCommand(argv []string) {
 // per command, because a flag that belongs to one command should not look like it belongs to
 // all of them.
 func usage(w io.Writer) {
-	fmt.Fprint(w, `usage: acornfall <command> [flags]
+	fmt.Fprint(w, `usage: acornd <command> [flags]
 
   start      run the gateway
   setup      check this machine, and make it able to run sandboxes
@@ -107,16 +107,16 @@ func usage(w io.Writer) {
   update     check for a release, and install it
   version    print the running version
 
-acornfall <command> -h    explains that command's flags
+acornd <command> -h    explains that command's flags
 `)
 }
 
 func serve(argv []string) error {
-	flags := flag.NewFlagSet("acornfall start", flag.ContinueOnError)
+	flags := flag.NewFlagSet("acornd start", flag.ContinueOnError)
 	host := flags.String("host", "0.0.0.0", "interface to listen on (default: every interface)")
 	port := flags.Int("port", 7777, "port to listen on")
-	dataDir := flags.String("data-dir", "", "the acornfall folder: config, credentials, state, workspaces (default: ~/.acornfall)")
-	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornfall/workspaces)")
+	dataDir := flags.String("data-dir", "", "the acornd folder: config, credentials, state, workspaces (default: ~/.acornd)")
+	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornd/workspaces)")
 	workerCommand := flags.String("worker", "", `worker command (default: ensured bun over ensured sources)`)
 	cloudflaredPath := flags.String("cloudflared", "", `the connector binary (default: the pinned one, ensured under the install folder)`)
 	if err := flags.Parse(argv); err != nil {
@@ -147,7 +147,7 @@ func serve(argv []string) error {
 	// install-wide name exists for tests and for a machine that must be told; the environment is
 	// where it lives now, because a flag on the server is a decision nobody meant to make once
 	// per boot.
-	engineName := os.Getenv("ACORNFALL_SANDBOX_ENGINE")
+	engineName := os.Getenv("ACORND_SANDBOX_ENGINE")
 	engine, tier, err := sandboxTier(ctx, dir, engineName)
 	if err != nil {
 		return err
@@ -207,7 +207,7 @@ func newWorkspaces(
 				RestartRequired: status.RestartRequired,
 			}
 		},
-		Model:      os.Getenv("ACORNFALL_MODEL"),
+		Model:      os.Getenv("ACORND_MODEL"),
 		Sandbox:    engine,
 		Sandboxes:  tier,
 		Vault:      secrets,
@@ -347,7 +347,7 @@ func listen(ctx context.Context, host string, port int, handler http.Handler, di
 		return err
 	}
 	bound := listener.Addr().String()
-	log.Printf("acornfall listening on http://%s  home=%s", displayAddr(bound), dir)
+	log.Printf("acornd listening on http://%s  home=%s", displayAddr(bound), dir)
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 		return err
 	}
@@ -359,12 +359,12 @@ func listen(ctx context.Context, host string, port int, handler http.Handler, di
 // so starting the gateway stays fast and a machine that cannot sandbox still runs everything
 // else — with tools that refuse.
 //
-// ACORNFALL_NO_SANDBOX is that refusal on purpose, not a fallback: no engine is configured,
+// ACORND_NO_SANDBOX is that refusal on purpose, not a fallback: no engine is configured,
 // nothing is installed or booted, and the worker's tools refuse. Tests use it so one command
 // behaves the same on a machine with /dev/kvm and in CI, which auto-detecting did not.
 func sandboxTier(ctx context.Context, dataDir, engineName string) (*sandbox.Manager, *sandbox.Tier, error) {
-	if os.Getenv("ACORNFALL_NO_SANDBOX") != "" {
-		log.Printf("sandbox: disabled by ACORNFALL_NO_SANDBOX; commands and file tools will refuse")
+	if os.Getenv("ACORND_NO_SANDBOX") != "" {
+		log.Printf("sandbox: disabled by ACORND_NO_SANDBOX; commands and file tools will refuse")
 		return nil, nil, nil
 	}
 	_ = ctx
@@ -401,18 +401,18 @@ func sandboxTier(ctx context.Context, dataDir, engineName string) (*sandbox.Mana
 // and scripts check it without starting anything.
 func versionCommand(argv []string) {
 	flags := flag.NewFlagSet("version", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	dataDir := flags.String("data-dir", "", "the acornd folder")
 	flagArgs, _ := splitFlags(argv, map[string]bool{"data-dir": true})
 	if err := flags.Parse(flagArgs); err != nil {
 		os.Exit(2)
 	}
 	dir, err := resolveDataDir(*dataDir)
 	if err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	version, err := versionString(dir)
 	if err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	fmt.Println(version)
 }
@@ -427,19 +427,19 @@ func versionString(dataDir string) (string, error) {
 
 func providers(argv []string) {
 	flags := flag.NewFlagSet("provider", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	dataDir := flags.String("data-dir", "", "the acornd folder")
 	flagArgs, positional := splitFlags(argv, map[string]bool{"data-dir": true})
 	if err := flags.Parse(flagArgs); err != nil {
 		os.Exit(2)
 	}
 	args := positional
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: acornfall provider <list|add|remove>")
+		fmt.Fprintln(os.Stderr, "usage: acornd provider <list|add|remove>")
 		os.Exit(2)
 	}
 	dir, err := resolveDataDir(*dataDir)
 	if err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	path := filepath.Join(dir, "credentials.json")
 	switch args[0] {
@@ -469,7 +469,7 @@ func providerList(path string) {
 
 func providerAdd(path string, args []string) {
 	if len(args) < 1 || len(args) > 2 {
-		fmt.Fprintln(os.Stderr, `usage: acornfall provider add <provider> [<api-key>]
+		fmt.Fprintln(os.Stderr, `usage: acornd provider add <provider> [<api-key>]
 
 With the key in argv the value is in the shell history and in every process listing; with the
 key left out it is read from stdin, which is what a script should do.`)
@@ -477,15 +477,15 @@ key left out it is read from stdin, which is what a script should do.`)
 	}
 	key, err := apiKey(args)
 	if err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	if key == "" {
-		log.Fatalf("acornfall: no api key for %s", args[0])
+		log.Fatalf("acornd: no api key for %s", args[0])
 	}
 	all := readCredentials(path)
 	all[args[0]] = credential{Type: "api_key", Key: key}
 	if err := writeCredentials(path, all); err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	fmt.Printf("stored api key for %s\n", args[0])
 }
@@ -505,13 +505,13 @@ func apiKey(args []string) (string, error) {
 
 func providerRemove(path string, args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: acornfall provider remove <provider>")
+		fmt.Fprintln(os.Stderr, "usage: acornd provider remove <provider>")
 		os.Exit(2)
 	}
 	all := readCredentials(path)
 	delete(all, args[0])
 	if err := writeCredentials(path, all); err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	fmt.Printf("removed %s\n", args[0])
 }
@@ -530,7 +530,7 @@ func readCredentials(path string) map[string]credential {
 		return all
 	}
 	if err := json.Unmarshal(payload, &all); err != nil {
-		log.Fatalf("acornfall: %s is not valid JSON: %v", path, err)
+		log.Fatalf("acornd: %s is not valid JSON: %v", path, err)
 	}
 	return all
 }
@@ -563,7 +563,7 @@ func resolveWorker(explicit string, updates *update.Manager) ([]string, string, 
 		}
 		return strings.Fields(explicit), worker, false
 	}
-	if dir := os.Getenv("ACORNFALL_WORKER"); dir != "" {
+	if dir := os.Getenv("ACORND_WORKER"); dir != "" {
 		worker, err := resolveWorkerDir(dir)
 		if err != nil {
 			return []string{"bun", "run", "src/main.ts"}, "", false
@@ -585,16 +585,16 @@ func resolveDataDir(flagValue string) (string, error) {
 	if flagValue != "" {
 		return filepath.Abs(flagValue)
 	}
-	if env := os.Getenv("ACORNFALL_DATA_DIR"); env != "" {
+	if env := os.Getenv("ACORND_DATA_DIR"); env != "" {
 		return filepath.Abs(env)
 	}
 	// The two older names, read only so an update can happen: the updater that stages a new
 	// binary runs it to ask its version, and the updater doing that is the one already on disk.
-	// A v0.14 install therefore points a v0.15 binary at an empty folder with ACORNFALL_HOME,
+	// A v0.14 install therefore points a v0.15 binary at an empty folder with ACORND_HOME,
 	// and without this the binary would answer about the live folder and be refused as the
 	// wrong version. Nothing but an updater should set them; they go when v0.14 is out of
 	// support (ADR 0027).
-	for _, legacy := range []string{"ACORNFALL_HOME", "ACORNFALL_DATA"} {
+	for _, legacy := range []string{"ACORND_HOME", "ACORND_DATA"} {
 		if env := os.Getenv(legacy); env != "" {
 			return filepath.Abs(env)
 		}
@@ -605,7 +605,7 @@ func resolveDataDir(flagValue string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".acornfall"), nil
+	return filepath.Join(home, ".acornd"), nil
 }
 
 // resolveWorkerDir finds the worker package without requiring configuration.
@@ -622,5 +622,5 @@ func resolveWorkerDir(flagValue string) (string, error) {
 			return filepath.Abs(candidate)
 		}
 	}
-	return "", fmt.Errorf("worker not found: pass --worker-dir or set ACORNFALL_WORKER")
+	return "", fmt.Errorf("worker not found: pass --worker-dir or set ACORND_WORKER")
 }

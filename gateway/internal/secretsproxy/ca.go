@@ -147,7 +147,7 @@ func generateCA() ([]byte, error) {
 	template := &x509.Certificate{
 		SerialNumber: serial,
 		// A name a person can recognise in a trust store, because that is where they will meet it.
-		Subject:   pkix.Name{CommonName: "Acornfall Workspace Proxy CA", Organization: []string{"acornfall"}},
+		Subject:   pkix.Name{CommonName: "Acornd Workspace Proxy CA", Organization: []string{"acornd"}},
 		NotBefore: now.Add(-time.Hour),
 		// Ten years: an expiry is a rotation nobody scheduled, and rotating this one means every
 		// workspace is recreated. Deleting the file is the supported way to rotate it.

@@ -23,7 +23,7 @@ tier — the microVM engine boundary — and fails rather than skips where there
 
 ## The scripted provider
 
-Nothing here calls a model. `ACORNFALL_DEV_SCRIPT` points the worker at a JSON file of rules:
+Nothing here calls a model. `ACORND_DEV_SCRIPT` points the worker at a JSON file of rules:
 the first rule whose `match` is a substring of the last user message wins, its `tools` are
 called, and its `reply` is the answer. That is what makes a feature driven by a tool call — a
 guard blocking one, a subagent being spawned — testable offline and deterministically.
@@ -34,7 +34,7 @@ guard blocking one, a subagent being spawned — testable offline and determinis
 ]}
 ```
 
-`ACORNFALL_DEV_PROVIDER=1` is the older, hand-driven mode: one real `bash` call per turn and a
+`ACORND_DEV_PROVIDER=1` is the older, hand-driven mode: one real `bash` call per turn and a
 reply quoting the request. `make dev` uses it.
 
 ## Conversations
@@ -83,7 +83,7 @@ The chain is **conversation → its definition → this workspace → the instal
 |---|---|---|
 | D1 | A workspace's defaults apply to conversations that never chose, and the state says which layer each came from. | `TestWorkspaceDefaultsApplyAndSayWhereTheyCameFrom` |
 | D2 | An install default applies to every workspace, without a restart; a workspace's own default wins. | `TestInstallDefaultsApplyToEveryWorkspace` |
-| D3 | An install default is one file, `~/.acornfall/settings.json`, and clearing it leaves no file. | `TestInstallDefaultsApplyToEveryWorkspace` |
+| D3 | An install default is one file, `~/.acornd/settings.json`, and clearing it leaves no file. | `TestInstallDefaultsApplyToEveryWorkspace` |
 | D4 | With nothing set anywhere, a preferred model runs rather than whichever is listed first, reported as the last resort. | `TestTheLastResortRunsWhenNothingIsSet` + `TestLastResortPrefersAnExplicitModel` |
 | D5 | A layer that cannot be used — a model no longer offered, a definition that is gone — falls through and is *not* rewritten. | `TestDefaultsFallThroughLayers` |
 | D6 | A resolved default is never persisted as this workspace's own choice. | `TestResolvedDefaultsAreNotPersistedAsThisWorkspace` |
@@ -124,7 +124,7 @@ The chain is **conversation → its definition → this workspace → the instal
 | R7 | Slash commands come from two layers, the workspace shadowing the install, and the listing says which file each came from. | `TestCommandsComeFromBothLayersAndTheWorkspaceWins` |
 | R8 | Expansion happens server-side, so the transcript records what the model saw; arguments are appended when there is no placeholder. | `TestCommandExpansionIsWhatTheModelSees`, `TestCommandArgumentsAreAppendedWhenThereIsNoPlaceholder` + `worker/test/commands.test.ts` |
 | R9 | A message that merely starts with a slash is not rewritten. | `TestAnUnknownCommandIsSentAsWritten` |
-| R10 | A resource bundle is read from `.agents/` — the ecosystem's name, where the Agent Skills convention points — as well as `.acornfall/`, at the user level (`~/.agents`) as well as in the workspace. Ours wins when a folder has both. Prompt templates are read from `commands/` or the ecosystem's `prompts/`. | `TestTheEcosystemAgentsFolderIsRead`, `worker/test/{config,commands,skills}.test.ts` |
+| R10 | A resource bundle is read from `.agents/` — the ecosystem's name, where the Agent Skills convention points — as well as `.acornd/`, at the user level (`~/.agents`) as well as in the workspace. Ours wins when a folder has both. Prompt templates are read from `commands/` or the ecosystem's `prompts/`. | `TestTheEcosystemAgentsFolderIsRead`, `worker/test/{config,commands,skills}.test.ts` |
 | R11 | The global resource folders are mounted into every sandbox at their own paths, read-only, so a skill's instructions can name a script and have it run. The install folder itself — credentials, token, state — is never mounted. | `TestAGlobalSkillsScriptRunsInsideTheWorkspace`, `TestGlobalPathsAreTheResourceFoldersAndNeverTheInstall`, `TestRenderMountsTheGlobalsReadOnly` |
 
 ## Guards
@@ -161,7 +161,7 @@ The chain is **conversation → its definition → this workspace → the instal
 |---|---|---|
 | P1 | Credentials live in the install folder (0600) and never inside a workspace. | `worker/test/skills.test.ts`, `TestWorkspacesAreIsolatedAndStartOnDemand` |
 | P2 | The provider list and each model's thinking levels come from the harness. | `worker/test/protocol.test.ts`, `TestAFreshInstallHasARootConversation` |
-| P3 | An install with no `ACORNFALL_IDENTITY` is the single admin ADR 0020 describes: every request is answered and no credential exists. Naming a door changes that for the run that named it. | `httpapi.TestNoDoorMeansTheConsoleIsOpen`, `TestADoorIsOffUnlessThisRunNamesOne` |
+| P3 | An install with no `ACORND_IDENTITY` is the single admin ADR 0020 describes: every request is answered and no credential exists. Naming a door changes that for the run that named it. | `httpapi.TestNoDoorMeansTheConsoleIsOpen`, `TestADoorIsOffUnlessThisRunNamesOne` |
 | P4 | A request a configured door does not prove is refused before any handler runs, with the reason its door wrote. Loopback is not a proof: the token file is. | `httpapi.TestARequestNoDoorProvedIsRefused`, `TestAProvenRequestReachesItsHandler`, `identity.TestALoopbackRequestWithoutProofIsRefused` |
 | P14 | The token is a 0600 file in the install folder, minted on first use, read per request so a rotation takes effect at once, and read only from the `Authorization` header — never a query string. | `identity.TestTheTokenFileIsNotReadableByAnyoneElse`, `TestARotatedTokenIsTheOnlyOneThatWorks`, `TestTheTokenIsNeverReadFromTheQueryString`, `TestEnsureTokenMintsOnceAndKeepsIt` |
 | P15 | A signed assertion is verified before anything is read out of it: RS256 only, signature against the publisher's key, audience, issuer, lifetime with a minute of leeway, and a present-and-false `email_verified` refused. The plaintext identity header is not evidence. | `identity.TestAValidAssertionNamesItsEmail`, `TestTheRefusals`, `TestThePlaintextIdentityHeaderIsNotEnough` |
@@ -200,7 +200,7 @@ The chain is **conversation → its definition → this workspace → the instal
 | P40 | A draft and a landing belong to one person: a draft is keyed by conversation and address, so sending clears only the sender's words and their own draft follows them to another machine; where a person lands is remembered per person beside the workspace's fallback for a browser that has never chosen; and selecting no longer detaches the worker, so moving a conversation does not pull another tab's live view out from under it. | `TestADraftBelongsToOnePerson`, `TestADraftOutlivesTheProcess`, `TestMovingAConversationDoesNotDetachAnothers`, `TestTheLandingIsEachPersons`, `TestALandingOutlivesTheProcess` |
 | P41 | A room's record says who is in it and what they are: exactly one owner and its guests, and a kind that says whether the room is somebody's own. A room is born with its creator as its owner, so a room made from the console is one its maker can open; a personal room refuses a guest and refuses to be forgotten, and an update can rewrite neither the members nor the kind. | `TestARoomIsBornWithItsOwner`, `TestARoomHasExactlyOneOwner`, `TestAPersonalRoomRefusesAGuest`, `TestAPersonalRoomCannotBeForgotten`, `TestAnUpdateCannotChangeWhoseRoomIsWhose`, `TestARoomWithNoMembersIsNotAnybodysOwnUnlessItIsTheInstalls` |
 | P42 | A registry written before rooms had roles is migrated at load, in one pass and one write: an address list becomes its owner and a kind, one address with no roles is somebody's own room, a hand-edited pair is read as owner-then-guest with one log line saying it guessed, a room nobody is named in is the admin's, and a personal room that names a guest is refused with the file named. | `TestAMembersListBecomesItsOwner`, `TestAOneMemberRoomBecomesPersonal`, `TestASecondAddressBecomesAGuestAndSaysSo`, `TestAMemberlessRoomIsTheAdmins`, `TestTheAdminsOwnRoomIsGivenItsMember`, `TestAnInstallWithNoAdminKeepsBothShapesOfTheOwnRoom`, `TestAPersonalRoomWithAGuestIsRefused`, `TestAGeneralKeyInAnOldRegistryIsIgnored` |
-| P43 | Forgetting a room unregisters it — gone from every rail, refused for every caller, its folder and history left exactly where they were — and `acornfall workspace purge <name>` is the only thing that deletes: it prints both folders, needs `--yes`, deletes the workspace's folder and its state, refuses a name the registry does not hold, and refuses every personal room. A name whose state is still there cannot be made again until it is purged, and `acornfall doctor` names every folder under the workspaces folder with no record. | `TestForgetKeepsTheFolder`, `TestPurgeNeedsTheRecord`, `TestPurgeDeletesTheStateToo`, `TestANewRoomCannotInheritAForgottenOne`, `TestPurgeRefusesEveryPersonalRoom`, `TestDoctorNamesAFolderWithNoRecord` |
+| P43 | Forgetting a room unregisters it — gone from every rail, refused for every caller, its folder and history left exactly where they were — and `acornd workspace purge <name>` is the only thing that deletes: it prints both folders, needs `--yes`, deletes the workspace's folder and its state, refuses a name the registry does not hold, and refuses every personal room. A name whose state is still there cannot be made again until it is purged, and `acornd doctor` names every folder under the workspaces folder with no record. | `TestForgetKeepsTheFolder`, `TestPurgeNeedsTheRecord`, `TestPurgeDeletesTheStateToo`, `TestANewRoomCannotInheritAForgottenOne`, `TestPurgeRefusesEveryPersonalRoom`, `TestDoctorNamesAFolderWithNoRecord` |
 | P44 | A room's owner invites somebody the book already names, removes a guest, and a guest may leave; a room cannot name an address the door will refuse, and the install's admin is not a member of a room they were not invited to. Forgetting a room is its owner's on the console, and a personal room is never shared. | `TestOnlyTheRoomsOwnerInvites`, `TestAGuestLeavesAndTheOwnerRemoves`, `TestForgetIsTheRoomsOwnersAndPersonalIsNeverShared`, `TestOnlyTheOwnerInvitesAndRemoves`, `TestAPersonalRoomRefusesAGuestThroughTheDoor` |
 | P45 | A guest prompts, steers, aborts and compacts, and cannot create, fork, hide, rename, reset or choose a model; the table is one method asked by the routes and by command expansion, so `/clear` cannot slip past the rule that lets a guest compact, and a real gateway behind a signed door refuses every one of those routes while accepting a message. A turn is checked against the install's provider list and not the caller's, so a guest speaks in a room whose model a member pinned, and the install still stops a revoked model. | `TestMayIsTheRoomsTable`, `TestAGuestMayCompactButMayNotReset`, `TestAGuestsListDoesNotBindARoomTheyWereInvitedTo`, `TestAGuestSpeaksAndCannotChangeTheRoom` |
 | P46 | The book has routes for the screen that manages it: the install's admin lists, invites, revokes, restores, narrows models and sets `can_create`, and every mutation answers with the whole book so the screen never shows a state between a write and a read; a person asking for any of them is refused. A new member may make rooms until the admin says otherwise, a member whose record allows it creates a room they own, and naming a revoked person puts them back without touching the rooms they were in. | `TestTheAdminManagesTheBook`, `TestAPersonCannotReadTheBook`, `TestOnlyAMemberWhoseRecordAllowsItMayMakeARoom`, `TestANewMemberMayMakeRoomsUntilTheAdminSaysNo`, `TestARevokedPersonComesBackWhenNamed`, `TestARestoreOfSomebodyWhoNeverSignedInIsAnInvitation` |
@@ -260,7 +260,7 @@ workaround:
     commands behind; the lifecycle test passed because `List` only reads configs. Two test runs
     were still alive on a real machine when the leak was found.
 13. Nested pasta printed `Couldn't configure user mappings` and exited 0, so the probe called a
-    network that never existed healthy — and the inner acornfall would have chosen bwrap and lost
+    network that never existed healthy — and the inner acornd would have chosen bwrap and lost
     its egress.
 14. A binary upgrade adopted a running bwrap sandbox and never wrote the new config: the only
     way to get the device grant was to remove the sandbox by hand. `Produce` now writes the

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
 // The list is somebody's own room first and then by name, so the sidebar does not reorder itself between

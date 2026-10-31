@@ -22,7 +22,7 @@ const opened: string[] = [];
 
 afterEach(async () => {
 	for (const dir of opened.splice(0)) await rm(dir, { recursive: true, force: true });
-	delete process.env.ACORNFALL_BWRAP_STATE;
+	delete process.env.ACORND_BWRAP_STATE;
 });
 
 interface Opened {
@@ -37,13 +37,13 @@ async function open(
 	network: "pasta" | "off" = "off",
 	options: { ignoreKill?: boolean; secretProxy?: { url: string; bundle: string } } = {},
 ): Promise<Opened> {
-	const root = await realpath(await mkdtemp(join(tmpdir(), "acornfall-bwrap-")));
+	const root = await realpath(await mkdtemp(join(tmpdir(), "acornd-bwrap-")));
 	opened.push(root);
 	const dir = join(root, "work");
 	const state = join(root, "state");
 	for (const path of [dir, state, join(state, "home")]) await mkdir(path, { recursive: true });
 	const fake = await fakeSupervisor(root, options);
-	const name = "acornfall-test";
+	const name = "acornd-test";
 	await writeFile(
 		join(state, `${name}.json`),
 		JSON.stringify({
@@ -62,7 +62,7 @@ async function open(
 			...(options.secretProxy === undefined ? {} : { secretProxy: options.secretProxy }),
 		}),
 	);
-	process.env.ACORNFALL_BWRAP_STATE = state;
+	process.env.ACORND_BWRAP_STATE = state;
 	return { dir, state, client: await openSandbox(name, dir), fake };
 }
 
@@ -115,11 +115,11 @@ test("the environment is exactly what the caller gets: secrets in, nothing else"
 		expect(withSecret?.env["PATH"]).toStartWith(`${join(state, "home")}/.local/bin`);
 
 		// clearEnv is the caller saying "nothing but what I pass", and it has to mean it.
-		process.env.ACORNFALL_SHOULD_NOT_LEAK = "yes";
+		process.env.ACORND_SHOULD_NOT_LEAK = "yes";
 		await client.exec("true", { clearEnv: true });
 		const cleared = fake.captured.at(-1);
-		expect(cleared?.env["ACORNFALL_SHOULD_NOT_LEAK"]).toBeUndefined();
-		delete process.env.ACORNFALL_SHOULD_NOT_LEAK;
+		expect(cleared?.env["ACORND_SHOULD_NOT_LEAK"]).toBeUndefined();
+		delete process.env.ACORND_SHOULD_NOT_LEAK;
 	} finally {
 		await fake.close();
 	}
@@ -174,7 +174,7 @@ test("files are read, written, and listed in the workspace", async () => {
 test("a config for another workspace is refused", async () => {
 	const { fake } = await open();
 	try {
-		expect(openSandbox("acornfall-test", "/somewhere/else")).rejects.toThrow(
+		expect(openSandbox("acornd-test", "/somewhere/else")).rejects.toThrow(
 			"is not the config for",
 		);
 	} finally {
@@ -187,7 +187,7 @@ test("a sandbox that is not answering says so, and what to do, without guessing"
 	await fake.close();
 	const failure = client.exec("true", {});
 	expect(failure).rejects.toThrow("is not answering");
-	expect(failure).rejects.toThrow("restarting acornfall starts it again");
+	expect(failure).rejects.toThrow("restarting acornd starts it again");
 });
 
 test("a command the supervisor cannot end is still reported as stopped", async () => {
@@ -222,7 +222,7 @@ test("an attached worker tells its sandbox it is still here", async () => {
 
 test("a workspace with a proxy puts it in the environment its commands get", async () => {
 	const proxy = {
-		url: "http://acornfall:a-token@127.0.0.1:41234",
+		url: "http://acornd:a-token@127.0.0.1:41234",
 		bundle: "/etc/ssl/certs/ca-certificates.crt",
 	};
 	const { client, fake } = await open("pasta", { secretProxy: proxy });
@@ -245,18 +245,18 @@ test("a workspace with a proxy puts it in the environment its commands get", asy
 test("a command does not inherit the gateway's environment", async () => {
 	const { client, fake } = await open();
 	const before = process.env.TERM;
-	process.env.ACORNFALL_AMBIENT_TOKEN = "a-token-the-gateway-was-started-with";
+	process.env.ACORND_AMBIENT_TOKEN = "a-token-the-gateway-was-started-with";
 	process.env.TERM = "a-term-from-the-shell";
 	try {
 		await client.exec("true", {});
 		const env = fake.captured.at(-1)?.env;
-		// The worker was started with acornfall's own environment, and a command that inherited it
+		// The worker was started with acornd's own environment, and a command that inherited it
 		// inherited whatever the gateway was holding. Only the handful a shell needs crosses over.
-		expect(env?.["ACORNFALL_AMBIENT_TOKEN"]).toBeUndefined();
+		expect(env?.["ACORND_AMBIENT_TOKEN"]).toBeUndefined();
 		expect(env?.["TERM"]).toBe("a-term-from-the-shell");
 		expect(env?.["HOME"]).toBe("/root");
 	} finally {
-		delete process.env.ACORNFALL_AMBIENT_TOKEN;
+		delete process.env.ACORND_AMBIENT_TOKEN;
 		if (before === undefined) delete process.env.TERM;
 		else process.env.TERM = before;
 		await fake.close();

@@ -14,7 +14,7 @@ Right after step 03, same session, never standalone.
 1. **Load personas from `icp.md` at the repo root.** If it is missing, draft it with the user now
    and save it — every panel in this chain reads that file, so the personas stay identical across
    passes.
-   - acornfall's honest set is one real person in three modes: **OWNER-OPERATOR**, **DELEGATOR**,
+   - acornd's honest set is one real person in three modes: **OWNER-OPERATOR**, **DELEGATOR**,
      **TINKERER** (source: `docs/ui-workflow/02-need-report.md`).
    - Do not invent multi-user personas — a teammate, a buyer, a hosted tenant. They do not exist
      yet, and judged against them the panel returns false confidence. Say that in `icp.md`.

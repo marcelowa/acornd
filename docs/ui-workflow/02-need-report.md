@@ -1,4 +1,4 @@
-# UI Requirements Report — Acornfall
+# UI Requirements Report — Acornd
 
 ## Product Positioning
 Personal agent console: local-first Go gateway + sandboxed execution, multi-conversation, per-workspace workers. The UI's job is to make long-running, tool-heavy agent work *readable, steerable, and auditable* — not to demo chat.

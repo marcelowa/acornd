@@ -19,7 +19,7 @@ func TestCommandExpansionIsWhatTheModelSees(t *testing.T) {
 	s := start(t,
 		withScript(scriptRule{Match: "EXPANDED:", Reply: "on it"}),
 		withSetup(func(t *testing.T, s *system) {
-			s.writeWorkspace(t, ".acornfall/commands/summarize.md",
+			s.writeWorkspace(t, ".acornd/commands/summarize.md",
 				"---\nname: summarize\ndescription: Summarize something\nargument-hint: what to summarize\n---\nEXPANDED: summarize $ARGUMENTS, briefly.")
 		}),
 	)
@@ -49,7 +49,7 @@ func TestCommandArgumentsAreAppendedWhenThereIsNoPlaceholder(t *testing.T) {
 	s := start(t,
 		withScript(scriptRule{Match: "PING", Reply: "pong"}),
 		withSetup(func(t *testing.T, s *system) {
-			s.writeWorkspace(t, ".acornfall/commands/status.md", "---\nname: status\n---\nPING the status.")
+			s.writeWorkspace(t, ".acornd/commands/status.md", "---\nname: status\n---\nPING the status.")
 		}),
 	)
 	c := s.client()
@@ -87,7 +87,7 @@ func TestCommandsComeFromBothLayersAndTheWorkspaceWins(t *testing.T) {
 	s := start(t, withSetup(func(t *testing.T, s *system) {
 		s.writeHome(t, "commands/deploy.md", "---\nname: deploy\ndescription: the install's way\n---\nInstall deploy.")
 		s.writeHome(t, "commands/shared.md", "---\nname: shared\ndescription: from the install\n---\nShared install body.")
-		s.writeWorkspace(t, ".acornfall/commands/deploy.md", "---\nname: deploy\ndescription: this workspace's way\n---\nWorkspace deploy.")
+		s.writeWorkspace(t, ".acornd/commands/deploy.md", "---\nname: deploy\ndescription: this workspace's way\n---\nWorkspace deploy.")
 	}))
 	c := s.client()
 
@@ -116,7 +116,7 @@ func TestCommandsComeFromBothLayersAndTheWorkspaceWins(t *testing.T) {
 	if builtins != 2 || byName["compact"] == "" || byName["clear"] == "" {
 		t.Fatalf("expected the two builtin commands beside the files, got %+v", listing.Commands)
 	}
-	if !strings.Contains(byName["deploy"], "this workspace's way") || !strings.Contains(byName["deploy"], ".acornfall/commands") {
+	if !strings.Contains(byName["deploy"], "this workspace's way") || !strings.Contains(byName["deploy"], ".acornd/commands") {
 		t.Errorf("the workspace's command should win, got %q", byName["deploy"])
 	}
 	if !strings.Contains(byName["shared"], "from the install") {

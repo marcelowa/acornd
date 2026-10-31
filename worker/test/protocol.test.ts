@@ -56,7 +56,7 @@ class Worker {
 			],
 			{
 				cwd: workerDir,
-				env: { ...process.env, ACORNFALL_DEV_SCRIPT: script },
+				env: { ...process.env, ACORND_DEV_SCRIPT: script },
 				stdin: "pipe",
 				stdout: "pipe",
 				stderr: "inherit",
@@ -182,7 +182,7 @@ function authFrame(authId: string, kind: string): (candidate: Frame) => boolean 
 }
 
 beforeAll(async () => {
-	home = await tempDir("acornfall-protocol-");
+	home = await tempDir("acornd-protocol-");
 	const workspace = join(home, "workspace");
 	await mkdir(workspace, { recursive: true });
 	const script = join(home, "script.json");
@@ -527,7 +527,7 @@ describe("authors", () => {
 	}
 
 	function written(entries: Entry[]): Entry | undefined {
-		return entries.find((entry) => entry.kind === "acornfall.message");
+		return entries.find((entry) => entry.kind === "acornd.message");
 	}
 
 	test("TestAnEntryCarriesItsAuthor", async () => {

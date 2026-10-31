@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 )
 
-// The cleanup once removed every sandbox labelled "acornfall" — the install, not the test —
+// The cleanup once removed every sandbox labelled "acornd" — the install, not the test —
 // so one test finishing deleted another test's running microVM. This pins the smaller list:
 // the general workspace and the workspaces created inside this test's own folder.
 func TestCleanupNamesOnlyTheSandboxesTheTestOwns(t *testing.T) {

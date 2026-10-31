@@ -21,7 +21,7 @@ The result, seen on `acornd` on 2026-10-28:
 
 - `supervisor.log` said `19:30:39 idle for 30m0s: stopping the sandbox` — and `19:53:23` for the
   other workspace — while both workers had been attached since 19:23;
-- `/run/user/1000/acornfall/<id>/s.sock` was gone, and `ps` showed no sandbox;
+- `/run/user/1000/acornd/<id>/s.sock` was gone, and `ps` showed no sandbox;
 - `read`, `write`, and `edit` kept working (file operations are the host's, by design), the state
   frame kept saying `status: running` (it is computed at attach), and every `bash` call failed with
   `connect ENOENT`, followed by a sentence that asserted a lifecycle fact nobody had checked:
@@ -46,7 +46,7 @@ alive forever and the net under a dead gateway would never fire. The two request
 things, so they are different messages.
 
 **3. The error says what to do.** The worker cannot start a bwrap sandbox, so the message is no
-longer a guess about the workspace's lifecycle: *"the sandbox is stopped, and restarting acornfall
+longer a guess about the workspace's lifecycle: *"the sandbox is stopped, and restarting acornd
 starts it again"* — which is true, because a restart re-attaches every worker and control starts
 what is stopped.
 
@@ -76,7 +76,7 @@ what is stopped.
   engines now keep tools working across an idle window, by different mechanisms.
 - **A sandbox created by an earlier binary does not know `keepalive`** and answers "unknown
   request". The client ignores that, so such a sandbox still idles out; it is recreated with the
-  new supervisor the next time it is started (a restart of acornfall, a stop, a secret change).
+  new supervisor the next time it is started (a restart of acornd, a stop, a secret change).
   An install that updates while a sandbox is alive keeps the old supervisor until then.
 - **Not fixed here:** the state frame's `sandbox.status` is still computed at attach, so a sandbox
   that dies for another reason (an OOM kill, a foreign signal) can read `running` while it is gone.

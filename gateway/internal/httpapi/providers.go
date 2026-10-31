@@ -8,7 +8,7 @@ package httpapi
 import (
 	"net/http"
 
-	"github.com/acornfall/acornfall/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/control"
 )
 
 // providerAllowlist answers which models this install may use from each provider. Empty for a provider means every

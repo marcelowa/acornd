@@ -25,7 +25,7 @@ export type ConversationMeta = {
 };
 
 export const ConversationMetaDoc = defineDoc<ConversationMeta>({
-	kind: "acornfall.meta",
+	kind: "acornd.meta",
 	version: 1,
 	scope: "conversation",
 	history: "latest",

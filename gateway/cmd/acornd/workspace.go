@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/acornfall/acornfall/gateway/internal/control"
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 )
 
 /*
@@ -43,14 +43,14 @@ func workspaceCommand(argv []string) {
 }
 
 func workspaceUsage(w *os.File) {
-	fmt.Fprint(w, `usage: acornfall workspace <command>
+	fmt.Fprint(w, `usage: acornd workspace <command>
 
   list                 every workspace, and the engine and image it runs on
   add <name> [folder]  register a folder as a workspace; the folder defaults to ./<name>
   remove <name>        forget a workspace; its folder and its history stay
   purge <name> --yes   delete a workspace's folder and its record; the only thing that deletes
 
-acornfall workspace add -h    explains the flags it takes
+acornd workspace add -h    explains the flags it takes
 `)
 }
 
@@ -59,7 +59,7 @@ acornfall workspace add -h    explains the flags it takes
 // hand-edited registry.
 func workspaceAdd(argv []string) {
 	flags := flag.NewFlagSet("workspace add", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	dataDir := flags.String("data-dir", "", "the acornd folder")
 	image := flags.String("image", "", "sandbox image for this workspace, e.g. golang:1.24 (default: "+sandbox.DefaultImage+")")
 	egress := flags.String("egress", "", `what the sandbox can reach: "public" (default), "private" (this machine's LAN and tailnet), or "off"`)
 	engine := flags.String("sandbox", "", "sandbox engine: microsandbox, bwrap, or host (default: what this machine can run)")
@@ -87,16 +87,16 @@ func workspaceAdd(argv []string) {
 	}
 	dir, err := resolveDataDir(*dataDir)
 	if err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	path := filepath.Join(dir, "workspaces.json")
 	registry, err := control.LoadRegistryFile(path)
 	if err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	name, absolute, err := addTarget(args, registry)
 	if err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	chosen = recordWorkspace(dir, registry, addRecord{
 		name:      name,
@@ -114,7 +114,7 @@ func workspaceAdd(argv []string) {
 }
 
 // addUsage is the flags a person may pass, and the one decision this command makes for them.
-const addUsage = `usage: acornfall workspace add <name> [folder] [flags]
+const addUsage = `usage: acornd workspace add <name> [folder] [flags]
 
   --sandbox ENGINE   microsandbox (needs a hypervisor), bwrap (needs user namespaces), or
                      host (no isolation); default: what this machine can run
@@ -123,8 +123,8 @@ const addUsage = `usage: acornfall workspace add <name> [folder] [flags]
   --keep-alive       keep the sandbox running when nobody is watching it
   --no-vm-nesting    refuse a hypervisor inside the sandbox
   --no-devices       withhold /dev/net/tun and /dev/kvm from a bwrap sandbox; the
-                     default grants them so a workspace can run another acornfall
-  --data-dir DIR     the acornfall folder (default: ~/.acornfall)
+                     default grants them so a workspace can run another acornd
+  --data-dir DIR     the acornd folder (default: ~/.acornd)
 
 The folder defaults to ./<name>. The engine is recorded here, once: a workspace keeps the
 engine it was created with.
@@ -159,11 +159,11 @@ func addTarget(positional []string, registry control.RegistryFile) (name, absolu
 func addChoices(egress, engine string) (network string, private bool, chosen string, ok bool) {
 	network, private, err := parseEgress(egress)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "acornfall: %v\n", err)
+		fmt.Fprintf(os.Stderr, "acornd: %v\n", err)
 		return "", false, "", false
 	}
 	if !sandbox.ValidEngine(engine) {
-		fmt.Fprintf(os.Stderr, "acornfall: --sandbox is one of %s\n", strings.Join(sandbox.EngineNames(), ", "))
+		fmt.Fprintf(os.Stderr, "acornd: --sandbox is one of %s\n", strings.Join(sandbox.EngineNames(), ", "))
 		return "", false, "", false
 	}
 	return network, private, engine, true
@@ -210,25 +210,25 @@ func recordWorkspace(dir string, registry control.RegistryFile, record addRecord
 		Private: record.private, DisableVMNesting: nesting, DisableDevices: devices,
 	})
 	if err := control.SaveRegistryFile(registry); err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	return chosen
 }
 
 func workspaceList(argv []string) {
 	flags := flag.NewFlagSet("workspace list", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	dataDir := flags.String("data-dir", "", "the acornd folder")
 	flagArgs, _ := splitFlags(argv, map[string]bool{"data-dir": true})
 	if err := flags.Parse(flagArgs); err != nil {
 		os.Exit(2)
 	}
 	dir, err := resolveDataDir(*dataDir)
 	if err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	registry, err := control.LoadRegistryFile(filepath.Join(dir, "workspaces.json"))
 	if err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	if len(registry.Workspaces) == 0 {
 		fmt.Println("no workspaces registered")
@@ -249,9 +249,9 @@ func workspaceList(argv []string) {
 
 func workspaceRemove(argv []string) {
 	flags := flag.NewFlagSet("workspace remove", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	dataDir := flags.String("data-dir", "", "the acornd folder")
 	flags.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: acornfall workspace remove <name>\n\nIts folder and its history stay; only the registration goes.\n")
+		fmt.Fprint(os.Stderr, "usage: acornd workspace remove <name>\n\nIts folder and its history stay; only the registration goes.\n")
 	}
 	flagArgs, positional := splitFlags(argv, map[string]bool{"data-dir": true})
 	if err := flags.Parse(flagArgs); err != nil {
@@ -264,34 +264,34 @@ func workspaceRemove(argv []string) {
 	}
 	dir, err := resolveDataDir(*dataDir)
 	if err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	path := filepath.Join(dir, "workspaces.json")
 	registry, err := control.LoadRegistryFile(path)
 	if err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	record, err := recordFor(registry, args[0])
 	if err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	if record.Personal() {
 		// Somebody's own room is never shared and never removed: forgetting it removes the one place they had, and
 		// the admin can do that by revoking the person, which is a decision with a name.
-		log.Fatalf("acornfall: %s is somebody's own room and cannot be forgotten", record.Name)
+		log.Fatalf("acornd: %s is somebody's own room and cannot be forgotten", record.Name)
 	}
 	registry.Workspaces = withoutWorkspace(registry.Workspaces, record.Name)
 	if err := control.SaveRegistryFile(registry); err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	fmt.Printf("forgot %s (its folder and history are untouched)\n", record.Name)
 }
 
 // purgeUsage is the one command in this file that deletes anything, and it says so before it does.
-const purgeUsage = `usage: acornfall workspace purge <name> --yes
+const purgeUsage = `usage: acornd workspace purge <name> --yes
 
   --yes              delete the folder, its state, and the record; without it, purge only names them
-  --data-dir DIR     the acornfall folder (default: ~/.acornfall)
+  --data-dir DIR     the acornd folder (default: ~/.acornd)
 
 Forgetting a workspace and deleting one are two acts, and this is the second (ADR 0034 §6). It
 needs the record to find the folder: a forgotten folder is just a folder, and a command that
@@ -301,18 +301,18 @@ leaving the state behind would hand a forgotten history to the next room of that
 `
 
 // workspacePurge deletes what makes a name a workspace: its folder, its state, and its record. It is the only
-// thing in acornfall that deletes one, it is never behind a route or a button, and it prints both paths before
+// thing in acornd that deletes one, it is never behind a route or a button, and it prints both paths before
 // it does: a path is the one thing a person can check before an unrecoverable act.
 func workspacePurge(argv []string) {
 	dir, name, yes := purgeArgs(argv)
 	path := filepath.Join(dir, "workspaces.json")
 	registry, err := control.LoadRegistryFile(path)
 	if err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	workspace, err := purgeTarget(registry, name)
 	if err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	folder, state := purgeTargets(dir, workspace)
 	fmt.Printf("purge %s\n  folder %s\n  state  %s\n", workspace.Name, folder, state)
@@ -321,7 +321,7 @@ func workspacePurge(argv []string) {
 		os.Exit(1)
 	}
 	if err := purgeWorkspace(registry, workspace.Name, folder, state); err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	fmt.Printf("purged %s: the folder, its state and the record are gone\n", workspace.Name)
 }
@@ -349,7 +349,7 @@ func purgeWorkspace(registry control.RegistryFile, name, folder, state string) e
 // meant it. It is separate from the deleting so that the deleting reads as one act.
 func purgeArgs(argv []string) (dir, name string, yes bool) {
 	flags := flag.NewFlagSet("workspace purge", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	dataDir := flags.String("data-dir", "", "the acornd folder")
 	confirmed := flags.Bool("yes", false, "delete the folder and the record")
 	flags.Usage = func() { fmt.Fprint(os.Stderr, purgeUsage) }
 	flagArgs, positional := splitFlags(argv, map[string]bool{"data-dir": true})
@@ -362,7 +362,7 @@ func purgeArgs(argv []string) (dir, name string, yes bool) {
 	}
 	dir, err := resolveDataDir(*dataDir)
 	if err != nil {
-		log.Fatalf("acornfall: %v", err)
+		log.Fatalf("acornd: %v", err)
 	}
 	return dir, positional[0], *confirmed
 }

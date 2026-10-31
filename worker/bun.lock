@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@acornfall/worker",
+      "name": "@acornd/worker",
       "dependencies": {
         "@earendil-works/chord": "^1.4.0",
         "@earendil-works/pi-ai": "^1.4.0",

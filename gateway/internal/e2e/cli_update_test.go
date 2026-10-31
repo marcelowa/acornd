@@ -42,7 +42,7 @@ func TestTheUpdateCommandRefusesAStrayArgument(t *testing.T) {
 	dir := t.TempDir()
 	if _, stderr, code := cli(t, dir, "", "update", "tidy", "--data-dir", dir); code != 2 {
 		t.Errorf("a stray argument: exit %d, want 2\n%s", code, stderr)
-	} else if !strings.Contains(stderr, "usage: acornfall update") {
+	} else if !strings.Contains(stderr, "usage: acornd update") {
 		t.Errorf("the refusal should print the usage: %q", stderr)
 	}
 }
@@ -55,7 +55,7 @@ func TestTheWorkspaceCommandsRefuseWhatTheyCannotDo(t *testing.T) {
 
 	if _, stderr, code := cli(t, dir, "", "workspace", "remove", "--data-dir", dir); code == 0 {
 		t.Errorf("remove with no name: exit 0\n%s", stderr)
-	} else if !strings.Contains(stderr, "usage: acornfall workspace remove") {
+	} else if !strings.Contains(stderr, "usage: acornd workspace remove") {
 		t.Errorf("the refusal should print the usage: %q", stderr)
 	}
 	if _, stderr, code := cli(t, dir, "", "workspace", "remove", "nowhere", "--data-dir", dir); code == 0 {

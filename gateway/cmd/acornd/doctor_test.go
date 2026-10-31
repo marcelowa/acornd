@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/control"
 )
 
 // Doctor used to build its report manager without an engine, so it always exited with

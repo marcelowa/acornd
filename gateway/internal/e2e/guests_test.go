@@ -25,7 +25,7 @@ type accessDoor struct {
 	key      *rsa.PrivateKey
 }
 
-const accessKid = "acornfall-test"
+const accessKid = "acornd-test"
 
 func newAccessDoor(t *testing.T) *accessDoor {
 	t.Helper()
@@ -46,7 +46,7 @@ func newAccessDoor(t *testing.T) *accessDoor {
 	return &accessDoor{
 		url:      server.URL,
 		issuer:   "https://test.cloudflareaccess.com",
-		audience: "acornfall-test",
+		audience: "acornd-test",
 		key:      key,
 	}
 }
@@ -88,10 +88,10 @@ func TestAGuestSpeaksAndCannotChangeTheRoom(t *testing.T) {
 	door := newAccessDoor(t)
 	s := start(t,
 		withEnv(
-			"ACORNFALL_IDENTITY=access",
-			"ACORNFALL_IDENTITY_AUDIENCE="+door.audience,
-			"ACORNFALL_IDENTITY_ISSUER="+door.issuer,
-			"ACORNFALL_IDENTITY_KEYS="+door.url,
+			"ACORND_IDENTITY=access",
+			"ACORND_IDENTITY_AUDIENCE="+door.audience,
+			"ACORND_IDENTITY_ISSUER="+door.issuer,
+			"ACORND_IDENTITY_KEYS="+door.url,
 		),
 		withSetup(func(t *testing.T, s *system) {
 			book := `{"people":[

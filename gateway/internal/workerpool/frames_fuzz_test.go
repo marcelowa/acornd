@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
 // FuzzTheReaderSurvivesWhateverTheWorkerSaid feeds the frame reader bytes it was never meant to

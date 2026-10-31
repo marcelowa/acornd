@@ -52,7 +52,7 @@ export const Conversation: Story = {
 				status: "done",
 				isError: false,
 				args: { command: "go test ./internal/workerpool" },
-				output: "ok  \tgithub.com/acornfall/acornfall/gateway/internal/workerpool\t0.21s",
+				output: "ok  \tgithub.com/marcelowa/acornd/gateway/internal/workerpool\t0.21s",
 			},
 			{
 				kind: "tool",
@@ -89,7 +89,7 @@ export const MultiTurn: Story = {
 				status: "done",
 				isError: false,
 				args: { command: "go test ./internal/workerpool" },
-				output: "ok  \tgithub.com/acornfall/acornfall/gateway/internal/workerpool\t0.21s",
+				output: "ok  \tgithub.com/marcelowa/acornd/gateway/internal/workerpool\t0.21s",
 			},
 			{ kind: "user", id: "4", at, text: "And the second announcement?", forkAt: "1" },
 			{
@@ -287,9 +287,9 @@ function longConversation(): TranscriptEntry[] {
 				turn === 221
 					? Array.from(
 							{ length: 400 },
-							(_, line) => `output line ${line}: ok  github.com/acornfall/acornfall`,
+							(_, line) => `output line ${line}: ok  github.com/marcelowa/acornd`,
 						).join("\n")
-					: `ok  \tgithub.com/acornfall/acornfall/gateway/internal/workerpool\t0.2${turn % 10}s`,
+					: `ok  \tgithub.com/marcelowa/acornd/gateway/internal/workerpool\t0.2${turn % 10}s`,
 		});
 		entries.push({
 			kind: "assistant",

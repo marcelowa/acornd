@@ -3,7 +3,7 @@ package control
 import (
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
 // What a conversation actually runs. Three layers, in a fixed order — what it chose, then what its

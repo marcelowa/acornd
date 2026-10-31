@@ -149,7 +149,7 @@ func (h *harness) client(t *testing.T, token string, roots ...*x509.Certificate)
 	}
 	userinfo := ""
 	if token != "" {
-		userinfo = url.UserPassword("acornfall", token).String() + "@"
+		userinfo = url.UserPassword("acornd", token).String() + "@"
 	}
 	proxyURL, err := url.Parse("http://" + userinfo + h.addr)
 	if err != nil {
@@ -461,7 +461,7 @@ func TestTheProxyRefusesAClientWithoutItsToken(t *testing.T) {
 		Name: "TEST_TOKEN", Value: theValue, Placeholder: thePlaceholder,
 		Hosts: []string{fakeHost}, Headers: true,
 	})
-	basic := "Basic " + base64.StdEncoding.EncodeToString([]byte("acornfall:"+h.token))
+	basic := "Basic " + base64.StdEncoding.EncodeToString([]byte("acornd:"+h.token))
 
 	cases := []struct {
 		name   string
@@ -761,12 +761,12 @@ func TestAuthorisedAcceptsOnlyTheTwoFormsAClientCanSend(t *testing.T) {
 	}{
 		{"bearer", "Bearer the-token", true},
 		{"bearer lower case", "bearer the-token", true},
-		{"basic", basic("acornfall:the-token"), true},
+		{"basic", basic("acornd:the-token"), true},
 		{"empty user", basic(":the-token"), true},
 		{"no header", "", false},
 		{"no space", "Bearer", false},
 		{"wrong bearer", "Bearer other", false},
-		{"wrong password", basic("acornfall:other"), false},
+		{"wrong password", basic("acornd:other"), false},
 		{"basic without a colon", basic("the-token"), false},
 		{"basic that is not base64", "Basic !!!not-base64!!!", false},
 		{"unknown scheme", "Token the-token", false},

@@ -117,7 +117,7 @@ func TestARunStreamsAndReportsItsExitCode(t *testing.T) {
 // The environment is exactly what was sent: a supervisor that inherited its own environment
 // would hand the sandbox everything the worker holds.
 func TestARunSeesOnlyTheEnvironmentItWasSent(t *testing.T) {
-	t.Setenv("ACORNFALL_SUPERVISOR_SHOULD_NOT_LEAK", "yes")
+	t.Setenv("ACORND_SUPERVISOR_SHOULD_NOT_LEAK", "yes")
 	_, socket := startServer(t)
 	c := dial(t, socket)
 	c.send(t, Request{
@@ -134,7 +134,7 @@ func TestARunSeesOnlyTheEnvironmentItWasSent(t *testing.T) {
 	c.send(t, Request{
 		Type: "run",
 		ID:   "2",
-		Argv: []string{"/bin/sh", "-c", `printf '%s' "${ACORNFALL_SUPERVISOR_SHOULD_NOT_LEAK:-absent}"`},
+		Argv: []string{"/bin/sh", "-c", `printf '%s' "${ACORND_SUPERVISOR_SHOULD_NOT_LEAK:-absent}"`},
 		Env:  map[string]string{},
 	})
 	output, _ = c.collect(t, "2")

@@ -30,7 +30,7 @@ import (
 )
 
 // LatestURL is the v1 release source: GitHub releases only.
-const LatestURL = "https://api.github.com/repos/marcelowa/acornfall/releases/latest"
+const LatestURL = "https://api.github.com/repos/marcelowa/acornd/releases/latest"
 
 // CheckInterval is how often the gateway checks on its own.
 const CheckInterval = time.Hour
@@ -155,8 +155,8 @@ func (m *Manager) Preflight(ctx context.Context) Preflight {
 }
 
 func releaseProblem(err error) string {
-	if os.Getenv("ACORNFALL_GITHUB_TOKEN") == "" && strings.Contains(err.Error(), "404") {
-		return "not found: a private repo needs ACORNFALL_GITHUB_TOKEN, or no releases exist yet"
+	if os.Getenv("ACORND_GITHUB_TOKEN") == "" && strings.Contains(err.Error(), "404") {
+		return "not found: a private repo needs ACORND_GITHUB_TOKEN, or no releases exist yet"
 	}
 	return "unreachable: " + err.Error()
 }
@@ -259,14 +259,14 @@ func New(dataDir, binPath string) *Manager {
 			binPath = executable
 		}
 	}
-	// ACORNFALL_UPDATE_URL points the release lookups at a mirror. It is the same kind of
-	// decision as ACORNFALL_GITHUB_TOKEN, which is already an environment variable for the same
+	// ACORND_UPDATE_URL points the release lookups at a mirror. It is the same kind of
+	// decision as ACORND_GITHUB_TOKEN, which is already an environment variable for the same
 	// reason — a private mirror or a rate-limited API — and it is what lets the update screen be
 	// tested against a server instead of against github.
 	return &Manager{
 		dataDir:   dataDir,
 		binPath:   binPath,
-		latestURL: envOr("ACORNFALL_UPDATE_URL", LatestURL),
+		latestURL: envOr("ACORND_UPDATE_URL", LatestURL),
 		client:    &http.Client{Timeout: 30 * time.Second},
 		settings:  DefaultSettings(),
 		IsAdmin:   func(*http.Request) bool { return true },
@@ -457,7 +457,7 @@ func (m *Manager) get(ctx context.Context, url string) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	if token := os.Getenv("ACORNFALL_GITHUB_TOKEN"); token != "" {
+	if token := os.Getenv("ACORND_GITHUB_TOKEN"); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
@@ -852,9 +852,9 @@ func sign(delta int) int {
 }
 
 // AssetFor picks the release file for this platform, or "" when the
-// release publishes none. Names follow `acornfall-<goos>-<goarch>`.
+// release publishes none. Names follow `acornd-<goos>-<goarch>`.
 func AssetFor(release Release) Asset {
-	return assetNamed(release, "acornfall-"+runtime.GOOS+"-"+runtime.GOARCH)
+	return assetNamed(release, "acornd-"+runtime.GOOS+"-"+runtime.GOARCH)
 }
 
 // WorkerTarballAsset picks the worker sources tarball, or "" when the
@@ -1022,7 +1022,7 @@ func (m *Manager) Migrate(ctx context.Context, tag string) error {
 		}
 		return err
 	}
-	temp, err := os.CreateTemp("", "acornfall-migrate-*.sh")
+	temp, err := os.CreateTemp("", "acornd-migrate-*.sh")
 	if err != nil {
 		return err
 	}
@@ -1207,7 +1207,7 @@ func (m *Manager) cleanVMs(ctx context.Context, options ApplyOptions) error {
 // version file would answer for the binary, and a failure must leave the
 // running build and its backup exactly alone.
 func checkExec(ctx context.Context, payload []byte, tag string) error {
-	temp, err := os.CreateTemp("", "acornfall-check-*")
+	temp, err := os.CreateTemp("", "acornd-check-*")
 	if err != nil {
 		return err
 	}
@@ -1223,7 +1223,7 @@ func checkExec(ctx context.Context, payload []byte, tag string) error {
 	if err := os.Chmod(tempPath, 0o755); err != nil {
 		return err
 	}
-	emptyDataDir, err := os.MkdirTemp("", "acornfall-check-data-*")
+	emptyDataDir, err := os.MkdirTemp("", "acornd-check-data-*")
 	if err != nil {
 		return err
 	}
@@ -1234,9 +1234,9 @@ func checkExec(ctx context.Context, payload []byte, tag string) error {
 	// Every name the folder has had, because the staged binary may be older or newer than this
 	// one: the check exists to learn what the *staged* build is, so it must speak its dialect.
 	command.Env = append(os.Environ(),
-		"ACORNFALL_DATA_DIR="+emptyDataDir,
-		"ACORNFALL_HOME="+emptyDataDir,
-		"ACORNFALL_DATA="+emptyDataDir,
+		"ACORND_DATA_DIR="+emptyDataDir,
+		"ACORND_HOME="+emptyDataDir,
+		"ACORND_DATA="+emptyDataDir,
 	)
 	output, err := command.Output()
 	if err != nil {
@@ -1275,7 +1275,7 @@ func CleanSandboxes(ctx context.Context, names []string, remove func(context.Con
 }
 
 // apiBase is scheme://host/repos/owner/repo, derived from the check URL.
-const defaultAPIBase = "https://api.github.com/repos/marcelowa/acornfall"
+const defaultAPIBase = "https://api.github.com/repos/marcelowa/acornd"
 
 func (m *Manager) apiBase() string {
 	url := m.latestURL
@@ -1302,7 +1302,7 @@ func (m *Manager) download(ctx context.Context, asset Asset) ([]byte, error) {
 	if accept != "" {
 		request.Header.Set("Accept", accept)
 	}
-	if token := os.Getenv("ACORNFALL_GITHUB_TOKEN"); token != "" {
+	if token := os.Getenv("ACORND_GITHUB_TOKEN"); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
 	response, err := m.client.Do(request)
@@ -1338,7 +1338,7 @@ func (m *Manager) checksumList(ctx context.Context, release Release) (string, er
 	}
 	// A token is for a private mirror or a rate-limited API, and comes from the environment so it
 	// never sits in a file this install writes.
-	if token := os.Getenv("ACORNFALL_GITHUB_TOKEN"); token != "" {
+	if token := os.Getenv("ACORND_GITHUB_TOKEN"); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
 	response, err := m.client.Do(request)
@@ -1403,9 +1403,9 @@ func (m *Manager) checkInstallFolder() error {
 		return nil
 	}
 	dir := filepath.Dir(m.binPath)
-	probe, err := os.CreateTemp(dir, ".acornfall-update-*")
+	probe, err := os.CreateTemp(dir, ".acornd-update-*")
 	if err != nil {
-		return fmt.Errorf("update: %s is not writable by this user, so the update cannot replace the binary: install acornfall into a folder you own (sh scripts/install.sh --dir ~/.acornfall/bin) or run acornfall as the user who owns %s", dir, dir)
+		return fmt.Errorf("update: %s is not writable by this user, so the update cannot replace the binary: install acornd into a folder you own (sh scripts/install.sh --dir ~/.acornd/bin) or run acornd as the user who owns %s", dir, dir)
 	}
 	name := probe.Name()
 	_ = probe.Close()
