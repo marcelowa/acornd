@@ -1,6 +1,6 @@
 # ADR 0033 — A browser reaches the machine through a tunnel we configure
 
-Status: accepted (2026-10-30), built
+Status: accepted (2026-10-30), built; the API token is stored (amended 2026-10-31)
 Date: 2026-10-30
 
 ## Context
@@ -76,21 +76,31 @@ What a reconcile did, and anything it could not do, is one line per step in the 
 
 **Built.** Every start runs the same apply the command runs, before the connector dials out, with a
 ninety-second budget and no way to fail a boot: an install with no door, no `remote.json`, or no API
-token in its environment says so once and serves anyway. The API token is read from
-`ACORNFALL_CLOUDFLARE_TOKEN` and is deliberately **not stored** — see §4 — so an install whose service
-does not carry it reconciles only when somebody runs the command. That is the honest limit of "as
-automatic as possible" until the token has a home with a stronger story than a file in the data folder.
+token in its environment or stored says so once and serves anyway. The token comes from
+`ACORNFALL_CLOUDFLARE_TOKEN` when the service carries it, and otherwise from the copy the console
+stored (§4); a start with neither reconciles only when somebody runs the command. The same apply runs
+after a person is added, revoked or restored, so the group follows the book.
 
-### 4. The running process holds the tunnel token, not the API token
+### 4. The console keeps the API token, 0600, so the door follows the book
 
 > [!WARNING]
 > The API token can rewrite DNS for the zone and every Access application on the account. It is the
 > most powerful credential in the install.
 
-So it is used at setup and reconcile and then offered for deletion (`acornfall remote forget-token`);
-what the supervised process holds is the tunnel token, which can run exactly one tunnel and nothing
-else. A leaked tunnel token lets someone else be your origin — Access still gates what reaches them,
-but it is a real leak, so rotating it is a button and the sentence that says so sits next to it.
+It is stored after a successful apply in `<data-dir>/remote.json`, beside the tunnel's token and with
+the same 0600, because the group is derived from `people.json` and reconciled at boot and after any
+change to People (decision 3). Without a token the door cannot follow the book, and the person who
+added somebody has to run a command to make their invitation real; that was the gap the first version
+left, when the token was used and dropped.
+
+What the supervised process holds is still the tunnel token, which can run exactly one tunnel and
+nothing else. The API token never leaves the install folder, is never returned by `GET /api/remote`
+(which says only whether one is stored), and is never logged; `acornfall remote forget-token`, or
+Forget in the console, removes it and leaves Cloudflare exactly as it is. A leaked tunnel token lets
+somebody else be your origin — Access still gates what reaches them, but it is a real leak, so rotating
+it is a button. A leaked API token is worse: it is the account's DNS and Access apps, so the install
+folder is 0700 and the file 0600, the token is rotatable in Cloudflare, and storing it buys the door
+following the book rather than a convenience.
 
 ### 5. `cloudflared` is ours: pinned, verified, supervised
 
@@ -196,6 +206,9 @@ building it is the token's lifetime and its refresh behaviour.
   repaired on the next pass; a failed step is reported and the rest is not skipped silently.
 - Golden fixtures — sanitized real responses — so a shape change in the API fails a test rather than
   a family member's login.
+- The stored token: `remote.TestTheSetupIsAFileWithItsToken`,
+  `httpapi.TestRemoteApplyKeepsTheTokenButNeverReturnsIt`, `TestForgettingTheTokenKeepsTheDoor`,
+  `TestAPersonAddedInTheBookReachesTheDoor`, and `ui/test/remote.test.ts` for the forgetting call.
 - `TestTheApiTokenIsNotNeededToKeepTheTunnelUp`, `TestACloudflaredCrashIsReportedAsDegraded`,
   `TestASetupThatDiedHalfwayResumes`.
 
