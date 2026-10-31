@@ -68,7 +68,9 @@ func openGate(dir, host string) (httpapi.Gate, error) {
 		return httpapi.Gate{}, err
 	}
 	if door == nil {
-		return httpapi.Gate{}, nil
+		// No door, but still an install folder: the edge reads the provider allowlist from it, and a gate with
+		// no Dir would let the single-admin install offer models its own allowlist refuses.
+		return httpapi.Gate{Dir: dir}, nil
 	}
 	book, err := people.Open(filepath.Join(dir, people.File))
 	if err != nil {

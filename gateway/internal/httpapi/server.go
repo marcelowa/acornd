@@ -96,7 +96,9 @@ func (s *Server) stateOf(ctl *control.Control, caller control.Caller, conversati
 			state.Can.MakeRoom = person.CanCreate
 		}
 	}
-	return state
+	// Every state the interface receives is filtered, not only the first one: the stream and a mutation answer
+	// with a state too, and an unfiltered frame put every model back in the picker after the first event.
+	return s.offerable(state, caller)
 }
 
 // mayRoom refuses an action this room keeps for its owner. The table is control's; this only decides the status
@@ -229,7 +231,7 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, s.offerable(s.stateOf(ctl, callerOf(r), r.URL.Query().Get("conversation")), callerOf(r)))
+	writeJSON(w, http.StatusOK, s.stateOf(ctl, callerOf(r), r.URL.Query().Get("conversation")))
 }
 
 // workspaceStatus answers where a workspace is, and never starts it: opening a workspace is the
