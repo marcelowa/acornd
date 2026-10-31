@@ -53,11 +53,11 @@ idle_timeout: 30m           # a sandbox nobody used stops itself
 mounts:
   - /home/me/work:/home/me/work:uid=1000,gid=1000
   - /home/me/.agents:/home/me/.agents:ro
-  - /home/me/.acornfall/skills:/home/me/.acornfall/skills:ro
+  - /home/me/.acornd/skills:/home/me/.acornd/skills:ro
 ```
 
 Egress **defaults on** for a new workspace and is a per-workspace switch (on/off only, for now),
-settable in the interface or with `acornfall workspace add --network off`. The image is the
+settable in the interface or with `acornd workspace add --network off`. The image is the
 project's environment — a `golang:` image, a `rust:` image, a devcontainer-style one — and
 settable with `--image`. Bun is the *worker's* runtime and has no business in the guest.
 
@@ -67,7 +67,7 @@ folders are mounted read-only at theirs for the same reason
 ([ADR 0014](0014-global-resources-in-the-sandbox.md)). Those mounts are the only doors into
 the host; the worker is not on the host side of any of them.
 
-`acornfall workspace list` shows what each workspace will run in; the policy file is written
+`acornd workspace list` shows what each workspace will run in; the policy file is written
 next to the workspace's state, so a person can read what it is allowed to be.
 
 ## What the worker can and cannot see
@@ -101,11 +101,11 @@ naming what is missing — and the state frame says so (`sandbox.tools: false`,
 `sandbox.problem`), which the interface shows. The worker starts anyway, because a workspace
 whose tools refuse is still a workspace: its conversations, its history, and its settings are
 all readable. Running unconfined must be a decision somebody made, never a state the system
-drifted into. The decision is a separate engine, the `host` engine, chosen by name (`ACORNFALL_SANDBOX_ENGINE=host` for an install-wide run): it is chosen by name,
+drifted into. The decision is a separate engine, the `host` engine, chosen by name (`ACORND_SANDBOX_ENGINE=host` for an install-wide run): it is chosen by name,
 never by a missing hypervisor, and every surface reports that it is not isolated
 ([ADR 0015](0015-host-engine.md)).
 
-`acornfall doctor` reports the tier without changing anything: engine, version, install path,
+`acornd doctor` reports the tier without changing anything: engine, version, install path,
 state path, and the reason it cannot work if it cannot.
 
 ## Known limits, deferred on purpose
@@ -162,13 +162,13 @@ state path, and the reason it cannot work if it cannot.
   runtime folder (ADR 0027).
 - The worker: `SandboxClient` and its engine adapter, `SandboxExecutionEnv` for every tool call,
   and resource loading routed through the sandbox. `--sandbox <name>` and
-  `ACORNFALL_SANDBOX_ENGINE` and the workspace's own engine come from control; without them the tools refuse.
-- `acornfall doctor` and the workspace CLI (`--image`, `--network`).
+  `ACORND_SANDBOX_ENGINE` and the workspace's own engine come from control; without them the tools refuse.
+- `acornd doctor` and the workspace CLI (`--image`, `--network`).
 - Tests: the environment, the routing, and the refusal are unit-tested against a fake sandbox,
   so the ordinary suite needs no hypervisor. The end-to-end tests that exercise a real
   workspace run a real microVM and belong to the slow tier, `make test-sandbox`, which fails
   rather than skips where there is no hypervisor. `make test` forces the refusal path with
-  `ACORNFALL_NO_SANDBOX=1` instead of auto-detecting the machine, so the fast gate behaves the
+  `ACORND_NO_SANDBOX=1` instead of auto-detecting the machine, so the fast gate behaves the
   same everywhere. Each test removes the sandboxes it created, named from the workspaces it
   owns; the image cache is shared across the suite, which is also what keeps it inside a
   registry's rate limit. [ADR 0013](0013-test-tiers.md) records the tiers.

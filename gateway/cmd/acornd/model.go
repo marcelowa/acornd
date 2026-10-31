@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/acornfall/acornfall/gateway/internal/control"
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
 // modelCommand is the headless half of Settings > Models: which model every workspace falls back
@@ -47,7 +47,7 @@ func modelCommand(argv []string) {
 // an empty list puts it back there.
 func modelAllow(argv []string) {
 	flags := flag.NewFlagSet("model allow", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder (default: ~/.acornfall)")
+	dataDir := flags.String("data-dir", "", "the acornd folder (default: ~/.acornd)")
 	clear := flags.Bool("clear", false, "allow every model this provider has again")
 	flagArgs, rest := splitFlags(argv, map[string]bool{"data-dir": true})
 	if err := flags.Parse(flagArgs); err != nil {
@@ -102,7 +102,7 @@ func printAllowlist(dir string) {
 }
 
 func modelUsage(w *os.File) {
-	fmt.Fprint(w, `usage: acornfall model <command>
+	fmt.Fprint(w, `usage: acornd model <command>
 
   list                 the default model and the provider keys this install has
   set <provider>/<id>  make it the default for every workspace
@@ -122,7 +122,7 @@ top of it.
 
 func modelList(argv []string) {
 	flags := flag.NewFlagSet("model list", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	dataDir := flags.String("data-dir", "", "the acornd folder")
 	flagArgs, _ := splitFlags(argv, map[string]bool{"data-dir": true})
 	if err := flags.Parse(flagArgs); err != nil {
 		os.Exit(2)
@@ -140,8 +140,8 @@ func modelList(argv []string) {
 	} else {
 		fmt.Println("default model   none (each workspace, then the provider's own choice)")
 	}
-	if env := strings.TrimSpace(os.Getenv("ACORNFALL_MODEL")); env != "" {
-		fmt.Printf("last resort     %s (ACORNFALL_MODEL)\n", env)
+	if env := strings.TrimSpace(os.Getenv("ACORND_MODEL")); env != "" {
+		fmt.Printf("last resort     %s (ACORND_MODEL)\n", env)
 	}
 	credentials := readCredentials(filepath.Join(dir, "credentials.json"))
 	if len(credentials) == 0 {
@@ -160,9 +160,9 @@ func modelList(argv []string) {
 
 func modelSet(argv []string) {
 	flags := flag.NewFlagSet("model set", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	dataDir := flags.String("data-dir", "", "the acornd folder")
 	flags.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: acornfall model set <provider>/<modelId> [--data-dir DIR]\n")
+		fmt.Fprint(os.Stderr, "usage: acornd model set <provider>/<modelId> [--data-dir DIR]\n")
 	}
 	flagArgs, positional := splitFlags(argv, map[string]bool{"data-dir": true})
 	if err := flags.Parse(flagArgs); err != nil {
@@ -174,7 +174,7 @@ func modelSet(argv []string) {
 	}
 	provider, modelID, ok := strings.Cut(positional[0], "/")
 	if !ok || strings.TrimSpace(provider) == "" || strings.TrimSpace(modelID) == "" {
-		fmt.Fprintf(os.Stderr, "acornfall model: %q is provider/modelId, e.g. anthropic/claude-sonnet-4-5\n", positional[0])
+		fmt.Fprintf(os.Stderr, "acornd model: %q is provider/modelId, e.g. anthropic/claude-sonnet-4-5\n", positional[0])
 		os.Exit(2)
 	}
 	dir, err := resolveDataDir(*dataDir)
@@ -197,7 +197,7 @@ func modelSet(argv []string) {
 
 func modelClear(argv []string) {
 	flags := flag.NewFlagSet("model clear", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder")
+	dataDir := flags.String("data-dir", "", "the acornd folder")
 	if err := flags.Parse(argv); err != nil {
 		os.Exit(2)
 	}
@@ -222,6 +222,6 @@ func modelSettingsPath(dir string) string {
 }
 
 func logFatal(err error) {
-	fmt.Fprintf(os.Stderr, "acornfall: %v\n", err)
+	fmt.Fprintf(os.Stderr, "acornd: %v\n", err)
 	os.Exit(1)
 }

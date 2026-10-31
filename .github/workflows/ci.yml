@@ -245,7 +245,7 @@ jobs:
       - name: Let bubblewrap make user namespaces
         # Ubuntu 24.04 gates unprivileged user namespaces behind AppArmor. The nested test
         # and the bwrap lifecycle test both need one; without this they fail before reaching
-        # any acornfall code. The bwrap job already does this for its own tier.
+        # any acornd code. The bwrap job already does this for its own tier.
         if: runner.environment == 'github-hosted' && runner.os == 'Linux'
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0

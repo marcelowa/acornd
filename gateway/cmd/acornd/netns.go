@@ -7,7 +7,7 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/acornfall/acornfall/gateway/internal/netns"
+	"github.com/marcelowa/acornd/gateway/internal/netns"
 )
 
 // netnsCommand configures the network namespace pasta made, then becomes the sandbox's own
@@ -26,15 +26,15 @@ func netnsCommand(argv []string) {
 	}
 	command := flags.Args()
 	if len(command) == 0 {
-		log.Fatal("acornfall netns: no command to run")
+		log.Fatal("acornd netns: no command to run")
 	}
 	if err := configureNamespace(*address, *gateway, *refusePrivate); err != nil {
-		log.Fatalf("acornfall netns: %v", err)
+		log.Fatalf("acornd netns: %v", err)
 	}
 	// Exec, not spawn: this process is the sandbox's first, so its pid, its exit status, and
 	// the signals sent to it belong to what runs next.
 	if err := syscall.Exec(command[0], command, os.Environ()); err != nil {
-		log.Fatalf("acornfall netns: cannot run %s: %v", command[0], err)
+		log.Fatalf("acornd netns: cannot run %s: %v", command[0], err)
 	}
 }
 

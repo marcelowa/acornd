@@ -116,7 +116,7 @@ export async function drawDiagram(source: string, theme: Theme): Promise<SVGSVGE
 	counter += 1;
 	let markup: string;
 	try {
-		({ svg: markup } = await mermaid.render(`acornfall-diagram-${theme}-${counter}`, source));
+		({ svg: markup } = await mermaid.render(`acornd-diagram-${theme}-${counter}`, source));
 	} catch (error) {
 		throw new Error(reason(error));
 	}

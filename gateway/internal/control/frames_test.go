@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
 // How a frame from the harness is routed, and the draft rules. Both are small functions where a

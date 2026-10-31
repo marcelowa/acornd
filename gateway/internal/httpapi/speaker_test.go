@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/control"
-	"github.com/acornfall/acornfall/gateway/internal/people"
+	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/people"
 )
 
 // speakerEdge is the edge with a book of named people and a registry, which is everything deciding who is speaking

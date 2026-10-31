@@ -32,7 +32,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 )
 
 var (
@@ -44,7 +44,7 @@ var (
 	// `make cover`. Empty means the ordinary build: instrumentation costs time, and nobody
 	// pays for it unless they asked for the number. `go test -cover` cannot see the gateway
 	// at all — it is a separate process — so this is the only way the feature suite counts.
-	coverDir = os.Getenv("ACORNFALL_COVER_DIR")
+	coverDir = os.Getenv("ACORND_COVER_DIR")
 	// engineHome is a shared installation of the sandbox engine for the whole run. Every test
 	// gets a fresh home, and a fresh home installs 26MB on first use; on a CI runner that
 	// download took 28 seconds, and four tests doing it at once raced the 30-second startup
@@ -77,18 +77,18 @@ func TestMain(m *testing.M) {
 	// Two assertions check what setup does for a person, and root has nothing to show them: it is
 	// the account that would be asked for a password, and a container that maps only uid 0 cannot
 	// become another one to look. They skip themselves, and a skip is a line nobody sees without
-	// -v, so the run says it once instead. Declaring ACORNFALL_NO_UNPRIVILEGED is the machine
+	// -v, so the run says it once instead. Declaring ACORND_NO_UNPRIVILEGED is the machine
 	// stating that nobody here can be that person; it silences the reminder, not the skip.
-	if os.Geteuid() == 0 && os.Getenv("ACORNFALL_NO_UNPRIVILEGED") == "" {
-		fmt.Fprintln(os.Stderr, "e2e: running as root, undeclared: the two unprivileged assertions skip themselves (declare it: ACORNFALL_NO_UNPRIVILEGED=1)")
+	if os.Geteuid() == 0 && os.Getenv("ACORND_NO_UNPRIVILEGED") == "" {
+		fmt.Fprintln(os.Stderr, "e2e: running as root, undeclared: the two unprivileged assertions skip themselves (declare it: ACORND_NO_UNPRIVILEGED=1)")
 	}
 
 	if skipReason == "" {
-		dir, err := os.MkdirTemp("", "acornfall-e2e-*")
+		dir, err := os.MkdirTemp("", "acornd-e2e-*")
 		if err != nil {
 			panic(err)
 		}
-		gatewayBin = filepath.Join(dir, "acornfall")
+		gatewayBin = filepath.Join(dir, "acornd")
 		// Removed explicitly rather than deferred: `os.Exit` skips defers, which is how every
 		// run of this suite left a temp directory holding a built binary behind.
 
@@ -102,7 +102,7 @@ func TestMain(m *testing.M) {
 			// means nothing.
 			args = append(args, "-cover", "-coverpkg=./...")
 		}
-		args = append(args, "-o", gatewayBin, "./cmd/acornfall")
+		args = append(args, "-o", gatewayBin, "./cmd/acornd")
 		build := exec.Command("go", args...)
 		build.Dir = filepath.Join(repoRoot, "gateway")
 		if out, err := build.CombinedOutput(); err != nil {
@@ -131,10 +131,10 @@ func TestMain(m *testing.M) {
 // limit. It is keyed by the engine version because the store carries its own schema: a run on a
 // newer engine migrates it forward, and the older one then refuses to read it.
 func sandboxStateDir() string {
-	if state := os.Getenv("ACORNFALL_SANDBOX_STATE"); state != "" {
+	if state := os.Getenv("ACORND_SANDBOX_STATE"); state != "" {
 		return state
 	}
-	return filepath.Join(os.TempDir(), "acornfall-e2e-sandboxes-"+sandbox.EngineVersion())
+	return filepath.Join(os.TempDir(), "acornd-e2e-sandboxes-"+sandbox.EngineVersion())
 }
 
 func which(name string) string {
@@ -258,10 +258,10 @@ func (s *system) environment(engineEnv string, hostEngine bool, lastResort strin
 	env := []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + s.DataDir,
-		"ACORNFALL_DATA_DIR=" + s.DataDir,
+		"ACORND_DATA_DIR=" + s.DataDir,
 		// The worker sources are a folder, and a folder is a thing the environment says
-		// (ACORNFALL_WORKER) rather than a flag on the server.
-		"ACORNFALL_WORKER=" + workerDir,
+		// (ACORND_WORKER) rather than a flag on the server.
+		"ACORND_WORKER=" + workerDir,
 	}
 	if lastResort != "" {
 		env = append(env, lastResort)
@@ -269,14 +269,14 @@ func (s *system) environment(engineEnv string, hostEngine bool, lastResort strin
 	if engineEnv != "" {
 		// The engine for the whole install is an environment decision now, not a flag: a
 		// workspace records its own engine, and this is the test telling the install otherwise.
-		env = append(env, "ACORNFALL_SANDBOX_ENGINE="+engineEnv)
+		env = append(env, "ACORND_SANDBOX_ENGINE="+engineEnv)
 	}
 	if s.cfg.updateURL != "" {
-		env = append(env, "ACORNFALL_UPDATE_URL="+s.cfg.updateURL)
+		env = append(env, "ACORND_UPDATE_URL="+s.cfg.updateURL)
 	}
 	env = append(env, s.cfg.extraEnv...)
-	if noSandbox := os.Getenv("ACORNFALL_NO_SANDBOX"); noSandbox != "" && !hostEngine {
-		env = append(env, "ACORNFALL_NO_SANDBOX="+noSandbox)
+	if noSandbox := os.Getenv("ACORND_NO_SANDBOX"); noSandbox != "" && !hostEngine {
+		env = append(env, "ACORND_NO_SANDBOX="+noSandbox)
 	}
 	if len(s.cfg.script) > 0 {
 		scriptPath := filepath.Join(s.DataDir, "script.json")
@@ -291,9 +291,9 @@ func (s *system) environment(engineEnv string, hostEngine bool, lastResort strin
 		if err := os.WriteFile(scriptPath, encoded, 0o644); err != nil {
 			s.t.Fatal(err)
 		}
-		env = append(env, "ACORNFALL_DEV_SCRIPT="+scriptPath)
+		env = append(env, "ACORND_DEV_SCRIPT="+scriptPath)
 	} else if !s.cfg.noDevProvider {
-		env = append(env, "ACORNFALL_DEV_PROVIDER=1")
+		env = append(env, "ACORND_DEV_PROVIDER=1")
 	}
 	if coverDir != "" {
 		// Not inherited from os.Environ on purpose: the environment here is curated, and a
@@ -326,7 +326,7 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	t.Cleanup(func() {
 		// The sandboxes this test created are stopped here: the gateway is killed, so its
 		// control never closes, and a leftover microVM holds memory for its idle timeout.
-		// Only this test's workspaces are named: removing by the acornfall label took every
+		// Only this test's workspaces are named: removing by the acornd label took every
 		// sandbox in the shared state, including a parallel test's running VM. The shared
 		// state directory stays: it holds the downloaded image every test would otherwise
 		// fetch again, which is also how a suite avoids a registry's rate limit.
@@ -390,7 +390,7 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	// names one in the environment, so a prompt always has something to run without credentials.
 	lastResort := ""
 	if !s.cfg.noDevProvider {
-		lastResort = "ACORNFALL_MODEL=faux/faux-1"
+		lastResort = "ACORND_MODEL=faux/faux-1"
 	}
 	// A resource test runs on the host engine: it needs the workspace's files, not a microVM,
 	// and this is the engine that needs no hypervisor and no state directory. Everything else
@@ -399,7 +399,7 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	// The tier names its engine (make test-sandbox sets microsandbox, the bwrap tier names
 	// bwrap). A test that names one in the map below overrides it; without this, a runner
 	// that also has bubblewrap installed silently changes the default under the suite.
-	engineEnv := os.Getenv("ACORNFALL_SANDBOX_ENGINE")
+	engineEnv := os.Getenv("ACORND_SANDBOX_ENGINE")
 	if value, ok := bwrapEngineTests.Load(t.Name()); ok && value == true {
 		hostEngine = true
 		engineEnv = "bwrap"
@@ -415,7 +415,7 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 		if err != nil {
 			t.Fatalf("copy the gateway binary: %v", err)
 		}
-		binary = filepath.Join(s.DataDir, "acornfall")
+		binary = filepath.Join(s.DataDir, "acornd")
 		if err := os.WriteFile(binary, payload, 0o755); err != nil {
 			t.Fatalf("copy the gateway binary: %v", err)
 		}
@@ -504,7 +504,7 @@ func (s *system) stop() {
 // sandboxesOwnedByTest lists the sandboxes this test is allowed to remove: the general
 // workspace, and every workspace created by name inside this test's own workspaces folder.
 // A test owns what it created, and the workspaces folder is a per-test temp directory, so
-// nothing here can name another test's sandbox. Removing by the acornfall label instead took
+// nothing here can name another test's sandbox. Removing by the acornd label instead took
 // every sandbox in the shared state, which is what made a parallel sandbox run fail in a
 // different set of tests each time.
 func (s *system) sandboxesOwnedByTest() []string {
@@ -522,7 +522,7 @@ func (s *system) sandboxesOwnedByTest() []string {
 // keepSandboxes leaves the sandboxes a test made in place, which is what somebody debugging a
 // sandbox failure wants: the machine is then still there to look at.
 func keepSandboxes() bool {
-	return os.Getenv("ACORNFALL_KEEP_SANDBOXES") != ""
+	return os.Getenv("ACORND_KEEP_SANDBOXES") != ""
 }
 
 // engineBinary finds the installed engine under a home, whatever version it is.
@@ -547,7 +547,7 @@ var bwrapEngineTests sync.Map
 // bwrapEngine marks a test as running on the bubblewrap engine, before start.
 //
 // A bwrap workspace fetches its image from a registry before it can run anything, so this is
-// also where the tier answers: without ACORNFALL_IMAGE_TEST the test skips, which keeps
+// also where the tier answers: without ACORND_IMAGE_TEST the test skips, which keeps
 // `make test` offline and fast. It is the same trade the microVM tier makes with /dev/kvm.
 func bwrapEngine(t *testing.T) {
 	t.Helper()
@@ -558,12 +558,12 @@ func bwrapEngine(t *testing.T) {
 // bwrapAvailable is the machine half, for a test that chooses the engine itself rather than
 // asking start to choose it.
 //
-// It skips on a machine that cannot run the tier, unless ACORNFALL_BWRAP_ONLY says this *is* the
+// It skips on a machine that cannot run the tier, unless ACORND_BWRAP_ONLY says this *is* the
 // bwrap tier — then it fails, because a tier that silently skips on the one machine meant to run
 // it is how its bug class survives. `make test-bwrap` sets that switch.
 func bwrapAvailable(t *testing.T) {
 	t.Helper()
-	only := os.Getenv("ACORNFALL_BWRAP_ONLY") != ""
+	only := os.Getenv("ACORND_BWRAP_ONLY") != ""
 	missing := func(format string, args ...any) {
 		if only {
 			t.Fatalf(format, args...)
@@ -578,8 +578,8 @@ func bwrapAvailable(t *testing.T) {
 	if _, err := exec.LookPath("pasta"); err != nil {
 		missing("no pasta on this machine: a bwrap workspace with egress needs it (apt install passt)")
 	}
-	if os.Getenv("ACORNFALL_IMAGE_TEST") == "" {
-		missing("a bwrap workspace fetches its image: set ACORNFALL_IMAGE_TEST=1 to run this")
+	if os.Getenv("ACORND_IMAGE_TEST") == "" {
+		missing("a bwrap workspace fetches its image: set ACORND_IMAGE_TEST=1 to run this")
 	}
 }
 
@@ -589,7 +589,7 @@ func bwrapAvailable(t *testing.T) {
 // worker provisions its sandbox.
 func notSandbox(t *testing.T) {
 	t.Helper()
-	if os.Getenv("ACORNFALL_SANDBOX_ONLY") != "" {
+	if os.Getenv("ACORND_SANDBOX_ONLY") != "" {
 		t.Skip("this test needs no sandbox; the fast tier ran it against the refusal path")
 	}
 }
@@ -612,7 +612,7 @@ func maybeSandbox(t *testing.T) {
 // every machine, including CI. The microVM path is covered by the boundary tests.
 func workspaceResources(t *testing.T) {
 	t.Helper()
-	if os.Getenv("ACORNFALL_SANDBOX_ONLY") != "" {
+	if os.Getenv("ACORND_SANDBOX_ONLY") != "" {
 		t.Skip("the sandbox tier runs the boundary tests; this one is a resource test")
 	}
 	hostEngineTests.Store(t.Name(), true)
@@ -633,8 +633,8 @@ func skipWithoutHypervisor(t *testing.T) {
 func sandboxUnavailable() string {
 	// CI has no /dev/kvm, and nobody wants to think about which tests skip there: this makes
 	// it a switch, so the CI behaviour can be run deliberately on a machine that has one.
-	if os.Getenv("ACORNFALL_NO_SANDBOX") != "" {
-		return "ACORNFALL_NO_SANDBOX is set"
+	if os.Getenv("ACORND_NO_SANDBOX") != "" {
+		return "ACORND_NO_SANDBOX is set"
 	}
 	switch runtime.GOOS {
 	case "linux":
@@ -1253,7 +1253,7 @@ type entry struct {
 // the harness's own, and the author has to land in the same commit as the words (ADR 0034 §7), which needs a kind of
 // ours to carry it. An install with no admin claimed can name nobody, so its prompts stay the harness's `pi.user` —
 // which is this suite, and personMessages is how a test asks for either.
-const personMessageKind = "acornfall.message"
+const personMessageKind = "acornd.message"
 
 // isPersonMessage reports whether this entry is somebody's prompt, whichever kind carried it.
 func (e entry) isPersonMessage() bool {

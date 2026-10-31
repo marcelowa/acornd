@@ -68,7 +68,7 @@ export function resolvePath(cwd: string, value: string): string {
 
 export function guardsExtension(deps: GuardDeps) {
 	return defineExtension({
-		name: "acornfall-guards",
+		name: "acornd-guards",
 		hooks: [
 			hook(ToolTask, {
 				beforeTool: async (call, api, context: Context) => {

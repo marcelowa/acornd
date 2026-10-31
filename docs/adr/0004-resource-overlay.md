@@ -16,7 +16,7 @@ unfalsifiable — an explanation of which layer produced what.
 global     <data-dir>/config.json                <data-dir>/agents/<name>.md
            ~/.agents/config.json                 ~/.agents/agents/<name>.md
 workspace  <ws>/.agents/config.json              <ws>/.agents/agents/<name>.md
-           <ws>/.acornfall/config.json           <ws>/.acornfall/agents/<name>.md
+           <ws>/.acornd/config.json           <ws>/.acornd/agents/<name>.md
 agent      the definition file itself
 ```
 
@@ -30,7 +30,7 @@ model rather than two.
 `.agents` is the rest of the ecosystem's name for this bundle: it is where the Agent
 Skills convention puts `skills/`, and what the other harnesses look for. A bundle written
 for one of them therefore works here unchanged, and a skill you already have is not
-something you rewrite to use this platform. `.acornfall` is our name, and a folder that has
+something you rewrite to use this platform. `.acornd` is our name, and a folder that has
 both reads ours last, so ours wins: the interchange copy is the one you share, and the local
 one is the one that overrides it.
 
@@ -38,7 +38,7 @@ one is the one that overrides it.
 convention puts a person's own skills.
 
 Within a layer the order is therefore `~/.agents` → `<data-dir>` → `<ws>/.agents` →
-`<ws>/.acornfall`, and each folder may hold `config.json`, `agents/`, `skills/`, and the prompt
+`<ws>/.acornd`, and each folder may hold `config.json`, `agents/`, `skills/`, and the prompt
 templates under `commands/` — or `prompts/`, which is the ecosystem's name for the same thing.
 A folder that has both reads `prompts/` first, so `commands/` wins, exactly as ours wins over
 `.agents`. Instructions concatenate in that order; a later model, thinking level, agent

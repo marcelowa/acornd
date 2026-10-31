@@ -8,10 +8,10 @@ long-value fix is mechanical and already in the primitive.
 
 Both are live in this sandbox, reachable from the owner's own machines and phone:
 
-- **The catalogue**: http://100.64.0.16:6006 · http://localhost:6006 —
+- **The catalogue**: http://localhost:6006 —
   group **Mocks/Providers**, below Screens. The phone stories are pinned to Phone (390); the
   toolbar's theme switch gives light and dark.
-- **The console itself**: http://100.64.0.16:7777/settings/providers — the fixed build, the real
+- **The console itself**: http://localhost:7777/settings/providers — the fixed build, the real
   42-provider catalogue, a dev model so conversations work. The dialog there is the product, not a
   drawing; OpenRouter's Sign in is the fastest way to see a long address.
 

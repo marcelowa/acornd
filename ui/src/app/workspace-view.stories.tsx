@@ -94,7 +94,7 @@ const entries: TranscriptEntry[] = [
 		status: "done",
 		isError: false,
 		args: { command: "go test ./internal/workerpool" },
-		output: "ok  \tgithub.com/acornfall/acornfall/gateway/internal/workerpool\t0.21s",
+		output: "ok  \tgithub.com/marcelowa/acornd/gateway/internal/workerpool\t0.21s",
 	},
 	{ kind: "notice", id: "4", at, text: "context compacted" },
 ];
@@ -207,8 +207,8 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		workspaces: [
 			{
 				name: "general",
-				title: "acornfall",
-				path: "/home/marcelo/workspace/acornfall",
+				title: "acornd",
+				path: "/home/marcelo/workspace/acornd",
 				personal: true,
 				kind: "personal",
 				members: [{ email: "me@example.com", role: "owner" }],
@@ -290,11 +290,11 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		},
 		resolved: {
 			name: "scout",
-			source: "/acornfall/.agents/agents/scout.md",
+			source: "/acornd/.agents/agents/scout.md",
 			model: "opencode-go/deepseek",
 			layers: [
-				{ layer: "install", path: "~/.acornfall/agents/default.md" },
-				{ layer: "workspace", path: "/acornfall/.agents/agents/scout.md" },
+				{ layer: "install", path: "~/.acornd/agents/default.md" },
+				{ layer: "workspace", path: "/acornd/.agents/agents/scout.md" },
 			],
 		},
 		harness: "pi-durable",

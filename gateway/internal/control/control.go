@@ -14,11 +14,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
-	"github.com/acornfall/acornfall/gateway/internal/secretsproxy"
-	"github.com/acornfall/acornfall/gateway/internal/vault"
-	"github.com/acornfall/acornfall/gateway/internal/workerpool"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/secretsproxy"
+	"github.com/marcelowa/acornd/gateway/internal/vault"
+	"github.com/marcelowa/acornd/gateway/internal/workerpool"
 )
 
 // ErrNoProvider means the install has no usable credential yet. It is a state,
@@ -71,7 +71,7 @@ type Options struct {
 	// preparing an image, booting the sandbox. Nil means nobody is listening.
 	OnStage func(step string)
 	// Sandbox is the machine's sandbox tier. Nil means this Control was built without one,
-	// which is what ACORNFALL_NO_SANDBOX asks the gateway for: the workspace still opens and
+	// which is what ACORND_NO_SANDBOX asks the gateway for: the workspace still opens and
 	// its tools refuse.
 	Sandbox *sandbox.Manager
 	// Vault is the install-wide tool-secret store. Nil means this workspace has no vault,

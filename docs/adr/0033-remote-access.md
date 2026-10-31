@@ -59,7 +59,7 @@ surfacing later as a `403` in a log:
 
 Then one `apply` creates, in order: the tunnel; its ingress configuration, naming the hostname and this console; a proxied `CNAME`
 `<sub>.<zone>` → `<tunnel-id>.cfdargotunnel.com`; the one-time-PIN identity provider, if the account
-has none; the Access application for that hostname; an Access group named `acornfall`; and one
+has none; the Access application for that hostname; an Access group named `acornd`; and one
 policy — allow, when in that group. Every id is written to `<data-dir>/remote.json`, so a second run
 is a no-op and a run that died halfway resumes from the ids it already has.
 
@@ -72,12 +72,12 @@ decided the console owns the list and the door enforces it, and this is the mech
 that true. A person added in the console is in the group; a person revoked is out of it.
 
 What a reconcile did, and anything it could not do, is one line per step in the console and in
-`acornfall remote status`.
+`acornd remote status`.
 
 **Built.** Every start runs the same apply the command runs, before the connector dials out, with a
 ninety-second budget and no way to fail a boot: an install with no door, no `remote.json`, or no API
 token in its environment or stored says so once and serves anyway. The token comes from
-`ACORNFALL_CLOUDFLARE_TOKEN` when the service carries it, and otherwise from the copy the console
+`ACORND_CLOUDFLARE_TOKEN` when the service carries it, and otherwise from the copy the console
 stored (§4); a start with neither reconciles only when somebody runs the command. The same apply runs
 after a person is added, revoked or restored, so the group follows the book.
 
@@ -95,7 +95,7 @@ left, when the token was used and dropped.
 
 What the supervised process holds is still the tunnel token, which can run exactly one tunnel and
 nothing else. The API token never leaves the install folder, is never returned by `GET /api/remote`
-(which says only whether one is stored), and is never logged; `acornfall remote forget-token`, or
+(which says only whether one is stored), and is never logged; `acornd remote forget-token`, or
 Forget in the console, removes it and leaves Cloudflare exactly as it is. A leaked tunnel token lets
 somebody else be your origin — Access still gates what reaches them, but it is a real leak, so rotating
 it is a button. A leaked API token is worse: it is the account's DNS and Access apps, so the install
@@ -115,7 +115,7 @@ notices until a family member says the page does not load.
 
 ### 6. The verifier is `access`, and it verifies
 
-`ACORNFALL_IDENTITY=access`, keys from `ACORNFALL_IDENTITY_KEYS` (default the team's
+`ACORND_IDENTITY=access`, keys from `ACORND_IDENTITY_KEYS` (default the team's
 `/cdn-cgi/access/certs`), `aud` equal to the Access application's tag, `iss` equal to the team domain,
 and every rule in 0032 §2 — expiry, `email_verified`, leeway, cache, refetch on an unknown `kid`.
 The plaintext `Cf-Access-Authenticated-User-Email` header is never read, for the same reason IAP's
@@ -215,9 +215,9 @@ building it is the token's lifetime and its refresh behaviour.
 **The interface (`make ui-check`)**: pasting a token names each missing scope, and the setup's last
 step shows the door's answer.
 
-**The live tier (`make test-tunnel`, `ACORNFALL_TUNNEL_TEST=1`)** — a throwaway zone and a token from
+**The live tier (`make test-tunnel`, `ACORND_TUNNEL_TEST=1`)** — a throwaway zone and a token from
 the environment; it fails rather than skips when the variable is set, the same rule
-`ACORNFALL_IMAGE_TEST` follows:
+`ACORND_IMAGE_TEST` follows:
 
 - Creates the tunnel, application, group, and an **Access service token** with a policy that admits
   it, then asserts from outside the machine:
@@ -233,6 +233,6 @@ the environment; it fails rather than skips when the variable is set, the same r
   why two.
 - **Other Access identity providers** (Google, GitHub). That is a policy change at the edge and zero
   lines of Go; the one-time PIN is chosen because it needs no account setup for anybody.
-- **Email sent by acornfall.** The door proves the mailbox; the invitation is a message the owner
+- **Email sent by acornd.** The door proves the mailbox; the invitation is a message the owner
   sends. Sending mail would mean owning a sender reputation.
 - **Self-hosted tunnel servers**, and any deployment where the machine has a public address.

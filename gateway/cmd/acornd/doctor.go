@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/control"
-	"github.com/acornfall/acornfall/gateway/internal/ready"
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
-	"github.com/acornfall/acornfall/gateway/internal/update"
+	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/ready"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/update"
 )
 
 // doctorCommand reports what this machine can do, and changes nothing: the difference
@@ -22,7 +22,7 @@ import (
 // is how a machine gets described by whichever flag was remembered.
 func doctorCommand(argv []string) {
 	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	dataDir := flags.String("data-dir", "", "the acornfall folder (default: ~/.acornfall)")
+	dataDir := flags.String("data-dir", "", "the acornd folder (default: ~/.acornd)")
 	asJSON := flags.Bool("json", false, "print the report as JSON")
 	flagArgs, _ := splitFlags(argv, map[string]bool{"data-dir": true})
 	if err := flags.Parse(flagArgs); err != nil {
@@ -30,7 +30,7 @@ func doctorCommand(argv []string) {
 	}
 	resolved, err := resolveDataDir(*dataDir)
 	if err != nil {
-		log.Fatalf("acornfall doctor: %v", err)
+		log.Fatalf("acornd doctor: %v", err)
 	}
 
 	report := gatherDoctor(resolved)
@@ -69,7 +69,7 @@ func gatherDoctor(dataDir string) doctorReport {
 	}
 	updater := update.New(dataDir, "")
 	if err := updater.Open(); err != nil {
-		log.Fatalf("acornfall doctor: %v", err)
+		log.Fatalf("acornd doctor: %v", err)
 	}
 	// Preflight never blocks on the network: an offline machine still gets every local answer,
 	// and the release check degrades to a sentence.
@@ -95,7 +95,7 @@ func printDoctorJSON(report doctorReport) {
 		Orphans   []string            `json:"orphans"`
 	}{Engines: report.engines, Default: report.defaultName, Update: report.health, Readiness: report.requirements, Orphans: report.orphans}, "", "  ")
 	if err != nil {
-		log.Fatalf("acornfall doctor: %v", err)
+		log.Fatalf("acornd doctor: %v", err)
 	}
 	fmt.Println(string(payload))
 }
@@ -113,12 +113,12 @@ func printDoctor(report doctorReport) {
 func workspaceOrphans(dataDir string) []string {
 	registry, err := control.LoadRegistryFile(filepath.Join(dataDir, "workspaces.json"))
 	if err != nil {
-		log.Printf("acornfall doctor: %v", err)
+		log.Printf("acornd doctor: %v", err)
 		return nil
 	}
 	orphans, err := control.OrphanFolders(registry)
 	if err != nil {
-		log.Printf("acornfall doctor: %v", err)
+		log.Printf("acornd doctor: %v", err)
 		return nil
 	}
 	return orphans
@@ -212,7 +212,7 @@ func printEngines(engines []engineReport, defaultEngine string) {
 		printEngineDetail(engine)
 	}
 	if defaultEngine == "" {
-		fmt.Println("\nno engine can run here: acornfall setup says what this machine needs")
+		fmt.Println("\nno engine can run here: acornd setup says what this machine needs")
 		return
 	}
 	fmt.Printf("\n* this machine will use %s\n", defaultEngine)
@@ -278,8 +278,8 @@ func readyInput(dataDir string, updater *update.Manager, health update.Preflight
 // disabledReason names an engine refusal from the environment, the way the
 // gateway's own startup does: the same switch must mean the same thing.
 func disabledReason() string {
-	if os.Getenv("ACORNFALL_NO_SANDBOX") != "" {
-		return "ACORNFALL_NO_SANDBOX is set"
+	if os.Getenv("ACORND_NO_SANDBOX") != "" {
+		return "ACORND_NO_SANDBOX is set"
 	}
 	return ""
 }

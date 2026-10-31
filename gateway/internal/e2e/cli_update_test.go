@@ -13,8 +13,13 @@ import (
 // it found, and installs nothing unless it was told to. This is the path a script uses, and the
 // one that has to work when nothing else is up.
 func TestTheCommandLineChecksForAnUpdateWithoutAGateway(t *testing.T) {
-	t.Parallel()
+	// Not parallel: the answer is faked through the environment, which the whole process shares.
 	dir := t.TempDir()
+	// A fake github, so the check never leaves the machine. What is under test is that the
+	// command asks and says what it found; pointing it at the real api.github.com made a test
+	// that fails whenever the repository is renamed, and passes for the wrong reason on any
+	// machine that happens to have network.
+	t.Setenv("ACORND_UPDATE_URL", fakeReleases(t).URL+"/repos/owner/repo/releases/latest")
 
 	// A development build has no version, so nothing is offered and the answer says so rather
 	// than printing an offer it cannot compare.
@@ -42,7 +47,7 @@ func TestTheUpdateCommandRefusesAStrayArgument(t *testing.T) {
 	dir := t.TempDir()
 	if _, stderr, code := cli(t, dir, "", "update", "tidy", "--data-dir", dir); code != 2 {
 		t.Errorf("a stray argument: exit %d, want 2\n%s", code, stderr)
-	} else if !strings.Contains(stderr, "usage: acornfall update") {
+	} else if !strings.Contains(stderr, "usage: acornd update") {
 		t.Errorf("the refusal should print the usage: %q", stderr)
 	}
 }
@@ -55,7 +60,7 @@ func TestTheWorkspaceCommandsRefuseWhatTheyCannotDo(t *testing.T) {
 
 	if _, stderr, code := cli(t, dir, "", "workspace", "remove", "--data-dir", dir); code == 0 {
 		t.Errorf("remove with no name: exit 0\n%s", stderr)
-	} else if !strings.Contains(stderr, "usage: acornfall workspace remove") {
+	} else if !strings.Contains(stderr, "usage: acornd workspace remove") {
 		t.Errorf("the refusal should print the usage: %q", stderr)
 	}
 	if _, stderr, code := cli(t, dir, "", "workspace", "remove", "nowhere", "--data-dir", dir); code == 0 {

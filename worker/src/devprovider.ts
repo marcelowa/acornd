@@ -4,9 +4,9 @@
  *
  * Two of them, because a test needs to say what the model does:
  *
- * - `ACORNFALL_DEV_PROVIDER=1` answers every user turn with one real bash call and a short
+ * - `ACORND_DEV_PROVIDER=1` answers every user turn with one real bash call and a short
  *   reply quoting the request. Enough to exercise tools and streaming by hand.
- * - `ACORNFALL_DEV_SCRIPT=<file>` answers from a script: the first rule whose `match` is a
+ * - `ACORND_DEV_SCRIPT=<file>` answers from a script: the first rule whose `match` is a
  *   substring of the last user message wins, and if it lists tools they are emitted before
  *   the reply. That is what makes a feature driven *by* a tool call — a guard blocking one,
  *   a subagent being spawned — testable offline instead of only by hand.
@@ -296,7 +296,7 @@ export function devProvider(): ReturnType<typeof fauxProvider> {
 	return provider(defaultRespond);
 }
 
-/** Reads the script named by ACORNFALL_DEV_SCRIPT. Throws loudly: a broken script is a test bug. */
+/** Reads the script named by ACORND_DEV_SCRIPT. Throws loudly: a broken script is a test bug. */
 export function scriptedDevProvider(path: string): ReturnType<typeof fauxProvider> {
 	const script = JSON.parse(readFileSync(path, "utf8")) as Script;
 	return provider(scriptedRespond(script), script);

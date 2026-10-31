@@ -312,7 +312,7 @@ export function openStream(
 				return;
 			}
 			if (frame.type !== "view" || frame.value === undefined) return;
-			handlers.onView(frame.value, frame.acornfall?.senders ?? {});
+			handlers.onView(frame.value, frame.acornd?.senders ?? {});
 		});
 		next.addEventListener("error", () => {
 			if (!mine()) return;

@@ -1,10 +1,10 @@
-# UI Need Summary — Acornfall Redesign
+# UI Need Summary — Acornd Redesign
 
 ## User Request
 Current UI is practical but doesn't look good. Deeply analyze it and significantly improve UI + UX: make it beautiful and usable.
 
 ## Product Goal
-Turn Acornfall's new React client (`ui/`) from a correct wireframe into a premium, calm, trustworthy agent console — without breaking ADR-0016 (tokens-or-nothing) or the dumb-screens architecture.
+Turn Acornd's new React client (`ui/`) from a correct wireframe into a premium, calm, trustworthy agent console — without breaking ADR-0016 (tokens-or-nothing) or the dumb-screens architecture.
 
 ## Target Users
 Solo developer / power user running local agents: lives in the transcript, manages multiple conversations per workspace, inspects context/tools/sandbox, switches models/thinking/agents.

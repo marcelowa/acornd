@@ -20,7 +20,7 @@ import {
 
 function stoppedError(): Error {
 	return new SandboxNotRunningError(
-		'sandbox "acornfall-fake-0000" has no agent endpoint (is it running?)',
+		'sandbox "acornd-fake-0000" has no agent endpoint (is it running?)',
 	);
 }
 
@@ -172,7 +172,7 @@ function fakeHandle(woken: MicrosandboxSession): {
 test("a stopped sandbox wakes on read and the file is read, not reported missing", async () => {
 	const files = new Map([["/work/notes.txt", "hello\n"]]);
 	const { handle, boots } = fakeHandle(fakeSession(liveFs(files)));
-	const client = new MicrosandboxClient("acornfall-fake-0000", handle, fakeSession(deadFs()));
+	const client = new MicrosandboxClient("acornd-fake-0000", handle, fakeSession(deadFs()));
 	expect(await client.read("/work/notes.txt")).toBe("hello\n");
 	expect(boots()).toBe(1);
 });
@@ -180,7 +180,7 @@ test("a stopped sandbox wakes on read and the file is read, not reported missing
 test("a stopped sandbox wakes on write and the write lands", async () => {
 	const files = new Map<string, string>();
 	const { handle, boots } = fakeHandle(fakeSession(liveFs(files)));
-	const client = new MicrosandboxClient("acornfall-fake-0000", handle, fakeSession(deadFs()));
+	const client = new MicrosandboxClient("acornd-fake-0000", handle, fakeSession(deadFs()));
 	await client.write("/work/new.txt", "written\n");
 	expect(files.get("/work/new.txt")).toBe("written\n");
 	expect(boots()).toBe(1);
@@ -201,7 +201,7 @@ test("a stopped sandbox wakes on exec and the command runs once", async () => {
 		throw stoppedError();
 	};
 	const client = new MicrosandboxClient(
-		"acornfall-fake-0000",
+		"acornd-fake-0000",
 		handle,
 		fakeSession(deadFs(), deadExec),
 	);
@@ -229,7 +229,7 @@ test("parallel tool calls join one wake, not one boot each", async () => {
 				resolveWake = resolve;
 			}),
 	} as unknown as MicrosandboxHandle;
-	const client = new MicrosandboxClient("acornfall-fake-0000", handle, fakeSession(deadFs()));
+	const client = new MicrosandboxClient("acornd-fake-0000", handle, fakeSession(deadFs()));
 	const pending = Promise.all([
 		client.read("/work/a.txt"),
 		client.read("/work/b.txt"),
@@ -246,7 +246,7 @@ test("parallel tool calls join one wake, not one boot each", async () => {
 test("a genuine missing file is still null, without waking", async () => {
 	const { handle, boots } = fakeHandle(fakeSession(liveFs(new Map())));
 	const client = new MicrosandboxClient(
-		"acornfall-fake-0000",
+		"acornd-fake-0000",
 		handle,
 		fakeSession(liveFs(new Map())),
 	);
@@ -261,7 +261,7 @@ test("a same-name replacement is never woken: no retry on a different machine", 
 	// null, which resource loading depends on — but the call must never wake and retry
 	// against a different machine behind the same name.
 	const replaced = async (): Promise<never> => {
-		throw new SandboxReplacedError('sandbox "acornfall-fake-0000" was replaced');
+		throw new SandboxReplacedError('sandbox "acornd-fake-0000" was replaced');
 	};
 	const replacingFs: FakeFs = {
 		...liveFs(new Map()),
@@ -274,7 +274,7 @@ test("a same-name replacement is never woken: no retry on a different machine", 
 			return fakeSession(liveFs(new Map()));
 		},
 	} as unknown as MicrosandboxHandle;
-	const client = new MicrosandboxClient("acornfall-fake-0000", handle, fakeSession(replacingFs));
+	const client = new MicrosandboxClient("acornd-fake-0000", handle, fakeSession(replacingFs));
 	expect(await client.read("/work/notes.txt")).toBeNull();
 	expect(boots).toBe(0);
 	// A throwing operation surfaces the replacement instead of waking.
@@ -283,7 +283,7 @@ test("a same-name replacement is never woken: no retry on a different machine", 
 		write: replaced,
 	};
 	const writer = new MicrosandboxClient(
-		"acornfall-fake-0000",
+		"acornd-fake-0000",
 		handle,
 		fakeSession(replacingWriteFs),
 	);
@@ -297,7 +297,7 @@ test("a failed wake reports the wake's error", async () => {
 			throw new Error("engine unavailable");
 		},
 	} as unknown as MicrosandboxHandle;
-	const client = new MicrosandboxClient("acornfall-fake-0000", handle, fakeSession(deadFs()));
+	const client = new MicrosandboxClient("acornd-fake-0000", handle, fakeSession(deadFs()));
 	expect(client.read("/work/notes.txt")).rejects.toThrow(/engine unavailable/);
 });
 

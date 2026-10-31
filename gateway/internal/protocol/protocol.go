@@ -157,9 +157,9 @@ type Frame struct {
 	Status         string          `json:"status,omitempty"`
 	// Our own annotation on a view frame: the worker's documents are not mounted in
 	// durable's view, so anything of ours travels beside the value.
-	Acornfall json.RawMessage `json:"acornfall,omitempty"`
-	AuthID    string          `json:"authId,omitempty"`
-	Event     *AuthEvent      `json:"event,omitempty"`
+	Acornd json.RawMessage `json:"acornd,omitempty"`
+	AuthID string          `json:"authId,omitempty"`
+	Event  *AuthEvent      `json:"event,omitempty"`
 	// A tool's secret request: the worker asks; the gateway answers with a command.
 	Name        string   `json:"name,omitempty"`
 	Description string   `json:"description,omitempty"`

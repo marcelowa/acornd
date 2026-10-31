@@ -5,7 +5,7 @@ Date: 2026-10-04
 
 ## Problem
 
-Pi's `/login` is a terminal flow that writes `~/.pi/agent/auth.json`. Acornfall has no
+Pi's `/login` is a terminal flow that writes `~/.pi/agent/auth.json`. Acornd has no
 terminal, a browser UI, and a headless worker. We need to know where credentials live,
 who runs login, and who refreshes.
 
@@ -46,12 +46,12 @@ in flight.
 ### Step 1 (implemented)
 
 A file-backed store at `<data-dir>/credentials.json`, holding exactly the pi-ai
-credential map. Control writes API keys into it via `acornfall provider add`. The worker
+credential map. Control writes API keys into it via `acornd provider add`. The worker
 reads it, and serializes `modify` with an exclusive lock file so two workers sharing the
 file cannot double-refresh. This is what pi-ai means by "cross-process too, e.g. a file
 lock", and it keeps v0 to one moving part.
 
-`acornfall provider add <provider> <key>` is the v0 onboarding path. It writes
+`acornd provider add <provider> <key>` is the v0 onboarding path. It writes
 `{"type":"api_key","key":"…"}`. File mode 0600.
 
 ### Step 2 (designed, not built)

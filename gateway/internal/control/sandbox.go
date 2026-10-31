@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
-	"github.com/acornfall/acornfall/gateway/internal/workerpool"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/workerpool"
 )
 
 // SandboxState says what the agent's tools can reach here. When Tools is false the tools

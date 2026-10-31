@@ -32,7 +32,7 @@ machine.
 A related finding came with it, and is fixed separately (ADR 0023): `pasta`'s port forwarding
 defaults to `auto`, which mirrored every service the machine listens on into the sandbox's
 loopback, and its gateway translation mapped `10.0.2.2` onto the same loopback. That let a workspace
-talk to the acornfall that ran it. Both are off now.
+talk to the acornd that ran it. Both are off now.
 
 ## The decision
 

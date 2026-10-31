@@ -13,7 +13,7 @@ import (
 // suite's image cache is.
 func liveDriver(dataDir string) *Microsandbox {
 	driver := NewMicrosandbox(dataDir)
-	if state := os.Getenv("ACORNFALL_SANDBOX_STATE"); state != "" {
+	if state := os.Getenv("ACORND_SANDBOX_STATE"); state != "" {
 		driver = driver.WithStateDir(state)
 	}
 	return driver
@@ -21,8 +21,8 @@ func liveDriver(dataDir string) *Microsandbox {
 
 // Live: only where a hypervisor exists. Proves the CLI shapes against the real engine.
 func TestLiveProduceAndStop(t *testing.T) {
-	if os.Getenv("ACORNFALL_LIVE_SANDBOX") == "" {
-		t.Skip("set ACORNFALL_LIVE_SANDBOX=1 to boot a real sandbox")
+	if os.Getenv("ACORND_LIVE_SANDBOX") == "" {
+		t.Skip("set ACORND_LIVE_SANDBOX=1 to boot a real sandbox")
 	}
 	dataDir := t.TempDir()
 	ws := filepath.Join(dataDir, "work")

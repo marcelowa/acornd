@@ -13,7 +13,7 @@ package arch
 // no longer uses fails too, because a permissive row silently outlives the reason for it.
 var Allowed = map[string][]string{
 	// The entry point constructs every layer; it is the one place allowed to know them all.
-	"cmd/acornfall": {
+	"cmd/acornd": {
 		"internal/cloudflared",
 		"internal/control",
 		"internal/httpapi",

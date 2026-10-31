@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
 // A harness process that is not a process. It answers the way a real worker does — a describe
@@ -233,7 +233,7 @@ func TestASignInAnswersWithAnIDFirst(t *testing.T) {
 // not something a person can act on, and the line that is one came from the harness.
 func TestTheFailureKeepsWhatTheHarnessSaid(t *testing.T) {
 	worker := newFakeWorker()
-	worker.words = "error: no api key for provider: add one with acornfall provider add"
+	worker.words = "error: no api key for provider: add one with acornd provider add"
 	control := controlWithWorker(t, worker)
 	control.workerFailed(worker, errors.New("exit status 1"))
 

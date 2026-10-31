@@ -15,7 +15,7 @@ afterAll(cleanupScratch);
 
 describe("skills", () => {
 	test("a skill is a directory holding SKILL.md, and needs a description", async () => {
-		const root = await tempDir("acornfall-skills-");
+		const root = await tempDir("acornd-skills-");
 		await write(
 			join(root, "documented", "SKILL.md"),
 			"---\nname: documented\ndescription: does a thing\n---\nBody",
@@ -29,7 +29,7 @@ describe("skills", () => {
 	});
 
 	test("the directory name is the fallback when frontmatter has none", async () => {
-		const root = await tempDir("acornfall-skills-");
+		const root = await tempDir("acornd-skills-");
 		await write(
 			join(root, "acorn-notes", "SKILL.md"),
 			"---\ndescription: from the folder\n---\nBody",
@@ -39,7 +39,7 @@ describe("skills", () => {
 	});
 
 	test("a later root shadows an earlier one, the way agents and commands do", async () => {
-		const root = await tempDir("acornfall-skills-");
+		const root = await tempDir("acornd-skills-");
 		await write(
 			join(root, "first", "same", "SKILL.md"),
 			"---\nname: same\ndescription: first\n---\nA",
@@ -61,7 +61,7 @@ describe("skills", () => {
 	});
 
 	test("the .agents folder is read, and ours shadows it", async () => {
-		const root = await tempDir("acornfall-skills-");
+		const root = await tempDir("acornd-skills-");
 		const workspace = join(root, "workspace");
 		await write(
 			join(workspace, ".agents", "skills", "eco", "SKILL.md"),
@@ -72,7 +72,7 @@ describe("skills", () => {
 			"---\nname: both\ndescription: ecosystem\n---\nB",
 		);
 		await write(
-			join(workspace, ".acornfall", "skills", "both", "SKILL.md"),
+			join(workspace, ".acornd", "skills", "both", "SKILL.md"),
 			"---\nname: both\ndescription: native\n---\nC",
 		);
 
@@ -133,7 +133,7 @@ describe("skills", () => {
 
 describe("credentials", () => {
 	test("round-trips a credential and keeps the file private", async () => {
-		const dir = await tempDir("acornfall-credentials-");
+		const dir = await tempDir("acornd-credentials-");
 		const path = join(dir, "credentials.json");
 		const store = new FileCredentialStore(path);
 
@@ -151,7 +151,7 @@ describe("credentials", () => {
 	});
 
 	test("reading hands back a copy, so a caller cannot mutate the store by accident", async () => {
-		const dir = await tempDir("acornfall-credentials-");
+		const dir = await tempDir("acornd-credentials-");
 		const store = new FileCredentialStore(join(dir, "credentials.json"));
 		await store.modify("p", async () => ({ type: "api_key", key: "k" }));
 
@@ -161,7 +161,7 @@ describe("credentials", () => {
 	});
 
 	test("modify returning nothing leaves the credential alone; delete is what removes it", async () => {
-		const dir = await tempDir("acornfall-credentials-");
+		const dir = await tempDir("acornd-credentials-");
 		const store = new FileCredentialStore(join(dir, "credentials.json"));
 		await store.modify("p", async () => ({ type: "api_key", key: "k" }));
 
@@ -174,7 +174,7 @@ describe("credentials", () => {
 	});
 
 	test("a corrupt file is an error, not an empty credential store", async () => {
-		const dir = await tempDir("acornfall-credentials-");
+		const dir = await tempDir("acornd-credentials-");
 		const path = join(dir, "credentials.json");
 		await write(path, "{ this is not json");
 		const store = new FileCredentialStore(path);

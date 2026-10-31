@@ -28,7 +28,7 @@ const entries: WireEntry[] = [
 				content: "",
 				sections: {
 					preamble: "You are a careful engineer.",
-					cwd: "<cwd>\n/acornfall\n</cwd>",
+					cwd: "<cwd>\n/acornd\n</cwd>",
 					skills: "deslop: simplify the work just completed",
 				},
 				toolsAdded: [

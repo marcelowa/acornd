@@ -123,7 +123,7 @@ func TestOneInstallRunsTwoEngines(t *testing.T) {
 // keeps its own tools untouched.
 //
 // It needs a registry, so it does not run by default: `make test` stays offline and fast.
-// ACORNFALL_IMAGE_TEST=1 runs it, and it costs one `debian:stable-slim` pull per test home.
+// ACORND_IMAGE_TEST=1 runs it, and it costs one `debian:stable-slim` pull per test home.
 func TestBwrapWorkspaceInstallsIntoItsOwnImage(t *testing.T) {
 	t.Parallel()
 	bwrapEngine(t)
@@ -178,7 +178,7 @@ func TestBwrapWorkspaceInstallsIntoItsOwnImage(t *testing.T) {
 
 // A sandbox must not reach the machine's own loopback. Two routes used to carry it there: pasta's
 // automatic port forwarding, which mirrors every service the machine listens on into the sandbox's
-// loopback — the acornfall API on 7777 among them, with no authentication in front of it — and the
+// loopback — the acornd API on 7777 among them, with no authentication in front of it — and the
 // gateway translation that maps 10.0.2.2 onto the same loopback. Both are closed in the argv, and
 // this fails if either comes back.
 func TestABwrapSandboxCannotReachTheMachinesLoopback(t *testing.T) {

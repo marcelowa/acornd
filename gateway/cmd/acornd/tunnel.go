@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/acornfall/acornfall/gateway/internal/cloudflared"
-	"github.com/acornfall/acornfall/gateway/internal/remote"
+	"github.com/marcelowa/acornd/gateway/internal/cloudflared"
+	"github.com/marcelowa/acornd/gateway/internal/remote"
 )
 
 // startTunnel keeps the connector alive for an install with a door in front of it.
@@ -17,7 +17,7 @@ import (
 // without anybody opening a terminal after a reboot. It refuses to guess: an install with no remote.json is a
 // loopback install, and one line says so rather than a connector starting for a tunnel that does not exist.
 func startTunnel(ctx context.Context, dataDir, explicit string) {
-	if !strings.EqualFold(strings.TrimSpace(os.Getenv("ACORNFALL_IDENTITY")), "access") {
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("ACORND_IDENTITY")), "access") {
 		return
 	}
 	setup, err := remote.Load(dataDir)
@@ -27,7 +27,7 @@ func startTunnel(ctx context.Context, dataDir, explicit string) {
 	}
 	token := strings.TrimSpace(setup.State.TunnelToken)
 	if token == "" {
-		log.Printf("tunnel: not configured yet: run `acornfall remote apply` to make the door, then start again")
+		log.Printf("tunnel: not configured yet: run `acornd remote apply` to make the door, then start again")
 		return
 	}
 	path := strings.TrimSpace(explicit)

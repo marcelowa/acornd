@@ -14,8 +14,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
-	"github.com/acornfall/acornfall/gateway/internal/workerpool"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/workerpool"
 )
 
 // Defaults are one layer's answer to "what runs when nothing more specific does". The
@@ -753,7 +753,7 @@ func (c *Control) ensureLastResort() error {
 }
 
 // parseModelBinding reads the "provider/modelId" form the overlay, the stored configuration,
-// and ACORNFALL_MODEL all share.
+// and ACORND_MODEL all share.
 func parseModelBinding(value string) (protocol.ModelBinding, bool) {
 	parts := strings.SplitN(value, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
@@ -840,7 +840,7 @@ func (c *Control) Reload(ctx context.Context) error {
 // preference, not a rule: a model nobody offers is skipped.
 var lastResortModels = []string{"deepseek-v4.1-flash"}
 
-// deriveLastResort picks what runs when no layer chose a model: ACORNFALL_MODEL, then the
+// deriveLastResort picks what runs when no layer chose a model: ACORND_MODEL, then the
 // preferred models, then the first authenticated provider's first model. Only the flag and
 // the preference are decisions; the end of the line is a guess, and it is reported as the
 // last resort rather than being stored as though someone had chosen it.
@@ -848,7 +848,7 @@ func (c *Control) deriveLastResort(describe protocol.Describe) (protocol.ModelBi
 	if model := strings.TrimSpace(c.opts.Model); model != "" {
 		binding, ok := parseModelBinding(model)
 		if !ok {
-			return protocol.ModelBinding{}, fmt.Errorf("ACORNFALL_MODEL must be provider/modelId, got %q", model)
+			return protocol.ModelBinding{}, fmt.Errorf("ACORND_MODEL must be provider/modelId, got %q", model)
 		}
 		return binding, nil
 	}
@@ -859,7 +859,7 @@ func (c *Control) deriveLastResort(describe protocol.Describe) (protocol.ModelBi
 		return binding, nil
 	}
 	return protocol.ModelBinding{}, fmt.Errorf(
-		"%w: run `acornfall provider add <provider> <api-key>` or connect one in the UI", ErrNoProvider,
+		"%w: run `acornd provider add <provider> <api-key>` or connect one in the UI", ErrNoProvider,
 	)
 }
 

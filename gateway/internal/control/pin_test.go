@@ -3,7 +3,7 @@ package control
 import (
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
 // A conversation pins what it will run when it is created: the resolved defaults, so a

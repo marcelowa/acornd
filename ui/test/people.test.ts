@@ -58,11 +58,11 @@ describe("the book of people", () => {
 
 	test("revoking and restoring are two posts to the record's own routes", async () => {
 		const calls = stub({ people: [] });
-		await revokePerson("ana+acornfall@example.com");
-		await restorePerson("ana+acornfall@example.com");
+		await revokePerson("ana+acornd@example.com");
+		await restorePerson("ana+acornd@example.com");
 		expect(calls.map((call) => call.url)).toEqual([
-			"/api/people/ana%2Bacornfall%40example.com/revoke",
-			"/api/people/ana%2Bacornfall%40example.com/restore",
+			"/api/people/ana%2Bacornd%40example.com/revoke",
+			"/api/people/ana%2Bacornd%40example.com/restore",
 		]);
 		expect(calls.every((call) => call.init?.method === "POST")).toBe(true);
 	});

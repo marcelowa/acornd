@@ -26,7 +26,7 @@ func cli(t *testing.T, dir string, stdin string, args ...string) (string, string
 	}
 	// Each command owns its own --data-dir, so the caller puts it where that command parses it.
 	command := exec.Command(gatewayBin, args...)
-	command.Env = append(os.Environ(), "HOME="+dir, "ACORNFALL_NO_SANDBOX=1")
+	command.Env = append(os.Environ(), "HOME="+dir, "ACORND_NO_SANDBOX=1")
 	if coverDir != "" {
 		// The same rule as the gateway above: `make cover` instruments this binary, and a child
 		// started without saying where to write is a child whose work is invisible.
@@ -320,7 +320,7 @@ func TestSetupPrintsWhatItWouldDoWhenItCannotAsk(t *testing.T) {
 	if !strings.Contains(out, "sandbox engines") {
 		t.Errorf("setup should say what it checked:\n%s", out)
 	}
-	if code == 1 && !strings.Contains(out+stderr, "acornfall") && !strings.Contains(out+stderr, "sudo") {
+	if code == 1 && !strings.Contains(out+stderr, "acornd") && !strings.Contains(out+stderr, "sudo") {
 		t.Errorf("a machine that cannot be fixed from inside should say what to run:\n%s\n%s", out, stderr)
 	}
 }

@@ -86,7 +86,7 @@ describe("builtins", () => {
 
 describe("loading", () => {
 	test("reads frontmatter, keeps the body, and sorts by name", async () => {
-		const root = await tempDir("acornfall-commands-");
+		const root = await tempDir("acornd-commands-");
 		await write(
 			join(root, "b.md"),
 			"---\nname: bravo\ndescription: second\nargument-hint: a thing\n---\nBody B",
@@ -101,21 +101,21 @@ describe("loading", () => {
 	});
 
 	test("the file name is the name when frontmatter does not give one", async () => {
-		const root = await tempDir("acornfall-commands-");
+		const root = await tempDir("acornd-commands-");
 		await write(join(root, "from-file-name.md"), "Just the body.");
 		const commands = await loadCommands([root], hostFiles);
 		expect(commands[0]?.name).toBe("from-file-name");
 	});
 
 	test("a command with no body is not a command", async () => {
-		const root = await tempDir("acornfall-commands-");
+		const root = await tempDir("acornd-commands-");
 		await write(join(root, "empty.md"), "---\nname: empty\n---\n");
 		expect(await loadCommands([root], hostFiles)).toEqual([]);
 	});
 
 	test("a later root shadows an earlier one, which is how a workspace overrides the install", async () => {
-		const first = await tempDir("acornfall-commands-");
-		const second = await tempDir("acornfall-commands-");
+		const first = await tempDir("acornd-commands-");
+		const second = await tempDir("acornd-commands-");
 		await write(
 			join(first, "deploy.md"),
 			"---\nname: deploy\ndescription: install\n---\nInstall deploy",
@@ -131,7 +131,7 @@ describe("loading", () => {
 	});
 
 	test("the ecosystem's prompts folder is read too, and our commands folder wins", async () => {
-		const root = await tempDir("acornfall-commands-");
+		const root = await tempDir("acornd-commands-");
 		const workspace = join(root, "workspace");
 		// The same name in both folder names: ours is read second and wins.
 		await write(
@@ -162,7 +162,7 @@ describe("loading", () => {
 	});
 
 	test("the .agents folder is read, and ours shadows it", async () => {
-		const root = await tempDir("acornfall-commands-");
+		const root = await tempDir("acornd-commands-");
 		const home = join(root, "home");
 		const workspace = join(root, "workspace");
 		const user = join(root, "user");
@@ -177,7 +177,7 @@ describe("loading", () => {
 			"---\nname: deploy\ndescription: ecosystem\n---\nEco",
 		);
 		await write(
-			join(workspace, ".acornfall", "commands", "deploy.md"),
+			join(workspace, ".acornd", "commands", "deploy.md"),
 			"---\nname: deploy\ndescription: native\n---\nNative",
 		);
 		await write(

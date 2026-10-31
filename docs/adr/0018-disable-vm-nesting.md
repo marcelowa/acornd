@@ -11,7 +11,7 @@ its hypervisor for nesting — the flag's presence in the guest is what a nested
 needs — and the machine has to be able to grant it: a Linux host with VT-x or AMD-V and
 `nested` enabled on its KVM module, or an Apple Silicon M3 or later on macOS 15+.
 
-The engine acornfall pins, microsandbox 0.7.6, has no switch at all: its guests nest whenever
+The engine acornd pins, microsandbox 0.7.6, has no switch at all: its guests nest whenever
 the machine can. Its successors 0.7.7 and 0.7.8 added a CPUID mask to their krun crate with
 the flag off and no way to ask for it, so their guests never nest — the regression upstream
 recorded as [#1778](https://github.com/superradcompany/microsandbox/issues/1778). The
@@ -23,7 +23,7 @@ enabled setting". It is blocked on
 it — v0.7.8, the latest, still has no flag. 0.7.6 is pinned on purpose, not left behind: a
 sandbox nests today, while the switch that would make it a choice is still upstream.
 
-This surfaced from use, not from theory: acornfall is developed inside an acornfall workspace,
+This surfaced from use, not from theory: acornd is developed inside an acornd workspace,
 and its own sandbox tier (`make test-sandbox`) needs `/dev/kvm` inside that workspace's guest.
 
 ## Decision
@@ -57,10 +57,10 @@ creation failing on every host that cannot nest — for workspaces that never wa
 inside a VM.
 
 **Disabled by default.** Rejected as the default, though both the flag and the field exist.
-The projects that want nesting are the ones this product is for — developing acornfall
+The projects that want nesting are the ones this product is for — developing acornd
 itself, emulators, container-in-sandbox work — a wrong guess is cheap by construction (the
 sandbox boots, the surfaces say why not), and the machine-level answer is one word to
-change. The engine's own default is off because it cannot know the host; acornfall can look.
+change. The engine's own default is off because it cannot know the host; acornd can look.
 
 **Deeper checks than we do.** Deferred: the host checks are deliberately conservative (a
 kernel parameter, a chip generation) and answer "no" when they are unsure, which is the safe
@@ -73,10 +73,10 @@ direction. The engine's own check remains the authority once the flag is passed.
   while the pin lasts. A workspace that disables nesting still gets a nesting-capable
   sandbox there: no off switch exists to honor it with. Moving the pin to the release
   carrying `--nested-virt` arms both directions, and the commit that moves it should say so.
-- `acornfall doctor` grows a nesting line, text and JSON; the state frame grows two fields.
+- `acornd doctor` grows a nesting line, text and JSON; the state frame grows two fields.
 - The install-wide switch is gone (it was `--disable-vm-nesting`): a workspace decides, and
   a refusal is recorded on the workspace rather than on the machine. The remaining difference
-  is still on purpose: acornfall's setting says what it refuses,
+  is still on purpose: acornd's setting says what it refuses,
   the engine's `--nested-virt` says what it does with a sandbox.
 - Tests: the machines' answers (Linux KVM parameters, Apple chip and OS version) are pure
   functions, tested on every platform; the create path — the flag, the explicit false, or

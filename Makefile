@@ -1,5 +1,5 @@
-BIN := bin/acornfall
-DATA ?= $(HOME)/.acornfall
+BIN := bin/acornd
+DATA ?= $(HOME)/.acornd
 
 # Listen on every interface so another device can open the console; override
 # HOST=127.0.0.1 for a loopback-only run.
@@ -56,7 +56,7 @@ deps: ## install worker, interface, and tool dependencies
 build: ui-build ## build the gateway binary, with the interface embedded
 	# CGO off, so the binary is static: it runs as a sandbox's first process, and an image may
 	# have no libc at all (a musl image, or none). The release builds it this way too.
-	cd gateway && CGO_ENABLED=0 go build -o ../$(BIN) ./cmd/acornfall
+	cd gateway && CGO_ENABLED=0 go build -o ../$(BIN) ./cmd/acornd
 	# The release also ships macOS binaries, so a file that only builds on Linux is a broken
 	# release rather than a broken test: this is the cheapest place to notice, and the v0.13.1
 	# release failed on exactly that.
@@ -124,7 +124,7 @@ cover: ## coverage across both processes, merged; FLOOR=0 reports without failin
 	cd gateway && go test -short -count=1 -parallel $(TEST_PARALLEL) \
 		-covermode=atomic -coverpkg=./... -coverprofile=$(COVER_DIR)/unit.cover \
 		$$(go list ./... | grep -v /internal/e2e)
-	cd gateway && ACORNFALL_NO_SANDBOX=1 ACORNFALL_COVER_DIR=$(COVER_DIR)/e2e \
+	cd gateway && ACORND_NO_SANDBOX=1 ACORND_COVER_DIR=$(COVER_DIR)/e2e \
 		go test -short -count=1 -parallel $(TEST_PARALLEL) ./internal/e2e
 	$(MAKE) coverage-report
 
@@ -156,7 +156,7 @@ analyze: ## complexity, duplication, dead code, error shape: fails on any findin
 	@if [ ! -x "$(DEADCODE)" ]; then echo "deadcode: not installed (make tools)"; exit 0; fi; \
 	tmp=$$(mktemp -d); \
 	cd gateway && for pair in linux/amd64 darwin/arm64; do \
-		GOOS=$${pair%/*} GOARCH=$${pair#*/} $(DEADCODE) -test ./cmd/acornfall ./internal/e2e | sort > $$tmp/$${pair%/*}; \
+		GOOS=$${pair%/*} GOARCH=$${pair#*/} $(DEADCODE) -test ./cmd/acornd ./internal/e2e | sort > $$tmp/$${pair%/*}; \
 	done; cd ..; \
 	dead=$$(comm -12 $$tmp/linux $$tmp/darwin); rm -rf $$tmp; \
 	if [ -n "$$dead" ]; then \
@@ -252,7 +252,7 @@ ENGINE_VERSION := $(shell awk -F'"' '/const Version = /{print $$2; exit}' gatewa
 # a run on a newer engine leaves a catalog an older one refuses to read ("database schema is
 # newer than this msb binary"), which is a poisoned cache that never heals. The 0.7.7 incident
 # in scripts/check-house-rules.mjs is the same failure from the other side.
-SANDBOX_STATE ?= /tmp/acornfall-e2e-sandboxes-$(ENGINE_VERSION)
+SANDBOX_STATE ?= /tmp/acornd-e2e-sandboxes-$(ENGINE_VERSION)
 
 # Every `go test` here runs with -shuffle=on: a suite that only passes in declaration order hides
 # that it shares something, and the seed is printed on failure so a shuffled run is reproducible.
@@ -304,16 +304,16 @@ test-suite: ## the Go suites, unit and feature, no hypervisor needed and no stat
 	# The bundle has to build: the end-to-end suite drives the client the gateway serves, and a
 	# run against a stale one is a run that says nothing about the tree.
 	$(MAKE) ui-build
-	# ACORNFALL_NO_SANDBOX forces the refusal path instead of auto-detecting a hypervisor, so
+	# ACORND_NO_SANDBOX forces the refusal path instead of auto-detecting a hypervisor, so
 	# the same command behaves the same on a machine with /dev/kvm and in CI. -short skips the
 	# tests whose assertions need a sandbox; the rest of the feature suite runs in parallel.
 	# A machine where every process is root — a container that maps only uid 0, where setpriv
 	# cannot make anyone else — skips the two assertions about the unprivileged path, because
-	# there is no unprivileged path to run. Declaring ACORNFALL_NO_UNPRIVILEGED=1 records that
+	# there is no unprivileged path to run. Declaring ACORND_NO_UNPRIVILEGED=1 records that
 	# decision; it does not hide a skip, and the suite is green either way. A skip is a line
 	# nobody sees without -v, so the gate says it once where a person is looking.
-	@if [ "$$(id -u)" = 0 ] && [ -z "$$ACORNFALL_NO_UNPRIVILEGED" ]; then \
-		echo "note: root, undeclared — the two unprivileged assertions skip themselves (declare it: ACORNFALL_NO_UNPRIVILEGED=1)"; fi
+	@if [ "$$(id -u)" = 0 ] && [ -z "$$ACORND_NO_UNPRIVILEGED" ]; then \
+		echo "note: root, undeclared — the two unprivileged assertions skip themselves (declare it: ACORND_NO_UNPRIVILEGED=1)"; fi
 	# -count=1 because the suite's inputs include worker/src and the built interface, which
 	# Go's test cache cannot see: a cached pass would be a pass for code that has changed.
 	@# COVER=1 is the same suite, instrumented: the profiles are what `make cover` would have
@@ -321,12 +321,12 @@ test-suite: ## the Go suites, unit and feature, no hypervisor needed and no stat
 	@# gets a test verdict and a coverage verdict from one pass instead of two.
 	@if [ "$(COVER)" = "1" ]; then \
 		rm -rf $(COVER_DIR) && mkdir -p $(COVER_DIR)/e2e; \
-		cd gateway && ACORNFALL_NO_SANDBOX=1 ACORNFALL_COVER_DIR=$(COVER_DIR)/e2e \
+		cd gateway && ACORND_NO_SANDBOX=1 ACORND_COVER_DIR=$(COVER_DIR)/e2e \
 			go test -short -race -count=1 -shuffle=on -parallel $(TEST_PARALLEL) \
 				-covermode=atomic -coverpkg=./... -coverprofile=$(COVER_DIR)/unit.cover ./...; \
 		status=$$?; cd ..; $(MAKE) coverage-report; exit $$status; \
 	else \
-		cd gateway && ACORNFALL_NO_SANDBOX=1 go test -short -race -count=1 -shuffle=on -parallel $(TEST_PARALLEL) ./...; \
+		cd gateway && ACORND_NO_SANDBOX=1 go test -short -race -count=1 -shuffle=on -parallel $(TEST_PARALLEL) ./...; \
 	fi
 
 test-bwrap: ## the bubblewrap engine end to end: it fetches an image, so it is not part of `make test`	# A bwrap workspace gets its own copy of its image and carries egress with pasta; both are
@@ -335,19 +335,19 @@ test-bwrap: ## the bubblewrap engine end to end: it fetches an image, so it is n
 	# itself, so there is nothing else to install. The client and driver tests run in the fast
 	# tier already.
 	#
-	# ACORNFALL_BWRAP_ONLY makes a machine without them fail instead of skip: this target is the
+	# ACORND_BWRAP_ONLY makes a machine without them fail instead of skip: this target is the
 	# one place that says the tier ran, so a skip here would be a green run that tested nothing.
-	cd worker && env -u ACORNFALL_NO_SANDBOX ACORNFALL_BWRAP_ONLY=1 bun test test/bwrap.test.ts test/env-conformance.test.ts
-	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_BWRAP_ONLY=1 ACORNFALL_IMAGE_TEST=1 go test -count=1 -shuffle=on ./internal/e2e/ -run 'Bwrap|TwoEngines|KeepsTheEngine'
+	cd worker && env -u ACORND_NO_SANDBOX ACORND_BWRAP_ONLY=1 bun test test/bwrap.test.ts test/env-conformance.test.ts
+	cd gateway && env -u ACORND_NO_SANDBOX ACORND_BWRAP_ONLY=1 ACORND_IMAGE_TEST=1 go test -count=1 -shuffle=on ./internal/e2e/ -run 'Bwrap|TwoEngines|KeepsTheEngine'
 
 test-sandbox: sandbox-preflight ## the engine boundary: live driver, SDK client, and its e2e tests
 	# env -u so a shell that exported the fast tier's switch cannot silently turn this into a
 	# suite of skips. -race stays here: the sandbox's start, attach, and mount path is only
 	# taken in this tier, and the four tests plus the live driver are ~35s instrumented.
-	cd worker && env -u ACORNFALL_NO_SANDBOX ACORNFALL_SANDBOX_INTEGRATION=1 MSB_HOME=$(SANDBOX_STATE) bun test test/sandbox.integration.test.ts
+	cd worker && env -u ACORND_NO_SANDBOX ACORND_SANDBOX_INTEGRATION=1 MSB_HOME=$(SANDBOX_STATE) bun test test/sandbox.integration.test.ts
 	# The tier names its own engine: a runner that also has bubblewrap installed must not
 	# change the default under the tests that expect the microVM's substitute secrets.
-	cd gateway && env -u ACORNFALL_NO_SANDBOX ACORNFALL_SANDBOX_ONLY=1 ACORNFALL_LIVE_SANDBOX=1 ACORNFALL_SANDBOX_STATE=$(SANDBOX_STATE) ACORNFALL_SANDBOX_ENGINE=microsandbox go test -race -count=1 -shuffle=on -parallel $(SANDBOX_PARALLEL) ./...
+	cd gateway && env -u ACORND_NO_SANDBOX ACORND_SANDBOX_ONLY=1 ACORND_LIVE_SANDBOX=1 ACORND_SANDBOX_STATE=$(SANDBOX_STATE) ACORND_SANDBOX_ENGINE=microsandbox go test -race -count=1 -shuffle=on -parallel $(SANDBOX_PARALLEL) ./...
 
 sandbox-preflight: ## fail, not skip, when there is no hypervisor for the microVM engine
 	@if [ "$$(uname -s)" = "Linux" ] && [ ! -r /dev/kvm ]; then \
@@ -361,7 +361,7 @@ run: build ## run against the current directory
 	./$(BIN) start --host $(HOST) --port $(PORT)
 
 dev: build ## run with the scripted dev provider (no api key needed)
-	cd worker && ACORNFALL_DEV_PROVIDER=1 ACORNFALL_MODEL=faux/faux-1 ACORNFALL_WORKER=$(CURDIR)/worker ../$(BIN) start --host $(HOST) --port $(PORT) --data-dir $(DATA)
+	cd worker && ACORND_DEV_PROVIDER=1 ACORND_MODEL=faux/faux-1 ACORND_WORKER=$(CURDIR)/worker ../$(BIN) start --host $(HOST) --port $(PORT) --data-dir $(DATA)
 
 ui: ## check the interface in a real browser (needs a running gateway)
 	cd tools && bun run check-ui.mjs $(URL)
@@ -373,8 +373,8 @@ ui-check: build ## the browser suite, with a gateway started for it and stopped 
 	@# which is why it was never in CI: the suite is the valuable half, the setup is what made it
 	@# somebody's afternoon. This is the setup, once.
 	rm -rf $(UI_CHECK_DIR) && mkdir -p $(UI_CHECK_DIR)
-	@ACORNFALL_SANDBOX_ENGINE=host ACORNFALL_DEV_PROVIDER=1 ACORNFALL_MODEL=faux/faux-1 \
-		ACORNFALL_WORKER=$(CURDIR)/worker \
+	@ACORND_SANDBOX_ENGINE=host ACORND_DEV_PROVIDER=1 ACORND_MODEL=faux/faux-1 \
+		ACORND_WORKER=$(CURDIR)/worker \
 		$(CURDIR)/$(BIN) start --data-dir $(UI_CHECK_DIR) \
 		--workspaces-dir $(UI_CHECK_DIR)/workspaces --host 127.0.0.1 --port $(UI_CHECK_PORT) \
 		> $(UI_CHECK_DIR)/gateway.log 2>&1 & echo $$! > $(UI_CHECK_DIR)/pid

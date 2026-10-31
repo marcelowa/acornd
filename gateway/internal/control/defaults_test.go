@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
 func binding(provider, modelID string) protocol.ModelBinding {

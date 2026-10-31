@@ -18,9 +18,9 @@ test("the workspaces list is no longer an address", () => {
 });
 
 test("a conversation URL keeps its workspace and its id", () => {
-	expect(routeFromUrl("/c/acornfall/abcd-1234", "")).toEqual({
+	expect(routeFromUrl("/c/acornd/abcd-1234", "")).toEqual({
 		screen: "conversation",
-		workspace: "acornfall",
+		workspace: "acornd",
 		conversation: "abcd-1234",
 		settingsTab: "general",
 		updateTag: "",

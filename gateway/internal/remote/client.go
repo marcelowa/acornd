@@ -449,4 +449,4 @@ func join(parts []string, sep string) string {
 }
 
 // ErrNoToken is a run that has nowhere to get a token from.
-var ErrNoToken = errors.New("remote access needs a Cloudflare API token: set ACORNFALL_CLOUDFLARE_TOKEN or paste one in the console")
+var ErrNoToken = errors.New("remote access needs a Cloudflare API token: set ACORND_CLOUDFLARE_TOKEN or paste one in the console")

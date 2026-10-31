@@ -86,7 +86,7 @@ func TestTheReleaseListIsCappedAndHidesPrereleases(t *testing.T) {
 // A token in the environment is how a rate-limited machine authenticates, and it is sent as a
 // header rather than in the URL, where it would land in logs.
 func TestATokenInTheEnvironmentIsSentAsAHeader(t *testing.T) {
-	t.Setenv("ACORNFALL_GITHUB_TOKEN", "secret-token")
+	t.Setenv("ACORND_GITHUB_TOKEN", "secret-token")
 	var authorization, accept string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authorization = r.Header.Get("Authorization")
@@ -111,7 +111,7 @@ func TestATokenInTheEnvironmentIsSentAsAHeader(t *testing.T) {
 // Without a token there is no Authorization header: an empty "Bearer " is a request GitHub
 // refuses for a reason nobody can read.
 func TestNoTokenMeansNoAuthorizationHeader(t *testing.T) {
-	os.Unsetenv("ACORNFALL_GITHUB_TOKEN")
+	os.Unsetenv("ACORND_GITHUB_TOKEN")
 	var present bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, present = r.Header["Authorization"]
@@ -244,7 +244,7 @@ func TestTheNextBackupIsTheNextFreeNumber(t *testing.T) {
 // A download carries the token too: a private mirror or a rate-limited API answers the metadata
 // and then refuses the file, which reads as an update that can never be installed.
 func TestADownloadCarriesTheTokenAndTheAcceptHeader(t *testing.T) {
-	t.Setenv("ACORNFALL_GITHUB_TOKEN", "secret-token")
+	t.Setenv("ACORND_GITHUB_TOKEN", "secret-token")
 	var authorization, accept string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authorization = r.Header.Get("Authorization")
@@ -257,7 +257,7 @@ func TestADownloadCarriesTheTokenAndTheAcceptHeader(t *testing.T) {
 
 	// An asset with an id is fetched through the API, which is where the Accept header is set.
 	manager.latestURL = server.URL + "/repos/owner/repo/releases/latest"
-	body, err := manager.download(context.Background(), Asset{ID: 7, Name: "acornfall"})
+	body, err := manager.download(context.Background(), Asset{ID: 7, Name: "acornd"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +275,7 @@ func TestADownloadCarriesTheTokenAndTheAcceptHeader(t *testing.T) {
 // The release lookups can be pointed at a mirror, which is what a private install sets and what
 // lets the update screen be driven against a server instead of github.
 func TestTheReleaseSourceCanBeAMirror(t *testing.T) {
-	t.Setenv("ACORNFALL_UPDATE_URL", "https://mirror.example/repos/o/r/releases/latest")
+	t.Setenv("ACORND_UPDATE_URL", "https://mirror.example/repos/o/r/releases/latest")
 	manager := New(t.TempDir(), "")
 	if got := manager.apiBase(); got != "https://mirror.example/repos/o/r" {
 		t.Errorf("apiBase = %q", got)
@@ -284,7 +284,7 @@ func TestTheReleaseSourceCanBeAMirror(t *testing.T) {
 	// A URL that does not carry the shape falls back to github rather than deriving a base from
 	// nothing: a mistyped mirror is not a reason to ask github, but a base cannot be invented
 	// either — and the fallback is what makes the mistake visible.
-	t.Setenv("ACORNFALL_UPDATE_URL", "https://mirror.example/whatever")
+	t.Setenv("ACORND_UPDATE_URL", "https://mirror.example/whatever")
 	if got := New(t.TempDir(), "").apiBase(); got != defaultAPIBase {
 		t.Errorf("a URL without the release path should not become an API base, got %q", got)
 	}

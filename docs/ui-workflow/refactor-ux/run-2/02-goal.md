@@ -7,7 +7,7 @@ run 1's goal plus the phone clause, which was the part open to correction.
 
 ## The goal statement, as a claim
 
-Acornfall is a local-first agent console for one technical operator. A Go gateway supervises a bun
+Acornd is a local-first agent console for one technical operator. A Go gateway supervises a bun
 worker and a microVM sandbox per workspace, and `ui/` is the only face of it. Run 1's working-well
 list stands unchanged: find the right conversation in a rail of dozens, read a tool-heavy turn
 without losing the place, intervene mid-run with no doubt about the control, change a setting once

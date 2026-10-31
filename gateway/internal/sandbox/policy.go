@@ -37,7 +37,7 @@ type Policy struct {
 	// docs/adr/0018-disable-vm-nesting.md.
 	DisableVMNesting bool
 	// Devices grants a bwrap sandbox the host's /dev/net/tun and /dev/kvm, and the
-	// capabilities nested pasta needs. It is what lets a workspace run another acornfall
+	// capabilities nested pasta needs. It is what lets a workspace run another acornd
 	// honestly: the inner engine gets a real bwrap sandbox and a real network instead of
 	// falling back to the host escape hatch. False by default at this layer; control fills
 	// it from the workspace's own opt-out. See docs/adr/0030-nested-engines.md.
@@ -182,7 +182,7 @@ func EnsureGlobal(dataDir, userHome string) error {
 // that `msb ls` means something to a person.
 func Name(workspace string) string {
 	slug := slugify(base(workspace))
-	return fmt.Sprintf("acornfall-%s-%s", slug, shortHash(workspace))
+	return fmt.Sprintf("acornd-%s-%s", slug, shortHash(workspace))
 }
 
 // shortHash tells two workspaces apart that end in the same folder name.

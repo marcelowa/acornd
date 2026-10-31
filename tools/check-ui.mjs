@@ -15,7 +15,7 @@ import { rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import puppeteer from "puppeteer-core";
 
-const url = process.argv[2] ?? process.env.ACORNFALL_URL ?? "http://127.0.0.1:7777";
+const url = process.argv[2] ?? process.env.ACORND_URL ?? "http://127.0.0.1:7777";
 const chrome = process.env.CHROME_PATH ?? "/usr/bin/chromium";
 
 let passed = 0;
@@ -612,7 +612,7 @@ try {
 		railAfter > railBefore + 40,
 		`${Math.round(railBefore)} → ${Math.round(railAfter)}`,
 	);
-	const saved = await page.evaluate(() => localStorage.getItem("acornfall.ui.railWidth"));
+	const saved = await page.evaluate(() => localStorage.getItem("acornd.ui.railWidth"));
 	check("the new rail width is saved", saved !== null && Number(saved) > 200, `saved ${saved}`);
 	await page.reload({ waitUntil: "domcontentloaded" });
 	await page.waitForSelector("[data-slot=splitter]", { timeout: 15000 });
@@ -1059,7 +1059,7 @@ try {
 	// and remembered there. Three options, so following the system is a choice too.
 	const isDark = () => page.evaluate(() => document.documentElement.classList.contains("dark"));
 
-	await page.evaluate(() => localStorage.removeItem("acornfall.ui.theme"));
+	await page.evaluate(() => localStorage.removeItem("acornd.ui.theme"));
 	await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "dark" }]);
 	await page.reload({ waitUntil: "domcontentloaded" });
 	await page.waitForSelector("[data-slot=conversation-list]", { timeout: 15000 });

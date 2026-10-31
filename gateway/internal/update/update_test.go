@@ -50,7 +50,7 @@ func testTags(releases []Release) string {
 func testManager(t *testing.T) (*Manager, string) {
 	t.Helper()
 	dataDir := t.TempDir()
-	bin := filepath.Join(t.TempDir(), "acornfall")
+	bin := filepath.Join(t.TempDir(), "acornd")
 	if err := os.WriteFile(bin, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +332,7 @@ func TestBuildVersionStampsFreshInstall(t *testing.T) {
 	BuildVersion = "v0.9.0"
 	defer func() { BuildVersion = old }()
 	dataDir := t.TempDir()
-	bin := filepath.Join(t.TempDir(), "acornfall")
+	bin := filepath.Join(t.TempDir(), "acornd")
 	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +348,7 @@ func TestBuildVersionStampsFreshInstall(t *testing.T) {
 
 func TestDevBuildNeverPrompts(t *testing.T) {
 	dataDir := t.TempDir()
-	bin := filepath.Join(t.TempDir(), "acornfall")
+	bin := filepath.Join(t.TempDir(), "acornd")
 	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +504,7 @@ func TestApplyStagesWorkerTarball(t *testing.T) {
 	manager.client = server.Client()
 	manager.mu.Lock()
 	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
-		{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
+		{Name: "acornd-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
 		{Name: WorkerTarball, URL: server.URL + "/worker.tgz"},
 	}}
 	manager.mu.Unlock()
@@ -530,7 +530,7 @@ func TestApplySkipsWorkerWhenReleasePredatesIt(t *testing.T) {
 	manager.client = server.Client()
 	manager.mu.Lock()
 	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
-		{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
+		{Name: "acornd-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
 	}}
 	manager.mu.Unlock()
 	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err != nil {
@@ -581,7 +581,7 @@ func TestVerifyChecksChecksumFile(t *testing.T) {
 	manager, _ := testManager(t)
 	binary := []byte(versionScript("v0.9.0"))
 	sum := sha256.Sum256(binary)
-	good := hex.EncodeToString(sum[:]) + "  acornfall-bin\n"
+	good := hex.EncodeToString(sum[:]) + "  acornd-bin\n"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/x.bin":
@@ -596,7 +596,7 @@ func TestVerifyChecksChecksumFile(t *testing.T) {
 	manager.client = server.Client()
 	manager.mu.Lock()
 	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
-		{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/x.bin"},
+		{Name: "acornd-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/x.bin"},
 		{Name: "sha256sums.txt", URL: server.URL + "/sums.txt"},
 	}}
 	manager.mu.Unlock()
@@ -612,7 +612,7 @@ func TestVerifyRefusesMismatch(t *testing.T) {
 		case "/x.bin":
 			_, _ = w.Write([]byte("evil-binary"))
 		case "/sums.txt":
-			_, _ = w.Write([]byte(strings.Repeat("0", 64) + "  acornfall-bin\n"))
+			_, _ = w.Write([]byte(strings.Repeat("0", 64) + "  acornd-bin\n"))
 		default:
 			_, _ = w.Write([]byte(releaseJSON("v0.9.0", "")))
 		}
@@ -621,7 +621,7 @@ func TestVerifyRefusesMismatch(t *testing.T) {
 	manager.client = server.Client()
 	manager.mu.Lock()
 	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
-		{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/x.bin"},
+		{Name: "acornd-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/x.bin"},
 		{Name: "sha256sums.txt", URL: server.URL + "/sums.txt"},
 	}}
 	manager.mu.Unlock()
@@ -642,7 +642,7 @@ func TestDownloadUsesAssetAPI(t *testing.T) {
 	var gotAccept string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
-		name := "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH
+		name := "acornd-" + runtime.GOOS + "-" + runtime.GOARCH
 		assets := fmt.Sprintf(`{"id":7,"name":%q,"browser_download_url":%q,"size":10}`,
 			name, "http://"+r.Host+"/o/r/download/x.bin")
 		_, _ = w.Write([]byte(releaseJSON("v0.9.0", assets)))
@@ -681,7 +681,7 @@ func TestApplySwapsAndRollbackRestores(t *testing.T) {
 			_, _ = w.Write(binary)
 			return
 		}
-		assets := fmt.Sprintf(`{"name":"acornfall-test-test","browser_download_url":%q,"size":10}`,
+		assets := fmt.Sprintf(`{"name":"acornd-test-test","browser_download_url":%q,"size":10}`,
 			"http://"+r.Host+"/x.bin")
 		_, _ = w.Write([]byte(releaseJSON("v0.9.0", assets)))
 	}))
@@ -698,7 +698,7 @@ func TestApplySwapsAndRollbackRestores(t *testing.T) {
 	_ = release
 	// Seed a matching asset by hand: the test server names it per platform.
 	manager.mu.Lock()
-	manager.latest.Assets = []Asset{{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/x.bin", Size: 10}}
+	manager.latest.Assets = []Asset{{Name: "acornd-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/x.bin", Size: 10}}
 	manager.mu.Unlock()
 
 	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err != nil {
@@ -870,7 +870,7 @@ func TestApplyRefusesWhileRestartPending(t *testing.T) {
 	manager.client = server.Client()
 	manager.mu.Lock()
 	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
-		{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
+		{Name: "acornd-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
 	}}
 	manager.mu.Unlock()
 	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err != nil {
@@ -928,7 +928,7 @@ func TestApplyStopsRunsOnDrainStop(t *testing.T) {
 	manager.client = server.Client()
 	manager.mu.Lock()
 	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
-		{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
+		{Name: "acornd-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
 	}}
 	manager.mu.Unlock()
 	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err != nil {
@@ -961,7 +961,7 @@ func TestApplyWipesSandboxesOnClean(t *testing.T) {
 	manager.client = server.Client()
 	manager.mu.Lock()
 	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
-		{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
+		{Name: "acornd-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
 	}}
 	manager.mu.Unlock()
 	if err := manager.Apply(context.Background(), ApplyOptions{CleanVMs: true, Drain: "stop"}); err != nil {
@@ -985,7 +985,7 @@ func TestApplyKeepsSandboxesByDefault(t *testing.T) {
 	manager.client = server.Client()
 	manager.mu.Lock()
 	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
-		{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
+		{Name: "acornd-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
 	}}
 	manager.mu.Unlock()
 	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err != nil {
@@ -1125,7 +1125,7 @@ func TestApplyStopsWorkersBeforeWipe(t *testing.T) {
 	manager.client = server.Client()
 	manager.mu.Lock()
 	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
-		{Name: "acornfall-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
+		{Name: "acornd-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
 	}}
 	manager.mu.Unlock()
 	if err := manager.Apply(context.Background(), ApplyOptions{CleanVMs: true, Drain: "stop"}); err != nil {
@@ -1209,7 +1209,7 @@ func TestApplyRefusesAnInstallFolderItCannotWrite(t *testing.T) {
 	if !strings.Contains(err.Error(), "not writable by this user") {
 		t.Fatalf("the refusal should say what is wrong: %v", err)
 	}
-	if !strings.Contains(err.Error(), "install.sh --dir ~/.acornfall/bin") {
+	if !strings.Contains(err.Error(), "install.sh --dir ~/.acornd/bin") {
 		t.Fatalf("the refusal should name the fix: %v", err)
 	}
 }
@@ -1221,7 +1221,7 @@ func TestTheVersionGateSpeaksEveryFolderName(t *testing.T) {
 	seen := filepath.Join(t.TempDir(), "seen.txt")
 	script := filepath.Join(t.TempDir(), "staged")
 	body := "#!/bin/sh\n" +
-		`printf '%s|%s|%s' "$ACORNFALL_DATA_DIR" "$ACORNFALL_HOME" "$ACORNFALL_DATA" > ` + seen + "\n" +
+		`printf '%s|%s|%s' "$ACORND_DATA_DIR" "$ACORND_HOME" "$ACORND_DATA" > ` + seen + "\n" +
 		"echo v9.9.9\n"
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)

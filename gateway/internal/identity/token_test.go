@@ -176,7 +176,7 @@ func TestATokenPathThatIsNotAFileIsReported(t *testing.T) {
 // by the caller, and a name under a file is a typo the tool can point at.
 func TestAnInstallFolderThatCannotBeCreatedIsReported(t *testing.T) {
 	base := t.TempDir()
-	file := filepath.Join(base, "acornfall")
+	file := filepath.Join(base, "acornd")
 	if err := os.WriteFile(file, []byte("not a folder"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}

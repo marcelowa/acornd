@@ -39,7 +39,7 @@ export const Running: Story = {
 			],
 			secretsRestart: true,
 		},
-		workspacePath: "/home/marcelo/workspace/acornfall",
+		workspacePath: "/home/marcelo/workspace/acornd",
 	},
 };
 

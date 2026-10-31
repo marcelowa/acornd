@@ -29,14 +29,14 @@ func serveChecksums(t *testing.T, lines string) (*http.Client, string) {
 // not build here.
 func TestAnArtifactMissingFromTheChecksumsIsRefused(t *testing.T) {
 	client, url := serveChecksums(t, "abc123  something-else-x86_64\n")
-	_, err := fetchChecksum(context.Background(), client, url+"/checksums.sha256", "acornfall-linux-amd64")
+	_, err := fetchChecksum(context.Background(), client, url+"/checksums.sha256", "acornd-linux-amd64")
 	if err == nil {
 		t.Fatal("an artifact with no checksum should be refused")
 	}
 	if !errors.Is(err, ErrUnavailable) {
 		t.Errorf("it should be the unavailable kind of error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "acornfall-linux-amd64") {
+	if !strings.Contains(err.Error(), "acornd-linux-amd64") {
 		t.Errorf("the refusal should name the artifact: %v", err)
 	}
 }
@@ -44,8 +44,8 @@ func TestAnArtifactMissingFromTheChecksumsIsRefused(t *testing.T) {
 // A checksum line carries a star for a binary transfer, and the hash is compared lower-cased: a
 // registry that writes it in capitals still means the same digest.
 func TestAChecksumLineIsReadTheWayTheFileWritesIt(t *testing.T) {
-	client, url := serveChecksums(t, "ABC123DEF  *acornfall-linux-amd64\n")
-	got, err := fetchChecksum(context.Background(), client, url+"/checksums.sha256", "acornfall-linux-amd64")
+	client, url := serveChecksums(t, "ABC123DEF  *acornd-linux-amd64\n")
+	got, err := fetchChecksum(context.Background(), client, url+"/checksums.sha256", "acornd-linux-amd64")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -155,7 +155,7 @@ two.
    `javascript:` link, a nested `<img>` inside a label and a real `foreignObject` label: labels
    and text survive, everything else is gone. Fixtures, because jsdom cannot lay out an SVG.
 3. `tools/check-ui.mjs` — one check: the scripted dev provider answers "draw the flow" with a
-   mermaid fence (`ACORNFALL_DEV_SCRIPT`, the mechanism `features.md` describes), and the suite
+   mermaid fence (`ACORND_DEV_SCRIPT`, the mechanism `features.md` describes), and the suite
    asserts an `<svg>` with non-empty label text is in the transcript, and that no off-origin
    request happened while it drew. That is the only place that proves the lazy chunk loads
    through the real bundle.

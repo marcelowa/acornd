@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
-	"github.com/acornfall/acornfall/gateway/internal/vault"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/vault"
 )
 
 // What reaches a sandbox is decided here, and the two engines decide differently: a substitute

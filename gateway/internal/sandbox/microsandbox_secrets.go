@@ -39,7 +39,7 @@ func substitutedSecrets(secrets []Secret) []Secret {
 // secretEnvVar is the host variable the policy file references. It is deliberately not the
 // guest's name: a host that already exports GITHUB_TOKEN cannot accidentally become the
 // source of the sandbox's GITHUB_TOKEN.
-func secretEnvVar(index int) string { return fmt.Sprintf("ACORNFALL_SECRET_%d", index) }
+func secretEnvVar(index int) string { return fmt.Sprintf("ACORND_SECRET_%d", index) }
 
 // secretEnvValues are the create process's extra environment entries. The values exist only
 // here and in the engine's memory; the policy file holds source references.
@@ -52,7 +52,7 @@ func secretEnvValues(secrets []Secret) []string {
 }
 
 // startSecretEnv carries both source spellings: a config created from sandbox.yaml uses the
-// ACORNFALL_SECRET_<n> source, while one changed by `msb modify --secret NAME@HOST` stores
+// ACORND_SECRET_<n> source, while one changed by `msb modify --secret NAME@HOST` stores
 // the guest name as its source. The start process has to satisfy whichever is stored.
 func startSecretEnv(secrets []Secret) []string {
 	values := append([]string(nil), secretEnvValues(secrets)...)

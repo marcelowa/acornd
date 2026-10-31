@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// rootPlan is the privileged half of `acornfall setup`, as data.
+// rootPlan is the privileged half of `acornd setup`, as data.
 //
 // It is data and not a command line on purpose. The unprivileged command works out what is
 // missing and writes this; the privileged process reads it, refuses anything that is not in its
@@ -115,8 +115,8 @@ func (p rootPlan) actions() []planAction {
 		actions = append(actions,
 			planAction{
 				Why:   "allow unprivileged user namespaces, and keep that across reboots",
-				File:  "/etc/sysctl.d/99-acornfall-userns.conf",
-				Write: "# written by acornfall setup: a sandbox needs an unprivileged user namespace\nkernel.apparmor_restrict_unprivileged_userns=0\n",
+				File:  "/etc/sysctl.d/99-acornd-userns.conf",
+				Write: "# written by acornd setup: a sandbox needs an unprivileged user namespace\nkernel.apparmor_restrict_unprivileged_userns=0\n",
 			},
 			planAction{
 				Why: "apply it now",
@@ -129,13 +129,13 @@ func (p rootPlan) actions() []planAction {
 		actions = append(actions,
 			planAction{
 				Why:  "make /dev/net/tun available, which is where pasta builds its interface",
-				File: "/etc/tmpfiles.d/acornfall-tun.conf",
-				Write: "# written by acornfall setup: pasta needs the tun device\n" +
+				File: "/etc/tmpfiles.d/acornd-tun.conf",
+				Write: "# written by acornd setup: pasta needs the tun device\n" +
 					"d /dev/net 0755 root root\n" +
 					"c! /dev/net/tun 0666 root root 10 200\n",
 			},
 			planAction{Why: "load the tun module", Run: []string{"modprobe", "tun"}},
-			planAction{Why: "create the tun device from the rule", Run: []string{"systemd-tmpfiles", "--create", "/etc/tmpfiles.d/acornfall-tun.conf"}},
+			planAction{Why: "create the tun device from the rule", Run: []string{"systemd-tmpfiles", "--create", "/etc/tmpfiles.d/acornd-tun.conf"}},
 			planAction{Why: "make sure the device is usable without root", Run: []string{"chmod", "0666", "/dev/net/tun"}},
 		)
 	}
@@ -147,7 +147,7 @@ func (p rootPlan) actions() []planAction {
 	}
 	if p.LingerUser != "" {
 		actions = append(actions, planAction{
-			Why: "keep " + p.LingerUser + "'s acornfall running after logout",
+			Why: "keep " + p.LingerUser + "'s acornd running after logout",
 			Run: []string{"loginctl", "enable-linger", p.LingerUser},
 		})
 	}
@@ -170,25 +170,25 @@ func userExists(name string) bool {
 	return err == nil
 }
 
-// runPlanAsRoot is the privileged half. It is reached by `sudo acornfall setup --privileged
-// --plan FILE`, which `acornfall setup` runs itself; a person does not type it.
+// runPlanAsRoot is the privileged half. It is reached by `sudo acornd setup --privileged
+// --plan FILE`, which `acornd setup` runs itself; a person does not type it.
 func runPlanAsRoot(path string) {
 	if os.Geteuid() != 0 {
-		logf("acornfall setup: --privileged is how `acornfall setup` asks for a password, not a command to run by hand")
+		logf("acornd setup: --privileged is how `acornd setup` asks for a password, not a command to run by hand")
 		os.Exit(2)
 	}
 	payload, err := os.ReadFile(path)
 	if err != nil {
-		logf("acornfall setup: %v", err)
+		logf("acornd setup: %v", err)
 		os.Exit(1)
 	}
 	var plan rootPlan
 	if err := json.Unmarshal(payload, &plan); err != nil {
-		logf("acornfall setup: the plan is not readable: %v", err)
+		logf("acornd setup: the plan is not readable: %v", err)
 		os.Exit(1)
 	}
 	if err := applyPlan(plan); err != nil {
-		logf("acornfall setup: %v", err)
+		logf("acornd setup: %v", err)
 		os.Exit(1)
 	}
 }

@@ -46,7 +46,7 @@ func (m *Manager) workerBad() string  { return m.workerDir() + ".bad" }
 func (m *Manager) workerTag() string  { return filepath.Join(m.workerDir(), "VERSION") }
 func (m *Manager) workerLock() string { return filepath.Join(m.workerDir(), "bun.lock") }
 func (m *Manager) workerMark() string {
-	return filepath.Join(m.workerDir(), "node_modules", ".acornfall-installed")
+	return filepath.Join(m.workerDir(), "node_modules", ".acornd-installed")
 }
 func (m *Manager) workerPending() string { return filepath.Join(m.dataDir, "worker.pending.tgz") }
 

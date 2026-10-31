@@ -14,15 +14,15 @@ type Story = StoryObj<typeof meta>;
 const noop = (): void => undefined;
 
 const workspace: WorkspaceSummary = {
-	name: "acornfall",
-	title: "acornfall",
-	path: "/home/marcelo/acornfall/workspaces/acronfall",
+	name: "acornd",
+	title: "acornd",
+	path: "/home/marcelo/acornd/workspaces/acronfall",
 	personal: true,
 	kind: "personal",
 	members: [{ email: "me@example.com", role: "owner" }],
 	running: true,
 	active: true,
-	image: "acornfall/sandbox:0.7.6",
+	image: "acornd/sandbox:0.7.6",
 	network: "on",
 };
 

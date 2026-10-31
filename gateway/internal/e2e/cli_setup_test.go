@@ -46,14 +46,14 @@ func TestTheRootHalfRefusesToBeRunByHand(t *testing.T) {
 	t.Parallel()
 	// Root has no refusal to show, and a container that maps only uid 0 cannot become somebody
 	// else to look (setpriv: setresuid failed: Invalid argument). The skip is not the same
-	// wherever it happens, though: a machine that declares ACORNFALL_NO_UNPRIVILEGED has decided
+	// wherever it happens, though: a machine that declares ACORND_NO_UNPRIVILEGED has decided
 	// that nobody here can run this as a person, and the skip says so; one that declares nothing is
 	// skipping an assertion it never said was missing, which TestMain names on stderr every run.
 	if os.Geteuid() == 0 {
-		if os.Getenv("ACORNFALL_NO_UNPRIVILEGED") == "" {
+		if os.Getenv("ACORND_NO_UNPRIVILEGED") == "" {
 			t.Skip("root, and undeclared: `setup --privileged` refusing a person cannot be observed here")
 		}
-		t.Skip("root, declared with ACORNFALL_NO_UNPRIVILEGED: `setup --privileged` refusing a person is untested on this machine")
+		t.Skip("root, declared with ACORND_NO_UNPRIVILEGED: `setup --privileged` refusing a person is untested on this machine")
 	}
 	dir := t.TempDir()
 	_, stderr, code := cli(t, dir, "", "setup", "--privileged", "--plan", dir+"/plan.json", "--data-dir", dir)

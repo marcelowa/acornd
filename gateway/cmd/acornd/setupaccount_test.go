@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/control"
-	"github.com/acornfall/acornfall/gateway/internal/vault"
+	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/vault"
 )
 
 // Who root is acting for, without being root: the three ways of knowing are all answers about a
@@ -70,7 +70,7 @@ func TestTheServiceAccountIsWhatItSaysItIs(t *testing.T) {
 	if !found {
 		t.Fatal("the service account should be evidence")
 	}
-	if account.Basis != "the acornfall service runs as "+currentAccount(t) {
+	if account.Basis != "the acornd service runs as "+currentAccount(t) {
 		t.Errorf("basis = %q", account.Basis)
 	}
 }

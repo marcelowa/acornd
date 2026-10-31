@@ -3,8 +3,8 @@ package httpapi
 import (
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/control"
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
 // stateWith is a state carrying two providers and four models, which is enough to tell a filtered list from a

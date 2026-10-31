@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/control"
-	"github.com/acornfall/acornfall/gateway/internal/vault"
+	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/vault"
 )
 
 // Answering a secret request is the one place a value arrives from a person, and every refusal in

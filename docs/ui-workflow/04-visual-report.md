@@ -1,4 +1,4 @@
-# Visual Design Report — Acornfall
+# Visual Design Report — Acornd
 
 ## Visual Concept
 **Calibrated instrument.** Finish every decision the token system started. Precise, quiet, layered, trustworthy. Beauty from spacing quality, type honesty, and elevation truth — not decoration.

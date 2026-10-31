@@ -34,7 +34,7 @@ export const Slots: Story = {
 				<span className="flex shrink-0 items-center gap-2">
 					<BrandMark />
 					<Text as="span" size="sm" weight="semibold">
-						Acornfall
+						Acornd
 					</Text>
 				</span>
 				<Text size="sm" className="truncate">

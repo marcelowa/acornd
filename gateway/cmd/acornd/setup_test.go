@@ -17,7 +17,7 @@ func working() setupReport {
 		PastaPath:      "/usr/bin/pasta",
 		LingerKnown:    true,
 		Linger:         true,
-		InstallDir:     "/home/me/.acornfall/bin",
+		InstallDir:     "/home/me/.acornd/bin",
 	}
 }
 
@@ -88,7 +88,7 @@ func TestSetupOnlyRelaxesUserNamespacesWhenThatIsTheCause(t *testing.T) {
 	// And it stays fixed after a reboot, which is why the plan writes a file as well.
 	var wrote bool
 	for _, action := range plan.actions() {
-		if action.File == "/etc/sysctl.d/99-acornfall-userns.conf" && strings.Contains(action.Write, "apparmor_restrict_unprivileged_userns=0") {
+		if action.File == "/etc/sysctl.d/99-acornd-userns.conf" && strings.Contains(action.Write, "apparmor_restrict_unprivileged_userns=0") {
 			wrote = true
 		}
 	}
@@ -132,7 +132,7 @@ func TestSetupPlansTheTunDevice(t *testing.T) {
 	// The rule is persistent, so the fix survives a reboot.
 	var persistent bool
 	for _, action := range plan.actions() {
-		if action.File == "/etc/tmpfiles.d/acornfall-tun.conf" && strings.Contains(action.Write, "c! /dev/net/tun 0666") {
+		if action.File == "/etc/tmpfiles.d/acornd-tun.conf" && strings.Contains(action.Write, "c! /dev/net/tun 0666") {
 			persistent = true
 		}
 	}
@@ -218,10 +218,10 @@ func TestSetupReadsTheDistribution(t *testing.T) {
 }
 
 // Who the checks are about is a decision with a wrong answer that looks like a right one: on a
-// machine where root installed acornfall, root can open /dev/kvm and make a user namespace
+// machine where root installed acornd, root can open /dev/kvm and make a user namespace
 // whatever the policy says, so probing as root reports a machine that works while the service's
 // workspaces cannot boot.
-func TestSetupChecksTheAccountThatRunsAcornfall(t *testing.T) {
+func TestSetupChecksTheAccountThatRunsAcornd(t *testing.T) {
 	current, err := user.Current()
 	if err != nil {
 		t.Skip("no current user")

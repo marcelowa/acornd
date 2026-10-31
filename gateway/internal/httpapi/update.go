@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/update"
+	"github.com/marcelowa/acornd/gateway/internal/update"
 )
 
 // health is the update tier's proof of life: the switch and the rollback

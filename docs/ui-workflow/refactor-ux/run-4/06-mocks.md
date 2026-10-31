@@ -6,7 +6,7 @@ compositions; every control and card they use is the product's own.
 
 ## How to look
 
-- **The catalogue**: http://100.64.0.16:6006 · http://localhost:6006 —
+- **The catalogue**: http://localhost:6006 —
   group **Mocks/Release**, below Screens. The toolbar switches light and dark; the phone stories
   are pinned to Phone (390).
 - The console itself is not part of this round: none of this exists in the product yet, so the
@@ -68,5 +68,5 @@ and **no horizontal overflow** (the only 404 is Storybook's own `favicon.ico`). 
    is not here?
 6. **The settings page**: running build, auto-check, and the Releases row as the door. Is that the
    door you want?
-7. **The runs dialog**: "5 runs are active across acornfall and hello-omri", with **Not now** and
+7. **The runs dialog**: "5 runs are active across acornd and hello-omri", with **Not now** and
    **Stop runs and install**. Enough to decide, every time?

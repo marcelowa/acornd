@@ -4,7 +4,7 @@ Date: 2026-08-29 (chain run 1, branch `docs-ui-refactor-chain`)
 
 ## The frame, as stated back to the owner
 
-Acornfall's console is not a fast-built throwaway. It has a token system with teeth (ADR-0016),
+Acornd's console is not a fast-built throwaway. It has a token system with teeth (ADR-0016),
 a Storybook catalogue, and a finished milestone pass (`docs/ui-workflow/milestones.md`, M1–M6 and
 R2–R6). So this is not a "make it look nicer" pass: it is a second, gated one that starts from the
 owner's journeys and persona checks and only then touches pixels.

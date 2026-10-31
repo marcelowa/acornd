@@ -55,7 +55,7 @@ internal/people      98   66
 # reports that as timed out rather than killed.
 # Those are the honest end of a mutation score, not a gap in the tests.
 #
-# Not measured, on purpose: `internal/httpapi` and `cmd/acornfall` keep their tests in the
+# Not measured, on purpose: `internal/httpapi` and `cmd/acornd` keep their tests in the
 # end-to-end suite, and gremlins only runs the package's own. A number from them would report the
 # absence of unit tests, not the strength of the tests. Their signal is coverage through the
 # feature suite, and `make cover` says it.

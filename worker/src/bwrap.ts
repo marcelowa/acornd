@@ -8,7 +8,7 @@ import { WorkspaceFiles } from "./workspace-files.ts";
  * The bubblewrap engine: a sandbox that runs as one process per workspace, with this worker's
  * binary as its first process inside.
  *
- * Control writes one config per workspace to `ACORNFALL_BWRAP_STATE` — the same file a person can
+ * Control writes one config per workspace to `ACORND_BWRAP_STATE` — the same file a person can
  * read — starts the sandbox, and the sandbox's supervisor answers on a Unix socket. A command
  * here is a request over that socket: the supervisor runs it inside the namespaces it already
  * holds, streams it back, and reaps what it leaves behind. That is why a daemon outlives the
@@ -24,10 +24,10 @@ export function engineName(): string {
 }
 
 export async function openSandbox(name: string, workspace: string): Promise<SandboxClient> {
-	const state = process.env.ACORNFALL_BWRAP_STATE;
+	const state = process.env.ACORND_BWRAP_STATE;
 	if (state === undefined || state === "") {
 		throw new Error(
-			"the bwrap engine's state folder is not set: control starts a workspace with ACORNFALL_BWRAP_STATE",
+			"the bwrap engine's state folder is not set: control starts a workspace with ACORND_BWRAP_STATE",
 		);
 	}
 	const path = join(state, `${name}.json`);
@@ -69,7 +69,7 @@ const systemPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 /**
  * What a command inherits from this process: the handful a shell needs to behave, and nothing else.
  *
- * This worker was started with acornfall's own environment, and a command that inherits it inherits
+ * This worker was started with acornd's own environment, and a command that inherits it inherits
  * whatever the gateway was holding — a provider key, a cloud token — with no vault involved. The
  * list is short on purpose: a caller that needs a variable passes it.
  */
@@ -219,7 +219,7 @@ class BwrapClient extends WorkspaceFiles implements SandboxClient {
 			const failed = (error: Error): void => {
 				reject(
 					new Error(
-						`the sandbox at ${this.config.socket} is not answering (${error.message}): the sandbox is stopped, and restarting acornfall starts it again`,
+						`the sandbox at ${this.config.socket} is not answering (${error.message}): the sandbox is stopped, and restarting acornd starts it again`,
 					),
 				);
 			};

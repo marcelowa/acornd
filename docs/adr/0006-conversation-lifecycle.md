@@ -10,7 +10,7 @@ from the first user message. A derived title cannot be edited, so a name has to 
 stored.
 
 **It is stored in a durable document committed into the conversation**
-(`acornfall.meta`, an ordinary conversation-scoped doc with `history: latest` and
+(`acornd.meta`, an ordinary conversation-scoped doc with `history: latest` and
 `fork: initial`), not in control's settings file.
 
 Why not settings: settings are ours, the transcript is the harness's. A name in our file

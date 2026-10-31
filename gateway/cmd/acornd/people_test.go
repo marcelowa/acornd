@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/people"
+	"github.com/marcelowa/acornd/gateway/internal/people"
 )
 
 // capture runs a command with stdout swapped, which is the only way to test one whose whole job is to

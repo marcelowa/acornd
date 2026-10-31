@@ -44,7 +44,7 @@ Two proofs are accepted, and nothing else:
 | local | the token file, `<data-dir>/token`, mode 0600 | the owner, from the CLI |
 | remote | a signed identity assertion, verified | a person |
 
-`<data-dir>/token` is minted at first boot, printed once, reprintable with `acornfall token`, and
+`<data-dir>/token` is minted at first boot, printed once, reprintable with `acornd token`, and
 rotatable. ADR 0014 already names that file, keeps it out of every sandbox mount, and pins the
 exclusion with a test — so a guest can reach the port and still not hold the proof. Loopback is
 **not** a door: a request from `127.0.0.1` with no token is refused, exactly like any other.
@@ -68,12 +68,12 @@ type Identity interface {
 | implementation | how it decides | configured by |
 |---|---|---|
 | `token` | constant-time compare against `<data-dir>/token` | on, always |
-| `access` | verifies Cloudflare Access's signed assertion | `ACORNFALL_IDENTITY=access` |
+| `access` | verifies Cloudflare Access's signed assertion | `ACORND_IDENTITY=access` |
 
 The assertion is a JWT. It is verified — signature against the publisher's keys, `aud`, `iss`,
 `exp` and `iat` with 60 seconds of leeway, and `email_verified: true` — and the plaintext
 `X-Goog-Authenticated-User-Email`-style header is **never** read, because anyone who reaches the
-port can write it. Keys come from `ACORNFALL_IDENTITY_KEYS`, are cached, and are refetched on an
+port can write it. Keys come from `ACORND_IDENTITY_KEYS`, are cached, and are refetched on an
 unknown `kid`; a fetch failure falls back to the cache and refuses if there is none.
 
 `iap` is the same code with a different issuer and audience, and is **not built** until someone
@@ -108,7 +108,7 @@ The reconciliation runs the other way too: an email the door still admits but `p
 longer names is refused with a sentence saying so, and the next reconcile removes it from the door.
 That is the one state a drift between the two can produce, and it fails closed.
 
-**Exactly one owner**, and it is claimed from the CLI: `acornfall people claim you@example.com`.
+**Exactly one owner**, and it is claimed from the CLI: `acornd people claim you@example.com`.
 The token already proves ownership, so there is no first-come race and no self-promotion through
 the API. An install with no `people.json` behaves as it does today — one owner, no people — except
 for the one rename in decision 9.
@@ -120,7 +120,7 @@ workspace they never showed up for.
 **There is no session table and no cookie of ours.** Every request re-asserts identity, so a
 `revoked` record takes effect on the next request with no expiry window, and the door's own
 session lifetime is the only thing left to expire. That is why `revoked` is instant and why there
-is no password, no reset flow, and no email sent by acornfall: the door proves the mailbox, and
+is no password, no reset flow, and no email sent by acornd: the door proves the mailbox, and
 the invitation is a message the owner sends.
 
 ### 4. A workspace has members, and the owner is not one
@@ -143,7 +143,7 @@ Two consequences, both stated rather than hidden:
 - **The owner can still reach the disk.** Their SQLite is a file on the machine, and `bash` or
   `ssh` opens it. The claim here is "the product offers no path", which is a weaker and more
   honest claim than confidentiality — the same register ADR 0011 uses about confinement.
-- **Removing a workspace stays a CLI command.** `acornfall workspace remove` already exists and
+- **Removing a workspace stays a CLI command.** `acornd workspace remove` already exists and
   never deletes the folder. The interface does not get a button for another person's workspace,
   for the reason ADR 0011 gives about naming a path: the destructive power belongs where it is
   visible.

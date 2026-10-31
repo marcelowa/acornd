@@ -7,7 +7,7 @@ the same people across passes.
 
 ## The set, and why it looks like this
 
-Acornfall is one operator today: the owner, running it for themselves. So the honest set is one
+Acornd is one operator today: the owner, running it for themselves. So the honest set is one
 real person in three modes, taken from `docs/ui-workflow/02-need-report.md`. The modes are not
 invented buyers — they are hats the same person wears, and they are the only reviewers whose
 reaction is evidence.
@@ -38,7 +38,7 @@ the first real second user exists, their block goes in this file and the panels 
 
 ### Persona: OWNER-OPERATOR
 
-- role: the person who runs acornfall for themselves; buyer, user and admin in one. Lives in the
+- role: the person who runs acornd for themselves; buyer, user and admin in one. Lives in the
   transcript, keeps several conversations per workspace.
 - goal: keep a full working session readable and steerable from open to close; always know what
   ran, what it cost, and where it ran.

@@ -257,7 +257,7 @@ export function ReleaseScreen({
 							Update
 						</Text>
 						<Text size="2xs" tone="muted" className="font-mono">
-							{isTag ? `acornfall ${current}` : "dev build — not a release tag"}
+							{isTag ? `acornd ${current}` : "dev build — not a release tag"}
 						</Text>
 					</Stack>
 

@@ -123,10 +123,10 @@ import type {
 	WireView,
 } from "./wire";
 
-const RAIL_WIDTH_KEY = "acornfall.ui.railWidth";
-const RAIL_COLLAPSED_KEY = "acornfall.ui.railCollapsed";
-const SEEN_KEY = "acornfall.seen";
-const THEME_KEY = "acornfall.ui.theme";
+const RAIL_WIDTH_KEY = "acornd.ui.railWidth";
+const RAIL_COLLAPSED_KEY = "acornd.ui.railCollapsed";
+const SEEN_KEY = "acornd.seen";
+const THEME_KEY = "acornd.ui.theme";
 
 /** How long a keystroke waits before the draft is written down. The words are on screen the
  * whole time: the wait is only so a sentence is not one POST and one state event per letter. */
@@ -759,9 +759,9 @@ export function usePlatform(): Platform {
 				const conversation = activeIdRef.current;
 				const claims: Record<string, BusyAction> = {};
 				for (const entry of nextView.entries ?? []) {
-					// A person's message is placed as `acornfall.message` (ADR 0034 §7); `pi.user` is an
+					// A person's message is placed as `acornd.message` (ADR 0034 §7); `pi.user` is an
 					// agent's message to another conversation.
-					if (entry.kind !== "pi.user" && entry.kind !== "acornfall.message") continue;
+					if (entry.kind !== "pi.user" && entry.kind !== "acornd.message") continue;
 					const text = (entry.model ?? [])
 						.map((message) => textOf(message.content))
 						.join("\n")

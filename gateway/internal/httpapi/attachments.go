@@ -28,7 +28,7 @@ func (s *Server) attachments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-	staged, err := os.CreateTemp("", "acornfall-upload-*")
+	staged, err := os.CreateTemp("", "acornd-upload-*")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

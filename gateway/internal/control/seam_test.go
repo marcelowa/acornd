@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
 // The weakest level is the one nearest the bottom of the scale, not the one the provider listed

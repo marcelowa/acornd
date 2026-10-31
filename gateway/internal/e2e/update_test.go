@@ -12,7 +12,7 @@ import (
 
 // fakeReleases is github's release API as this build reads it: the newest release, a page of
 // them, and one by tag. The gateway under test is a child process pointed at it by
-// ACORNFALL_UPDATE_URL, so the update screen is driven end to end without reaching github.
+// ACORND_UPDATE_URL, so the update screen is driven end to end without reaching github.
 func fakeReleases(t *testing.T) *httptest.Server {
 	t.Helper()
 	asset := func(id int, name string, size int) map[string]any {
@@ -26,7 +26,7 @@ func fakeReleases(t *testing.T) *httptest.Server {
 			"published_at": "2026-10-20T10:00:00Z",
 			"prerelease":   prerelease,
 			"assets": []any{
-				asset(1, "acornfall-linux-amd64", 1000),
+				asset(1, "acornd-linux-amd64", 1000),
 				asset(2, "worker.tar.gz", 200),
 			},
 		}

@@ -29,7 +29,7 @@ export const Default: Story = {
 			<PopoverContent className="w-72">
 				<PopoverHeader>
 					<PopoverTitle>Workspace</PopoverTitle>
-					<PopoverDescription>~/workspace/acornfall</PopoverDescription>
+					<PopoverDescription>~/workspace/acornd</PopoverDescription>
 				</PopoverHeader>
 				<Input placeholder="Search" className="mt-3" />
 			</PopoverContent>

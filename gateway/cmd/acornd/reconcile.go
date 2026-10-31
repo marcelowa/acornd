@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/remote"
+	"github.com/marcelowa/acornd/gateway/internal/remote"
 )
 
 // reconcileBudget is how long a start waits on Cloudflare before giving up on it. A boot is not the place to
@@ -27,7 +27,7 @@ const reconcileBudget = 90 * time.Second
 //   - an install that never ran an apply has no declared state to match;
 //   - an install with no API token cannot talk to Cloudflare, and the person who can fix that is told so.
 func reconcileRemote(ctx context.Context, dataDir string) {
-	if !strings.EqualFold(strings.TrimSpace(os.Getenv("ACORNFALL_IDENTITY")), "access") {
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("ACORND_IDENTITY")), "access") {
 		return
 	}
 	setup, err := remote.Load(dataDir)
@@ -38,14 +38,14 @@ func reconcileRemote(ctx context.Context, dataDir string) {
 	if !setup.Configured() {
 		return
 	}
-	token := strings.TrimSpace(os.Getenv("ACORNFALL_CLOUDFLARE_TOKEN"))
+	token := strings.TrimSpace(os.Getenv("ACORND_CLOUDFLARE_TOKEN"))
 	if token == "" {
 		// The console stores the token the admin pasted, so the boot can reconcile without a service unit
 		// carrying it; the environment wins when both exist, because that is the one an operator set on purpose.
 		token = strings.TrimSpace(setup.APIToken)
 	}
 	if token == "" {
-		log.Printf("tunnel: not reconciled (no API token: paste one in Settings → Remote, or set ACORNFALL_CLOUDFLARE_TOKEN); what is there still works")
+		log.Printf("tunnel: not reconciled (no API token: paste one in Settings → Remote, or set ACORND_CLOUDFLARE_TOKEN); what is there still works")
 		return
 	}
 	book, admitted, err := remoteInputs(dataDir)

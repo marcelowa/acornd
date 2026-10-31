@@ -58,7 +58,7 @@ export const Topbar: Story = {
 						className="size-6 shrink-0 rounded-md"
 					/>
 					<Text as="span" size="sm" weight="semibold">
-						Acornfall
+						Acornd
 					</Text>
 				</span>
 				<Text size="sm" className="truncate">
@@ -86,7 +86,7 @@ export const TopbarPhone: Story = {
 						className="size-6 shrink-0 rounded-md"
 					/>
 					<Text as="span" size="sm" weight="semibold">
-						Acornfall
+						Acornd
 					</Text>
 				</span>
 				<Text size="sm" className="truncate">
@@ -117,7 +117,7 @@ function TopbarPhoneRailOpenFrame() {
 							className="size-6 shrink-0 rounded-md"
 						/>
 						<Text as="span" size="sm" weight="semibold">
-							Acornfall
+							Acornd
 						</Text>
 					</span>
 					<Text size="sm" className="truncate">

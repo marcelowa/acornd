@@ -51,7 +51,7 @@ func TestAgentDefinitionsOverlayByLayer(t *testing.T) {
 		withSetup(func(t *testing.T, s *system) {
 			s.writeHome(t, "agents/researcher.md", "---\nname: researcher\ndescription: the global one\ndenying: bash\n---\nGlobal body.")
 			s.writeHome(t, "agents/global-only.md", "---\nname: global-only\ndescription: only in the install\n---\nGlobal only body.")
-			s.writeWorkspace(t, ".acornfall/agents/researcher.md", "---\nname: researcher\ndescription: the workspace one\n---\nWorkspace body.")
+			s.writeWorkspace(t, ".acornd/agents/researcher.md", "---\nname: researcher\ndescription: the workspace one\n---\nWorkspace body.")
 		}),
 	)
 	c := s.client()
@@ -82,7 +82,7 @@ func TestAgentDefinitionsOverlayByLayer(t *testing.T) {
 	if byName["global-only"].layer != "global" {
 		t.Errorf("a global definition should still be offered, got %+v", byName["global-only"])
 	}
-	if !strings.Contains(byName["researcher"].source, ".acornfall/agents") {
+	if !strings.Contains(byName["researcher"].source, ".acornd/agents") {
 		t.Errorf("the explain view should say which file won, got %s", byName["researcher"].source)
 	}
 
@@ -114,7 +114,7 @@ func TestConfigLayersFoldIntoOneAgent(t *testing.T) {
 		withScript(scriptRule{Match: "fold", Reply: "folded"}),
 		withSetup(func(t *testing.T, s *system) {
 			s.writeHome(t, "config.json", `{"defaults":{"instructions":"GLOBAL MARKER","denyTools":["bash"]}}`)
-			s.writeWorkspace(t, ".acornfall/config.json", `{"defaults":{"instructions":"WORKSPACE MARKER","denyTools":["write"]}}`)
+			s.writeWorkspace(t, ".acornd/config.json", `{"defaults":{"instructions":"WORKSPACE MARKER","denyTools":["write"]}}`)
 		}),
 	)
 	c := s.client()
@@ -161,8 +161,8 @@ func TestTheEcosystemAgentsFolderIsRead(t *testing.T) {
 			s.writeWorkspace(t, ".agents/prompts/eco-prompt.md", "---\nname: eco-prompt\ndescription: from prompts\n---\nEco prompt body.")
 			s.writeWorkspace(t, ".agents/skills/eco-skill/SKILL.md", "---\nname: eco-skill\ndescription: from .agents\n---\nBody.")
 			// And ours, shadowing the agent and the command by name.
-			s.writeWorkspace(t, ".acornfall/agents/eco.md", "---\nname: eco\ndescription: from .acornfall\n---\nNative body.")
-			s.writeWorkspace(t, ".acornfall/commands/eco.md", "---\nname: eco-command\ndescription: from .acornfall\n---\nNative body.")
+			s.writeWorkspace(t, ".acornd/agents/eco.md", "---\nname: eco\ndescription: from .acornd\n---\nNative body.")
+			s.writeWorkspace(t, ".acornd/commands/eco.md", "---\nname: eco-command\ndescription: from .acornd\n---\nNative body.")
 		}),
 	)
 	c := s.client()
@@ -181,7 +181,7 @@ func TestTheEcosystemAgentsFolderIsRead(t *testing.T) {
 			agent.Description, agent.Source = candidate.Description, candidate.Source
 		}
 	}
-	if !strings.Contains(agent.Description, "from .acornfall") || !strings.Contains(agent.Source, ".acornfall") {
+	if !strings.Contains(agent.Description, "from .acornd") || !strings.Contains(agent.Source, ".acornd") {
 		t.Errorf("our folder should shadow the ecosystem one, got %+v", agent)
 	}
 
@@ -206,7 +206,7 @@ func TestTheEcosystemAgentsFolderIsRead(t *testing.T) {
 	for _, command := range listing.Commands {
 		byCommand[command.Name] = command.Source
 	}
-	if !strings.Contains(byCommand["eco-command"], ".acornfall") {
+	if !strings.Contains(byCommand["eco-command"], ".acornd") {
 		t.Errorf("our folder should shadow the ecosystem command, got %q", byCommand["eco-command"])
 	}
 	if !strings.Contains(byCommand["eco-prompt"], "/prompts/") {
@@ -244,7 +244,7 @@ func TestReloadPicksUpANewDefinition(t *testing.T) {
 	root := c.waitForConversation("personal")
 	before := c.view("personal", root)
 
-	s.writeWorkspace(t, ".acornfall/agents/late.md", "---\nname: late\ndescription: written after startup\n---\nBody.")
+	s.writeWorkspace(t, ".acornd/agents/late.md", "---\nname: late\ndescription: written after startup\n---\nBody.")
 	c.post("/api/workspaces/personal/agents/reload", nil, nil)
 
 	got := c.state("personal")
@@ -347,7 +347,7 @@ func TestABrokenWorkspaceFileIsReportedAndHeals(t *testing.T) {
 		withScript(scriptRule{Match: "after the fix", Reply: "fixed"}),
 		withSetup(func(t *testing.T, s *system) {
 			// A guard with no reason: a mistake, and one the worker refuses to load.
-			s.writeWorkspace(t, ".acornfall/config.json",
+			s.writeWorkspace(t, ".acornd/config.json",
 				`{"defaults":{"hooks":{"guards":[{"tool":"bash","arg":"command","pattern":"rm -rf"}]}}}`)
 		}),
 	)
@@ -384,7 +384,7 @@ func TestABrokenWorkspaceFileIsReportedAndHeals(t *testing.T) {
 	}
 
 	// Fixing the file is enough: the supervisor keeps trying, and nothing needs a restart.
-	s.writeWorkspace(t, ".acornfall/config.json",
+	s.writeWorkspace(t, ".acornd/config.json",
 		`{"defaults":{"hooks":{"guards":[{"tool":"bash","arg":"command","pattern":"rm -rf","reason":"now it has one"}]}}}`)
 	deadline = time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {

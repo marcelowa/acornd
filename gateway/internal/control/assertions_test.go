@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
 // The three things the mutation report found covered but unasserted. Each one is a rule the

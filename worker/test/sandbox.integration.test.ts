@@ -12,13 +12,13 @@ import { openSandbox } from "../src/microsandbox.ts";
  * only caller. `make test` must stay the same on every machine, and a machine without a
  * hypervisor has no business booting one.
  */
-const enabled = process.env.ACORNFALL_SANDBOX_INTEGRATION === "1";
+const enabled = process.env.ACORND_SANDBOX_INTEGRATION === "1";
 const integration = enabled ? test : test.skip;
 
 integration(
 	"streams, kills, and reads and writes files through the real engine",
 	async () => {
-		const name = `acornfall-integration-${process.pid}-${Date.now()}`;
+		const name = `acornd-integration-${process.pid}-${Date.now()}`;
 		const created = await Sandbox.builder(name)
 			.image("debian:stable-slim")
 			.cpus(1)
@@ -61,8 +61,8 @@ integration(
 
 			// Killing is inside the sandbox: a command stopped from here must not run its tail
 			// afterwards, which is what a host-side kill leaves behind.
-			await client.mkdir("/tmp/acornfall-integration");
-			const marker = "/tmp/acornfall-integration/killed";
+			await client.mkdir("/tmp/acornd-integration");
+			const marker = "/tmp/acornd-integration/killed";
 			const controller = new AbortController();
 			const longRunning = client.exec(`sleep 3 && touch ${marker}`, {
 				signal: controller.signal,
@@ -76,19 +76,19 @@ integration(
 
 			// The file operations, each read back through a second call so a write cannot pass
 			// on a return value alone.
-			const hello = "/tmp/acornfall-integration/hello.txt";
+			const hello = "/tmp/acornd-integration/hello.txt";
 			await client.write(hello, "from the test\n");
 			expect(await client.read(hello)).toBe("from the test\n");
 			expect(new TextDecoder().decode(await client.readBytes(hello))).toBe("from the test\n");
 
-			const streamedPath = "/tmp/acornfall-integration/streamed.txt";
+			const streamedPath = "/tmp/acornd-integration/streamed.txt";
 			const sink = await client.writeStream(streamedPath);
 			await sink.write("one ");
 			await sink.write("two\n");
 			await sink.close();
 			expect(await client.read(streamedPath)).toBe("one two\n");
 
-			const entries = await client.list("/tmp/acornfall-integration");
+			const entries = await client.list("/tmp/acornd-integration");
 			expect(entries.map((entry) => entry.name).sort()).toEqual([
 				"hello.txt",
 				"streamed.txt",
@@ -100,22 +100,22 @@ integration(
 			expect(info?.directory).toBe(false);
 			expect(info?.size).toBe("from the test\n".length);
 
-			await client.rename(hello, "/tmp/acornfall-integration/renamed.txt");
+			await client.rename(hello, "/tmp/acornd-integration/renamed.txt");
 			expect(await client.read(hello)).toBeNull();
-			expect(await client.read("/tmp/acornfall-integration/renamed.txt")).toBe(
+			expect(await client.read("/tmp/acornd-integration/renamed.txt")).toBe(
 				"from the test\n",
 			);
-			await client.remove("/tmp/acornfall-integration/renamed.txt", {});
-			expect(await client.read("/tmp/acornfall-integration/renamed.txt")).toBeNull();
+			await client.remove("/tmp/acornd-integration/renamed.txt", {});
+			expect(await client.read("/tmp/acornd-integration/renamed.txt")).toBeNull();
 			// A stopped sandbox is not missing files: stopping it and reading back the
 			// file wakes it and reads the contents, and a command runs on the woken VM.
 			// This is the outage of issue #58 — an idle stop under a live worker — where
 			// reads used to answer null and commands failed with "no agent endpoint".
-			await client.write("/tmp/acornfall-integration/wake.txt", "still here\n");
+			await client.write("/tmp/acornd-integration/wake.txt", "still here\n");
 			const stopped = await Sandbox.get(name);
 			await stopped.stop();
 			expect((await stopped.refresh()).status).toBe("stopped");
-			expect(await client.read("/tmp/acornfall-integration/wake.txt")).toBe("still here\n");
+			expect(await client.read("/tmp/acornd-integration/wake.txt")).toBe("still here\n");
 			const woken = await client.exec(["/bin/echo", "awake"], {});
 			expect(woken.code).toBe(0);
 		} finally {

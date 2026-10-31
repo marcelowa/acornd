@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/control"
 )
 
-// Purge is the only thing in acornfall that deletes a workspace, and it needs the record to find the folder
+// Purge is the only thing in acornd that deletes a workspace, and it needs the record to find the folder
 // (ADR 0034 §6). The order is the trap: purge runs instead of forget and never after it, because once a room is
 // forgotten its folder is just a folder — and a command that deleted a directory by a name nothing points at any
 // more is how somebody removes the wrong one.

@@ -8,7 +8,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
 // May is the whole permission table for a room, and every row is one this ADR decided: a guest speaks,

@@ -84,7 +84,7 @@ func TestEngineRefusalIsStated(t *testing.T) {
 	input := testInput(dataDir)
 	input.EngineInstalled = false
 	input.EngineProblem = ""
-	input.EngineDisabled = "ACORNFALL_NO_SANDBOX is set"
+	input.EngineDisabled = "ACORND_NO_SANDBOX is set"
 	requirement := byName(Check(input), "engine")
 	if !requirement.OK {
 		t.Fatal("a stated refusal is an answer, not a failure")

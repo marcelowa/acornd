@@ -9,9 +9,9 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/acornfall/acornfall/gateway/internal/control"
-	"github.com/acornfall/acornfall/gateway/internal/identity"
-	"github.com/acornfall/acornfall/gateway/internal/people"
+	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/identity"
+	"github.com/marcelowa/acornd/gateway/internal/people"
 )
 
 // stubDoor is a door that answers by rule: the composition with the routes is what these tests are

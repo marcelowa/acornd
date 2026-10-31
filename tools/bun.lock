@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@acornfall/tools",
+      "name": "@acornd/tools",
       "devDependencies": {
         "puppeteer-core": "^25.16.0",
       },

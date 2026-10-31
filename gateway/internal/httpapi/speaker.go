@@ -13,9 +13,9 @@ package httpapi
 import (
 	"net/http"
 
-	"github.com/acornfall/acornfall/gateway/internal/control"
-	"github.com/acornfall/acornfall/gateway/internal/people"
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/people"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
 // authorOf is who wrote this request's words: the address the door proved, the display name the book has for it,

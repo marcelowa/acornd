@@ -21,7 +21,7 @@ every first open.
 The default listen address is `0.0.0.0:7777`. No token is generated, stored, or required.
 `--insecure` is removed, because it was the old way to ask for what is now the default.
 
-The token itself is gone, not merely switched off: `--token`, `ACORNFALL_TOKEN`, and the
+The token itself is gone, not merely switched off: `--token`, `ACORND_TOKEN`, and the
 middleware behind them were removed rather than left as an option nobody has to take. A
 guard that exists is a guard someone believes in, and the honest state of authentication here
 is "absent" until it is designed. Security for an exposed port is future work on purpose, not

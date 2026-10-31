@@ -21,10 +21,10 @@ export const WithLayers: Story = {
 	args: {
 		resolved: {
 			name: "scout",
-			source: "/home/marcelo/workspace/acornfall/.agents/agents/scout.md",
+			source: "/home/marcelo/workspace/acornd/.agents/agents/scout.md",
 			layers: [
-				{ layer: "install", path: "/home/marcelo/.acornfall/agents/default.md" },
-				{ layer: "workspace", path: "/acornfall/.agents/agents/scout.md" },
+				{ layer: "install", path: "/home/marcelo/.acornd/agents/default.md" },
+				{ layer: "workspace", path: "/acornd/.agents/agents/scout.md" },
 				{ layer: "conversation", path: "(chosen in this conversation)" },
 			],
 		},

@@ -486,7 +486,7 @@ func TestAWedgedLockIsRefusedRatherThanWaitedOn(t *testing.T) {
 	if err == nil {
 		t.Fatal("a held lock did not stop the write")
 	}
-	if !strings.Contains(err.Error(), "another acornfall process") {
+	if !strings.Contains(err.Error(), "another acornd process") {
 		t.Errorf("the refusal does not say what is happening: %v", err)
 	}
 	if waited := time.Since(start); waited > 3*lockBudget {

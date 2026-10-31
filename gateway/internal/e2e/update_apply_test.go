@@ -31,7 +31,7 @@ func publishedRelease(t *testing.T, tag string) string {
 	mux.HandleFunc("/repos/owner/repo/binary", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(binary) })
 	mux.HandleFunc("/repos/owner/repo/worker", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(worker) })
 	mux.HandleFunc("/repos/owner/repo/checksums", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = fmt.Fprintf(w, "%s  acornfall-%s-%s\n%s  worker.tar.gz\n",
+		_, _ = fmt.Fprintf(w, "%s  acornd-%s-%s\n%s  worker.tar.gz\n",
 			sum(binary), runtime.GOOS, runtime.GOARCH, sum(worker))
 	})
 	// One release, answered both ways: `latest` for the check, and by tag for the apply that named
@@ -42,7 +42,7 @@ func publishedRelease(t *testing.T, tag string) string {
 			{"id":0,"name":"worker.tar.gz","size":%d,"browser_download_url":%q},
 			{"id":0,"name":"sha256sums.txt","size":0,"browser_download_url":%q}]}`,
 			tag, tag,
-			"acornfall-"+runtime.GOOS+"-"+runtime.GOARCH, len(binary), base+"/repos/owner/repo/binary",
+			"acornd-"+runtime.GOOS+"-"+runtime.GOARCH, len(binary), base+"/repos/owner/repo/binary",
 			len(worker), base+"/repos/owner/repo/worker", base+"/repos/owner/repo/checksums")
 	}
 	mux.HandleFunc("/repos/owner/repo/releases/latest", one)
@@ -66,7 +66,7 @@ func TestTheGatewayInstallsAndRollsBackAnUpdate(t *testing.T) {
 		}
 	}))
 	c := s.client()
-	installed := filepath.Join(s.DataDir, "acornfall")
+	installed := filepath.Join(s.DataDir, "acornd")
 
 	// The answer is the status after the swap: the version running is the new one, and a restart is
 	// owed. `latest` stays what the last *check* found — applying a tag from the picker must not

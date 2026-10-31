@@ -6,7 +6,7 @@ tokens-or-nothing system (ADR-0016), Storybook as the design surface, `check:sys
 check, and `design.md` / `icp.md` at the repo root as the output.
 
 The skills live in `.agents/skills/refactor-ux-01..12`, so every harness that reads that folder
-(Claude Code, Codex, acornfall's worker) can run them. Step 1 is the entry point; each later step
+(Claude Code, Codex, acornd's worker) can run them. Step 1 is the entry point; each later step
 is reached by finishing the previous step's exit gate.
 
 | # | Step | Gate |

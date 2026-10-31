@@ -231,7 +231,7 @@ export type Frame =
 			seq: number;
 			value: unknown;
 			/** Our own annotation: the view mounts only durable's documents. */
-			acornfall?: {
+			acornd?: {
 				senders: Record<string, { conversationId: string; name?: string; kind: string }>;
 			};
 	  }

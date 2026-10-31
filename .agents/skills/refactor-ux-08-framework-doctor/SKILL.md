@@ -1,6 +1,6 @@
 ---
 name: refactor-ux-08-framework-doctor
-description: Run acornfall's structural health checks over the consolidated ui/ and fix what they flag, before building the approved direction. Step 8 of the refactor-ux chain.
+description: Run acornd's structural health checks over the consolidated ui/ and fix what they flag, before building the approved direction. Step 8 of the refactor-ux chain.
 ---
 
 # Framework doctor

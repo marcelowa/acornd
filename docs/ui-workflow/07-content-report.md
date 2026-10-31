@@ -1,4 +1,4 @@
-# Content and Copy Report — Acornfall
+# Content and Copy Report — Acornd
 
 ## Voice and Tone
 Quiet expert colleague. Short, plain, reversible. Say what happened + what to do next. No hype, no mascot, no AI filler ("delve", "seamless", "powerful").

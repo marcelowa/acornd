@@ -21,10 +21,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
-	"github.com/acornfall/acornfall/gateway/internal/vault"
-	"github.com/acornfall/acornfall/gateway/internal/workerpool"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/vault"
+	"github.com/marcelowa/acornd/gateway/internal/workerpool"
 )
 
 // PersonalWorkspaceName is the install's own workspace: the one the admin lands on when nothing else is
@@ -44,7 +44,7 @@ func DefaultWorkspacesDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("cannot tell where to create workspaces: %w (pass --workspaces-dir)", err)
 	}
-	return filepath.Join(dataDir, "acornfall", "workspaces"), nil
+	return filepath.Join(dataDir, "acornd", "workspaces"), nil
 }
 
 // Workspace is a folder the agent works in, plus the decisions that belong to it.
@@ -81,7 +81,7 @@ type Workspace struct {
 	DisableVMNesting *bool `json:"disable_vm_nesting,omitempty"`
 	// DisableDevices is whether this bwrap workspace must not receive the host's
 	// /dev/net/tun and /dev/kvm. Nil means the default: devices are granted, so a
-	// workspace can run another acornfall with its own bwrap engine and network. A
+	// workspace can run another acornd with its own bwrap engine and network. A
 	// pointer because true is a decision and absent is not.
 	DisableDevices *bool `json:"disable_devices,omitempty"`
 	// Kind is what this workspace is: KindPersonal, somebody's own room, or KindRoom, which has one owner and
@@ -218,8 +218,8 @@ type WorkspacesOptions struct {
 	WorkerDir     string
 	// Update reports the self-update summary for the state stream.
 	Update func() UpdateSummary
-	// Model is the last resort, from ACORNFALL_MODEL: below every workspace and below the
-	// install's own default, which `acornfall model set` writes.
+	// Model is the last resort, from ACORND_MODEL: below every workspace and below the
+	// install's own default, which `acornd model set` writes.
 	Model string
 	// Sandbox is the install's default engine, shared by every workspace that does not name
 	// one of its own.
@@ -559,7 +559,7 @@ func (w *Workspaces) stateRefusal(name string) error {
 	if _, err := os.Stat(state); err != nil {
 		return nil
 	}
-	return fmt.Errorf("workspace %q cannot be made: %s holds the state of one that is not registered, and a room of that name would open its history (delete it with `acornfall workspace purge %s`, or remove %s by hand)", name, state, name, state)
+	return fmt.Errorf("workspace %q cannot be made: %s holds the state of one that is not registered, and a room of that name would open its history (delete it with `acornd workspace purge %s`, or remove %s by hand)", name, state, name, state)
 }
 
 // Update replaces a workspace record. The name may not change: it is the identity every
@@ -643,7 +643,7 @@ func (c *Control) discardSandbox(workspacePath string) {
 // Remove forgets a room: it is gone from every rail and refused for every caller, and its folder and its
 // history stay exactly where they are, the same way deleting a conversation is a tombstone rather than a
 // delete. Forget and delete are two acts, and this is the first one (ADR 0034 §6): the second is
-// `acornfall workspace purge`, which needs the record this one takes away.
+// `acornd workspace purge`, which needs the record this one takes away.
 //
 // A personal room refuses it. Somebody's own room is never shared and never removed, and the admin who wants
 // one gone can revoke the person, which is a decision with a name.

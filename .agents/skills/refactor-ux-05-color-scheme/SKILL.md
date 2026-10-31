@@ -1,6 +1,6 @@
 ---
 name: refactor-ux-05-color-scheme
-description: Choose acornfall's console palette as a specific, persona-justified direction, expressed in tokens, and get it confirmed. Step 5 of the refactor-ux chain.
+description: Choose acornd's console palette as a specific, persona-justified direction, expressed in tokens, and get it confirmed. Step 5 of the refactor-ux chain.
 ---
 
 # Pick the colour scheme

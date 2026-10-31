@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/supervise"
+	"github.com/marcelowa/acornd/gateway/internal/supervise"
 )
 
 // TestMain lets this binary be the sandbox's supervisor, which is what a started sandbox runs.
@@ -206,7 +206,7 @@ func TestBwrapCreateWritesWhatTheWorkspaceRunsUnder(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(config.Rootfs, "etc", "os-release")); err != nil {
 		t.Fatalf("the rootfs was not copied from the image: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(config.Rootfs, "etc", "apt", "apt.conf.d", "99-acornfall")); err != nil {
+	if _, err := os.Stat(filepath.Join(config.Rootfs, "etc", "apt", "apt.conf.d", "99-acornd")); err != nil {
 		t.Fatalf("the apt sandbox line was not written: %v", err)
 	}
 	info, err := os.Stat(config.DataDir)
@@ -346,7 +346,7 @@ func TestBwrapRemoveDeletesTheHomeAndNotTheWorkspace(t *testing.T) {
 		t.Fatalf("remove left the sandbox's own folder behind: %v", err)
 	}
 	// Removing what is not there is already the wanted state.
-	if err := driver.Remove(context.Background(), "acornfall-absent"); err != nil {
+	if err := driver.Remove(context.Background(), "acornd-absent"); err != nil {
 		t.Fatalf("second remove: %v", err)
 	}
 }
@@ -361,10 +361,10 @@ func TestBwrapSandboxArgvIsOneSandboxPerWorkspace(t *testing.T) {
 		Image:       "debian:stable-slim",
 		Rootfs:      "/state/ws/rootfs",
 		DataDir:     "/state/ws/home",
-		Hidden:      "/home/me/.acornfall",
+		Hidden:      "/home/me/.acornd",
 		ReadOnly:    []string{"/home/me/.agents"},
 		Bwrap:       "/usr/bin/bwrap",
-		Supervisor:  "/install/acornfall",
+		Supervisor:  "/install/acornd",
 		Run:         "/state/ws/run",
 		GuestRun:    guestRunDir,
 		GuestSocket: guestSocketPath,
@@ -388,11 +388,11 @@ func TestBwrapSandboxArgvIsOneSandboxPerWorkspace(t *testing.T) {
 		// The private home, the workspace at its own path, and the socket's folder on both sides.
 		"--bind /state/ws/home /root",
 		"--bind /work/ws /work/ws",
-		"--bind /state/ws/run /run/acornfall",
+		"--bind /state/ws/run /run/acornd",
 		"--ro-bind /home/me/.agents /home/me/.agents",
 		// The supervisor is this binary, bound in, and it is what the sandbox runs.
-		"--ro-bind /install/acornfall /usr/local/bin/acornfall",
-		"-- /usr/local/bin/acornfall internal sandbox-supervisor --socket /run/acornfall/s.sock",
+		"--ro-bind /install/acornd /usr/local/bin/acornd",
+		"-- /usr/local/bin/acornd internal sandbox-supervisor --socket /run/acornd/s.sock",
 		// The same policy value the microVM engine is given: both engines answer "stop when idle"
 		// the same way, and a kept-alive workspace asks for a timeout that never fires.
 		"--idle-timeout 30m",
@@ -416,7 +416,7 @@ func TestBwrapSandboxArgvSharesPastaForEgress(t *testing.T) {
 		Rootfs:      "/state/ws/rootfs",
 		DataDir:     "/state/ws/home",
 		Bwrap:       "/usr/bin/bwrap",
-		Supervisor:  "/install/acornfall",
+		Supervisor:  "/install/acornd",
 		Run:         "/state/ws/run",
 		GuestRun:    guestRunDir,
 		GuestSocket: guestSocketPath,
@@ -437,12 +437,12 @@ func TestBwrapSandboxArgvSharesPastaForEgress(t *testing.T) {
 		// The machine's own loopback is not the workspace's, by either route pasta offers: the
 		// automatic port forwarding mirrors every host listener into the sandbox, and the gateway
 		// translation maps 10.0.2.2 onto the same loopback. A sandbox that reached 127.0.0.1:7777
-		// would be talking to the acornfall that runs it.
+		// would be talking to the acornd that runs it.
 		"-t none -u none -T none -U none", "--no-map-gw",
 		"-a 10.0.2.15 -n 24 -g 10.0.2.2",
 		// pasta configures neither the address nor the route, so the sandbox does it from inside
 		// the namespace pasta made: this binary over netlink, not a shell and not iproute2.
-		"/install/acornfall internal netns --address 10.0.2.15/24 --gateway 10.0.2.2",
+		"/install/acornd internal netns --address 10.0.2.15/24 --gateway 10.0.2.2",
 		"/usr/bin/bwrap",
 		"--share-net",
 	} {
@@ -560,7 +560,7 @@ func TestABwrapWorkspaceWithASecretsProxyCarriesOnePortAndItsCA(t *testing.T) {
 		Rootfs:      "/state/ws/rootfs",
 		DataDir:     "/state/ws/home",
 		Bwrap:       "/usr/bin/bwrap",
-		Supervisor:  "/install/acornfall",
+		Supervisor:  "/install/acornd",
 		Run:         "/state/ws/run",
 		GuestRun:    guestRunDir,
 		GuestSocket: guestSocketPath,
@@ -572,7 +572,7 @@ func TestABwrapWorkspaceWithASecretsProxyCarriesOnePortAndItsCA(t *testing.T) {
 
 	withProxy := base
 	withProxy.SecretProxy = &bwrapSecretProxy{
-		URL: "http://acornfall:a-token@127.0.0.1:41234", BundleFile: "/state/ws/ca-bundle.pem",
+		URL: "http://acornd:a-token@127.0.0.1:41234", BundleFile: "/state/ws/ca-bundle.pem",
 		Bundle: guestCABundle, Port: 41234,
 	}
 	argv, err := driver.bootArgv(withProxy)
@@ -641,7 +641,7 @@ func TestAMicroVMStartsInsideABwrapSandbox(t *testing.T) {
 	if err != nil {
 		t.Skip("no home folder for the engine store")
 	}
-	engine := NewMicrosandbox(filepath.Join(home, ".acornfall"))
+	engine := NewMicrosandbox(filepath.Join(home, ".acornd"))
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	if !engine.Installed() {
@@ -751,7 +751,7 @@ func TestBwrapRestartsOnlyWhenTheProxyForwardChanges(t *testing.T) {
 	}
 	policy := func(port int) Policy {
 		return Policy{Workspace: workspace, SecretProxy: &SecretProxy{
-			URL: fmt.Sprintf("http://acornfall:token@127.0.0.1:%d", port),
+			URL: fmt.Sprintf("http://acornd:token@127.0.0.1:%d", port),
 		}}
 	}
 
@@ -821,7 +821,7 @@ func TestBwrapNestedEgressReusesPastaUserNamespace(t *testing.T) {
 		Workspace:   "/work",
 		Run:         "/run",
 		GuestRun:    guestRunDir,
-		Supervisor:  "/usr/local/bin/acornfall",
+		Supervisor:  "/usr/local/bin/acornd",
 		GuestSocket: guestSocketPath,
 	}
 	argv, err := driver.sandboxArgv(config)
@@ -861,7 +861,7 @@ func TestBwrapIsARealEngineOfTheSeam(t *testing.T) {
 	if driver.Name() != "bwrap" {
 		t.Fatalf("name %q", driver.Name())
 	}
-	if !strings.Contains(strings.Join(driver.Env(), " "), "ACORNFALL_BWRAP_STATE="+driver.StateDir()) {
+	if !strings.Contains(strings.Join(driver.Env(), " "), "ACORND_BWRAP_STATE="+driver.StateDir()) {
 		t.Fatalf("env does not point the worker at the configs: %v", driver.Env())
 	}
 	// The seam's own list has to offer it, or a workspace cannot choose it.
@@ -903,7 +903,7 @@ func TestBwrapBindsUpstreamResolversWhenTheMachineUsesALoopbackOne(t *testing.T)
 	}
 	driver := NewBwrap(t.TempDir())
 	driver.resolver = resolverFiles{Host: host, Upstream: upstream}
-	workspace := filepath.Join(dir, "state", "acornfall-test")
+	workspace := filepath.Join(dir, "state", "acornd-test")
 	got, err := driver.resolverFile(workspace)
 	if err != nil {
 		t.Fatalf("resolver: %v", err)
@@ -928,7 +928,7 @@ func TestBwrapBindsTheMachinesOwnResolverWhenItIsUsable(t *testing.T) {
 	}
 	driver := NewBwrap(t.TempDir())
 	driver.resolver = resolverFiles{Host: host, Upstream: filepath.Join(dir, "absent")}
-	got, err := driver.resolverFile(filepath.Join(dir, "state", "acornfall-test"))
+	got, err := driver.resolverFile(filepath.Join(dir, "state", "acornd-test"))
 	if err != nil {
 		t.Fatalf("resolver: %v", err)
 	}
@@ -964,7 +964,7 @@ func TestBwrapRefusesPrivateNetworksWithoutAGrant(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
 	config := bwrapConfig{
 		Workspace: "/work/ws", Rootfs: "/state/ws/rootfs", DataDir: "/state/ws/home",
-		Bwrap: "/usr/bin/bwrap", Supervisor: "/install/acornfall",
+		Bwrap: "/usr/bin/bwrap", Supervisor: "/install/acornd",
 		Run: "/state/ws/run", GuestRun: guestRunDir, GuestSocket: guestSocketPath,
 		Network: bwrapNetwork{
 			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
@@ -979,7 +979,7 @@ func TestBwrapRefusesPrivateNetworksWithoutAGrant(t *testing.T) {
 	for _, want := range []string{
 		// The flag asks for the routes; the list itself lives where the routes are installed, so
 		// this asserts the request rather than repeating the list in a second place.
-		"acornfall internal netns --address 10.0.2.15/24 --gateway 10.0.2.2 --refuse-private",
+		"acornd internal netns --address 10.0.2.15/24 --gateway 10.0.2.2 --refuse-private",
 		"--dns-forward 10.0.2.3",
 	} {
 		if !strings.Contains(joined, want) {
@@ -994,7 +994,7 @@ func TestBwrapAGrantReachesPrivateNetworks(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
 	config := bwrapConfig{
 		Workspace: "/work/ws", Rootfs: "/state/ws/rootfs", DataDir: "/state/ws/home",
-		Bwrap: "/usr/bin/bwrap", Supervisor: "/install/acornfall",
+		Bwrap: "/usr/bin/bwrap", Supervisor: "/install/acornd",
 		Run: "/state/ws/run", GuestRun: guestRunDir, GuestSocket: guestSocketPath,
 		Network: bwrapNetwork{
 			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
@@ -1014,7 +1014,7 @@ func TestBwrapAGrantReachesPrivateNetworks(t *testing.T) {
 	}
 }
 
-// The sandbox's resolver file is written by acornfall when the machine's is unreachable from
+// The sandbox's resolver file is written by acornd when the machine's is unreachable from
 // inside: pasta's address, forwarded to the machine's own resolver.
 func TestBwrapWritesTheResolverItsNetworkCanReach(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
@@ -1056,7 +1056,7 @@ func TestBwrapEgressProbeSaysWhatToDo(t *testing.T) {
 }
 
 // The sandbox's own processes are started with three variables, not with the gateway's environment.
-// What they inherited instead was everything acornfall was started with, and a command inside could
+// What they inherited instead was everything acornd was started with, and a command inside could
 // read it at /proc/<pid>/environ: a workspace is not where the machine's credentials live.
 func TestTheSandboxProcessGetsItsOwnEnvironment(t *testing.T) {
 	t.Parallel()
@@ -1065,7 +1065,7 @@ func TestTheSandboxProcessGetsItsOwnEnvironment(t *testing.T) {
 	if !slices.Equal(env, want) {
 		t.Errorf("the sandbox's environment is %q, want %q", env, want)
 	}
-	if strings.Contains(strings.Join(env, " "), "ACORNFALL") {
+	if strings.Contains(strings.Join(env, " "), "ACORND") {
 		t.Errorf("nothing of this install should reach the sandbox's own environment: %q", env)
 	}
 	if empty := sandboxProcessEnv(bwrapConfig{}); empty[1] != "HOME=/" {
@@ -1081,7 +1081,7 @@ func TestTheSandboxArgvClearsTheEnvironmentFirst(t *testing.T) {
 	argv, err := driver.sandboxArgv(bwrapConfig{
 		Bwrap: "/usr/bin/bwrap", Workspace: "/work/ws", DataDir: "/state/ws/home",
 		Run: "/state/ws/run", GuestRun: guestRunDir, GuestSocket: guestSocketPath,
-		Supervisor: "/install/acornfall",
+		Supervisor: "/install/acornd",
 	})
 	if err != nil {
 		t.Fatalf("argv: %v", err)

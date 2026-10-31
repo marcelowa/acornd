@@ -47,8 +47,8 @@ describe("a room's members", () => {
 
 	test("removing somebody encodes the address in the path", async () => {
 		const calls = stub(() => new Response(JSON.stringify({ workspaces: [] })));
-		await removeMember("team", "ana+acornfall@example.com");
-		expect(calls[0]?.url).toBe("/api/workspaces/team/members/ana%2Bacornfall%40example.com");
+		await removeMember("team", "ana+acornd@example.com");
+		expect(calls[0]?.url).toBe("/api/workspaces/team/members/ana%2Bacornd%40example.com");
 		expect(calls[0]?.init?.method).toBe("DELETE");
 	});
 

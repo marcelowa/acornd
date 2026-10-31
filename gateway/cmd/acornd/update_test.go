@@ -35,7 +35,7 @@ func TestTheUpdateOfferKeepsHeadlines(t *testing.T) {
 	}
 }
 
-// The prompt after `acornfall update` defaults to yes: the command was already the request.
+// The prompt after `acornd update` defaults to yes: the command was already the request.
 func TestTheUpdatePromptDefaultsToYes(t *testing.T) {
 	for input, want := range map[string]bool{
 		"\n": true, "y\n": true, "Y\n": true, "yes\n": true,

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/remote"
+	"github.com/marcelowa/acornd/gateway/internal/remote"
 )
 
 // logs captures what the standard logger writes, which is where a boot says what it did.
@@ -25,8 +25,8 @@ func logs(t *testing.T, run func()) string {
 // An install with no door in front of it has nothing to reconcile, and a boot that talks to Cloudflare anyway
 // would be a single-admin install reaching for an account it never named.
 func TestReconcileDoesNothingWithoutADoor(t *testing.T) {
-	t.Setenv("ACORNFALL_IDENTITY", "")
-	t.Setenv("ACORNFALL_CLOUDFLARE_TOKEN", "not-used")
+	t.Setenv("ACORND_IDENTITY", "")
+	t.Setenv("ACORND_CLOUDFLARE_TOKEN", "not-used")
 	out := logs(t, func() { reconcileRemote(context.Background(), t.TempDir()) })
 	if out != "" {
 		t.Errorf("an install with no door said %q", out)
@@ -36,8 +36,8 @@ func TestReconcileDoesNothingWithoutADoor(t *testing.T) {
 // With a door and no API token, the boot says so once and carries on: the door still works, and the person who
 // can fix it is the person reading the log.
 func TestReconcileSaysItCannotWithoutAnAPIToken(t *testing.T) {
-	t.Setenv("ACORNFALL_IDENTITY", "access")
-	t.Setenv("ACORNFALL_CLOUDFLARE_TOKEN", "")
+	t.Setenv("ACORND_IDENTITY", "access")
+	t.Setenv("ACORND_CLOUDFLARE_TOKEN", "")
 	dir := t.TempDir()
 	if err := remote.Save(dir, remote.Setup{
 		Desired: remote.Desired{Hostname: "console.example.com", ZoneID: "z", AccountID: "a"},
@@ -54,8 +54,8 @@ func TestReconcileSaysItCannotWithoutAnAPIToken(t *testing.T) {
 // An install that never ran an apply has no declared state, so the boot has nothing to match and says nothing:
 // the first apply is the admin's command, not something a boot invents.
 func TestReconcileDoesNothingBeforeAnApply(t *testing.T) {
-	t.Setenv("ACORNFALL_IDENTITY", "access")
-	t.Setenv("ACORNFALL_CLOUDFLARE_TOKEN", "present-but-unused")
+	t.Setenv("ACORND_IDENTITY", "access")
+	t.Setenv("ACORND_CLOUDFLARE_TOKEN", "present-but-unused")
 	out := logs(t, func() { reconcileRemote(context.Background(), t.TempDir()) })
 	if out != "" {
 		t.Errorf("an install with no apply said %q", out)
@@ -86,8 +86,8 @@ func TestSummariseSaysWhatChanged(t *testing.T) {
 // The book and the desire come from the install folder, and a missing book is a refusal rather than an empty
 // allowlist: an apply that admits nobody is the half-setup remote apply already refuses to make.
 func TestReconcileRefusesAnInstallWithNobodyInIt(t *testing.T) {
-	t.Setenv("ACORNFALL_IDENTITY", "access")
-	t.Setenv("ACORNFALL_CLOUDFLARE_TOKEN", "present-but-unused")
+	t.Setenv("ACORND_IDENTITY", "access")
+	t.Setenv("ACORND_CLOUDFLARE_TOKEN", "present-but-unused")
 	dir := t.TempDir()
 	if err := remote.Save(dir, remote.Setup{
 		Desired: remote.Desired{Hostname: "console.example.com", ZoneID: "z", AccountID: "a"},

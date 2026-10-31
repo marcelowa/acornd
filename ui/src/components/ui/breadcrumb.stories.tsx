@@ -28,7 +28,7 @@ export const Default: Story = {
 				</BreadcrumbItem>
 				<BreadcrumbSeparator />
 				<BreadcrumbItem>
-					<BreadcrumbLink href="#">acornfall</BreadcrumbLink>
+					<BreadcrumbLink href="#">acornd</BreadcrumbLink>
 				</BreadcrumbItem>
 				<BreadcrumbSeparator />
 				<BreadcrumbItem>

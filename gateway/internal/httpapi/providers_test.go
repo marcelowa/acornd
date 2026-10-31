@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/control"
-	"github.com/acornfall/acornfall/gateway/internal/identity"
-	"github.com/acornfall/acornfall/gateway/internal/people"
+	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/identity"
+	"github.com/marcelowa/acornd/gateway/internal/people"
 )
 
 // allowlisted is a console whose handler serves the three allowlist routes behind the door.

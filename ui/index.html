@@ -4,12 +4,12 @@
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-		<title>Acornfall</title>
+		<title>Acornd</title>
 		<script>
 			// The theme before the first paint: a stored choice if there is one, otherwise what the
 			// system says. Without this, a dark desktop gets a white flash until React mounts.
 			try {
-				var stored = localStorage.getItem("acornfall.ui.theme");
+				var stored = localStorage.getItem("acornd.ui.theme");
 				var choice = stored === null ? null : JSON.parse(stored);
 				if (choice === "dark" || (choice !== "light" && matchMedia("(prefers-color-scheme: dark)").matches)) {
 					document.documentElement.classList.add("dark");

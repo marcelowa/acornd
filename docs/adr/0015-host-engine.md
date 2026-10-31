@@ -23,7 +23,7 @@ fallback is still open." This is that decision.
 
 ## Decision
 
-**A second engine, `host`, selected explicitly, never a fallback.** `ACORNFALL_SANDBOX_ENGINE=host`
+**A second engine, `host`, selected explicitly, never a fallback.** `ACORND_SANDBOX_ENGINE=host`
 runs commands and file operations on the host, in the workspace, with the user's own permissions
 and reach. (It was a flag, `--sandbox-engine host`, until ADR 0027 moved install-wide engine
 choices to the environment.) It is never the default: a machine's default is what it can run
@@ -35,7 +35,7 @@ The guardrails are part of the decision, not politeness:
 - **Nothing selects it by itself.** A missing hypervisor, a failed install, or an unknown
   engine name never becomes the host engine. A typo is refused with the list of engines.
 - **Every surface says it is not isolated.** `Driver.Isolated()` is false, the state frame
-  carries `"isolated": false`, `acornfall doctor` prints it beside the other engines, and the
+  carries `"isolated": false`, `acornd doctor` prints it beside the other engines, and the
   startup log says it in a sentence.
 - **The host engine has no mounts.** Global resources are plain host paths, so there is no
   read-only enforcement: under this engine the agent can edit its own instructions. That is

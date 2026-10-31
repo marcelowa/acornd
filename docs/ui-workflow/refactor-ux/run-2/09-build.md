@@ -97,7 +97,7 @@ layer, and it is the owner's to run.
 `bun run dev` in `ui/` forwards `/api` to the gateway, so the real app is on the tailnet without
 touching the running gateway:
 
-- http://100.64.0.16:7800 — the shipped direction, live, with the gateway's own data.
+- http://localhost:7800 — the shipped direction, live, with the gateway's own data.
 
 The gateway binary on :7777 embeds the bundle it was built with, so it still serves the previous
 build until it is rebuilt and restarted (which stops its sandboxes).

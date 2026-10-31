@@ -11,9 +11,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
-	"github.com/acornfall/acornfall/gateway/internal/workerpool"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/workerpool"
 )
 
 // attachToWorker is everything that needs a live harness: start it, ask what it can do, read

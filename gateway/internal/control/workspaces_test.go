@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 )
 
 // Where workspaces live is a decision someone makes, not one to guess.
 //
-// Without a home directory the old code fell back to a relative "acornfall/workspaces", which
+// Without a home directory the old code fell back to a relative "acornd/workspaces", which
 // put workspaces wherever the process happened to start — a folder nobody chose, appearing in a
 // container's working directory. An error names the flag that settles it instead.
 func TestNoHomeDirectoryIsAnErrorNotAGuess(t *testing.T) {
@@ -24,7 +24,7 @@ func TestNoHomeDirectoryIsAnErrorNotAGuess(t *testing.T) {
 	if !strings.Contains(err.Error(), "--workspaces-dir") {
 		t.Errorf("the error should name the flag that fixes it, got %q", err)
 	}
-	if strings.Contains(dir, "acornfall") {
+	if strings.Contains(dir, "acornd") {
 		t.Errorf("no path should be invented, got %q", dir)
 	}
 }
@@ -83,7 +83,7 @@ func TestARegistryFromAnOlderBuildIsRewrittenWithoutOldKeys(t *testing.T) {
 // Nesting is allowed unless this workspace refuses it: the install has no say any more, and an
 // unset field means "nest when the machine and the engine can", which is not the same as false.
 func TestNestingIsTheWorkspacesOwnDecision(t *testing.T) {
-	const dataDir, userHome = "/home/me/.acornfall", "/home/me"
+	const dataDir, userHome = "/home/me/.acornd", "/home/me"
 	on, off := true, false
 	cases := []struct {
 		name      string
@@ -105,10 +105,10 @@ func TestNestingIsTheWorkspacesOwnDecision(t *testing.T) {
 	}
 }
 
-// Devices are on by default so a bwrap workspace can run another acornfall, and a workspace
+// Devices are on by default so a bwrap workspace can run another acornd, and a workspace
 // that does not want them can say so once.
 func TestDevicesAreOnByDefaultAndTheWorkspaceCanWithdrawThem(t *testing.T) {
-	const dataDir, userHome = "/home/me/.acornfall", "/home/me"
+	const dataDir, userHome = "/home/me/.acornd", "/home/me"
 	on := true
 	if !(Workspace{}).SandboxPolicy(dataDir, userHome).Devices {
 		t.Fatal("a workspace that asked for nothing should get the devices")

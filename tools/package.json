@@ -1,5 +1,5 @@
 {
-  "name": "@acornfall/tools",
+  "name": "@acornd/tools",
   "private": true,
   "type": "module",
   "description": "Development checks that need a browser.",

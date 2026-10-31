@@ -146,7 +146,7 @@ Status: **3 of 3 landed** — OWNER-OPERATOR, TINKERER and DELEGATOR answered.
    path I can see, and it isn't enough. Also cannot see: where the release page gets the list (no UI
    code for it yet) or how it marks a target the list doesn't contain. Where the page's "switch
    resets" is enforced I cannot tell from journeys alone.
-10. **Small churn notes, not blockers.** `settings-screen.tsx:73-75` already prints "acornfall
+10. **Small churn notes, not blockers.** `settings-screen.tsx:73-75` already prints "acornd
     {version}" under the Settings heading, so J21.1's "only place either lives" contradicts the
     console. And removing `/settings/updates` with no redirect means an old link in my notes lands
     silently on Defaults (`use-platform.ts:102-105` falls back to "defaults") with no "the page

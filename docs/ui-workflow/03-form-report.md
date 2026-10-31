@@ -1,4 +1,4 @@
-# UI Form and Layout Report — Acornfall
+# UI Form and Layout Report — Acornd
 
 ## Interface Type
 - App shell: rail + transcript + composer; settings/workspaces replace transcript; Inspector overlays (→ docks).

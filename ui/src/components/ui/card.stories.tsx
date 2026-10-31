@@ -16,8 +16,8 @@ function Workspace() {
 	return (
 		<Card className="w-80">
 			<CardHeader>
-				<CardTitle>acornfall</CardTitle>
-				<CardDescription>~/workspace/acornfall</CardDescription>
+				<CardTitle>acornd</CardTitle>
+				<CardDescription>~/workspace/acornd</CardDescription>
 			</CardHeader>
 			<CardContent>
 				<Text size="sm" tone="muted">

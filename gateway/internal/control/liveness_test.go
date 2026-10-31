@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/acornfall/acornfall/gateway/internal/workerpool"
+	"github.com/marcelowa/acornd/gateway/internal/workerpool"
 )
 
 // A worker's death is only news if it is the worker that is running.

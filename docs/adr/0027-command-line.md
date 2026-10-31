@@ -6,7 +6,7 @@ Date: 2026-10-26
 ## The problem
 
 The command line grew one flag at a time, and each one was reasonable when it was added. The
-result was not: `acornfall` with no arguments started a server, `start` was not a word you could
+result was not: `acornd` with no arguments started a server, `start` was not a word you could
 type, and the server carried fourteen flags of which half belonged to a developer, the updater,
 or a test. `--home` and `--data-dir` were the same folder under two names, with two environment
 variables behind them; `doctor` declared both, so the last one typed won, silently. `--network`
@@ -20,7 +20,7 @@ person who reads `-h` looking for the two flags they need.
 
 ## The decision
 
-**A command is a question a person asks, and it is named.** `acornfall` alone prints the list and
+**A command is a question a person asks, and it is named.** `acornd` alone prints the list and
 exits 2: nothing is a guess, and starting a server is too big a guess.
 
 | command | the question |
@@ -45,7 +45,7 @@ variables; the migrate scripts are baked into the binary. What is left on `start
 listens (`--host`, `--port`), where it keeps things (`--data-dir`, `--workspaces-dir`), and
 `--worker`.
 
-**One folder has one name.** The install folder is `--data-dir`, `ACORNFALL_DATA_DIR`, and
+**One folder has one name.** The install folder is `--data-dir`, `ACORND_DATA_DIR`, and
 `dataDir` in the code. `home` means the user's own home, which the sandbox mounts, and nothing
 else.
 
@@ -59,30 +59,30 @@ was already the request. `--yes` answers both; `--check` refuses to apply.
 
 **The socket is not a setting.** A Unix socket path has a hard length, which is why the store
 carried a flag whose only real job was to be short. The socket moved to the session's runtime
-folder instead (`$XDG_RUNTIME_DIR/acornfall`, else this user's folder under the temp directory),
+folder instead (`$XDG_RUNTIME_DIR/acornd`, else this user's folder under the temp directory),
 per install and per workspace, so the length no longer depends on where the install lives. The
 store is `<data-dir>/sandboxes`; `--sandbox-state` and its environment variable are gone, and a
 machine that wants the store elsewhere can symlink it — the same answer the e2e suite uses to
 share one image between tests.
 
-**No token.** `--token`, `ACORNFALL_TOKEN`, and the middleware that read them are gone, and the
+**No token.** `--token`, `ACORND_TOKEN`, and the middleware that read them are gone, and the
 default listen address stays `0.0.0.0:7777`: open on purpose (ADR 0020), with authentication
 named as future work rather than implied by a switch nobody set.
 
 ## What it costs
 
-- **Scripts typed the old words.** `acornfall` alone, `--home`, `--token`, `--workspace`,
+- **Scripts typed the old words.** `acornd` alone, `--home`, `--token`, `--workspace`,
   `--addr`, `--network`/`--private`, `--sandbox-engine`, `--disable-vm-nesting` (install-wide),
   `--migrate-dir`, `--worker-dir`, `--worker-bin`, `secret rm`, and `secret --workspace <folder>`
   all changed or went away. The release notes name each replacement; this is a pre-1.0 break.
-- **The old folder names are still read, for one purpose.** `ACORNFALL_HOME` and
-  `ACORNFALL_DATA` are honoured after `ACORNFALL_DATA_DIR`, because the updater that stages a new
+- **The old folder names are still read, for one purpose.** `ACORND_HOME` and
+  `ACORND_DATA` are honoured after `ACORND_DATA_DIR`, because the updater that stages a new
   binary is the one already on disk: a v0.14 install points a v0.15 binary at an empty folder to
   ask its version, and a binary that ignored the old name would answer about the live folder and
   be refused. The shim goes when v0.14 is out of support; nothing else should set those names.
-- **Two things moved to the environment**: `ACORNFALL_WORKER` (worker sources) and
-  `ACORNFALL_SANDBOX_ENGINE` (a whole-install engine, for a test or a machine that must be told).
-  `ACORNFALL_MODEL` stays as the last resort.
+- **Two things moved to the environment**: `ACORND_WORKER` (worker sources) and
+  `ACORND_SANDBOX_ENGINE` (a whole-install engine, for a test or a machine that must be told).
+  `ACORND_MODEL` stays as the last resort.
 - **`--disable-vm-nesting` is per workspace now.** An install-wide refusal was a default for a
   decision each workspace makes, and on the pinned engine a refusal cannot be honored yet
   (ADR 0018).

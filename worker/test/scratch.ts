@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 const created: string[] = [];
 
 /** A temp directory for one test, cleaned up by `cleanupScratch` at the end of the file. */
-export async function tempDir(prefix = "acornfall-test-"): Promise<string> {
+export async function tempDir(prefix = "acornd-test-"): Promise<string> {
 	const dir = await mkdtemp(join(tmpdir(), prefix));
 	created.push(dir);
 	return dir;

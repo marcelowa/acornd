@@ -24,7 +24,7 @@ Two things were wrong beyond the runtime. **The same command behaved differently
 with different capabilities** — it booted microVMs here and refused in CI, so a green run
 proved different things in different places, and a test that should have caught a sandbox
 regression could pass by skipping. And **the parallel failures were not the sandboxes**: the
-harness cleanup ran `msb rm --label acornfall`, which removes every sandbox the install ever
+harness cleanup ran `msb rm --label acornd`, which removes every sandbox the install ever
 made, so a test finishing deleted a parallel test's running VM. That is why the failures
 moved between runs.
 
@@ -42,10 +42,10 @@ honest.**
   two-minute deadline instead of sixty seconds — a bound for failing, not a target.
 - **`make test-sandbox` is the engine boundary.** The live driver test, the worker's SDK
   suite, and the four end-to-end tests that exercise the sandbox itself — a tool call, a global
-  mount, a guard, a heal — without `-short`, with `ACORNFALL_LIVE_SANDBOX=1` and
-  `ACORNFALL_SANDBOX_INTEGRATION=1`, one sandbox per core (`SANDBOX_PARALLEL`, 6 here: 125s at
+  mount, a guard, a heal — without `-short`, with `ACORND_LIVE_SANDBOX=1` and
+  `ACORND_SANDBOX_INTEGRATION=1`, one sandbox per core (`SANDBOX_PARALLEL`, 6 here: 125s at
   2, 85s at 4, 72s at 6, 76s at 8), sharing the image cache under
-  `/tmp/acornfall-e2e-sandboxes`. `-race` stays on: the sandbox's start, attach, and mount path
+  `/tmp/acornd-e2e-sandboxes`. `-race` stays on: the sandbox's start, attach, and mount path
   is only taken here, and the instrumented tier is ~35s. It **fails** where there is
   no hypervisor rather than skipping: a slow tier that silently does nothing is how the bug
   class it exists for survives.
@@ -53,18 +53,18 @@ honest.**
   `workspaceResources` (the host engine, `make test`), and `notSandbox` (the refusal path,
   `make test`). A test calls one of them, and the sandbox tier skips the other two; the two
   fast-tier kinds are told apart by the harness, which starts a resource test's gateway with
-  `ACORNFALL_SANDBOX_ENGINE=host`.
-- **"No sandbox" in the fast tier is the refusal path the product ships.** `ACORNFALL_NO_SANDBOX`
+  `ACORND_SANDBOX_ENGINE=host`.
+- **"No sandbox" in the fast tier is the refusal path the product ships.** `ACORND_NO_SANDBOX`
   makes the gateway build no sandbox tier at all — the same state as a machine without a
   hypervisor — so the tools refuse and the worker starts anyway. It is never a host-backed
   stand-in: an unconfined execution engine must not exist in the product for a test to select.
 - **A machine where nobody but root can run says so.** Two fast-tier assertions check what
-  `acornfall setup` does for a person: that `--privileged` refuses one, and that it prints the
+  `acornd setup` does for a person: that `--privileged` refuses one, and that it prints the
   commands instead of failing when it cannot ask. As root there is nothing to observe — root is
   the account that would be asked — and a container that maps only uid 0 cannot become someone
   else to look (`setpriv: setresuid failed`), so both skip. A skip is a line nobody sees in a
   non-verbose run, so the suite says it once on stderr until the machine declares
-  `ACORNFALL_NO_UNPRIVILEGED=1`. The declaration silences the reminder, not the skip: the run is
+  `ACORND_NO_UNPRIVILEGED=1`. The declaration silences the reminder, not the skip: the run is
   green either way, and what went untested is in the skip message rather than in a failure.
 - **A test removes only what it created.** The end-to-end harness computes the sandbox names
   from the workspaces the test owns — its general folder plus its own workspaces directory —
@@ -94,7 +94,7 @@ without inventing a second identity scheme, and the shared image cache keeps its
 of the removal list entirely.
 
 **Bun's `-short`.** It has none, so the worker's real-SDK suite is gated by
-`ACORNFALL_SANDBOX_INTEGRATION=1`, which `make test-sandbox` sets and `make test` does not.
+`ACORND_SANDBOX_INTEGRATION=1`, which `make test-sandbox` sets and `make test` does not.
 
 ## Consequences
 

@@ -291,7 +291,7 @@ func TestDelegationPolicyCanForbidSpawning(t *testing.T) {
 			Reply: "I could not delegate",
 		}),
 		withSetup(func(t *testing.T, s *system) {
-			s.writeWorkspace(t, ".acornfall/config.json", `{"defaults":{"delegation":{"child":false,"peer":false}}}`)
+			s.writeWorkspace(t, ".acornd/config.json", `{"defaults":{"delegation":{"child":false,"peer":false}}}`)
 		}),
 	)
 	c := s.client()

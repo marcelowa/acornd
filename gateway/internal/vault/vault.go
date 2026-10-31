@@ -630,7 +630,7 @@ func waitForLock(file *os.File, exclusive bool) error {
 			return err
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("another acornfall process has been holding %s for over %s: try again", file.Name(), lockBudget)
+			return fmt.Errorf("another acornd process has been holding %s for over %s: try again", file.Name(), lockBudget)
 		}
 		time.Sleep(lockRetry)
 	}
@@ -692,7 +692,7 @@ func validateName(name string) error {
 	if !namePattern.MatchString(name) {
 		return invalidf("name %q must be an uppercase environment variable: A-Z, 0-9, and _", name)
 	}
-	if reservedNames[name] || strings.HasPrefix(name, "MSB_") || strings.HasPrefix(name, "ACORNFALL_") {
+	if reservedNames[name] || strings.HasPrefix(name, "MSB_") || strings.HasPrefix(name, "ACORND_") {
 		return invalidf("name %q is reserved by the sandbox or the host", name)
 	}
 	return nil

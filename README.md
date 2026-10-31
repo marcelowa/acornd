@@ -1,4 +1,4 @@
-# Acornfall
+# Acornd
 
 A personal assistant platform: a Go gateway and control plane over a pluggable
 agent harness.
@@ -39,7 +39,7 @@ another worker, not changing the control plane.
 First, ask the machine what it needs — and let it fix it:
 
 ```bash
-acornfall setup     # probes, then asks for your password only for the steps that need root
+acornd setup     # probes, then asks for your password only for the steps that need root
 ```
 
 It names each step before asking (install `bubblewrap passt`, allow user namespaces, make
@@ -50,7 +50,7 @@ or no terminal), it prints the same steps as copy-pasteable commands instead.
 
 Already root? No password exists, so the plan is what you approve: it shows the steps and asks
 `apply these steps? [y/N]` (`--yes` for a script). Either way it checks the account that runs
-acornfall, not the one typing: the owner of the acornfall folder, `--for USER` to say otherwise.
+acornd, not the one typing: the owner of the acornd folder, `--for USER` to say otherwise.
 Root can open `/dev/kvm` and make a user namespace whatever the policy says, so a check run as
 root would report a machine that works while the service's workspaces cannot boot.
 
@@ -65,24 +65,24 @@ make deps    # bun install in worker/, ui/, tools/
 make tools   # the linters make lint runs (staticcheck, worker deps)
 ```
 
-`bun` must stay on `PATH` for development: with `ACORNFALL_WORKER` pointing at the sources the
+`bun` must stay on `PATH` for development: with `ACORND_WORKER` pointing at the sources the
 gateway starts workers with system bun, and a worker fails to start without it. Releases
 need no bun and no sources: the gateway downloads a pinned bun once and
 the worker tarball per release, both under the install folder
-(`~/.acornfall` by default), and installs dependencies itself. Migrate
+(`~/.acornd` by default), and installs dependencies itself. Migrate
 scripts bake into the binary. Nothing lives outside the install folder.
 
 ## Run
 
 ```bash
 make deps                      # bun install in worker/
-make build                     # go build -> ./bin/acornfall
+make build                     # go build -> ./bin/acornd
 
-echo "$OPENCODE_API_KEY" | ./bin/acornfall provider add opencode-go
-./bin/acornfall start           # http://<host>:7777
+echo "$OPENCODE_API_KEY" | ./bin/acornd provider add opencode-go
+./bin/acornd start           # http://<host>:7777
 ```
 
-Every command answers `-h`, and `acornfall` with no arguments lists them:
+Every command answers `-h`, and `acornd` with no arguments lists them:
 
 ```
 start      run the gateway
@@ -107,10 +107,10 @@ A workspace runs on one engine, chosen when it is created and kept with its reco
 | `host` | no sandbox: the tools run on your machine | nothing, and it is not isolated |
 
 ```bash
-./bin/acornfall workspace add demo ~/work/demo --sandbox bwrap   # or the engine switch on the create form
-./bin/acornfall workspace add daemons ~/work/daemons --keep-alive  # a workspace that runs things
-./bin/acornfall workspace list                                    # the engine is a column
-ACORNFALL_IMAGE_TEST=1 make test                                  # the bwrap end-to-end tests, which fetch an image
+./bin/acornd workspace add demo ~/work/demo --sandbox bwrap   # or the engine switch on the create form
+./bin/acornd workspace add daemons ~/work/daemons --keep-alive  # a workspace that runs things
+./bin/acornd workspace list                                    # the engine is a column
+ACORND_IMAGE_TEST=1 make test                                  # the bwrap end-to-end tests, which fetch an image
 ```
 
 A bwrap workspace gets its own copy of its image, so `apt install` works inside it and the
@@ -119,15 +119,15 @@ pasta forwards through the host: egress is the public internet, and the machine'
 its LAN, link-local addresses, its tailnet — are refused inside the sandbox by route unless that
 workspace was granted them (`--egress private`, or the dialog's *private networks* toggle)
 ([ADR 0025](docs/adr/0025-sandbox-egress.md)). The sandbox is one process per workspace with
-acornfall itself as its first process inside, so a daemon a command starts keeps running, and
+acornd itself as its first process inside, so a daemon a command starts keeps running, and
 every engine has the same create / start / stop / remove lifecycle
 ([ADR 0024](docs/adr/0024-one-lifecycle.md)). What it gives up today: the copy costs its image's
 size on disk ([ADR 0023](docs/adr/0023-bwrap-engine.md)).
 
 A bwrap workspace also receives the host's `/dev/net/tun` and `/dev/kvm`, and the
-capabilities nested pasta needs, so it can run another acornfall with its own bwrap engine
+capabilities nested pasta needs, so it can run another acornd with its own bwrap engine
 and network instead of falling back to the host. A workspace can withdraw them with
-`acornfall workspace add --no-devices` (or `disable_devices` in the registry and the API);
+`acornd workspace add --no-devices` (or `disable_devices` in the registry and the API);
 the default is on, and a missing device is skipped rather than failing the boot. The inner
 bwrap sandbox reuses the user namespace pasta already made, because a third user namespace
 inside it cannot write its uid map. The outer workspace remains the boundary and its egress
@@ -140,26 +140,26 @@ engine and store; `make test-sandbox` runs that test.
 One line (the token rides along while the repo is private):
 
 ```bash
-export ACORNFALL_GITHUB_TOKEN='...'   # fine-grained, read-only, this repo
-curl -fsSL -H "Authorization: Bearer $ACORNFALL_GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/marcelowa/acornfall/main/scripts/install.sh | sh
+export ACORND_GITHUB_TOKEN='...'   # fine-grained, read-only, this repo
+curl -fsSL -H "Authorization: Bearer $ACORND_GITHUB_TOKEN" \
+  https://raw.githubusercontent.com/marcelowa/acornd/main/scripts/install.sh | sh
 # or with wget:
-wget -qO- --header="Authorization: Bearer $ACORNFALL_GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/marcelowa/acornfall/main/scripts/install.sh | sh
+wget -qO- --header="Authorization: Bearer $ACORND_GITHUB_TOKEN" \
+  https://raw.githubusercontent.com/marcelowa/acornd/main/scripts/install.sh | sh
 ```
 
 By hand (same token header while private):
 
 ```bash
-mkdir -p ~/acornfall/release && cd ~/acornfall/release
-export ACORNFALL_GITHUB_TOKEN='...'
-AUTH="Authorization: Bearer $ACORNFALL_GITHUB_TOKEN"
-curl -sL -H "$AUTH" -o acornfall https://github.com/marcelowa/acornfall/releases/download/v0.9.5/acornfall-linux-amd64
-curl -sL -H "$AUTH" -o sha256sums.txt https://github.com/marcelowa/acornfall/releases/download/v0.9.5/sha256sums.txt
+mkdir -p ~/acornd/release && cd ~/acornd/release
+export ACORND_GITHUB_TOKEN='...'
+AUTH="Authorization: Bearer $ACORND_GITHUB_TOKEN"
+curl -sL -H "$AUTH" -o acornd https://github.com/marcelowa/acornd/releases/download/v0.9.5/acornd-linux-amd64
+curl -sL -H "$AUTH" -o sha256sums.txt https://github.com/marcelowa/acornd/releases/download/v0.9.5/sha256sums.txt
 sha256sum -c sha256sums.txt --ignore-missing   # must say OK
-chmod +x acornfall
-echo "$OPENCODE_API_KEY" | ./acornfall provider add opencode-go
-./acornfall start
+chmod +x acornd
+echo "$OPENCODE_API_KEY" | ./acornd provider add opencode-go
+./acornd start
 ```
 
 ### Token (while the repo is private)
@@ -169,9 +169,9 @@ Releases are readable with a fine-grained token and nothing else:
 1. GitHub → Settings → Developer settings → Personal access tokens →
    Fine-grained tokens → Generate new token.
 2. Resource owner: your account. Repository access: Only select
-   repositories → `acornfall`.
+   repositories → `acornd`.
 3. Permissions → Contents: Read-only (Metadata comes along).
-4. `export ACORNFALL_GITHUB_TOKEN='...'` where the gateway runs. The
+4. `export ACORND_GITHUB_TOKEN='...'` where the gateway runs. The
    gateway reads it on every check, download, and checksum fetch.
 
 Use ends when releases go public: unset the variable and the same
@@ -179,33 +179,33 @@ commands work without it. A token that was ever pasted into chat
 should be rotated afterwards under the token's own settings.
 
 First boot downloads a pinned bun once and the worker sources for its
-tag, then installs dependencies — all under `~/.acornfall`, nothing on
+tag, then installs dependencies — all under `~/.acornd`, nothing on
 the host. After that it self-updates from Settings > Updates: one
-click, it restarts itself. Headless, `acornfall update` does the same thing: it checks, shows the
+click, it restarts itself. Headless, `acornd update` does the same thing: it checks, shows the
 new tag and its first lines, and asks `install vX? [Y/n]` — `--yes` skips the question, `--check`
 only reports. With no gateway running it installs to disk and takes effect at the next start.
 
-Useful flags: `--data-dir <dir>` (default `~/.acornfall`), `--host` and `--port`
-(default `0.0.0.0:7777`), `--workspaces-dir <dir>` (default `~/acornfall/workspaces`),
+Useful flags: `--data-dir <dir>` (default `~/.acornd`), `--host` and `--port`
+(default `0.0.0.0:7777`), `--workspaces-dir <dir>` (default `~/acornd/workspaces`),
 `--worker <command>` (a worker other than the ensured one).
 
 The engine's store — images, workspace disks, snapshots — is `<data-dir>/sandboxes`, and a
-sandbox's Unix socket lives in the session's runtime folder (`$XDG_RUNTIME_DIR/acornfall`, or a
+sandbox's Unix socket lives in the session's runtime folder (`$XDG_RUNTIME_DIR/acornd`, or a
 folder of this user's under the system temp directory). Sockets are not state and not
 configuration, so neither has a flag; a machine that wants the store elsewhere can symlink it.
 
-The default model is chosen with `acornfall model set <provider>/<modelId>` and read from
+The default model is chosen with `acornd model set <provider>/<modelId>` and read from
 `<data-dir>/settings.json`, where the interface writes it too. Provider keys are
-`acornfall provider add <provider>` (reads the key from stdin) — or with it in argv, for a
+`acornd provider add <provider>` (reads the key from stdin) — or with it in argv, for a
 script that already has it.
 
-The engine is a property of each workspace, recorded when the workspace is created (`acornfall
+The engine is a property of each workspace, recorded when the workspace is created (`acornd
 workspace add --sandbox …`), and a machine's default is what it can actually run. For a
-development loop or a test, `ACORNFALL_SANDBOX_ENGINE` names one for the whole install: `host`
+development loop or a test, `ACORND_SANDBOX_ENGINE` names one for the whole install: `host`
 runs the tools on this machine with no isolation ([ADR 0015](docs/adr/0015-host-engine.md)).
 
 Two environment variables cover what a service manager should not have to pass as flags:
-`ACORNFALL_DATA_DIR` for the install folder and `ACORNFALL_WORKER` for the worker's sources. A flag
+`ACORND_DATA_DIR` for the install folder and `ACORND_WORKER` for the worker's sources. A flag
 wins over the variable.
 
 ### Reaching it from another machine
@@ -213,14 +213,14 @@ wins over the variable.
 The gateway listens on every interface and needs no token by default:
 
 ```bash
-./bin/acornfall start           # binds 0.0.0.0:7777
+./bin/acornd start           # binds 0.0.0.0:7777
 ```
 
 Open `http://<machine>:7777` from another device. Anyone who can reach port 7777 gets the
 console, its workspaces, and the provider key it spends, so keep that port on a network you
 trust. See [ADR 0020](docs/adr/0020-open-by-default.md).
 
-A token is opt-in. `--token <secret>` or `ACORNFALL_TOKEN` guards every request. A client
+A token is opt-in. `--token <secret>` or `ACORND_TOKEN` guards every request. A client
 sends `Authorization: Bearer <secret>`, or opens `?token=<secret>` once, which sets an
 HttpOnly cookie and redirects to `/` so the secret does not stay in the address bar.
 EventSource cannot set headers, which is why the cookie exists.
@@ -228,7 +228,7 @@ EventSource cannot set headers, which is why the cookie exists.
 To keep it off the network, bind loopback and use an SSH tunnel:
 
 ```bash
-./bin/acornfall start --host 127.0.0.1
+./bin/acornd start --host 127.0.0.1
 ssh -L 7777:127.0.0.1:7777 desktop
 # then browse http://localhost:7777
 ```
@@ -251,7 +251,7 @@ the agent continues without you resending anything. The restart waits until no r
 the workspace. Rotating an existing name is live, and adding a host or a name is what a
 substitute engine cannot do without that brief restart. The value field hides by default and has an eye to reveal what you pasted. It carries the
 common password-manager opt-outs, though Bitwarden on Firefox still prompts
-([issue #100](https://github.com/marcelowa/acornfall/issues/100)); it is never inside a
+([issue #100](https://github.com/marcelowa/acornd/issues/100)); it is never inside a
 submitting form. The default image has no `curl`; install one inside the sandbox or use the
 project's own HTTPS client:
 
@@ -265,10 +265,10 @@ Settings > Secrets lists them; the conversation menu has the same page, and an a
 needs one shows the card. The headless path reads the value from stdin:
 
 ```bash
-acornfall secret add GITHUB_TOKEN --global --description "release token" \
+acornd secret add GITHUB_TOKEN --global --description "release token" \
   --hosts api.github.com,github.com < token.txt
-acornfall secret list
-acornfall secret show GITHUB_TOKEN      # what it is for, and where; never the value
+acornd secret list
+acornd secret show GITHUB_TOKEN      # what it is for, and where; never the value
 ```
 
 A workspace secret names its workspace instead of its folder: `--workspace demo`.
@@ -285,10 +285,10 @@ make dev
 ## What works
 
 - **People and rooms**: the install's admin names people from the console or with
-  `acornfall people`; every person gets a personal workspace and may lead rooms of their
+  `acornd people`; every person gets a personal workspace and may lead rooms of their
   own, and a room's owner invites guests. A guest speaks in the room's conversations,
   compacts them and stops a run, and cannot create, fork, hide, rename, `/clear` or choose
-  a model. Forgetting a room unregisters it; `acornfall workspace purge` is the only thing
+  a model. Forgetting a room unregisters it; `acornd workspace purge` is the only thing
   that deletes. Remote access is a Cloudflare tunnel with a one-time PIN; see
   [ADR 0032](docs/adr/0032-who-may-call-the-console.md) and
   [ADR 0034](docs/adr/0034-install-roles-and-room-roles.md).
@@ -324,7 +324,7 @@ make dev
   showing which layer contributed what. See `docs/adr/0004-resource-overlay.md`.
 - **Workspaces**: a folder, its own `AGENTS.md`, config, agents, skills, and commands — under
   `.agents/` (the ecosystem's name, so a bundle written for another harness works) or
-  `.acornfall/`, which wins when a folder has both. Each workspace runs its own
+  `.acornd/`, which wins when a folder has both. Each workspace runs its own
   worker and storage, started on first use. See `docs/adr/0011-workspaces.md`.
 - **Sandboxed execution**: what the agent *runs* runs in a microVM — one per workspace, the
   workspace mounted read-write at its own path and the global resource folders (`~/.agents`,
@@ -332,8 +332,8 @@ make dev
   and so does every file the agent reads or writes. The worker stays outside it, next to the
   provider key. A skill's script therefore runs where its instructions say it lives, while the
   install's credentials, token, and state are not paths inside the guest. When the engine
-  or the hypervisor is missing the tools refuse rather than run on the host; `acornfall doctor`
-  says which it is. `ACORNFALL_SANDBOX_ENGINE=host` is the explicit alternative for a machine without a
+  or the hypervisor is missing the tools refuse rather than run on the host; `acornd doctor`
+  says which it is. `ACORND_SANDBOX_ENGINE=host` is the explicit alternative for a machine without a
   hypervisor or a fast development loop: the tools run on the host, unconfined, and the state
   and doctor say so. A workspace nests virtual machines — runs a hypervisor inside
   its sandbox — when the engine offers it and the machine can grant it, unless nesting is
@@ -342,14 +342,14 @@ make dev
   `docs/adr/0014-global-resources-in-the-sandbox.md`, `docs/adr/0015-host-engine.md`, and
   `docs/adr/0018-disable-vm-nesting.md`.
 - **Slash commands** from `<home>/commands/`, `~/.agents/commands/`, and the workspace's
-  `.agents/` or `.acornfall/` — under `commands/` or, since it is the same thing by another
+  `.agents/` or `.acornd/` — under `commands/` or, since it is the same thing by another
   name, `prompts/` — expanded server-side so the transcript records what the model saw.
 - **Guards**: declarative rules that block a tool call and say why — a command pattern, or a
   path outside the workspace — accumulating across layers and visible in the inspector.
 - **Workspaces are managed from the interface**: create by name inside the workspaces folder
-  (`--workspaces-dir`, default `~/acornfall/workspaces`), and forget one (which never deletes
+  (`--workspaces-dir`, default `~/acornd/workspaces`), and forget one (which never deletes
   the folder or the history). Pointing a workspace at a folder elsewhere is
-  `acornfall workspace add <name> <folder>`, because the interface stays inside one
+  `acornd workspace add <name> <folder>`, because the interface stays inside one
   directory.
 - **Delegation**: `delegate` hands a task to a subagent and waits; `subagent` starts one
   that keeps working while you answer and reports back when it is done, waking the parent
@@ -363,7 +363,7 @@ make dev
   reason), restarts it with backoff, and resumes every run from its last commit — about
   two seconds. The stream sends a keepalive and the client reconnects on its own.
   See [ADR 0009](docs/adr/0009-liveness-and-recovery.md).
-- Credentials live in `~/.acornfall/credentials.json` (0600), never in the worker's home.
+- Credentials live in `~/.acornd/credentials.json` (0600), never in the worker's home.
 - **Self-update**: the gateway checks GitHub releases hourly (plus a Refresh button).
   A header dot (count 1) leads to Settings > Updates: current tag, new tag, notes,
   backup note, Update now / Later. Backup (config, state DB, workspace list, last 3)
@@ -371,18 +371,18 @@ make dev
   the default; Start clean wipes the sandbox root only. A running conversation blocks
   with a choice: wait for drain, stop runs and update, or cancel. The new binary
   migrates at boot (`scripts/migrate/<tag>.sh`, non-zero stops boot) and `GET /healthz`
-  must pass for 30s; failure restores `acornfall.bak` and names the cause on the screen.
-  Pin a tag for no prompts. While the repo is private, set `ACORNFALL_GITHUB_TOKEN`
+  must pass for 30s; failure restores `acornd.bak` and names the cause on the screen.
+  Pin a tag for no prompts. While the repo is private, set `ACORND_GITHUB_TOKEN`
   (read-only, one repo) so the check, download, and checksum fetch can read releases;
   drop it when releases go public. See [ADR 0019](docs/adr/0019-self-update.md).
 
 ## Write an agent
 
-`~/.acornfall/agents/<name>.md` (global) or `<workspace>/.agents/agents/<name>.md`
+`~/.acornd/agents/<name>.md` (global) or `<workspace>/.agents/agents/<name>.md`
 (workspace, shadows a global definition of the same name). The workspace bundle may also be
-`<workspace>/.acornfall/`, and that one wins when both exist: `.agents` is the ecosystem's
+`<workspace>/.acornd/`, and that one wins when both exist: `.agents` is the ecosystem's
 name — a bundle written for another harness works here, and `~/.agents/skills/` is read too —
-while `.acornfall` is where you keep what is yours alone:
+while `.acornd` is where you keep what is yours alone:
 
 ```markdown
 ---
@@ -437,7 +437,7 @@ scripted provider, so nothing calls a model and nothing needs a network. They ne
 forced off, so the tools take the refusal path and the command behaves the same everywhere;
 `make test-sandbox` runs them against real microVMs where there is a hypervisor — the tiers
 are [ADR 0013](docs/adr/0013-test-tiers.md). A feature driven by a tool call — a guard
-blocking one, a subagent being spawned — is driven by `ACORNFALL_DEV_SCRIPT`, a JSON file of
+blocking one, a subagent being spawned — is driven by `ACORND_DEV_SCRIPT`, a JSON file of
 rules matched against the last user message; see `docs/features.md`.
 
 The Markdown renderer in `ui/src/components/transcript/render-markdown.ts` **escapes the source

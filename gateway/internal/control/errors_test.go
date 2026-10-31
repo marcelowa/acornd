@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/protocol"
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
-	"github.com/acornfall/acornfall/gateway/internal/vault"
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/vault"
 )
 
 // A harness that refuses is a refusal the caller sees. These are the commands whose failure has a

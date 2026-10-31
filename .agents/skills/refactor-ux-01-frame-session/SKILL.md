@@ -1,6 +1,6 @@
 ---
 name: refactor-ux-01-frame-session
-description: Open a dedicated session for a UI/UX pass on acornfall's console (ui/), journeys and ICP checks first, pixels later. Step 1 of the acornfall refactor-ux chain. Use when asked to improve the UI, redesign the console, or start a UI/UX pass.
+description: Open a dedicated session for a UI/UX pass on acornd's console (ui/), journeys and ICP checks first, pixels later. Step 1 of the acornd refactor-ux chain. Use when asked to improve the UI, redesign the console, or start a UI/UX pass.
 ---
 
 # Frame the refactor session
@@ -10,7 +10,7 @@ one at a time, each behind its own gate.
 
 ## When to use it
 
-Start of a UI/UX pass on acornfall's console (`ui/`). Not for a new feature: these passes run
+Start of a UI/UX pass on acornd's console (`ui/`). Not for a new feature: these passes run
 against capabilities that already work.
 
 ## The frame
@@ -33,7 +33,7 @@ features.
    as it lands, starting with `01-frame.md`. `design.md` and `icp.md` stay at the repo root.
 4. **Know where these skills live.** They are in the workspace
    (`<workspace>/.agents/skills/refactor-ux-*`) while the chain is young; step 12 mirrors them into
-   `acornfall/.agents/skills/`.
+   `acornd/.agents/skills/`.
 
 ## Exit gate
 

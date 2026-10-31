@@ -4,7 +4,7 @@ Status: accepted (2026-10-28), built
 
 ## The problem
 
-Two agents were working in `acornfall-dev-01` on 2026-10-28. One of them ran a command with a
+Two agents were working in `acornd-dev-01` on 2026-10-28. One of them ran a command with a
 sixty-second tool timeout:
 
 ```sh
@@ -88,5 +88,5 @@ part a turn cannot do without.
 | *"a command the supervisor cannot end is still reported as stopped"* (worker) | the test timed out after 5s | `code 143`, `stopped:"timeout"`, in 3s |
 | `TestAPastaThatLeavesAProcessBehindIsRefusedNotHung` (probe) | 6.00s — until the holder exited | 1.2s |
 
-Found on `acornd`, in `acornfall-dev-01`, from the transcript, the `tasks` table, the zombie's
+Found on `acornd`, in `acornd-dev-01`, from the transcript, the `tasks` table, the zombie's
 process group and `/proc/<pid>/fd`.

@@ -16,9 +16,9 @@ import (
 // disappear when the user logs out, which is right: a socket is not state.
 func RuntimeDir() (string, error) {
 	if base := os.Getenv("XDG_RUNTIME_DIR"); base != "" {
-		return filepath.Join(base, "acornfall"), nil
+		return filepath.Join(base, "acornd"), nil
 	}
-	return filepath.Join(os.TempDir(), "acornfall-"+strconv.Itoa(os.Getuid())), nil
+	return filepath.Join(os.TempDir(), "acornd-"+strconv.Itoa(os.Getuid())), nil
 }
 
 // socketDir is the folder one sandbox's socket goes in: per install and per workspace, because two

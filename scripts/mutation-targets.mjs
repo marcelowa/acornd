@@ -47,7 +47,7 @@ function flooredPackages() {
 	return names;
 }
 
-/** A file in the gateway belongs to the first two path segments: `internal/control`, `cmd/acornfall`. */
+/** A file in the gateway belongs to the first two path segments: `internal/control`, `cmd/acornd`. */
 function packageOf(path) {
 	const parts = path.split("/");
 	if (parts[0] !== "gateway" || parts.length < 3) return undefined;

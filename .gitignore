@@ -2,17 +2,17 @@ bin/
 node_modules/
 *.sqlite
 *.sqlite-*
-# A key is never repository content, wherever it lands. Acornfall's own settings are covered
-# by `.acornfall/` above and live in the data dir, so they are not listed by name: a bare
+# A key is never repository content, wherever it lands. Acornd's own settings are covered
+# by `.acornd/` above and live in the data dir, so they are not listed by name: a bare
 # `settings.json` would also hide `.pi/settings.json`, which is this repository's own config.
 credentials.json
 credentials.json.lock
 .DS_Store
 # A workspace's local resources: config, agents, skills, commands. The shared bundle is
 # `.agents/`, which is committed; this one is yours, and this repository is also a workspace.
-.acornfall/
-.acornfall/*.sqlite
-.acornfall/*.sqlite-*
+.acornd/
+.acornd/*.sqlite
+.acornd/*.sqlite-*
 tools/node_modules/
 
 # `make cover` writes a run's profiles here; a coverage number is not source.

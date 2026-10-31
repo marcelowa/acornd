@@ -11,7 +11,7 @@ func TestLastWordsPrefersTheLineThatExplains(t *testing.T) {
 	worker := New(Config{})
 	for _, line := range []string{
 		"172 | if (reason === \"\") throw new Error(`${path}: a guard needs a reason`)",
-		"error: /tmp/ws/.acornfall/config.json: a guard needs a reason, because the model is told it",
+		"error: /tmp/ws/.acornd/config.json: a guard needs a reason, because the model is told it",
 		"      at parseGuard (/worker/src/config.ts:173:31)",
 		"      at async loadCatalog (/worker/src/config.ts:320:42)",
 		"",

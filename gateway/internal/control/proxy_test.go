@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/acornfall/acornfall/gateway/internal/sandbox"
-	"github.com/acornfall/acornfall/gateway/internal/secretsproxy"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/secretsproxy"
 )
 
 // proxyControl is a control with nothing running: the proxy's own tests drive the traffic, and

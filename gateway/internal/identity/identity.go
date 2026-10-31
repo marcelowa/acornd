@@ -20,7 +20,7 @@ import (
 //
 // Admin is the install admin and is deliberately not a member of anyone else's workspace (ADR 0032
 // decision 4): owning the install means lifecycle, credentials and policy, not reading a
-// conversation. Email is empty only while the admin has not been claimed with `acornfall people`.
+// conversation. Email is empty only while the admin has not been claimed with `acornd people`.
 type Caller struct {
 	Admin bool
 	Email string
@@ -36,10 +36,10 @@ type Door interface {
 var (
 	// ErrNoProof is the refusal a request gets when no door could prove it. It is the one error the
 	// edge still answers 401 for, so it must not be reused for anything else.
-	ErrNoProof = errors.New("this console needs to know who is calling: run `acornfall token` on the machine that runs it, or sign in through the address you were sent")
+	ErrNoProof = errors.New("this console needs to know who is calling: run `acornd token` on the machine that runs it, or sign in through the address you were sent")
 	// ErrWrongToken is the token door's refusal. It is separate from ErrNoProof because the fix is
 	// different: the token exists, and it is not the install's.
-	ErrWrongToken = errors.New("that is not this install's token: read it again with `acornfall token`")
+	ErrWrongToken = errors.New("that is not this install's token: read it again with `acornd token`")
 )
 
 // Any admits a request proved by any of its doors, and reports every door's reason when none did.
