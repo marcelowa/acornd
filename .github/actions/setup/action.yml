@@ -27,7 +27,7 @@ runs:
     # source and that is minutes, not seconds. They are restored and installed only for the job
     # that runs them: a test job that unpacked them would spend those seconds to ignore them.
     - if: inputs.tools == 'true'
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/go/bin
         key: go-tools-${{ runner.os }}-${{ hashFiles('gateway/go.mod') }}

@@ -143,8 +143,7 @@ func (s *Server) peopleCanCreate(w http.ResponseWriter, r *http.Request) {
 // peopleStatus says what went wrong in the book's terms: an address it does not hold is not there, and a
 // record that already exists is a conflict rather than a refusal of the person asking.
 func peopleStatus(err error) int {
-	var unknown people.ErrUnknown
-	if errors.As(err, &unknown) {
+	if _, unknown := errors.AsType[people.ErrUnknown](err); unknown {
 		return http.StatusNotFound
 	}
 	if errors.Is(err, people.ErrExists) {

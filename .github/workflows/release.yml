@@ -52,7 +52,7 @@ jobs:
           -ldflags "-X github.com/acornfall/acornfall/gateway/internal/update.BuildVersion=${{ github.ref_name }}"
           -o ../acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
           ./cmd/acornfall
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
           path: acornfall-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -65,7 +65,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: tar -czf worker.tar.gz -C worker package.json bun.lock src
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: worker-sources
           path: worker.tar.gz
@@ -82,7 +82,7 @@ jobs:
           fetch-depth: 1
           fetch-tags: true
           sparse-checkout: .github
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -96,7 +96,7 @@ jobs:
       # A hyphen tag (`v0.9.35-rc.1`) is a pre-release: GitHub's own flag,
       # which the update page's picker reads, and which keeps the newest-GA
       # mark pointed at production.
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           body_path: release-notes.md
