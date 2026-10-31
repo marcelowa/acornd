@@ -55,6 +55,9 @@ func Save(dir string, setup Setup, now time.Time) error {
 		return errors.New("remote: a setup needs an install folder")
 	}
 	setup.Updated = now.UTC().Format(time.RFC3339)
+	// #nosec G117 -- writing the token is what this file is for (ADR 0033 §4): it lands in a
+	// 0600 file inside a 0700 install folder, which ADR 0014 keeps out of every sandbox mount,
+	// and GET /api/remote says only whether one is stored.
 	payload, err := json.MarshalIndent(setup, "", "  ")
 	if err != nil {
 		return err
