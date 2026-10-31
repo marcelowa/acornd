@@ -36,7 +36,10 @@ another worker, not changing the control plane.
 
 ## Setup
 
-First, ask the machine what it needs — and let it fix it:
+No toolchain, and you just want the binary? [Install from a release](#install-from-a-release-one-binary-no-toolchain)
+puts one file on the machine and skips everything below.
+
+With the sources, first ask the machine what it needs — and let it fix it:
 
 ```bash
 acornd setup     # probes, then asks for your password only for the steps that need root
@@ -75,11 +78,10 @@ scripts bake into the binary. Nothing lives outside the install folder.
 ## Run
 
 ```bash
-make deps                      # bun install in worker/
 make build                     # go build -> ./bin/acornd
 
 echo "$OPENCODE_API_KEY" | ./bin/acornd provider add opencode-go
-./bin/acornd start           # http://<host>:7777
+./bin/acornd start             # http://<host>:7777
 ```
 
 Every command answers `-h`, and `acornd` with no arguments lists them:
@@ -137,46 +139,29 @@ engine and store; `make test-sandbox` runs that test.
 
 ### Install from a release (one binary, no toolchain)
 
-One line (the token rides along while the repo is private):
+One line:
 
 ```bash
-export ACORND_GITHUB_TOKEN='...'   # fine-grained, read-only, this repo
-curl -fsSL -H "Authorization: Bearer $ACORND_GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/marcelowa/acornd/main/scripts/install.sh | sh
-# or with wget:
-wget -qO- --header="Authorization: Bearer $ACORND_GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/marcelowa/acornd/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/marcelowa/acornd/main/scripts/install.sh | sh
 ```
 
-By hand (same token header while private):
+It picks the binary for this machine, checks its checksum, and puts it in `~/.acornd/bin`.
+Then `acornd setup` says what the machine needs and offers to do it, and `acornd start`
+serves the console on `http://<host>:7777`.
+
+By hand, if you would rather see every step:
 
 ```bash
-mkdir -p ~/acornd/release && cd ~/acornd/release
-export ACORND_GITHUB_TOKEN='...'
-AUTH="Authorization: Bearer $ACORND_GITHUB_TOKEN"
-curl -sL -H "$AUTH" -o acornd https://github.com/marcelowa/acornd/releases/download/v0.31.0/acornd-linux-amd64
-curl -sL -H "$AUTH" -o sha256sums.txt https://github.com/marcelowa/acornd/releases/download/v0.31.0/sha256sums.txt
+mkdir -p ~/.acornd/bin && cd ~/.acornd/bin
+curl -LO https://github.com/marcelowa/acornd/releases/download/v0.31.1/acornd-linux-amd64
+curl -LO https://github.com/marcelowa/acornd/releases/download/v0.31.1/sha256sums.txt
 sha256sum -c sha256sums.txt --ignore-missing   # must say OK
-chmod +x acornd
+mv acornd-linux-amd64 acornd && chmod +x acornd
 echo "$OPENCODE_API_KEY" | ./acornd provider add opencode-go
 ./acornd start
 ```
 
-### Token (while the repo is private)
-
-Releases are readable with a fine-grained token and nothing else:
-
-1. GitHub → Settings → Developer settings → Personal access tokens →
-   Fine-grained tokens → Generate new token.
-2. Resource owner: your account. Repository access: Only select
-   repositories → `acornd`.
-3. Permissions → Contents: Read-only (Metadata comes along).
-4. `export ACORND_GITHUB_TOKEN='...'` where the gateway runs. The
-   gateway reads it on every check, download, and checksum fetch.
-
-Use ends when releases go public: unset the variable and the same
-commands work without it. A token that was ever pasted into chat
-should be rotated afterwards under the token's own settings.
+Swap `linux-amd64` for `linux-arm64`, `darwin-amd64` or `darwin-arm64` on another machine.
 
 First boot downloads a pinned bun once and the worker sources for its
 tag, then installs dependencies — all under `~/.acornd`, nothing on
@@ -372,9 +357,7 @@ make dev
   with a choice: wait for drain, stop runs and update, or cancel. The new binary
   migrates at boot (`scripts/migrate/<tag>.sh`, non-zero stops boot) and `GET /healthz`
   must pass for 30s; failure restores `acornd.bak` and names the cause on the screen.
-  Pin a tag for no prompts. While the repo is private, set `ACORND_GITHUB_TOKEN`
-  (read-only, one repo) so the check, download, and checksum fetch can read releases;
-  drop it when releases go public. See [ADR 0019](docs/adr/0019-self-update.md).
+  Pin a tag for no prompts. See [ADR 0019](docs/adr/0019-self-update.md).
 
 ## Write an agent
 
