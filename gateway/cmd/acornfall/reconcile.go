@@ -40,9 +40,12 @@ func reconcileRemote(ctx context.Context, dataDir string) {
 	}
 	token := strings.TrimSpace(os.Getenv("ACORNFALL_CLOUDFLARE_TOKEN"))
 	if token == "" {
-		// The API token is not stored: it is the account's, and keeping it in the install folder would make a
-		// file in a workspace-adjacent directory worth stealing. The boot has it when the service has it.
-		log.Printf("tunnel: not reconciled (no ACORNFALL_CLOUDFLARE_TOKEN); what is there still works, and `acornfall remote apply` changes it")
+		// The console stores the token the admin pasted, so the boot can reconcile without a service unit
+		// carrying it; the environment wins when both exist, because that is the one an operator set on purpose.
+		token = strings.TrimSpace(setup.APIToken)
+	}
+	if token == "" {
+		log.Printf("tunnel: not reconciled (no API token: paste one in Settings → Remote, or set ACORNFALL_CLOUDFLARE_TOKEN); what is there still works")
 		return
 	}
 	book, admitted, err := remoteInputs(dataDir)

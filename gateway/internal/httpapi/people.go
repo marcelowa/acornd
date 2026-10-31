@@ -72,6 +72,7 @@ func (s *Server) peopleAdd(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	go s.reconcileAfterPeople()
 	s.peopleAnswer(w)
 }
 
@@ -84,6 +85,7 @@ func (s *Server) peopleRevoke(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), peopleStatus(err))
 		return
 	}
+	go s.reconcileAfterPeople()
 	s.peopleAnswer(w)
 }
 
@@ -98,6 +100,7 @@ func (s *Server) peopleRestore(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), peopleStatus(err))
 		return
 	}
+	go s.reconcileAfterPeople()
 	s.peopleAnswer(w)
 }
 

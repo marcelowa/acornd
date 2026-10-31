@@ -46,7 +46,7 @@ func TestReconcileSaysItCannotWithoutAnAPIToken(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 	out := logs(t, func() { reconcileRemote(context.Background(), dir) })
-	if !strings.Contains(out, "no ACORNFALL_CLOUDFLARE_TOKEN") {
+	if !strings.Contains(out, "no API token") {
 		t.Errorf("the boot did not say why it skipped the reconcile: %q", out)
 	}
 }

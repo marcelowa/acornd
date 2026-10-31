@@ -492,8 +492,9 @@ func TestAGroupIsAListOfAddresses(t *testing.T) {
 func TestTheSetupIsAFileWithItsToken(t *testing.T) {
 	dir := t.TempDir()
 	setup := Setup{
-		Desired: Desired{Hostname: "testing.acornd.app", ZoneID: "z", AccountID: "a"},
-		State:   State{TunnelID: "t", TunnelToken: "secret", AppID: "app", Audience: "aud"},
+		Desired:  Desired{Hostname: "testing.acornd.app", ZoneID: "z", AccountID: "a"},
+		State:    State{TunnelID: "t", TunnelToken: "secret", AppID: "app", Audience: "aud"},
+		APIToken: "api-token",
 	}
 	if err := Save(dir, setup, time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("save: %v", err)
@@ -509,7 +510,7 @@ func TestTheSetupIsAFileWithItsToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if loaded.State.TunnelToken != "secret" || loaded.Desired.Hostname != "testing.acornd.app" {
+	if loaded.State.TunnelToken != "secret" || loaded.Desired.Hostname != "testing.acornd.app" || loaded.APIToken != "api-token" {
 		t.Errorf("loaded = %+v", loaded)
 	}
 	if loaded.Updated != "2026-10-30T12:00:00Z" {

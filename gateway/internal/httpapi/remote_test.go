@@ -253,8 +253,9 @@ func TestRemoteApplyWithoutATokenCreatesNothing(t *testing.T) {
 	}
 }
 
-// The token is used and dropped: nothing about it reaches remote.json.
-func TestRemoteApplyKeepsNoToken(t *testing.T) {
+// The token is kept, 0600, so the door follows the book without a service unit carrying it — and it never
+// crosses the status boundary, which is the half of ADR 0033 §4 that still holds.
+func TestRemoteApplyKeepsTheTokenButNeverReturnsIt(t *testing.T) {
 	api := newCloudflare()
 	api.zones = map[string]remote.Zone{"example.com": {ID: "zone-1", Account: "acc-1"}}
 	handler, _, dir := screen(t, api)
@@ -266,8 +267,78 @@ func TestRemoteApplyKeepsNoToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if strings.Contains(string(payload), "api-token-secret") {
-		t.Error("the API token was written to the install folder")
+	if !strings.Contains(string(payload), "api-token-secret") {
+		t.Error("the API token was not kept, so the door cannot follow the book")
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/remote", nil))
+	if strings.Contains(recorder.Body.String(), "api-token-secret") {
+		t.Error("the status returned the API token")
+	}
+	var answer remoteState
+	if err := json.Unmarshal(recorder.Body.Bytes(), &answer); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !answer.TokenStored {
+		t.Error("the status does not say the token is stored")
+	}
+}
+
+// Forget is the other half: the token leaves the install, and what is at Cloudflare stays.
+func TestForgettingTheTokenKeepsTheDoor(t *testing.T) {
+	api := newCloudflare()
+	handler, _, dir := screen(t, api)
+	if err := remote.Save(dir, remote.Setup{
+		Desired:  remote.Desired{Hostname: "console.example.com", ZoneID: "z", AccountID: "a"},
+		State:    remote.State{TunnelID: "t"},
+		APIToken: "api-token-secret",
+	}, time.Now()); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/remote/forget-token", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	setup, err := remote.Load(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if setup.APIToken != "" {
+		t.Error("the token survived the forget")
+	}
+	if setup.Desired.Hostname == "" {
+		t.Error("forget removed the door")
+	}
+}
+
+// A person added in the book is in the group after the reconcile that follows the write (ADR 0033 §3).
+func TestAPersonAddedInTheBookReachesTheDoor(t *testing.T) {
+	api := newCloudflare()
+	_, opened, dir := screen(t, api)
+	if _, err := opened.Add("ana@example.com", "Ana"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := remote.Save(dir, remote.Setup{
+		Desired:  remote.Desired{Hostname: "console.example.com", ZoneID: "z", AccountID: "a"},
+		State:    remote.State{TunnelID: "t"},
+		APIToken: "api-token-secret",
+	}, time.Now()); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	server := &Server{gate: Gate{People: opened, Dir: dir}}
+	server.reconcileAfterPeople()
+
+	found := false
+	for _, group := range api.groups {
+		for _, email := range group.Emails {
+			if email == "ana@example.com" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("the group does not name the new person: %+v", api.groups)
 	}
 }
 
