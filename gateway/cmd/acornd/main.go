@@ -66,12 +66,15 @@ var commands = map[string]func([]string){
 	"people":    peopleCommand,
 	"remote":    remoteCommand,
 	"token":     tokenCommand,
-	"update":    updateCommand,
-	"version":   versionCommand,
-	"internal":  internalCommand,
-	"help":      func([]string) { usage(os.Stdout) },
-	"-h":        func([]string) { usage(os.Stdout) },
-	"--help":    func([]string) { usage(os.Stdout) },
+	// setup-code sits beside token in the table because the two are the credentials an install prints:
+	// one proves ownership, the other claims a fresh install before there is an owner (ADR 0036 §3).
+	"setup-code": setupCodeCommand,
+	"update":     updateCommand,
+	"version":    versionCommand,
+	"internal":   internalCommand,
+	"help":       func([]string) { usage(os.Stdout) },
+	"-h":         func([]string) { usage(os.Stdout) },
+	"--help":     func([]string) { usage(os.Stdout) },
 }
 
 // internalCommand dispatches the verbs that binaries call. An unknown one is refused like any
@@ -102,6 +105,7 @@ func usage(w io.Writer) {
   restart    start it again with the arguments it was started with
   status     is it running, where, and since when
   setup      check this machine, and make it able to run sandboxes
+  setup-code print, rotate, or remove the code that claims a fresh install
   doctor     report what the sandbox engines can do here; changes nothing
   workspace  list, add, forget, and purge workspaces
   secret     list, add, show, rotate, and remove secrets
@@ -115,6 +119,15 @@ func usage(w io.Writer) {
 
 acornd <command> -h    explains that command's flags
 `)
+}
+
+// announceSetup writes the line that claims a fresh install, right after the address it is reachable at. A
+// detached run logs it too: the log is 0600, and the code is what the person starting the install needs
+// (ADR 0036 §3).
+func announceSetup(dir, address string) {
+	if line := setupLine(dir, address); line != "" {
+		log.Print(line)
+	}
 }
 
 func serve(argv []string) error {
@@ -369,6 +382,9 @@ func listen(ctx context.Context, host string, port int, handler http.Handler, di
 	}
 	bound := listener.Addr().String()
 	log.Printf("acornd listening on http://%s  home=%s", displayAddr(bound), dir)
+	// Where to claim it, once the address is the one that was actually bound: with a port of 0 the configured
+	// address names no port at all, and a URL a person cannot open is worse than no line (ADR 0036 §3).
+	announceSetup(dir, bound)
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 		return err
 	}

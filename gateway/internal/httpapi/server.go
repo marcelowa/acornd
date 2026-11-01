@@ -31,9 +31,59 @@ type Server struct {
 type Gate struct {
 	Door   identity.Door
 	People *people.Book
-	// Dir is the install folder. The remote-access screen reads and writes remote.json there, and nothing else
-	// on the edge needs a path at all.
+	// Dir is the install folder. The remote-access screen reads and writes remote.json there, the
+	// sign-in routes read the token and the setup code, and nothing else on the edge needs a path.
 	Dir string
+}
+
+// mode is what the gate admits by, in the three states ADR 0036 §3 names: open with nothing
+// configured at all, setup while the book has no admin, and door once it has one.
+type mode int
+
+const (
+	// modeOpen is ADR 0020's single admin: no door to prove with, so every request is answered as it
+	// always was.
+	modeOpen mode = iota
+	// modeSetup is an install nobody owns yet: the claim form and the sign-in have to be reachable, and
+	// everything else waits for a proof (ADR 0036 §3).
+	modeSetup
+	// modeDoor is an install with an owner: every request needs one of the door's proofs.
+	modeDoor
+)
+
+// mode answers what this gate is now. It is read on every request rather than once at boot, because
+// the answer changes without a restart: claiming the install is one POST (ADR 0036 §3).
+func (g Gate) mode() mode {
+	switch {
+	case g.Door == nil:
+		return modeOpen
+	case g.People == nil:
+		// A door with no book: there is nobody to claim and nothing to set up, so the proof is the
+		// whole rule. The entry point never builds this; a test that is about the door does.
+		return modeDoor
+	default:
+		noOwner, err := g.noOwner()
+		if err != nil || !noOwner {
+			// A book nobody can read is not a fresh install: setup is the larger authority of the two,
+			// and a damaged file must not hand it out.
+			return modeDoor
+		}
+		return modeSetup
+	}
+}
+
+// noOwner reports whether the book has no admin, which is the fact setup mode is made of: the setup
+// code is accepted, the claim route answers, and every other API route waits for a proof. An
+// unreadable book answers with its error rather than with "no owner" (ADR 0036 §3).
+func (g Gate) noOwner() (bool, error) {
+	if g.People == nil {
+		return false, nil
+	}
+	_, claimed, err := g.People.Admin()
+	if err != nil {
+		return false, err
+	}
+	return !claimed, nil
 }
 
 func New(workspaces *control.Workspaces, static fs.FS, updates *update.Manager, gate Gate) *Server {

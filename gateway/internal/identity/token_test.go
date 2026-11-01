@@ -184,3 +184,56 @@ func TestAnInstallFolderThatCannotBeCreatedIsReported(t *testing.T) {
 		t.Fatal("a token was minted under a file")
 	}
 }
+
+// MatchToken is the sign-in form's compare: the one the door makes, asked about a value from a body
+// rather than a header.
+func TestMatchToken(t *testing.T) {
+	dir := t.TempDir()
+	token, err := RotateToken(dir)
+	if err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+	cases := []struct {
+		name    string
+		dir     string
+		given   string
+		want    bool
+		wantErr bool
+	}{
+		{name: "the install's own token", dir: dir, given: token, want: true},
+		{name: "another one", dir: dir, given: token + "x", want: false},
+		{name: "an install with no token file", dir: t.TempDir(), given: token, wantErr: true},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			matched, err := MatchToken(test.dir, test.given)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, test.wantErr)
+			}
+			if matched != test.want {
+				t.Errorf("MatchToken = %v, want %v", matched, test.want)
+			}
+		})
+	}
+}
+
+// The token door says why it could not read a token rather than guessing a caller: a request with a
+// bearer header to an install whose token file is gone is refused, not admitted.
+func TestTheTokenDoorReportsATokenItCannotRead(t *testing.T) {
+	if _, err := (Token{Dir: t.TempDir()}).Prove(request("Authorization", "Bearer anything")); err == nil || errors.Is(err, ErrWrongToken) {
+		t.Fatalf("err = %v, want the missing token file", err)
+	}
+}
+
+// EnsureToken reports a folder it cannot write instead of pretending the install has a token: the boot
+// that mints one names the folder.
+func TestEnsureTokenReportsAFolderItCannotWrite(t *testing.T) {
+	base := t.TempDir()
+	file := filepath.Join(base, "acornd")
+	if err := os.WriteFile(file, []byte("not a folder"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, _, err := EnsureToken(file); err == nil {
+		t.Fatal("a token was minted under a file")
+	}
+}

@@ -51,12 +51,27 @@ func (t Token) Prove(r *http.Request) (Caller, error) {
 		// install: the remote door may still prove someone, so the reason is the answer.
 		return Caller{}, fmt.Errorf("this install has no token file yet: %w", err)
 	}
-	// Constant time, because a token compared with == leaks its prefix to anyone who can time a
-	// response.
-	if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
+	if !sameSecret(got, want) {
 		return Caller{}, ErrWrongToken
 	}
 	return Caller{Admin: true}, nil
+}
+
+// MatchToken reports whether given is this install's token. It is the compare the door makes, for
+// the sign-in form: the proof arrives in a body there, and a browser cannot set a header on a page
+// load.
+func MatchToken(dir, given string) (bool, error) {
+	want, err := ReadToken(dir)
+	if err != nil {
+		return false, err
+	}
+	return sameSecret(given, want), nil
+}
+
+// sameSecret compares two credentials in constant time, because a token or a code compared with ==
+// leaks its prefix to anyone who can time a response.
+func sameSecret(got, want string) bool {
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
 // bearer reads the header's token, without pretending to parse the scheme case-sensitively: RFC 6750
@@ -115,36 +130,15 @@ func EnsureToken(dir string) (token string, minted bool, err error) {
 	return token, true, nil
 }
 
-// RotateToken replaces the install's token and returns the new one. The file is written beside its
-// destination and renamed onto it, so a reader never sees a half-written token and the mode is never
-// looser than 0600 — a token created world-readable for one syscall is a token that leaked.
+// RotateToken replaces the install's token and returns the new one. It is written the way every
+// credential in the install folder is: whole, 0600, and renamed onto its destination.
 func RotateToken(dir string) (string, error) {
 	raw := make([]byte, tokenBytes)
 	if _, err := rand.Read(raw); err != nil {
 		return "", fmt.Errorf("minting a token: %w", err)
 	}
 	token := base64.RawURLEncoding.EncodeToString(raw)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
-	}
-	file, err := os.CreateTemp(dir, "."+TokenFile+"-")
-	if err != nil {
-		return "", err
-	}
-	// CreateTemp creates 0600 by design; the explicit chmod is for the umask on a filesystem that
-	// ignores it, which is the difference between a secret and a public file.
-	if err := file.Chmod(0o600); err != nil {
-		_ = file.Close()
-		return "", err
-	}
-	_, writeErr := file.WriteString(token + "\n")
-	closeErr := file.Close()
-	if writeErr != nil || closeErr != nil {
-		_ = os.Remove(file.Name())
-		return "", errors.Join(writeErr, closeErr)
-	}
-	if err := os.Rename(file.Name(), filepath.Join(dir, TokenFile)); err != nil {
-		_ = os.Remove(file.Name())
+	if err := writeWhole(dir, TokenFile, token+"\n"); err != nil {
 		return "", err
 	}
 	return token, nil

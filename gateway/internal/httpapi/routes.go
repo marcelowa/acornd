@@ -25,6 +25,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/defaults/agent", s.admin(s.setInstallDefaultAgent))
 
 	mux.HandleFunc("GET /healthz", s.health)
+	s.sessionRoutes(mux)
 	s.updateRoutes(mux)
 	s.secretRoutes(mux)
 	s.workspaceRoutes(mux)
@@ -37,8 +38,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /", noCache(http.FileServerFS(s.static)))
 
 	// The door is in front of everything, which is what makes "no path reaches a handler unproven" true
-	// by construction rather than by each handler remembering.
-	if s.gate.Door != nil {
+	// by construction rather than by each handler remembering. Setup is a state of the same door: the
+	// routes that have to answer without a proof are named in one place, and admit decides per request
+	// which ones they are (ADR 0036 §3).
+	if s.gate.mode() != modeOpen {
 		return s.admit(mux)
 	}
 	return mux

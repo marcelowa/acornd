@@ -31,7 +31,9 @@ func TestEveryStateFrameIsFiltered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
-	response, err := http.DefaultClient.Do(request)
+	// Through the suite's client, so the request carries the proof the console asks for: a stream is an API
+	// route like any other (ADR 0036 §3).
+	response, err := s.client().http.Do(request)
 	if err != nil {
 		t.Fatalf("stream: %v", err)
 	}

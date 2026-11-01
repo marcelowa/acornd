@@ -60,17 +60,16 @@ func printToken(out, notes io.Writer, dir string, rotate bool) error {
 }
 
 // openGate builds what this run admits by: the door that proves who is calling, and the book of people
-// it must then know. Both are nil for the single-admin install ADR 0020 describes, because a door
-// nothing configured is how a switched-off guard comes back.
+// it must then know.
+//
+// The book is opened on every install now, not only one with a door: the console configures its own
+// remote access, and that needs a book to name people in before the door exists (ADR 0036 §5). The mode
+// follows from it — no admin means setup, an admin means the door — and it is read per request, so the
+// claim that ends setup takes effect without a restart (ADR 0036 §3).
 func openGate(dir, host string) (httpapi.Gate, error) {
 	door, err := identityDoor(dir, host)
 	if err != nil {
 		return httpapi.Gate{}, err
-	}
-	if door == nil {
-		// No door, but still an install folder: the edge reads the provider allowlist from it, and a gate with
-		// no Dir would let the single-admin install offer models its own allowlist refuses.
-		return httpapi.Gate{Dir: dir}, nil
 	}
 	book, err := people.Open(filepath.Join(dir, people.File))
 	if err != nil {
@@ -79,32 +78,33 @@ func openGate(dir, host string) (httpapi.Gate, error) {
 	if _, claimed, err := book.Admin(); err != nil {
 		return httpapi.Gate{}, err
 	} else if !claimed {
-		// Loud at boot rather than at the first browser: a console with a door and no admin is one only
-		// the machine can get into, and the fix is one command.
-		fmt.Fprintln(os.Stderr, "acornd: this install has people but no admin yet; `acornd people claim you@example.com` names one")
+		// A fresh install generates the code it is claimed with on first boot (ADR 0036 §3). Failing here
+		// is the boot being unable to write its own folder, which every other file in it would also fail.
+		if _, _, err := identity.EnsureSetupCode(dir); err != nil {
+			return httpapi.Gate{}, err
+		}
 	}
 	return httpapi.Gate{Door: door, People: book, Dir: dir}, nil
 }
 
-// identityDoor builds the proof this run requires, or nil for the single-admin install ADR 0020
-// describes. The door is off unless this run names a publisher, so an install that never turns people
-// on behaves exactly as it did before there was a door.
+// identityDoor builds the proof this run requires: the install token, the owner's session cookie, and
+// the assertion door when this run names a publisher.
 //
-// ACORND_IDENTITY=access means a browser arrives through Cloudflare Access, with the assertion it
-// signs; `token` means only the command line, which is what a machine behind somebody else's proxy
-// wants. The token door is in the set either way: the command line is how the admin reaches a console
-// that has people, and how they get back in when the proxy is what broke.
+// The door is always there, because the console is closed by default now (ADR 0036 §3). ACORND_IDENTITY
+// only decides whether a proxy's assertion is the third proof: `access` means a browser may arrive
+// through Cloudflare Access with the assertion it signs; unset means the token and the cookie are the
+// whole of it, which is what a machine behind somebody else's proxy wants.
 func identityDoor(dir, host string) (identity.Door, error) {
 	kind := strings.TrimSpace(os.Getenv("ACORND_IDENTITY"))
-	if kind == "" {
-		return nil, nil
+	if kind != "" && !loopback(host) {
+		// A console behind a publisher listens on loopback only. The door is reached through a proxy on
+		// this machine (ADR 0033), and a listener on every interface would be reachable without one — a
+		// door on one address and a hole on the others. Without a publisher there is nothing in front to
+		// reach it through, so the default bind stays 0.0.0.0 (ADR 0036 §5).
+		return nil, fmt.Errorf("a console behind a publisher listens on loopback only, and --host %q is not one: bind 127.0.0.1 and reach it through cloudflared", host)
 	}
-	// A console with a door listens on loopback only. The door is reached through a proxy on this
-	// machine (ADR 0033), and a listener on every interface would be reachable without one — a door on
-	// one address and a hole on the others.
-	if !loopback(host) {
-		return nil, fmt.Errorf("a console with people listens on loopback only, and --host %q is not one: reach it through cloudflared, or unset ACORND_IDENTITY for a single-admin install", host)
-	}
+	// The session cookie is signed with a key derived from this token, so every install has one, door or
+	// no door (ADR 0036 §4).
 	if _, minted, err := identity.EnsureToken(dir); err != nil {
 		return nil, err
 	} else if minted {
@@ -116,15 +116,15 @@ func identityDoor(dir, host string) (identity.Door, error) {
 		return nil, err
 	}
 	if remote == nil {
-		return identity.Any(identity.Token{Dir: dir}), nil
+		return identity.Any(identity.Token{Dir: dir}, identity.Session{Dir: dir}), nil
 	}
-	return identity.Any(identity.Token{Dir: dir}, remote), nil
+	return identity.Any(identity.Token{Dir: dir}, remote, identity.Session{Dir: dir}), nil
 }
 
-// remoteDoor is the door a publisher's name builds, or nil for a console only the command line opens.
+// remoteDoor is the door a publisher's name builds, or nil for a console only the local proofs open.
 func remoteDoor(kind string) (identity.Door, error) {
 	switch kind {
-	case "token":
+	case "", "token":
 		return nil, nil
 	case "access":
 		audience, issuer, keys, err := accessValues()

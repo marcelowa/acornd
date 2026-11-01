@@ -39,8 +39,10 @@ var Allowed = map[string][]string{
 		"internal/workerpool",
 	},
 
-	// The feature suite drives a real gateway binary; it reaches the engine only to install one.
+	// The feature suite drives a real gateway binary; it reaches the engine only to install one, and the
+	// door's credential file to sign its clients in — a console with no proof answers nobody (ADR 0036 §3).
 	"internal/e2e": {
+		"internal/identity",
 		"internal/sandbox",
 	},
 

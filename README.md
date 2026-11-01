@@ -92,6 +92,7 @@ stop       stop the run recorded in this install folder
 restart    start it again with the arguments it was started with
 status     is it running, where, and since when
 setup      check this machine, and make it able to run sandboxes
+setup-code print, rotate, or remove the code that claims a fresh install
 doctor     report what the sandbox engines can do here; changes nothing
 workspace  list, add, forget, and purge workspaces
 secret     list, add, show, rotate, and remove secrets
@@ -109,6 +110,11 @@ version    print the running version
 console answers. `stop`, `restart`, and `status` read the run recorded in that folder — one run per
 folder, `restart` reuses the arguments it was started with, and nothing restarts it after a crash
 (ADR 0036).
+
+A fresh install prints `http://<host>:7777/setup?code=…` on every start until somebody claims it,
+and `acornd setup-code` prints that code, rotates it (`--rotate`) or removes it (`--disable`) — the
+install token from `acornd token` signs in on the same form, so a rotated or disabled code is never
+a lockout ([ADR 0036](docs/adr/0036-a-console-that-sets-itself-up.md)).
 
 ### Sandbox engines
 
@@ -207,20 +213,19 @@ wins over the variable.
 
 ### Reaching it from another machine
 
-The gateway listens on every interface and needs no token by default:
+The gateway listens on every interface, and the console is closed from the first minute: a fresh
+install answers its pages and a sign-in, and refuses every other request until somebody claims it
+([ADR 0036](docs/adr/0036-a-console-that-sets-itself-up.md)).
 
 ```bash
-./bin/acornd start           # binds 0.0.0.0:7777
+./bin/acornd start           # binds 0.0.0.0:7777, and prints where to claim it
 ```
 
-Open `http://<machine>:7777` from another device. Anyone who can reach port 7777 gets the
-console, its workspaces, and the provider key it spends, so keep that port on a network you
-trust. See [ADR 0020](docs/adr/0020-open-by-default.md).
-
-A token is opt-in. `--token <secret>` or `ACORND_TOKEN` guards every request. A client
-sends `Authorization: Bearer <secret>`, or opens `?token=<secret>` once, which sets an
-HttpOnly cookie and redirects to `/` so the secret does not stay in the address bar.
-EventSource cannot set headers, which is why the cookie exists.
+Open the printed `http://<machine>:7777/setup?code=…` from another device and claim the install
+with your name and address. A script talks to the API with `Authorization: Bearer $(acornd token)`;
+a browser signs in on the same form with that token or the setup code, and holds an HttpOnly session
+cookie for a month. EventSource cannot set a header, which is why the cookie exists. Keep the port on
+a network you trust anyway.
 
 To keep it off the network, bind loopback and use an SSH tunnel:
 

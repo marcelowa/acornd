@@ -32,6 +32,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marcelowa/acornd/gateway/internal/identity"
 	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 )
 
@@ -683,19 +684,56 @@ type client struct {
 	t    *testing.T
 	base string
 	// identity is the signed assertion this client sends, when a test starts a door that wants one. Empty
-	// is the install with no door, where every request is the admin's.
+	// is a console whose clients are the install's admin, which is what the token is for.
 	identity string
-	http     *http.Client
+	// token is the install's own credential. The console is closed from the first minute, so a client
+	// with no assertion and no token is refused before any handler runs (ADR 0036 §3).
+	token string
+	http  *http.Client
 	// stream is the same client without a timeout: a stream is meant to stay open.
 	stream *http.Client
 }
 
 func (s *system) client() *client {
-	return &client{
-		t:      s.t,
-		base:   s.Addr,
-		http:   &http.Client{Timeout: 60 * time.Second},
-		stream: &http.Client{},
+	c := &client{t: s.t, base: s.Addr, token: s.token()}
+	round := proof{client: c}
+	c.http = &http.Client{Timeout: 60 * time.Second, Transport: round}
+	// The stream is the same client without a timeout: a stream is meant to stay open.
+	c.stream = &http.Client{Transport: round}
+	return c
+}
+
+// token is the install's own credential, read once the gateway has minted it: it proves the admin, which is
+// what a feature test is — one person at one install.
+func (s *system) token() string {
+	payload, err := os.ReadFile(filepath.Join(s.DataDir, identity.TokenFile))
+	if err != nil {
+		s.t.Fatalf("the install has no token to sign its client in with: %v", err)
+	}
+	return strings.TrimSpace(string(payload))
+}
+
+// proof is the transport every request this suite makes goes through, so a test that builds its own request —
+// a stream, an upload — is somebody too. The console answers nobody without a proof (ADR 0036 §3).
+type proof struct {
+	client *client
+}
+
+func (p proof) RoundTrip(request *http.Request) (*http.Response, error) {
+	p.client.authorize(request)
+	return http.DefaultTransport.RoundTrip(request)
+}
+
+// authorize makes this request somebody's: the assertion a door test minted, or the install's token for a
+// client that is the admin. A door test's client always has an identity and never falls back to the token,
+// or every guest would be the admin.
+func (c *client) authorize(request *http.Request) {
+	if c.identity != "" {
+		request.Header.Set("Cf-Access-Jwt-Assertion", c.identity)
+		return
+	}
+	if c.token != "" {
+		request.Header.Set("Authorization", "Bearer "+c.token)
 	}
 }
 
@@ -762,9 +800,6 @@ func (c *client) doTry(method, path string, body any) (int, []byte, error) {
 	}
 	if body != nil {
 		request.Header.Set("content-type", "application/json")
-	}
-	if c.identity != "" {
-		request.Header.Set("Cf-Access-Jwt-Assertion", c.identity)
 	}
 	response, err := c.http.Do(request)
 	if err != nil {

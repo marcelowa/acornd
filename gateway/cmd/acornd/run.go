@@ -152,6 +152,9 @@ func startDetached(argv []string, dataDir, host string, port int) error {
 	} else {
 		_ = listener.Close()
 	}
+	// The parent mints the code before the child can: on a first boot the child is still fetching bun
+	// when `start -d` has to say where to claim the install (ADR 0036 §3).
+	ensureSetupCode(dir)
 	run, err := spawnDetached(append([]string{"start"}, withoutDetach(argv)...), dir)
 	if err != nil {
 		return err
@@ -421,15 +424,36 @@ func reportStarted(run spawned, dir string, address string) {
 		default:
 		}
 		if url != "" && waitHealthy(url, 200*time.Millisecond) {
-			fmt.Printf("acornd: up at %s\n", strings.TrimSuffix(url, "/healthz"))
-			fmt.Printf("acornd: log %s\n", runLogPath(dir))
+			reportUp(dir, address, url)
 			return
 		}
 		if time.Now().After(deadline) {
-			fmt.Println("acornd: still starting — the first boot fetches bun and the worker sources")
-			fmt.Printf("acornd: log %s\n", runLogPath(dir))
+			reportSlow(dir, address)
 			return
 		}
+	}
+}
+
+// reportUp is the good ending of a detached start: the console answers, and a fresh install says where to
+// claim it.
+func reportUp(dir, address, url string) {
+	fmt.Printf("acornd: up at %s\n", strings.TrimSuffix(url, "/healthz"))
+	printSetupLine(dir, address)
+	fmt.Printf("acornd: log %s\n", runLogPath(dir))
+}
+
+// reportSlow is the ending where the first boot is still fetching bun: the address and the claim URL are
+// already known, and the log says the rest.
+func reportSlow(dir, address string) {
+	fmt.Println("acornd: still starting — the first boot fetches bun and the worker sources")
+	printSetupLine(dir, address)
+	fmt.Printf("acornd: log %s\n", runLogPath(dir))
+}
+
+// printSetupLine says where to claim a fresh install, when there is such a line to say.
+func printSetupLine(dir, address string) {
+	if line := setupLine(dir, address); line != "" {
+		fmt.Println(line)
 	}
 }
 
@@ -440,14 +464,20 @@ func healthURL(address string) string {
 	if err != nil {
 		return ""
 	}
-	if host == "" || host == "0.0.0.0" {
-		host = "127.0.0.1"
+	return "http://" + net.JoinHostPort(displayHost(host), port) + "/healthz"
+}
+
+// displayHost is the address a person can open: a wildcard bind is an instruction to the kernel, not
+// somewhere a browser can go, so it is shown as this machine's own loopback.
+func displayHost(host string) string {
+	switch host {
+	case "", "0.0.0.0":
+		return "127.0.0.1"
+	case "::":
+		// An all-interfaces IPv6 bind is reached on its own loopback, which is not the v4 one.
+		return "::1"
 	}
-	// An all-interfaces IPv6 bind is reached on its own loopback, which is not the v4 one.
-	if host == "::" {
-		host = "::1"
-	}
-	return "http://" + net.JoinHostPort(host, port) + "/healthz"
+	return host
 }
 
 // waitHealthy polls the one endpoint that answers before a workspace, a worker or a model exists.

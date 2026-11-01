@@ -1,6 +1,7 @@
 # ADR 0020 — The console listens on every interface and needs no token by default
 
-Status: accepted, built
+Status: superseded by [ADR 0036](0036-a-console-that-sets-itself-up.md) (2026-11-01); the address stays open by
+default, the console behind it does not
 Date: 2026-10-25
 
 ## Context
