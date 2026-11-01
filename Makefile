@@ -385,7 +385,7 @@ ui-check: build ## the browser suite, with a gateway started for it and stopped 
 		sleep 1; \
 	done
 	@printf '%s' '{"providerModels":{"faux":["faux-1"]}}' > $(CURDIR)/$(UI_CHECK_DIR)/settings.json
-	@cd tools && CHROME_PATH=$${CHROME_PATH:-/usr/bin/chromium} bun run check-ui.mjs http://127.0.0.1:$(UI_CHECK_PORT) \
+	@cd tools && ACORND_UI_DIR=$(CURDIR)/$(UI_CHECK_DIR) CHROME_PATH=$${CHROME_PATH:-/usr/bin/chromium} bun run check-ui.mjs http://127.0.0.1:$(UI_CHECK_PORT) \
 		|| { status=$$?; kill $$(cat $(CURDIR)/$(UI_CHECK_DIR)/pid) 2>/dev/null; \
 			echo "gateway log:"; tail -30 $(CURDIR)/$(UI_CHECK_DIR)/gateway.log; exit $$status; }
 	@kill $$(cat $(UI_CHECK_DIR)/pid) 2>/dev/null || true
