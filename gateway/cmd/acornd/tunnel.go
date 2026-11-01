@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"os"
 	"strings"
 
 	"github.com/marcelowa/acornd/gateway/internal/cloudflared"
@@ -14,15 +13,16 @@ import (
 //
 // The family never starts this. A console reached through Cloudflare Access is a hostname, a route, and a
 // process dialling out; the first two are what `remote apply` writes, and this is what makes the third true
-// without anybody opening a terminal after a reboot. It refuses to guess: an install with no remote.json is a
-// loopback install, and one line says so rather than a connector starting for a tunnel that does not exist.
+// without anybody opening a terminal after a reboot. The question is asked of `remote.json`, not of the
+// environment (ADR 0036 §5): an install with no record has no tunnel to run and says nothing, and one whose
+// apply stopped before the tunnel had a token gets one line rather than a connector dialling nothing.
 func startTunnel(ctx context.Context, dataDir, explicit string) {
-	if !strings.EqualFold(strings.TrimSpace(os.Getenv("ACORND_IDENTITY")), "access") {
-		return
-	}
 	setup, err := remote.Load(dataDir)
 	if err != nil {
 		log.Printf("tunnel: remote access could not be read: %v", err)
+		return
+	}
+	if !setup.Configured() {
 		return
 	}
 	token := strings.TrimSpace(setup.State.TunnelToken)

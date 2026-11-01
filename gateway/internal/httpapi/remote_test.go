@@ -19,20 +19,23 @@ import (
 
 // fakeCloudflare is the account the screen talks to: enough of it to see the order the handler works in.
 type fakeCloudflare struct {
-	zones     map[string]remote.Zone
-	zoneErr   error
-	tunnels   []remote.Tunnel
-	ingress   string
-	records   []remote.DNSRecord
-	groups    []remote.Group
-	apps      []remote.App
-	policies  []remote.Policy
-	idps      []remote.IdentityProvider
-	nextID    int
-	createdIn []string
+	zones      map[string]remote.Zone
+	zoneErr    error
+	tunnels    []remote.Tunnel
+	ingress    string
+	records    []remote.DNSRecord
+	groups     []remote.Group
+	apps       []remote.App
+	policies   []remote.Policy
+	idps       []remote.IdentityProvider
+	nextID     int
+	createdIn  []string
+	teamDomain string
 }
 
-func newCloudflare() *fakeCloudflare { return &fakeCloudflare{nextID: 0} }
+func newCloudflare() *fakeCloudflare {
+	return &fakeCloudflare{nextID: 0, teamDomain: "team.cloudflareaccess.com"}
+}
 
 func (f *fakeCloudflare) id(prefix string) string {
 	f.nextID++
@@ -101,6 +104,10 @@ func (f *fakeCloudflare) CreateOneTimePIN(context.Context, string) (remote.Ident
 	return provider, nil
 }
 
+func (f *fakeCloudflare) AccessOrganization(context.Context, string) (string, error) {
+	return f.teamDomain, nil
+}
+
 func (f *fakeCloudflare) AccessGroups(context.Context, string) ([]remote.Group, error) {
 	return f.groups, nil
 }
@@ -126,7 +133,7 @@ func (f *fakeCloudflare) AccessApps(context.Context, string) ([]remote.App, erro
 	return f.apps, nil
 }
 
-func (f *fakeCloudflare) CreateAccessApp(_ context.Context, _, name, hostname string) (remote.App, error) {
+func (f *fakeCloudflare) CreateAccessApp(_ context.Context, _, name, hostname, _ string) (remote.App, error) {
 	app := remote.App{ID: f.id("a"), Name: name, Domain: hostname, Audience: "audience-" + f.id("x")}
 	f.apps = append(f.apps, app)
 	f.createdIn = append(f.createdIn, "app")
@@ -180,6 +187,34 @@ func TestRemoteStatusSaysNothingIsConfiguredYet(t *testing.T) {
 	}
 }
 
+// The team domain travels with the status, named the way the interface reads it: it is half of what the door is
+// built from, and the screen shows it beside the audience without opening the file itself (ADR 0036 §5).
+func TestTheRemoteStatusCarriesTheTeamDomain(t *testing.T) {
+	api := newCloudflare()
+	handler, _, dir := screen(t, api)
+	if err := remote.Save(dir, remote.Setup{
+		Desired: remote.Desired{Hostname: "console.example.com", ZoneID: "z", AccountID: "a"},
+		State:   remote.State{TunnelID: "t", Audience: "aud-1", TeamDomain: "team.cloudflareaccess.com"},
+	}, time.Now()); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/remote", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
+	var answer remoteState
+	if err := json.Unmarshal(recorder.Body.Bytes(), &answer); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if answer.TeamDomain != "team.cloudflareaccess.com" || answer.Audience != "aud-1" {
+		t.Errorf("the status says %+v, want the team domain beside the audience", answer)
+	}
+	if !strings.Contains(recorder.Body.String(), `"teamDomain"`) {
+		t.Errorf("the answer does not name the field the screen reads: %s", recorder.Body.String())
+	}
+}
+
 func TestRemoteApplyMakesWhatTheFormAskedFor(t *testing.T) {
 	api := newCloudflare()
 	api.zones = map[string]remote.Zone{"example.com": {ID: "zone-1", Account: "acc-1"}}
@@ -198,6 +233,9 @@ func TestRemoteApplyMakesWhatTheFormAskedFor(t *testing.T) {
 	}
 	if !state.Configured || state.Hostname != "console.example.com" || state.Audience == "" {
 		t.Errorf("the answer says %+v", state)
+	}
+	if state.TeamDomain != "team.cloudflareaccess.com" {
+		t.Errorf("the apply learned the team domain and did not answer with it: %+v", state)
 	}
 	if len(state.Steps) == 0 {
 		t.Error("the answer carries no steps")

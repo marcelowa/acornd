@@ -232,6 +232,9 @@ a browser signs in on the same form with that token or the setup code, and holds
 cookie for a month. EventSource cannot set a header, which is why the cookie exists. Keep the port on
 a network you trust anyway.
 
+With remote access configured ([ADR 0033](docs/adr/0033-remote-access.md)) the console listens on
+loopback by default and is reached only through Cloudflare, or over an SSH tunnel with the install token.
+
 To keep it off the network, bind loopback and use an SSH tunnel:
 
 ```bash

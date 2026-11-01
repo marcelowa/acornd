@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/marcelowa/acornd/gateway/internal/remote"
 )
 
 func TestRunRecordRoundTrip(t *testing.T) {
@@ -149,5 +151,45 @@ func TestHealthURLReachesAWildcardBindOnLoopback(t *testing.T) {
 		if got := healthURL(test.address); got != test.want {
 			t.Fatalf("healthURL(%q) = %q, want %q", test.address, got, test.want)
 		}
+	}
+}
+
+// Where a run binds follows the door now: an explicit --host wins, remote access means loopback and Cloudflare,
+// and an install with no door stays reachable on the LAN so it can be configured at all (ADR 0036 §5).
+func TestListenHostFollowsTheDoor(t *testing.T) {
+	configured := t.TempDir()
+	if err := remote.Save(configured, remote.Setup{
+		Desired: remote.Desired{Hostname: "console.example.com", ZoneID: "z", AccountID: "a"},
+	}, time.Now()); err != nil {
+		t.Fatalf("save the door: %v", err)
+	}
+	cases := []struct{ name, explicit, dir, want string }{
+		{"explicit wins", "192.0.2.1", configured, "192.0.2.1"},
+		{"explicit loopback wins", "127.0.0.1", t.TempDir(), "127.0.0.1"},
+		{"a door is loopback", "", configured, "127.0.0.1"},
+		{"no door is every interface", "", t.TempDir(), "0.0.0.0"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := listenHost(test.explicit, test.dir)
+			if err != nil {
+				t.Fatalf("listen host: %v", err)
+			}
+			if got != test.want {
+				t.Errorf("listenHost(%q) = %q, want %q", test.explicit, got, test.want)
+			}
+		})
+	}
+}
+
+// A record that cannot be read is an error rather than a guess: binding every interface because the file is
+// broken would be an open console where the person meant a closed one.
+func TestListenHostRefusesAnUnreadableDoor(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, remote.File), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if host, err := listenHost("", dir); err == nil {
+		t.Errorf("an unreadable remote.json resolved to %q", host)
 	}
 }

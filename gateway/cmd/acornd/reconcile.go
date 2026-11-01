@@ -22,14 +22,12 @@ const reconcileBudget = 90 * time.Second
 // is what turns "remote access" from a command somebody remembers into a property: a group changed in the book,
 // a record deleted in a dashboard, a tunnel replaced — all of it heals at the next start.
 //
-// Three ways it declines, each said once and none of them fatal:
-//   - an install with no door in front of it has nothing to reconcile;
+// Whether there is anything to reconcile is the file's answer, not the environment's (ADR 0036 §5). Three ways it
+// declines, each said once and none of them fatal:
 //   - an install that never ran an apply has no declared state to match;
-//   - an install with no API token cannot talk to Cloudflare, and the person who can fix that is told so.
+//   - an install with no API token cannot talk to Cloudflare, and the person who can fix that is told so;
+//   - an install whose book names nobody is refused by the same apply the command runs.
 func reconcileRemote(ctx context.Context, dataDir string) {
-	if !strings.EqualFold(strings.TrimSpace(os.Getenv("ACORND_IDENTITY")), "access") {
-		return
-	}
 	setup, err := remote.Load(dataDir)
 	if err != nil {
 		log.Printf("tunnel: remote access could not be read: %v", err)

@@ -221,6 +221,19 @@ func (c *Client) CreateOneTimePIN(ctx context.Context, account string) (Identity
 	return IdentityProvider{ID: created.ID, Type: created.Type}, nil
 }
 
+// AccessOrganization answers the account's team domain, which is the host every assertion from this edge is
+// issued by and the one the keys live under. It needs the Access scope that already covers organizations: the
+// same permission the group and the provider use, because it is the same setting (ADR 0036 §5).
+func (c *Client) AccessOrganization(ctx context.Context, account string) (string, error) {
+	var organization struct {
+		AuthDomain string `json:"auth_domain"`
+	}
+	if err := c.call(ctx, scopeGroups, http.MethodGet, "/accounts/"+account+"/access/organizations", nil, &organization); err != nil {
+		return "", err
+	}
+	return organization.AuthDomain, nil
+}
+
 func (c *Client) AccessGroups(ctx context.Context, account string) ([]Group, error) {
 	var groups []groupPayload
 	if err := c.call(ctx, scopeGroups, http.MethodGet, "/accounts/"+account+"/access/groups", nil, &groups); err != nil {
@@ -295,7 +308,7 @@ func (c *Client) AccessApps(ctx context.Context, account string) ([]App, error) 
 	return out, nil
 }
 
-func (c *Client) CreateAccessApp(ctx context.Context, account, name, hostname string) (App, error) {
+func (c *Client) CreateAccessApp(ctx context.Context, account, name, hostname, idp string) (App, error) {
 	var created struct {
 		ID       string `json:"id"`
 		Name     string `json:"name"`
@@ -303,12 +316,17 @@ func (c *Client) CreateAccessApp(ctx context.Context, account, name, hostname st
 		Audience string `json:"aud"`
 	}
 	body := map[string]any{
-		"name":             name,
-		"domain":           hostname,
-		"type":             "self_hosted",
-		"session_duration": "24h",
+		"name":   name,
+		"domain": hostname,
+		"type":   "self_hosted",
+		// A month is Access's ceiling: both the application and the account cap a session there, so a year is
+		// not a value the platform accepts and the family re-enters an emailed code monthly (ADR 0036 §6).
+		"session_duration": "1mo",
+		// The one-time PIN is the only identity provider on this application, so the page asks for an address
+		// rather than offering a picker in which the other entries admit nobody.
+		"auto_redirect_to_identity": true,
+		"allowed_idps":              []string{idp},
 		// A browser that is not on a policy is refused by default: the policy below is the only way in.
-		"auto_redirect_to_identity": false,
 	}
 	if err := c.call(ctx, scopeApps, http.MethodPost, "/accounts/"+account+"/access/apps", body, &created); err != nil {
 		return App{}, err

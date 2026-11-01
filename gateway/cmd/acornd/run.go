@@ -140,6 +140,12 @@ func startDetached(argv []string, dataDir, host string, port int) error {
 	if err != nil {
 		return err
 	}
+	// The same resolution the child will make: the preflight, the port check, the address in the report and in
+	// the record all have to name the interface the run actually binds (ADR 0036 §5).
+	host, err = listenHost(host, dir)
+	if err != nil {
+		return err
+	}
 	address := net.JoinHostPort(host, strconv.Itoa(port))
 	// Asked here rather than only inside the child: the parent answers, so a second start is one
 	// sentence instead of a spawned process that dies into a log.

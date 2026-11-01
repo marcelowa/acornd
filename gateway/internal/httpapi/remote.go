@@ -39,14 +39,18 @@ type remoteState struct {
 	Configured bool `json:"configured"`
 	// TokenStored says the API token is on this machine, so the door follows the book without anybody running a
 	// command. The token itself never crosses this boundary.
-	TokenStored bool         `json:"tokenStored"`
-	Hostname    string       `json:"hostname,omitempty"`
-	ZoneID      string       `json:"zoneId,omitempty"`
-	AccountID   string       `json:"accountId,omitempty"`
-	Audience    string       `json:"audience,omitempty"`
-	Updated     string       `json:"updated,omitempty"`
-	TunnelID    string       `json:"tunnelId,omitempty"`
-	Steps       []remoteStep `json:"steps,omitempty"`
+	TokenStored bool   `json:"tokenStored"`
+	Hostname    string `json:"hostname,omitempty"`
+	ZoneID      string `json:"zoneId,omitempty"`
+	AccountID   string `json:"accountId,omitempty"`
+	// TeamDomain is the account's login domain, which the door's issuer and keys URL are derived from. The
+	// screen shows it beside the audience for the same reason: the two values are what a browser is checked
+	// against (ADR 0036 §5).
+	TeamDomain string       `json:"teamDomain,omitempty"`
+	Audience   string       `json:"audience,omitempty"`
+	Updated    string       `json:"updated,omitempty"`
+	TunnelID   string       `json:"tunnelId,omitempty"`
+	Steps      []remoteStep `json:"steps,omitempty"`
 }
 
 // remoteStatus answers what is recorded. Nothing secret: the tunnel's token and the API token never leave the
@@ -68,6 +72,7 @@ func remoteStateFor(setup remote.Setup) remoteState {
 		Hostname:    setup.Desired.Hostname,
 		ZoneID:      setup.Desired.ZoneID,
 		AccountID:   setup.Desired.AccountID,
+		TeamDomain:  setup.State.TeamDomain,
 		Audience:    setup.State.Audience,
 		Updated:     setup.Updated,
 		TunnelID:    setup.State.TunnelID,
@@ -227,6 +232,7 @@ func answerFor(desire remote.Desired, state remote.State, steps []remote.Step) r
 		Hostname:   desire.Hostname,
 		ZoneID:     desire.ZoneID,
 		AccountID:  desire.AccountID,
+		TeamDomain: state.TeamDomain,
 		Audience:   state.Audience,
 		TunnelID:   state.TunnelID,
 		Steps:      make([]remoteStep, 0, len(steps)),

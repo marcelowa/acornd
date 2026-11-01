@@ -20,6 +20,7 @@ import (
 	"github.com/marcelowa/acornd/gateway/internal/control"
 	"github.com/marcelowa/acornd/gateway/internal/httpapi"
 	"github.com/marcelowa/acornd/gateway/internal/ready"
+	"github.com/marcelowa/acornd/gateway/internal/remote"
 	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 	"github.com/marcelowa/acornd/gateway/internal/update"
 	"github.com/marcelowa/acornd/gateway/internal/vault"
@@ -132,7 +133,7 @@ func announceSetup(dir, address string) {
 
 func serve(argv []string) error {
 	flags := flag.NewFlagSet("acornd start", flag.ContinueOnError)
-	host := flags.String("host", "0.0.0.0", "interface to listen on (default: every interface)")
+	host := flags.String("host", "", "interface to listen on (default: 127.0.0.1 when remote access is configured, otherwise every interface)")
 	port := flags.Int("port", 7777, "port to listen on")
 	dataDir := flags.String("data-dir", "", "the acornd folder: config, credentials, state, workspaces (default: ~/.acornd)")
 	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornd/workspaces)")
@@ -147,13 +148,12 @@ func serve(argv []string) error {
 		return startDetached(argv, *dataDir, *host, *port)
 	}
 
-	install, err := openInstall(*dataDir)
+	install, err := openInstall(*dataDir, *host)
 	if err != nil {
 		return err
 	}
 	dir, userHome, secrets := install.dir, install.userHome, install.vault
-	address := net.JoinHostPort(*host, strconv.Itoa(*port))
-	if err := recordRun(dir, address); err != nil {
+	if err := recordRun(dir, net.JoinHostPort(install.host, strconv.Itoa(*port))); err != nil {
 		return err
 	}
 	defer removeRunRecord(dir)
@@ -187,7 +187,7 @@ func serve(argv []string) error {
 	// The gate is opened before the registry, because the registry needs one answer out of it: whose the
 	// workspaces that predate people are. Control is told an address, not a file — it knows what a
 	// workspace is and not what a people file is.
-	gate, err := openGate(dir, *host)
+	gate, err := openGate(dir, install.host)
 	if err != nil {
 		return err
 	}
@@ -201,7 +201,29 @@ func serve(argv []string) error {
 
 	logReadiness(ready.Check(readyInputForBoot(dir, updates, engine)))
 
-	return serveConsole(ctx, *host, *port, dir, workspaces, updates, gate, *cloudflaredPath)
+	return serveConsole(ctx, install.host, *port, dir, workspaces, updates, gate, *cloudflaredPath)
+}
+
+// listenHost is where a run binds, now that the default follows the door rather than a flag (ADR 0036 §5). Its
+// answer is resolved once and then used by the gate, the listener, the setup URL and the run record, so all four
+// name the same address.
+//
+// An explicit --host wins, and an explicit one that is not loopback is refused later, by the door. Otherwise an
+// install with remote access configured listens on loopback and is reached through Cloudflare, and an install
+// without it listens on every interface, because a headless machine has to be reachable on the LAN to be
+// configured at all.
+func listenHost(explicit, dir string) (string, error) {
+	if host := strings.TrimSpace(explicit); host != "" {
+		return host, nil
+	}
+	setup, err := remote.Load(dir)
+	if err != nil {
+		return "", err
+	}
+	if setup.Configured() {
+		return "127.0.0.1", nil
+	}
+	return "0.0.0.0", nil
 }
 
 // serveConsole starts what runs beside the listener and then serves. The account is made to match
@@ -250,18 +272,26 @@ func newWorkspaces(
 }
 
 // install is where this install lives, opened: its folder, the user's home the sandbox mounts
-// from, and the vault.
+// from, the vault, and the interface this run listens on.
 type install struct {
 	dir      string
 	userHome string
 	vault    *vault.Store
+	// host is where this run binds, resolved with the folder because every later answer uses it: the gate,
+	// the listener, the setup URL and the run record (ADR 0036 §5).
+	host string
 }
 
-// openInstall resolves the install once, and creates the folders a sandbox will mount from. The
-// user's home is resolved here rather than inside control: the sandbox mounts `~/.agents` at the
-// same path the worker reads it from, and both have to be answering about the same folder.
-func openInstall(dataDir string) (install, error) {
+// openInstall resolves the install once, creates the folders a sandbox will mount from, and resolves the
+// interface this run listens on. The user's home is resolved here rather than inside control: the sandbox
+// mounts `~/.agents` at the same path the worker reads it from, and both have to be answering about the same
+// folder.
+func openInstall(dataDir, explicitHost string) (install, error) {
 	dir, err := resolveDataDir(dataDir)
+	if err != nil {
+		return install{}, err
+	}
+	host, err := listenHost(explicitHost, dir)
 	if err != nil {
 		return install{}, err
 	}
@@ -281,7 +311,7 @@ func openInstall(dataDir string) (install, error) {
 	if err := sandbox.EnsureGlobal(dir, userHome); err != nil {
 		return install{}, err
 	}
-	return install{dir: dir, userHome: userHome, vault: store}, nil
+	return install{dir: dir, userHome: userHome, vault: store, host: host}, nil
 }
 
 // bootUpdates opens the self-update tier and runs whatever migrate is pending. A failing migrate

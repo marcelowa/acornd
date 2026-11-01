@@ -99,3 +99,79 @@ func TestReconcileRefusesAnInstallWithNobodyInIt(t *testing.T) {
 		t.Errorf("an install whose book is empty was reconciled anyway: %q", out)
 	}
 }
+
+// The reconciler asks the file, not the environment: an install with the variables set and no record has nothing
+// declared and reaches for nobody's account (ADR 0036 §5).
+func TestReconcileAsksTheFileNotTheEnvironment(t *testing.T) {
+	t.Setenv("ACORND_IDENTITY", "access")
+	t.Setenv("ACORND_CLOUDFLARE_TOKEN", "not-used")
+	out := logs(t, func() { reconcileRemote(context.Background(), t.TempDir()) })
+	if out != "" {
+		t.Errorf("an install with no record said %q", out)
+	}
+}
+
+// A recorded door with no API token is the one thing a boot says out loud, and it says it with no
+// ACORND_IDENTITY anywhere: the file is what makes it a door (ADR 0036 §5).
+func TestReconcileSaysItCannotWithoutAnAPITokenFromTheFile(t *testing.T) {
+	t.Setenv("ACORND_IDENTITY", "")
+	t.Setenv("ACORND_CLOUDFLARE_TOKEN", "")
+	dir := t.TempDir()
+	if err := remote.Save(dir, remote.Setup{
+		Desired: remote.Desired{Hostname: "console.example.com", ZoneID: "z", AccountID: "a"},
+		State:   remote.State{TunnelID: "t", Audience: "aud", TeamDomain: "team.cloudflareaccess.com"},
+	}, time.Now()); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	out := logs(t, func() { reconcileRemote(context.Background(), dir) })
+	if !strings.Contains(out, "no API token") {
+		t.Errorf("the boot did not say why it skipped the reconcile: %q", out)
+	}
+}
+
+// The connector asks the file too, and no record is silence: a loopback install has no tunnel to run and no
+// line to say about it, whatever the environment holds (ADR 0036 §5).
+func TestTheTunnelAsksTheFileNotTheEnvironment(t *testing.T) {
+	t.Setenv("ACORND_IDENTITY", "access")
+	out := logs(t, func() { startTunnel(context.Background(), t.TempDir(), "") })
+	if out != "" {
+		t.Errorf("an install with no record said %q", out)
+	}
+}
+
+// A record whose apply stopped before the tunnel had a token is one line, not a connector dialling nothing.
+func TestTheTunnelSaysItHasNoToken(t *testing.T) {
+	t.Setenv("ACORND_IDENTITY", "")
+	dir := t.TempDir()
+	if err := remote.Save(dir, remote.Setup{
+		Desired: remote.Desired{Hostname: "console.example.com", ZoneID: "z", AccountID: "a"},
+		State:   remote.State{TunnelID: "t", Audience: "aud", TeamDomain: "team.cloudflareaccess.com"},
+	}, time.Now()); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	out := logs(t, func() { startTunnel(context.Background(), dir, "") })
+	if !strings.Contains(out, "remote apply") {
+		t.Errorf("the boot did not say what to run to finish the tunnel: %q", out)
+	}
+}
+
+// An apply leaves the console's stored API token alone. The CLI and the boot reconcile both go through this
+// path, and a version that wrote the setup without it made the door stop following the book after one start —
+// the credential the Remote screen says is stored, silently gone (ADR 0033 §4).
+func TestAnApplyKeepsTheTokenTheConsoleStored(t *testing.T) {
+	prior := remote.Setup{APIToken: "cf-token", State: remote.State{Audience: "old"}}
+	next := setupAfterApply(
+		remote.Desired{Hostname: "console.example.com", ZoneID: "z", AccountID: "a"},
+		remote.State{Audience: "new", TeamDomain: "team.cloudflareaccess.com"},
+		prior,
+	)
+	if next.APIToken != "cf-token" {
+		t.Errorf("the token became %q, want the stored one", next.APIToken)
+	}
+	if next.State.Audience != "new" || next.Desired.Hostname != "console.example.com" {
+		t.Errorf("the apply's own answer was not written: %+v", next)
+	}
+	if next.State.TeamDomain != "team.cloudflareaccess.com" {
+		t.Errorf("the team domain was not written: %+v", next.State)
+	}
+}
