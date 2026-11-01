@@ -22,6 +22,7 @@ import { PeopleSection } from "@/components/settings/people-section";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { RemoteSection } from "@/components/settings/remote-section";
 import { SessionSection } from "@/components/settings/session-section";
+import { SetupChecklist } from "@/components/settings/setup-checklist";
 import { SecretsSection } from "@/components/settings/secrets-section";
 import { SecretRequestDialog } from "@/components/secrets/secret-request-dialog";
 import { ProviderLoginDialog } from "@/components/settings/provider-login-dialog";
@@ -528,6 +529,19 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	// the settings page is allowed to open long after the gate asked.
 	const session = <SessionSection />;
 
+	// What a new install still needs. The facts are the ones the console already has; the book is read when the
+	// settings open, which is what makes the last step honest (ADR 0036 §7).
+	const setup = (
+		<SetupChecklist
+			hasProvider={platform.providers.some((provider) => provider.authenticated)}
+			hasModel={platform.model.value !== ""}
+			remoteConfigured={platform.remote?.configured === true}
+			remoteRestartRequired={platform.remote?.restartRequired === true}
+			memberCount={platform.people?.people.length}
+			onOpen={platform.showSettingsTab}
+		/>
+	);
+
 	// Provider keys are global, so their section never sits under the workspace tabs.
 	// A provider with one method offers that method: the row's own button already says "Add key"
 	// or "Sign in", and a dialog asking again is a press the panel cut. Only a provider that
@@ -622,6 +636,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 				remote={remote}
 				people={people}
 				session={session}
+				setup={setup}
 				admin={platform.admin}
 				version={platform.update?.current}
 				onClose={() => platform.showScreen("conversation")}

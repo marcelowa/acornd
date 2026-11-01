@@ -32,6 +32,8 @@ export interface SettingsScreenProps {
 	people: ReactNode;
 	/** The browser's own session: who it is, and the press that signs it out. */
 	session: ReactNode;
+	/** What a new install still needs, in the order it is worth asking. Disappears when everything is done. */
+	setup?: ReactNode | undefined;
 	/** The install's role, not the room's: it is what puts the People page in the bar (ADR 0034 §1). */
 	admin?: boolean | undefined;
 	/** The running build, when the gateway answered: shown under the title. */
@@ -63,6 +65,7 @@ export function SettingsScreen({
 	remote,
 	people,
 	session,
+	setup,
 	admin = false,
 	version,
 	onClose,
@@ -115,6 +118,8 @@ export function SettingsScreen({
 
 					{page === "general" ? (
 						<>
+							{/* What a new install still needs, before the facts about the running one. */}
+							{setup}
 							{/* The install's own facts first: what runs, and how it keeps itself current. */}
 							{install}
 							<SettingsGroup

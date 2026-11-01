@@ -1477,7 +1477,10 @@ export function usePlatform(): Platform {
 	const [peopleFailure, setPeopleFailure] = useState<string | undefined>(undefined);
 	const admin = state?.admin === true;
 	useEffect(() => {
-		if (route.screen !== "settings" || route.settingsTab !== "people" || !admin) return;
+		// The book is read as soon as the settings open, not when the People page is picked: the Getting started
+		// checklist on the first page has to know whether anybody has been invited, and a page that lies about
+		// that is worse than one that does not mention it.
+		if (route.screen !== "settings" || !admin || peopleBook !== undefined) return;
 		let cancelled = false;
 		setPeopleLoading(true);
 		setPeopleFailure(undefined);
@@ -1499,7 +1502,7 @@ export function usePlatform(): Platform {
 		return () => {
 			cancelled = true;
 		};
-	}, [route.screen, route.settingsTab, admin]);
+	}, [route.screen, route.settingsTab, admin, peopleBook]);
 
 	/** One write on the book: its answer is the whole document, and a refusal is the page's own sentence. */
 	const writeBook = useCallback((request: Promise<WirePerson[]>): void => {
