@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -305,25 +306,58 @@ func (s *Server) reconcileAfterPeople() {
 	if s.gate.People == nil {
 		return
 	}
+	// An install with no door has nothing to reconcile, and asking the book first would touch the folder of
+	// every install that has no remote access — a write nobody asked for, and one a test's cleanup can race.
 	setup, err := remote.Load(s.gate.Dir)
 	if err != nil || !setup.Configured() || setup.APIToken == "" {
 		return
 	}
-	admitted, err := s.gate.People.Admitted()
+	// One at a time, and again if the book moved while the last apply was in the air. Two changes a second apart
+	// each start a reconcile, and the slower one finishing last would put the older list in the group — a revoked
+	// address back in, until the next boot (ADR 0033 §3).
+	s.peopleReconcile.Lock()
+	defer s.peopleReconcile.Unlock()
+	for attempt := 0; attempt < 3; attempt++ {
+		admitted, err := s.gate.People.Admitted()
+		if err != nil {
+			log.Printf("tunnel: the door did not follow the book: %v", err)
+			return
+		}
+		if err := s.reconcileAdmitted(admitted); err != nil {
+			log.Printf("tunnel: the door did not follow the book: %v", err)
+			return
+		}
+		after, err := s.gate.People.Admitted()
+		if err != nil {
+			log.Printf("tunnel: the door did not follow the book: %v", err)
+			return
+		}
+		if slices.Equal(admitted, after) {
+			return
+		}
+	}
+	log.Printf("tunnel: the book kept changing while the door was following it; the next change or start will settle it")
+}
+
+// reconcileAdmitted is one apply of one list: the group the door admits, as the book holds it now.
+func (s *Server) reconcileAdmitted(admitted []string) error {
+	setup, err := remote.Load(s.gate.Dir)
 	if err != nil {
-		log.Printf("tunnel: the door did not follow the book: %v", err)
-		return
+		return err
+	}
+	if !setup.Configured() || setup.APIToken == "" {
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), peopleReconcileBudget)
 	defer cancel()
 	state, _, err := (&remote.Provisioner{API: remoteAPI(setup.APIToken)}).Apply(ctx, setup.Desired, setup.State, admitted)
 	if err != nil {
-		log.Printf("tunnel: the door did not follow the book: %v", err)
-		return
+		return err
 	}
 	if err := remote.Save(s.gate.Dir, remote.Setup{Desired: setup.Desired, State: state, APIToken: setup.APIToken}, time.Now()); err != nil {
-		log.Printf("tunnel: the door followed the book but its ids could not be written: %v", err)
+		return fmt.Errorf("the door followed the book but its ids could not be written: %w", err)
 	}
+	return nil
 }
 
 // answerFor is what the screen renders: the state it will show next time, and what this press changed.

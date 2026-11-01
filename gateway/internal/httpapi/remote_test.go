@@ -35,6 +35,10 @@ type fakeCloudflare struct {
 	nextID     int
 	createdIn  []string
 	teamDomain string
+	// onGroupWrite runs after a group is created or rewritten: a test that needs the book to move while the apply
+	// is in the air hangs the change here, because that is the only place the two orders can be made to differ.
+	onGroupWrite func(include []string)
+	groupWrites  int
 }
 
 func newCloudflare() *fakeCloudflare {
@@ -131,6 +135,7 @@ func (f *fakeCloudflare) CreateAccessGroup(_ context.Context, _, name string, in
 	group := remote.Group{ID: f.id("g"), Name: name, Emails: include}
 	f.groups = append(f.groups, group)
 	f.createdIn = append(f.createdIn, "group")
+	f.groupWritten(include)
 	return group, nil
 }
 
@@ -138,6 +143,7 @@ func (f *fakeCloudflare) UpdateAccessGroup(_ context.Context, _, id, name string
 	for index := range f.groups {
 		if f.groups[index].ID == id {
 			f.groups[index].Emails = include
+			f.groupWritten(include)
 			return f.groups[index], nil
 		}
 	}
@@ -440,6 +446,55 @@ func TestAPersonAddedInTheBookReachesTheDoor(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("the group does not name the new person: %+v", api.groups)
+	}
+}
+
+// The book can move while the apply that follows it is in the air, because the two changes are a second apart and
+// each starts its own reconcile. The slower apply must not write the older list last: a revoked address would be
+// back in the group until the next boot (ADR 0033 §3).
+func TestTheGroupConvergesWhenTheBookMovesDuringAnApply(t *testing.T) {
+	api := newCloudflare()
+	_, opened, dir := screen(t, api)
+	if _, err := opened.Add("ana@example.com", "Ana"); err != nil {
+		t.Fatalf("add ana: %v", err)
+	}
+	if _, err := opened.Add("ben@example.com", "Ben"); err != nil {
+		t.Fatalf("add ben: %v", err)
+	}
+	if err := remote.Save(dir, remote.Setup{
+		Desired:  remote.Desired{Hostname: "console.example.com", ZoneID: "z", AccountID: "a"},
+		State:    remote.State{TunnelID: "t"},
+		APIToken: "api-token-secret",
+	}, time.Now()); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	// The first write of the group is the one that lands before the revoke: the book changes right after it, and
+	// the reconcile has to notice and write the new list rather than stop on the older one.
+	moved := false
+	api.onGroupWrite = func(include []string) {
+		if moved || !slices.Contains(include, "ana@example.com") {
+			return
+		}
+		moved = true
+		if err := opened.Revoke("ana@example.com"); err != nil {
+			t.Errorf("revoke during the apply: %v", err)
+		}
+	}
+	server := &Server{gate: Gate{People: opened, Dir: dir}}
+	server.reconcileAfterPeople()
+
+	if api.groupWrites < 2 {
+		t.Fatalf("the group was written %d times, want a second pass after the book moved", api.groupWrites)
+	}
+	var last []string
+	for _, group := range api.groups {
+		last = group.Emails
+	}
+	if slices.Contains(last, "ana@example.com") {
+		t.Errorf("the revoked address is back in the group: %v", last)
+	}
+	if !slices.Contains(last, "ben@example.com") {
+		t.Errorf("the group does not name ben, who never left: %v", last)
 	}
 }
 
@@ -951,5 +1006,13 @@ func TestTheDoorCheckUsesTheIssuerTheDoorUses(t *testing.T) {
 				t.Fatal("the check never ran")
 			}
 		})
+	}
+}
+
+// groupWritten is the hook every group write goes through, and the count a test reads to see how many applies ran.
+func (f *fakeCloudflare) groupWritten(include []string) {
+	f.groupWrites++
+	if f.onGroupWrite != nil {
+		f.onGroupWrite(include)
 	}
 }

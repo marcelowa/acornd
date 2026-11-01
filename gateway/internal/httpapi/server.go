@@ -14,6 +14,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"sync"
 )
 
 type Server struct {
@@ -25,6 +26,9 @@ type Server struct {
 	// started with: the update tier's exec, for a different reason (ADR 0036 §6). It is a field rather than a
 	// call straight into that tier so a test can press the button without the test process becoming a console.
 	restart func() error
+	// peopleReconcile serialises the applies a People change starts. They run beside the write, so two changes a
+	// second apart each start one; without this the slower one can write the older list last.
+	peopleReconcile sync.Mutex
 }
 
 // Gate is what the edge admits by: the door that proves who is calling, and the book of people it has to
