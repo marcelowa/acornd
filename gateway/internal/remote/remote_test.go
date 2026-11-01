@@ -653,8 +653,8 @@ func TestTheAccessAppIsAMonthAndThePINIsTheOnlyWayIn(t *testing.T) {
 	if _, err := (&Client{Token: "t", Base: server.URL}).CreateAccessApp(context.Background(), "acc", AppName, "console.example.com", "idp-1"); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if posted["session_duration"] != "1mo" {
-		t.Errorf("session_duration = %v, want 1mo", posted["session_duration"])
+	if posted["session_duration"] != "720h" {
+		t.Errorf("session_duration = %v, want 720h (a month is written as hours; the API refused \"1mo\")", posted["session_duration"])
 	}
 	if posted["auto_redirect_to_identity"] != true {
 		t.Errorf("auto_redirect_to_identity = %v, want true", posted["auto_redirect_to_identity"])

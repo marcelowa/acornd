@@ -346,7 +346,8 @@ func (c *Client) CreateAccessApp(ctx context.Context, account, name, hostname, i
 		"type":   "self_hosted",
 		// A month is Access's ceiling: both the application and the account cap a session there, so a year is
 		// not a value the platform accepts and the family re-enters an emailed code monthly (ADR 0036 §6).
-		"session_duration": "1mo",
+		// Written as hours because that is the only shape the API takes ("24h", "10h45m"); it refused "1mo".
+		"session_duration": "720h",
 		// The one-time PIN is the only identity provider on this application, so the page asks for an address
 		// rather than offering a picker in which the other entries admit nobody.
 		"auto_redirect_to_identity": true,
