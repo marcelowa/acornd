@@ -54,6 +54,9 @@ var commands = map[string]func([]string){
 			log.Fatalf("acornd: %v", err)
 		}
 	},
+	"stop":      stopCommand,
+	"restart":   restartCommand,
+	"status":    statusCommand,
 	"setup":     setupCommand,
 	"doctor":    doctorCommand,
 	"workspace": workspaceCommand,
@@ -94,7 +97,10 @@ func internalCommand(argv []string) {
 func usage(w io.Writer) {
 	fmt.Fprint(w, `usage: acornd <command> [flags]
 
-  start      run the gateway
+  start      run the gateway (foreground; -d detaches and logs to the install folder)
+  stop       stop the run recorded in this install folder
+  restart    start it again with the arguments it was started with
+  status     is it running, where, and since when
   setup      check this machine, and make it able to run sandboxes
   doctor     report what the sandbox engines can do here; changes nothing
   workspace  list, add, forget, and purge workspaces
@@ -119,8 +125,13 @@ func serve(argv []string) error {
 	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornd/workspaces)")
 	workerCommand := flags.String("worker", "", `worker command (default: ensured bun over ensured sources)`)
 	cloudflaredPath := flags.String("cloudflared", "", `the connector binary (default: the pinned one, ensured under the install folder)`)
+	detach := flags.Bool("d", false, "detach: log to <data-dir>/acornd.log and return")
 	if err := flags.Parse(argv); err != nil {
 		return err
+	}
+
+	if *detach {
+		return startDetached(argv, *dataDir, *host, *port)
 	}
 
 	install, err := openInstall(*dataDir)
@@ -128,6 +139,11 @@ func serve(argv []string) error {
 		return err
 	}
 	dir, userHome, secrets := install.dir, install.userHome, install.vault
+	address := net.JoinHostPort(*host, strconv.Itoa(*port))
+	if err := recordRun(dir, address); err != nil {
+		return err
+	}
+	defer removeRunRecord(dir)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -171,13 +187,18 @@ func serve(argv []string) error {
 	wireUpdates(updates, workspaces, engine)
 
 	logReadiness(ready.Check(readyInputForBoot(dir, updates, engine)))
-	// The account is made to match what this install recorded, then the connector is started: reconcile first,
-	// so a tunnel that was replaced or a record that was deleted is fixed before anything dials out to it. Both
-	// run under the same context and neither blocks the door.
-	go reconcileRemote(ctx, dir)
-	startTunnel(ctx, dir, *cloudflaredPath)
 
-	return listen(ctx, *host, *port, httpapi.New(workspaces, web.Files, updates, gate).Handler(), dir)
+	return serveConsole(ctx, *host, *port, dir, workspaces, updates, gate, *cloudflaredPath)
+}
+
+// serveConsole starts what runs beside the listener and then serves. The account is made to match
+// what this install recorded before the connector dials out, so a tunnel that was replaced or a
+// record that was deleted is fixed first; both run under the same context and neither blocks the
+// door.
+func serveConsole(ctx context.Context, host string, port int, dir string, workspaces *control.Workspaces, updates *update.Manager, gate httpapi.Gate, cloudflaredPath string) error {
+	go reconcileRemote(ctx, dir)
+	startTunnel(ctx, dir, cloudflaredPath)
+	return listen(ctx, host, port, httpapi.New(workspaces, web.Files, updates, gate).Handler(), dir)
 }
 
 // newWorkspaces is the workspace layer as this boot configured it: where its folders are, what

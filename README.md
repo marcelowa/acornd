@@ -87,16 +87,28 @@ echo "$OPENCODE_API_KEY" | ./bin/acornd provider add opencode-go
 Every command answers `-h`, and `acornd` with no arguments lists them:
 
 ```
-start      run the gateway
+start      run the gateway (foreground; -d detaches and logs to the install folder)
+stop       stop the run recorded in this install folder
+restart    start it again with the arguments it was started with
+status     is it running, where, and since when
 setup      check this machine, and make it able to run sandboxes
 doctor     report what the sandbox engines can do here; changes nothing
 workspace  list, add, forget, and purge workspaces
 secret     list, add, show, rotate, and remove secrets
 provider   list, add, and remove model provider keys
 model      list or choose the default model
+people     who may use this install, and what they may do
+remote     the tunnel a browser comes through, and who it admits
+token      print the token that proves you own this install
 update     check for a release, and install it
 version    print the running version
 ```
+
+`acornd start` stays in the terminal. `-d` detaches it into the install folder: its own session,
+`<data-dir>/acornd.log` for everything it would have printed, and the command returns once the
+console answers. `stop`, `restart`, and `status` read the run recorded in that folder — one run per
+folder, `restart` reuses the arguments it was started with, and nothing restarts it after a crash
+(ADR 0036).
 
 ### Sandbox engines
 
