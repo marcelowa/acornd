@@ -116,6 +116,11 @@ and `acornd setup-code` prints that code, rotates it (`--rotate`) or removes it 
 install token from `acornd token` signs in on the same form, so a rotated or disabled code is never
 a lockout ([ADR 0036](docs/adr/0036-a-console-that-sets-itself-up.md)).
 
+In a browser, a fresh install shows a claim form asking for a name, an email and the setup code. When
+the session is gone — the cookie expired, or the install token was rotated — the console shows a
+sign-in form instead, which takes the setup code or the install token. `acornd start` prints the
+code and `acornd setup-code` prints it again; `acornd token` prints the token.
+
 ### Sandbox engines
 
 A workspace runs on one engine, chosen when it is created and kept with its record:

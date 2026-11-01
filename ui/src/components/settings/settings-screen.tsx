@@ -30,6 +30,8 @@ export interface SettingsScreenProps {
 	remote: ReactNode;
 	/** The book of people: who may use this install. The admin's page, and nobody else's. */
 	people: ReactNode;
+	/** The browser's own session: who it is, and the press that signs it out. */
+	session: ReactNode;
 	/** The install's role, not the room's: it is what puts the People page in the bar (ADR 0034 §1). */
 	admin?: boolean | undefined;
 	/** The running build, when the gateway answered: shown under the title. */
@@ -60,6 +62,7 @@ export function SettingsScreen({
 	install,
 	remote,
 	people,
+	session,
 	admin = false,
 	version,
 	onClose,
@@ -154,6 +157,7 @@ export function SettingsScreen({
 									</ToggleGroup>
 								</div>
 							</SettingsGroup>
+							{session}
 						</>
 					) : null}
 

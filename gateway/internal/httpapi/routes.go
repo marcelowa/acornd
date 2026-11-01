@@ -140,12 +140,17 @@ func (s *Server) workspaceRoutes(mux *http.ServeMux) {
 // pageRoutes are the interface's own screens: /c/<workspace>/<conversation> is a conversation,
 // /w/<workspace> is a workspace with whichever conversation it lands on. Routes rather than a
 // catch-all, so a reload and a shared link land where someone was.
+//
+// /setup is a page for the same reason every other one is: `acornd start` prints it with the code
+// in the query, and the browser has to load the document that draws the claim form before it holds
+// a cookie. The page carries nothing of the install; the claim route behind it does (ADR 0036 §3).
 func (s *Server) pageRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /c/{ws}/{id}", s.page)
 	mux.HandleFunc("GET /c/{id}", s.page)
 	mux.HandleFunc("GET /w/{ws}", s.page)
 	mux.HandleFunc("GET /update", s.page)
 	mux.HandleFunc("GET /update/{tag}", s.page)
+	mux.HandleFunc("GET /setup", s.page)
 	mux.HandleFunc("GET /settings", s.page)
 	mux.HandleFunc("GET /settings/", s.page)
 	mux.HandleFunc("GET /workspaces", s.page)

@@ -9,6 +9,7 @@ import type {
 	WirePerson,
 	WireSecretEvent,
 	WireSender,
+	WireSession,
 	WireState,
 	WireView,
 	WireWorkspaceStatus,
@@ -23,9 +24,91 @@ function workspacePath(workspace: string, tail: string): string {
 	return `/api/workspaces/${encodeURIComponent(workspace)}${tail}`;
 }
 
+/**
+ * Every answer this module reads comes back through here, for the two things every one of them
+ * needs: a refusal carries the gateway's own sentence — a status code is not one — and a 401 means
+ * this browser is nobody again, which is one fact with one listener rather than a branch in every
+ * screen (ADR 0036 §4).
+ */
+async function request(path: string, init?: RequestInit): Promise<Response> {
+	const response = await fetch(path, init);
+	// A refusal on the sign-in routes is the form's own: the person is looking at it, and a page
+	// that reloaded would take the sentence away before it was read.
+	if (response.status === 401 && !answersItsOwnRefusal(path)) sessionLost();
+	return response;
+}
+
+/** The routes whose 401 is about what was typed into them, not about a session that ended. */
+function answersItsOwnRefusal(path: string): boolean {
+	return path.startsWith("/api/session") || path.startsWith("/api/setup/");
+}
+
+/** The one listener a lost session wakes: the gate that decides what the first render is. */
+let sessionLostHandler: (() => void) | undefined;
+
+/**
+ * Hear when an API call says this browser is nobody. The return is the unregister, so a gate that
+ * goes away does not leave the next one answering for it.
+ */
+export function onSessionLost(handler: () => void): () => void {
+	sessionLostHandler = handler;
+	return () => {
+		if (sessionLostHandler === handler) sessionLostHandler = undefined;
+	};
+}
+
+function sessionLost(): void {
+	sessionLostHandler?.();
+}
+
+/* ---------- the session ---------- */
+
+async function sessionRequest(path: string, init: RequestInit): Promise<WireSession> {
+	const response = await request(path, init);
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	return (await response.json()) as WireSession;
+}
+
+/** Is this install claimed, who owns it, and is this browser already somebody. Needs no proof. */
+export function fetchSession(): Promise<WireSession> {
+	return sessionRequest("/api/session", { method: "GET" });
+}
+
+/** The install token, or the setup code while nobody owns the install. Answers the session document. */
+export function signIn(secret: string): Promise<WireSession> {
+	return sessionRequest("/api/session", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ secret }),
+	});
+}
+
+/** Forget this browser's cookie. The install token and the setup code are untouched. */
+export function signOut(): Promise<WireSession> {
+	return sessionRequest("/api/session", { method: "DELETE" });
+}
+
+/**
+ * Claim a fresh install: the code proves the caller holds the machine, the book records them as its
+ * admin, and the answer is the person it made (ADR 0036 §3).
+ */
+export async function claimInstall(input: {
+	code: string;
+	name: string;
+	email: string;
+}): Promise<WirePerson> {
+	const response = await request("/api/setup/claim", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(input),
+	});
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	return (await response.json()) as WirePerson;
+}
+
 export async function fetchState(workspace: string, conversation: string): Promise<WireState> {
 	const query = `workspace=${encodeURIComponent(workspace)}&conversation=${encodeURIComponent(conversation)}`;
-	const response = await fetch(`/api/state?${query}`);
+	const response = await request(`/api/state?${query}`);
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
 	return (await response.json()) as WireState;
 }
@@ -35,7 +118,7 @@ export async function fetchState(workspace: string, conversation: string): Promi
  * seconds; this one answers immediately, so the interface can say what is happening meanwhile.
  */
 export async function fetchWorkspaceStatus(workspace: string): Promise<WireWorkspaceStatus> {
-	const response = await fetch(workspacePath(workspace, "/status"));
+	const response = await request(workspacePath(workspace, "/status"));
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
 	return (await response.json()) as WireWorkspaceStatus;
 }
@@ -56,7 +139,7 @@ async function peopleRequest(path: string, method: string, body?: unknown): Prom
 		init.headers = { "content-type": "application/json" };
 		init.body = JSON.stringify(body);
 	}
-	const response = await fetch(path, init);
+	const response = await request(path, init);
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
 	return ((await response.json()) as WirePeople).people;
 }
@@ -124,7 +207,7 @@ export interface ProviderCatalogEntry {
 
 /** Every provider and every model: the list the owner chooses from, never the narrowed one. */
 export async function fetchProviderCatalog(): Promise<ProviderCatalogEntry[]> {
-	const response = await fetch("/api/providers/catalog");
+	const response = await request("/api/providers/catalog");
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
 	const body = (await response.json()) as { providers?: ProviderCatalogEntry[] };
 	return body.providers ?? [];
@@ -132,7 +215,7 @@ export async function fetchProviderCatalog(): Promise<ProviderCatalogEntry[]> {
 
 /** What this install may use from each provider: `{openai: ["gpt-5"]}`. Absent means every model it has. */
 export async function fetchProviderAllowlist(): Promise<Record<string, string[]>> {
-	const response = await fetch("/api/providers/allowlist");
+	const response = await request("/api/providers/allowlist");
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
 	const body = (await response.json()) as { providers?: Record<string, string[]> };
 	return body.providers ?? {};
@@ -143,7 +226,7 @@ export async function saveProviderAllowlist(
 	provider: string,
 	models: string[],
 ): Promise<Record<string, string[]>> {
-	const response = await fetch("/api/providers/allowlist", {
+	const response = await request("/api/providers/allowlist", {
 		method: "PUT",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify({ provider, models }),
@@ -164,14 +247,14 @@ export interface DoorReport {
 
 /** Ask, from outside, whether the door opens and whether it is guarded. Needs no API token. */
 export async function checkRemote(): Promise<DoorReport> {
-	const response = await fetch("/api/remote/check", { method: "POST" });
+	const response = await request("/api/remote/check", { method: "POST" });
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
 	return (await response.json()) as DoorReport;
 }
 
 /** The door as it stands: what is recorded, and whether anything has been made yet. */
 export async function fetchRemote(): Promise<RemoteStatus> {
-	const response = await fetch("/api/remote");
+	const response = await request("/api/remote");
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
 	return (await response.json()) as RemoteStatus;
 }
@@ -180,15 +263,15 @@ export async function fetchRemote(): Promise<RemoteStatus> {
  * Make Cloudflare match what the owner types. A token that works is kept on this machine (0600) so the door can
  * follow the book; it never comes back from the gateway, and the status only says whether it is there.
  */
-export async function applyRemote(request: {
+export async function applyRemote(change: {
 	hostname: string;
 	zone: string;
 	token?: string | undefined;
 }): Promise<RemoteStatus> {
-	const response = await fetch("/api/remote/apply", {
+	const response = await request("/api/remote/apply", {
 		method: "POST",
 		headers: { "content-type": "application/json" },
-		body: JSON.stringify(request),
+		body: JSON.stringify(change),
 	});
 	if (!response.ok) {
 		// A failed apply still carries what it made, because the screen shows the steps it took.
@@ -200,7 +283,7 @@ export async function applyRemote(request: {
 
 /** Forget the stored API token. What is at Cloudflare stays; the door stops following the book until a new one. */
 export async function forgetRemoteToken(): Promise<RemoteStatus> {
-	const response = await fetch("/api/remote/forget-token", { method: "POST" });
+	const response = await request("/api/remote/forget-token", { method: "POST" });
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
 	return (await response.json()) as RemoteStatus;
 }
@@ -359,7 +442,7 @@ export function openStream(
 }
 
 async function post(path: string, body: unknown): Promise<void> {
-	const response = await fetch(path, {
+	const response = await request(path, {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify(body ?? {}),
@@ -395,7 +478,7 @@ export async function saveDraft(
 	draft: { text: string; attachments: WireDraftAttachment[] },
 	keepalive = false,
 ): Promise<WireDraft> {
-	const response = await fetch(
+	const response = await request(
 		workspacePath(workspace, `/conversations/${encodeURIComponent(conversation)}/draft`),
 		{
 			method: "POST",
@@ -493,7 +576,7 @@ export async function setAgent(
 	conversation: string,
 	change: AgentChange,
 ): Promise<WireState> {
-	const response = await fetch(
+	const response = await request(
 		workspacePath(workspace, `/conversations/${encodeURIComponent(conversation)}/agent`),
 		{
 			method: "POST",
@@ -513,7 +596,7 @@ export async function setAgent(
  * shown rather than swallowed — never inviting somebody into a room that would refuse them (ADR 0034 §1).
  */
 export async function addMember(workspace: string, email: string): Promise<void> {
-	const response = await fetch(workspacePath(workspace, "/members"), {
+	const response = await request(workspacePath(workspace, "/members"), {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify({ email }),
@@ -523,7 +606,7 @@ export async function addMember(workspace: string, email: string): Promise<void>
 
 /** Take a guest out of a room, or let a guest leave. The owner cannot be removed: ending a room is forgetting it. */
 export async function removeMember(workspace: string, email: string): Promise<void> {
-	const response = await fetch(
+	const response = await request(
 		workspacePath(workspace, `/members/${encodeURIComponent(email)}`),
 		{ method: "DELETE" },
 	);
@@ -548,7 +631,7 @@ export function createWorkspace(name: string, engine?: string): Promise<void> {
 
 /** A new conversation, created and selected; the answer is the state it is now in. */
 export async function createConversation(workspace: string): Promise<WireState> {
-	const response = await fetch(workspacePath(workspace, "/conversations"), { method: "POST" });
+	const response = await request(workspacePath(workspace, "/conversations"), { method: "POST" });
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
 	return (await response.json()) as WireState;
 }
@@ -609,7 +692,7 @@ export function setDefaultAgent(
 }
 
 export async function fetchCommands(workspace: string): Promise<SlashCommand[]> {
-	const response = await fetch(workspacePath(workspace, "/commands"));
+	const response = await request(workspacePath(workspace, "/commands"));
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
 	const body = (await response.json()) as WireCommands;
 	return body.commands;
@@ -630,7 +713,7 @@ export interface UploadedAttachment {
 export async function uploadAttachment(workspace: string, file: File): Promise<UploadedAttachment> {
 	const body = new FormData();
 	body.append("file", file, file.name);
-	const response = await fetch(workspacePath(workspace, "/attachments"), {
+	const response = await request(workspacePath(workspace, "/attachments"), {
 		method: "POST",
 		body,
 	});
@@ -644,7 +727,7 @@ export async function startProviderLogin(
 	providerId: string,
 	authType: ProviderAuthType,
 ): Promise<string> {
-	const response = await fetch(workspacePath(workspace, "/providers/login"), {
+	const response = await request(workspacePath(workspace, "/providers/login"), {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify({ providerId, authType }),
@@ -713,7 +796,7 @@ export interface UpdateRelease {
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
-	const response = await fetch(path, {
+	const response = await request(path, {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify(body ?? {}),
@@ -723,7 +806,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function fetchUpdateStatus(): Promise<UpdateStatus> {
-	const response = await fetch("/api/update/status");
+	const response = await request("/api/update/status");
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
 	return (await response.json()) as UpdateStatus;
 }
@@ -735,7 +818,7 @@ export async function fetchReleases(
 ): Promise<UpdateRelease[]> {
 	const query = new URLSearchParams({ limit: String(limit) });
 	if (includePrerelease) query.set("prerelease", "1");
-	const response = await fetch(`/api/update/releases?${query}`);
+	const response = await request(`/api/update/releases?${query}`);
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
 	const body = (await response.json()) as { releases: UpdateRelease[] };
 	return body.releases;
@@ -745,7 +828,7 @@ export async function fetchReleases(
 export async function fetchNotes(tags: string[]): Promise<Record<string, string>> {
 	if (tags.length === 0) return {};
 	const query = new URLSearchParams({ tags: tags.join(",") });
-	const response = await fetch(`/api/update/notes?${query}`);
+	const response = await request(`/api/update/notes?${query}`);
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
 	const body = (await response.json()) as { notes: Record<string, string> };
 	return body.notes;
@@ -753,7 +836,7 @@ export async function fetchNotes(tags: string[]): Promise<Record<string, string>
 
 /** One release by name: a version outside the twenty, and the running row. */
 export async function fetchRelease(tag: string): Promise<UpdateRelease> {
-	const response = await fetch(`/api/update/releases/${encodeURIComponent(tag)}`);
+	const response = await request(`/api/update/releases/${encodeURIComponent(tag)}`);
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
 	return (await response.json()) as UpdateRelease;
 }
@@ -847,7 +930,7 @@ async function readJSON<T>(path: string, method: string, body?: unknown): Promis
 		init.headers = { "content-type": "application/json" };
 		init.body = JSON.stringify(body);
 	}
-	const response = await fetch(path, init);
+	const response = await request(path, init);
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
 	return (await response.json()) as T;
 }

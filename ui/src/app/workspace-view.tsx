@@ -21,6 +21,7 @@ import { ProviderModelsDialog } from "@/components/settings/provider-models-dial
 import { PeopleSection } from "@/components/settings/people-section";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { RemoteSection } from "@/components/settings/remote-section";
+import { SessionSection } from "@/components/settings/session-section";
 import { SecretsSection } from "@/components/settings/secrets-section";
 import { SecretRequestDialog } from "@/components/secrets/secret-request-dialog";
 import { ProviderLoginDialog } from "@/components/settings/provider-login-dialog";
@@ -517,6 +518,10 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		/>
 	);
 
+	// Who this browser is, and the press that signs it out. The section reads its own session, because
+	// the settings page is allowed to open long after the gate asked.
+	const session = <SessionSection />;
+
 	// Provider keys are global, so their section never sits under the workspace tabs.
 	// A provider with one method offers that method: the row's own button already says "Add key"
 	// or "Sign in", and a dialog asking again is a press the panel cut. Only a provider that
@@ -610,6 +615,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 				install={install}
 				remote={remote}
 				people={people}
+				session={session}
 				admin={platform.admin}
 				version={platform.update?.current}
 				onClose={() => platform.showScreen("conversation")}

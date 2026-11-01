@@ -163,6 +163,20 @@ func TestTheInterfaceLoadsBehindTheDoor(t *testing.T) {
 	}
 }
 
+// `acornd start` prints /setup?code=…, and the browser has to be able to load the document that
+// draws the claim form before it holds a cookie. The page is public; the claim route behind it is
+// the one that asks for the code (ADR 0036 §3).
+func TestSetupServesTheInterfaceWithoutAProof(t *testing.T) {
+	console := newConsole(t)
+	recorder := console.do(t, http.MethodGet, "/setup?code="+console.code, "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("GET /setup = %d, want the interface", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "<!doctype html>") {
+		t.Errorf("GET /setup served %q, want the client's document", recorder.Body.String())
+	}
+}
+
 // Health stays in front of the door in every mode: a supervisor and the tunnel read it, and a probe that
 // needs a credential turns a working console into a restart loop.
 func TestHealthAnswersWithoutAProofDuringSetup(t *testing.T) {
