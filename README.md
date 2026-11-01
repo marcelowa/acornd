@@ -168,9 +168,12 @@ One line:
 curl -fsSL https://raw.githubusercontent.com/marcelowa/acornd/main/scripts/install.sh | sh
 ```
 
-It picks the binary for this machine, checks its checksum, and puts it in `~/.acornd/bin`.
-Then `acornd setup` says what the machine needs and offers to do it, and `acornd start`
-serves the console on `http://<host>:7777`.
+It picks the binary for this machine, checks its checksum, and puts it in `~/.acornd/bin`. Then it
+runs `acornd setup --yes`, which does the steps this machine allows without a password and prints the
+rest, and starts the console detached on `http://<host>:7777` with the line that claims it. A machine
+that cannot be prepared non-interactively gets the plan as commands; the console serves either way.
+`--no-start` stops after the binary is in place, `--no-setup` leaves the machine alone, and
+`--version <tag>` pins a release.
 
 By hand, if you would rather see every step:
 

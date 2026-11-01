@@ -1,23 +1,26 @@
 #!/bin/sh
-# Install acornd from a release: picks the binary for this machine,
-# verifies its checksum, and runs preflight. Needs curl and sha256sum.
+# Install acornd from a release: picks the binary for this machine, verifies its checksum, prepares the
+# machine as far as it can without a password, starts the console, and prints where to claim it.
 #
-#   sh install.sh [--dir DIR] [--version TAG]
+#   sh install.sh [--dir DIR] [--version TAG] [--no-start] [--no-setup]
 #
-# While the repo is private the token is required (fine-grained,
-# read-only, this repo); releases answer 404 without it. --dir defaults
-# to ~/.acornd/bin, --version to the latest release.
+# --dir defaults to ~/.acornd/bin, --version to the latest release, and --no-start stops after the
+# binary is in place. --no-setup leaves the machine alone, for an image that prepares it another way.
+# Nothing here needs a token: the repository and its releases are public.
 set -eu
 
 DIR="${ACORND_BIN_DIR:-$HOME/.acornd/bin}"
 VERSION=""
-TOKEN="${ACORND_GITHUB_TOKEN:-}"
+START=1
+SETUP=1
 
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--dir) DIR="$2"; shift 2 ;;
 		--version) VERSION="$2"; shift 2 ;;
-		-h|--help) echo "usage: install.sh [--dir DIR] [--version TAG]"; exit 0 ;;
+		--no-start) START=0; shift ;;
+		--no-setup) SETUP=0; shift ;;
+		-h|--help) echo "usage: install.sh [--dir DIR] [--version TAG] [--no-start] [--no-setup]"; exit 0 ;;
 		*) echo "unknown flag $1"; exit 2 ;;
 	esac
 done
@@ -45,36 +48,22 @@ case "$os/$arch" in
 	*) echo "install.sh: no release for $os/$arch"; exit 2 ;;
 esac
 
-api() {
-	curl -fsSL ${TOKEN:+-H "Authorization: Bearer $TOKEN"} -H "Accept: application/vnd.github+json" "$1"
-}
-
-# The tag: explicit, or the latest release. Compact the JSON first so one
-# grep answers instead of a parser nobody guaranteed.
+# The tag: explicit, or wherever github.com sends a browser asking for the latest release. The
+# redirect is read rather than api.github.com, because a machine that installs this once should not
+# meet a rate limit for it.
 if [ -z "$VERSION" ]; then
-	VERSION="$(api https://api.github.com/repos/marcelowa/acornd/releases/latest | tr -d '\n ' | grep -o '"tag_name":"[^"]*"' | head -n 1 | cut -d'"' -f4)"
-	[ -n "$VERSION" ] || { echo "install.sh: no releases yet, or the token is missing"; exit 2; }
+	VERSION="$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+		https://github.com/marcelowa/acornd/releases/latest | sed 's#.*/tag/##')"
+	[ -n "$VERSION" ] && [ "$VERSION" != "https://github.com/marcelowa/acornd/releases/latest" ] || {
+		echo "install.sh: no releases yet, or github.com did not name one"; exit 2; }
 fi
+release="https://github.com/marcelowa/acornd/releases/download/$VERSION"
 echo "install.sh: release $VERSION, asset $asset"
 
-release="$(api "https://api.github.com/repos/marcelowa/acornd/releases/tags/$VERSION" | tr -d '\n ')" || {
-	echo "install.sh: cannot read release $VERSION"
-	exit 2
-}
-asset_id() {
-	printf '%s' "$release" | grep -o "\"id\":[0-9]*,\"node_id\":\"[A-Za-z0-9_=-]*\",\"name\":\"$1\"" | head -n 1 | cut -d: -f2 | cut -d, -f1
-}
-gateway_id="$(asset_id "$asset")"
-sums_id="$(asset_id sha256sums.txt)"
-[ -n "$gateway_id" ] && [ -n "$sums_id" ] || { echo "install.sh: $VERSION holds no $asset"; exit 2; }
-
 mkdir -p "$DIR"
-get() {
-	curl -fsSL ${TOKEN:+-H "Authorization: Bearer $TOKEN"} -H "Accept: application/octet-stream" \
-		"https://api.github.com/repos/marcelowa/acornd/releases/assets/$1" -o "$2"
-}
-get "$gateway_id" "$DIR/acornd"
-get "$sums_id" "$DIR/sha256sums.txt"
+get() { curl -fsSL "$1" -o "$2"; }
+get "$release/$asset" "$DIR/acornd"
+get "$release/sha256sums.txt" "$DIR/sha256sums.txt"
 
 want="$(grep " $asset\$" "$DIR/sha256sums.txt" | cut -d" " -f1)"
 [ -n "$want" ] || { echo "install.sh: checksum file names no $asset"; exit 2; }
@@ -82,12 +71,31 @@ want="$(grep " $asset\$" "$DIR/sha256sums.txt" | cut -d" " -f1)"
 [ "$(sum "$DIR/acornd")" = "$want" ] || { echo "install.sh: CHECKSUM MISMATCH, refusing"; exit 1; }
 echo "install.sh: checksum OK"
 chmod +x "$DIR/acornd"
+BIN="$DIR/acornd"
 
-echo "install.sh: preflight"
-"$DIR/acornd" doctor || true
+# The machine first, and only as far as it can go without a password: setup runs the steps it can,
+# prints the rest as commands, and never makes the install depend on this succeeding — a console that
+# serves is more useful than one that refuses because bubblewrap is missing.
+if [ "$SETUP" = "1" ]; then
+	if [ "$(id -u)" = "0" ]; then
+		"$BIN" setup --yes || echo "install.sh: setup did not finish; it printed what is left"
+	else
+		"$BIN" setup --yes || echo "install.sh: setup needs a terminal or sudo; run '$BIN setup' when you have one"
+	fi
+fi
+
+if [ "$START" = "1" ]; then
+	# Detached, because the person who ran this is about to close the terminal. Its own log, and the
+	# setup URL it prints is the claim line on a fresh install.
+	"$BIN" start -d || {
+		echo "install.sh: the console did not start; run '$BIN start -d' and read its answer"
+		exit 1
+	}
+fi
+
 cat <<EOF
+
 install.sh: next
   export PATH="\$PATH:$DIR"
-  echo "\$OPENCODE_API_KEY" | acornd provider add opencode-go
-  acornd start
+  $( [ "$START" = "1" ] && echo "open the address above to claim this install" || echo "acornd start -d" )
 EOF
