@@ -496,11 +496,17 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	const remote = (
 		<RemoteSection
 			status={platform.remote}
+			preview={platform.remotePreview}
+			previewBusy={platform.remotePreviewBusy}
+			restarting={platform.remoteRestarting}
+			restarted={platform.remoteRestarted}
 			failure={platform.remoteFailure}
 			busy={platform.remoteBusy}
 			check={platform.remoteCheck}
 			checking={platform.remoteChecking}
 			onCheck={platform.checkRemote}
+			onPreview={platform.previewRemote}
+			onEnable={platform.enableRemote}
 			onApply={(request) => {
 				void platform.applyRemote(request);
 			}}

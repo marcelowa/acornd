@@ -192,10 +192,27 @@ export interface RemoteStatus {
 	hostname?: string | undefined;
 	zoneId?: string | undefined;
 	accountId?: string | undefined;
+	/** The account's Access login domain, which the door's issuer and keys URL derive from. */
+	teamDomain?: string | undefined;
 	audience?: string | undefined;
 	updated?: string | undefined;
 	tunnelId?: string | undefined;
+	/** The file records a door this process did not start with: a restart is what turns it on. */
+	restartRequired?: boolean | undefined;
 	steps?: RemoteStep[] | undefined;
+}
+
+/** One zone the pasted token can see, with the account it lives in. */
+export interface RemoteZone {
+	name: string;
+	id: string;
+	accountId: string;
+}
+
+/** What a token can reach, before any of it is stored: the zones, and the account's login domain. */
+export interface RemotePreview {
+	zones: RemoteZone[];
+	teamDomain?: string | undefined;
 }
 
 /** A provider with every model it has, for choosing what the install may spend on it. */
@@ -282,6 +299,27 @@ export async function applyRemote(change: {
 }
 
 /** Forget the stored API token. What is at Cloudflare stays; the door stops following the book until a new one. */
+/** What this token can see, so the screen offers zones instead of asking for one by name. Stores nothing. */
+export async function previewRemote(token: string): Promise<RemotePreview> {
+	const response = await request("/api/remote/preview", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ token }),
+	});
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	return (await response.json()) as RemotePreview;
+}
+
+/**
+ * Restart this process so the door the file describes becomes the one it serves. The answer arrives before the
+ * exec, and `restarting` is false when this run already built the verifier.
+ */
+export async function enableRemote(): Promise<{ restarting: boolean }> {
+	const response = await request("/api/remote/enable", { method: "POST" });
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	return (await response.json()) as { restarting: boolean };
+}
+
 export async function forgetRemoteToken(): Promise<RemoteStatus> {
 	const response = await request("/api/remote/forget-token", { method: "POST" });
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
