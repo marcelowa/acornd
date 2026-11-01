@@ -7,6 +7,7 @@ package httpapi
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -162,6 +163,10 @@ func (s *Server) setupClaim(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), peopleStatus(err))
 		return
 	}
+	if err := s.handOverWorkspaces(person.Email); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	if err := s.setSession(w, r, person.Email); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -170,6 +175,19 @@ func (s *Server) setupClaim(w http.ResponseWriter, r *http.Request) {
 	// beside the write, and a no-op on an install with no remote access.
 	go s.reconcileAfterPeople()
 	writeJSON(w, http.StatusOK, person)
+}
+
+// handOverWorkspaces gives the install's rooms to the person who just claimed it: they were made before there
+// was an owner, and without this the new admin lands on a console whose workspace answers 404 (ADR 0036 §3).
+func (s *Server) handOverWorkspaces(email string) error {
+	if s.workspaces == nil {
+		// A screen's tests build the server without a workspace layer; there is nothing there to hand over.
+		return nil
+	}
+	if err := s.workspaces.ClaimOwner(email); err != nil {
+		return fmt.Errorf("the install is claimed, but its workspace could not be handed over: %w", err)
+	}
+	return nil
 }
 
 // claimable answers whether this install may still be claimed, writing the refusal itself when it may not:

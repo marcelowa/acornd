@@ -321,3 +321,40 @@ func TestAnInstallWithNoAdminKeepsBothShapesOfTheOwnRoom(t *testing.T) {
 		t.Errorf("a room with one member is %+v, want somebody's own, owned by them", one)
 	}
 }
+
+// A claim after boot is the same moment as an install that had an owner from the start: the room that predates
+// people becomes the new admin's, without a restart, and a room somebody already holds is left alone.
+func TestClaimingTheInstallHandsTheOwnerlessRoomToTheNewAdmin(t *testing.T) {
+	workspaces := registryWithAdmins(t, "", []Workspace{
+		{Name: PersonalWorkspaceName, Path: "/w/personal"},
+		{Name: "ana", Path: "/w/ana", Kind: KindPersonal, Members: []Member{{Email: "ana@example.com", Role: RoleOwner}}},
+	})
+	if err := workspaces.loadRegistry(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := workspaces.ClaimOwner("Me@Example.com"); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	owned := workspaces.registry[PersonalWorkspaceName]
+	if owned.Owner() != "me@example.com" {
+		t.Errorf("the install's room is owned by %q, want the new admin", owned.Owner())
+	}
+	if ana := workspaces.registry["ana"]; ana.Owner() != "ana@example.com" {
+		t.Errorf("a room with an owner was taken: %v", ana.Members)
+	}
+	// Written, not just held: a restart has to find the same answer.
+	reloaded := registryWithAdmins(t, "", nil)
+	reloaded.opts.DataDir = workspaces.opts.DataDir
+	if err := reloaded.loadRegistry(); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.registry[PersonalWorkspaceName].Owner() != "me@example.com" {
+		t.Errorf("the claim was not written down: %+v", reloaded.registry[PersonalWorkspaceName])
+	}
+	if err := workspaces.ClaimOwner("other@example.com"); err != nil {
+		t.Fatalf("second claim: %v", err)
+	}
+	if workspaces.registry[PersonalWorkspaceName].Owner() != "me@example.com" {
+		t.Error("a second claim took a room that already had an owner")
+	}
+}
