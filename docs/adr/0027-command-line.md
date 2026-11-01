@@ -1,6 +1,7 @@
 # ADR 0027 — One command per question, and flags stay with the command that answers it
 
-Status: accepted, built
+Status: accepted, built; the surface gained `stop`, `restart`, `status`, and `setup-code` in
+[ADR 0036](0036-a-console-that-sets-itself-up.md) §2–§3
 Date: 2026-10-26
 
 ## The problem

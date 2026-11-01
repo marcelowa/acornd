@@ -196,6 +196,28 @@ click, it restarts itself. Headless, `acornd update` does the same thing: it che
 new tag and its first lines, and asks `install vX? [Y/n]` — `--yes` skips the question, `--check`
 only reports. With no gateway running it installs to disk and takes effect at the next start.
 
+### From a fresh machine, in order
+
+Five steps, and the console asks for each of them ([ADR 0036](docs/adr/0036-a-console-that-sets-itself-up.md)):
+
+1. **Install.** The one line above puts the binary under `~/.acornd/bin`, prepares the machine as far as
+   it can without a password, and starts the console detached. It prints the address that claims it:
+   `http://<host>:7777/setup?code=…`.
+2. **Claim it.** Open that address and type your name and email. The code proves you started the machine;
+   from then on the install is yours, and this browser holds a signed cookie for a month. Lost the code?
+   `acornd setup-code` prints it again until somebody claims the install.
+3. **Teach it a model.** Settings → Providers: paste a provider key and tick the models this install may
+   spend on it. Then Settings → General → Defaults: choose what a new conversation starts from.
+4. **Give it a door.** Settings → Remote: paste a Cloudflare API token, pick the zone it can see, type a
+   hostname (`console`, or the whole `console.example.com`), press **Apply**, then **Turn on**. Apply
+   creates the tunnel, the `CNAME`, the one-time PIN, the application and the group; Turn on restarts the
+   console so it serves them, and this LAN address stops answering.
+5. **Invite people.** Open `https://<hostname>` and sign in with the code Cloudflare emails you. Settings
+   → People: add an address, then send them the URL yourself. They get in with a code to their email, and
+   nothing else does.
+
+Settings → General opens with **Getting started**, which shows which of the last four is still open.
+
 Useful flags: `--data-dir <dir>` (default `~/.acornd`), `--host` and `--port`
 (default `0.0.0.0:7777`), `--workspaces-dir <dir>` (default `~/acornd/workspaces`),
 `--worker <command>` (a worker other than the ensured one).
