@@ -54,27 +54,52 @@ const (
 	scopeGroups scope = "Account · Access: Organizations, Identity Providers and Groups · Edit"
 )
 
+// zonePayload is a zone as the API carries it: its id, its name, and the account it lives in. The account is why
+// a zone is enough to place a tunnel, and why the token needs no Account · Read of its own.
+type zonePayload struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Account struct {
+		ID string `json:"id"`
+	} `json:"account"`
+}
+
+func (z zonePayload) zone() Zone { return Zone{ID: z.ID, Name: z.Name, Account: z.Account.ID} }
+
 // ZoneByName resolves the zone the hostname belongs to, and the account it lives in. It is how the admin names
 // a domain instead of two ids, and it is why the token does not need Account · Read: a zone says which account
 // it is in.
 func (c *Client) ZoneByName(ctx context.Context, name string) (Zone, error) {
-	var found []struct {
-		ID      string `json:"id"`
-		Name    string `json:"name"`
-		Account struct {
-			ID string `json:"id"`
-		} `json:"account"`
-	}
+	var found []zonePayload
 	query := url.Values{"name": {name}, "per_page": {"1"}}
 	if err := c.call(ctx, scopeDNS, http.MethodGet, "/zones?"+query.Encode(), nil, &found); err != nil {
 		return Zone{}, err
 	}
 	for _, zone := range found {
 		if zone.Name == name {
-			return Zone{ID: zone.ID, Name: zone.Name, Account: zone.Account.ID}, nil
+			return zone.zone(), nil
 		}
 	}
 	return Zone{}, fmt.Errorf("this token cannot see a zone called %q", name)
+}
+
+// Zones is what the setup screen asks first: every domain this token can see, with the account each lives in, so
+// the person chooses one instead of typing a domain and two ids (ADR 0036 §6).
+//
+// It needs the DNS permission the zone lookup needs and nothing more: a token that can create the record can read
+// the list it is created in, and the account id rides on the zone rather than on a second call.
+func (c *Client) Zones(ctx context.Context) ([]Zone, error) {
+	var zones []zonePayload
+	// Fifty is the API's largest page: an account with more zones than that scrolls a list the screen draws, and this
+	// call does not have to paginate it to be useful.
+	if err := c.call(ctx, scopeDNS, http.MethodGet, "/zones?per_page=50", nil, &zones); err != nil {
+		return nil, err
+	}
+	out := make([]Zone, 0, len(zones))
+	for _, zone := range zones {
+		out = append(out, zone.zone())
+	}
+	return out, nil
 }
 
 func (c *Client) Tunnels(ctx context.Context, account string) ([]Tunnel, error) {

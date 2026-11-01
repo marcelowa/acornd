@@ -18,7 +18,7 @@ import (
 func TestTheDoorExistsEvenWithNoPublisherNamed(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("ACORND_IDENTITY", "")
-	door, err := identityDoor(dir, "127.0.0.1")
+	door, _, err := identityDoor(dir, "127.0.0.1")
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -55,7 +55,7 @@ func TestTheDoorExistsEvenWithNoPublisherNamed(t *testing.T) {
 // makes that safe (ADR 0036 §5).
 func TestAnInstallWithNoPublisherMayListenEverywhere(t *testing.T) {
 	t.Setenv("ACORND_IDENTITY", "")
-	door, err := identityDoor(t.TempDir(), "0.0.0.0")
+	door, _, err := identityDoor(t.TempDir(), "0.0.0.0")
 	if err != nil || door == nil {
 		t.Fatalf("door = %v, err = %v; want the local door on every interface", door, err)
 	}
@@ -126,7 +126,7 @@ func TestOpenGateKeepsTheCodeItAlreadyHas(t *testing.T) {
 // and a listener on every interface is reachable without one (ADR 0033).
 func TestAConsoledWithADoorListensOnLoopbackOnly(t *testing.T) {
 	t.Setenv("ACORND_IDENTITY", "token")
-	_, err := identityDoor(t.TempDir(), "0.0.0.0")
+	_, _, err := identityDoor(t.TempDir(), "0.0.0.0")
 	if err == nil {
 		t.Fatal("a door was built for a listener on every interface")
 	}
@@ -142,7 +142,7 @@ func TestTheAccessDoorNeedsItsThreeValues(t *testing.T) {
 	t.Setenv("ACORND_IDENTITY_AUDIENCE", "")
 	t.Setenv("ACORND_IDENTITY_ISSUER", "")
 	t.Setenv("ACORND_IDENTITY_KEYS", "")
-	_, err := identityDoor(t.TempDir(), "127.0.0.1")
+	_, _, err := identityDoor(t.TempDir(), "127.0.0.1")
 	if err == nil {
 		t.Fatal("an assertion door was built with nothing to check against")
 	}
@@ -163,7 +163,7 @@ func TestTheAccessDoorNeedsItsThreeValues(t *testing.T) {
 func TestAConfiguredDoorMintsTheInstallToken(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("ACORND_IDENTITY", "token")
-	door, err := identityDoor(dir, "127.0.0.1")
+	door, _, err := identityDoor(dir, "127.0.0.1")
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -183,7 +183,7 @@ func TestAConfiguredDoorMintsTheInstallToken(t *testing.T) {
 // console that looks locked and is not.
 func TestADoorThisBuildDoesNotHaveIsRefused(t *testing.T) {
 	t.Setenv("ACORND_IDENTITY", "okta")
-	_, err := identityDoor(t.TempDir(), "127.0.0.1")
+	_, _, err := identityDoor(t.TempDir(), "127.0.0.1")
 	if err == nil || !strings.Contains(err.Error(), "okta") {
 		t.Fatalf("err = %v, want a refusal naming the value", err)
 	}
@@ -244,7 +244,7 @@ func TestARunThatNamesAccessGetsBothDoors(t *testing.T) {
 	t.Setenv("ACORND_IDENTITY_AUDIENCE", "aud-tag")
 	t.Setenv("ACORND_IDENTITY_ISSUER", "https://team.cloudflareaccess.com")
 	t.Setenv("ACORND_IDENTITY_KEYS", "https://team.cloudflareaccess.com/cdn-cgi/access/certs")
-	door, err := identityDoor(dir, "127.0.0.1")
+	door, _, err := identityDoor(dir, "127.0.0.1")
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}

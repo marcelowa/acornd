@@ -21,6 +21,10 @@ type Server struct {
 	static     fs.FS
 	update     *update.Manager
 	gate       Gate
+	// restart is how a press replaces this process with itself, keeping the argv and the environment it was
+	// started with: the update tier's exec, for a different reason (ADR 0036 §6). It is a field rather than a
+	// call straight into that tier so a test can press the button without the test process becoming a console.
+	restart func() error
 }
 
 // Gate is what the edge admits by: the door that proves who is calling, and the book of people it has to
@@ -34,6 +38,14 @@ type Gate struct {
 	// Dir is the install folder. The remote-access screen reads and writes remote.json there, the
 	// sign-in routes read the token and the setup code, and nothing else on the edge needs a path.
 	Dir string
+	// Publisher says this boot built the Access verifier, so assertions from the edge are checked. It is what
+	// remote.json cannot answer: a file written after the listener opened is a door this process does not have,
+	// and the screen can say a restart is what is missing rather than a second apply (ADR 0036 §6).
+	Publisher bool
+	// RunHost is the --host this run was started with, when it was given one, and "" when it took the default.
+	// An enable reads it because an exec cannot change the argv the process already has: a console started on
+	// every interface cannot restart itself into a door (ADR 0036 §5).
+	RunHost string
 }
 
 // mode is what the gate admits by, in the three states ADR 0036 §3 names: open with nothing
@@ -87,7 +99,13 @@ func (g Gate) noOwner() (bool, error) {
 }
 
 func New(workspaces *control.Workspaces, static fs.FS, updates *update.Manager, gate Gate) *Server {
-	return &Server{workspaces: workspaces, static: static, update: updates, gate: gate}
+	server := &Server{workspaces: workspaces, static: static, update: updates, gate: gate}
+	if updates != nil {
+		// The same exec the update screen finishes with: same args, same environment, a new process that reads
+		// remote.json as the door it now is (ADR 0036 §6).
+		server.restart = updates.Restart
+	}
+	return server
 }
 
 // controlFor finds the workspace a request is about. The workspace-scoped routes name it;

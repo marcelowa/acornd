@@ -87,10 +87,13 @@ func (s *Server) updateRoutes(mux *http.ServeMux) {
 	// Replacing the binary is the admin's: a person who could restart the gateway could take the install
 	// down for everybody, which is not a workspace-sized decision.
 	mux.HandleFunc("GET /api/update/status", s.admin(s.updateStatus))
-	// The remote-access screen: what the install recorded, and the apply that makes Cloudflare match it. Both are
-	// the install's own business, and the token the second one takes is used and dropped (ADR 0033 §4).
+	// The remote-access screen: what the install recorded, what a pasted token can see, the apply that makes
+	// Cloudflare match it, and the press that restarts the console so the door starts with it. All of them are the
+	// install's own business, and the token they take is used and dropped (ADR 0033 §4, ADR 0036 §6).
 	mux.HandleFunc("GET /api/remote", s.admin(s.remoteStatus))
+	mux.HandleFunc("POST /api/remote/preview", s.admin(s.remotePreview))
 	mux.HandleFunc("POST /api/remote/apply", s.admin(s.remoteApply))
+	mux.HandleFunc("POST /api/remote/enable", s.admin(s.remoteEnable))
 	mux.HandleFunc("POST /api/remote/check", s.admin(s.remoteCheck))
 	mux.HandleFunc("POST /api/remote/forget-token", s.admin(s.remoteForgetToken))
 	// What a provider's key may be spent on, and the catalog it is chosen from: the install's own business.

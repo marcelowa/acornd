@@ -69,7 +69,7 @@ func printToken(out, notes io.Writer, dir string, rotate bool) error {
 // follows from it — no admin means setup, an admin means the door — and it is read per request, so the
 // claim that ends setup takes effect without a restart (ADR 0036 §3).
 func openGate(dir, host string) (httpapi.Gate, error) {
-	door, err := identityDoor(dir, host)
+	door, publisher, err := identityDoor(dir, host)
 	if err != nil {
 		return httpapi.Gate{}, err
 	}
@@ -86,23 +86,27 @@ func openGate(dir, host string) (httpapi.Gate, error) {
 			return httpapi.Gate{}, err
 		}
 	}
-	return httpapi.Gate{Door: door, People: book, Dir: dir}, nil
+	// The two facts the remote screen cannot read for itself: whether this boot built the door, and the address
+	// the run was started with, which an exec would keep (ADR 0036 §6).
+	return httpapi.Gate{Door: door, People: book, Dir: dir, Publisher: publisher, RunHost: recordedHost(dir)}, nil
 }
 
 // identityDoor builds the proof this run requires: the install token, the owner's session cookie, and
-// the assertion door when this install has a publisher in front of it.
+// the assertion door when this install has a publisher in front of it. The second answer is whether this boot
+// built that assertion door — the fact a restart is the fix for, reported here so the console does not have to ask
+// a second time (ADR 0036 §6).
 //
 // The door is always there, because the console is closed by default now (ADR 0036 §3). Where the assertion
 // door comes from is the one thing that moved: `remote.json` is the door, and the environment is an override
 // for tests and for a machine behind somebody else's proxy (ADR 0036 §5). ACORND_IDENTITY is no longer what
 // turns Access on; a file an apply wrote is.
-func identityDoor(dir, host string) (identity.Door, error) {
+func identityDoor(dir, host string) (identity.Door, bool, error) {
 	byEnvironment := identityFromEnvironment()
 	setup := remote.Setup{}
 	if !byEnvironment {
 		loaded, err := remote.Load(dir)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		setup = loaded
 	}
@@ -111,24 +115,24 @@ func identityDoor(dir, host string) (identity.Door, error) {
 		// machine (ADR 0033), and a listener on every interface would be reachable without one — a door on one
 		// address and a hole on the others. Without a publisher there is nothing in front to reach it through,
 		// so an install with no remote access keeps binding 0.0.0.0 (ADR 0036 §5).
-		return nil, fmt.Errorf("a console behind a publisher listens on loopback only, and --host %q is not one: bind 127.0.0.1 and reach it through cloudflared", host)
+		return nil, false, fmt.Errorf("a console behind a publisher listens on loopback only, and --host %q is not one: bind 127.0.0.1 and reach it through cloudflared", host)
 	}
 	// The session cookie is signed with a key derived from this token, so every install has one, door or
 	// no door (ADR 0036 §4).
 	if _, minted, err := identity.EnsureToken(dir); err != nil {
-		return nil, err
+		return nil, false, err
 	} else if minted {
 		fmt.Fprintln(os.Stderr, "acornd: this install had no token; `acornd token` prints the new one")
 	}
 
 	publisher, err := publisherDoor(setup, byEnvironment)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if publisher == nil {
-		return identity.Any(identity.Token{Dir: dir}, identity.Session{Dir: dir}), nil
+		return identity.Any(identity.Token{Dir: dir}, identity.Session{Dir: dir}), false, nil
 	}
-	return identity.Any(identity.Token{Dir: dir}, publisher, identity.Session{Dir: dir}), nil
+	return identity.Any(identity.Token{Dir: dir}, publisher, identity.Session{Dir: dir}), true, nil
 }
 
 // identityEnvironment is the four variables that put a publisher in front of the console by hand. Any of them

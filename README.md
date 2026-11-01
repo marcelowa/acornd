@@ -235,6 +235,15 @@ a network you trust anyway.
 With remote access configured ([ADR 0033](docs/adr/0033-remote-access.md)) the console listens on
 loopback by default and is reached only through Cloudflare, or over an SSH tunnel with the install token.
 
+Settings → Remote is how that gets configured without a terminal ([ADR 0036](docs/adr/0036-a-console-that-sets-itself-up.md) §6):
+the screen takes a Cloudflare API token and shows the zones that token can see, so the zone is a choice;
+the hostname is a label (`console`) or a full name (`console.acornd.app`), a label is completed with the
+zone, and a name in another zone is refused. **Apply** creates what is missing — the tunnel, the `CNAME`,
+the one-time PIN, the application, the group and its policy — and writes the ids down, so a second press
+creates nothing and a run that died halfway resumes. Then **Turn on** restarts the console, because the
+door and the tunnel are read at boot: the console listens on loopback, the tunnel carries the browser, and
+the LAN address stops answering.
+
 To keep it off the network, bind loopback and use an SSH tunnel:
 
 ```bash

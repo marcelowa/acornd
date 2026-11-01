@@ -193,3 +193,35 @@ func TestListenHostRefusesAnUnreadableDoor(t *testing.T) {
 		t.Errorf("an unreadable remote.json resolved to %q", host)
 	}
 }
+
+// The record is where an enable reads the --host the run was started with, because an exec keeps that argv: a
+// console started on every interface cannot restart itself into a door, and the person is told to start it again.
+func TestTheRecordNamesTheHostTheRunWasStartedWith(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "no host flag", args: []string{"start"}, want: ""},
+		{name: "a separate value", args: []string{"start", "--host", "0.0.0.0"}, want: "0.0.0.0"},
+		{name: "one dash", args: []string{"start", "-host", "192.0.2.1"}, want: "192.0.2.1"},
+		{name: "joined with =", args: []string{"start", "--host=::"}, want: "::"},
+		{name: "another flag first", args: []string{"start", "--port", "7777", "--host", "127.0.0.1"}, want: "127.0.0.1"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := writeRunRecord(dir, runRecord{PID: 1, Args: test.args, Address: "127.0.0.1:7777"}); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			if got := recordedHost(dir); got != test.want {
+				t.Errorf("recordedHost(%v) = %q, want %q", test.args, got, test.want)
+			}
+		})
+	}
+	// A folder nothing was started from has no host to name, and saying otherwise would refuse an enable for a run
+	// that never had the flag.
+	if got := recordedHost(t.TempDir()); got != "" {
+		t.Errorf("recordedHost of an install that never started = %q, want empty", got)
+	}
+}

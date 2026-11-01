@@ -32,6 +32,8 @@ type fake struct {
 	ingress    string
 	teamDomain string
 	appIDP     string
+	// visible is what the token can see, which is the question the setup screen asks before an apply.
+	visible []Zone
 }
 
 func newFake() *fake { return &fake{teamDomain: "team.cloudflareaccess.com"} }
@@ -59,6 +61,15 @@ func (f *fake) created() []string {
 		}
 	}
 	return out
+}
+
+// Zones is the setup screen's first question: what can this token see. It records the call like the rest, so a test
+// can assert the preview asked without creating anything.
+func (f *fake) Zones(context.Context) ([]Zone, error) {
+	if err := f.record("zones"); err != nil {
+		return nil, err
+	}
+	return f.visible, nil
 }
 
 func (f *fake) Tunnels(context.Context, string) ([]Tunnel, error) {
@@ -545,6 +556,46 @@ func TestAZoneNamesItsAccount(t *testing.T) {
 	}
 	if _, err := (&Client{Token: "t", Base: server.URL}).ZoneByName(context.Background(), "nope.example"); err == nil {
 		t.Error("a zone the token cannot see was accepted")
+	}
+}
+
+// The setup screen's first question, answered by the account: every zone this token can see, each with the account
+// it lives in, because that is where the tunnel will be made (ADR 0036 §6).
+func TestTheZonesAreWhatTheTokenCanSee(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/zones" || r.URL.Query().Get("per_page") != "50" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"success":true,"result":[` +
+			`{"id":"z1","name":"acornd.app","account":{"id":"a1"}},` +
+			`{"id":"z2","name":"example.com","account":{"id":"a2"}}]}`))
+	}))
+	defer server.Close()
+	zones, err := (&Client{Token: "t", Base: server.URL}).Zones(context.Background())
+	if err != nil {
+		t.Fatalf("zones: %v", err)
+	}
+	want := []Zone{{ID: "z1", Name: "acornd.app", Account: "a1"}, {ID: "z2", Name: "example.com", Account: "a2"}}
+	if !slices.Equal(zones, want) {
+		t.Errorf("zones = %+v, want %+v", zones, want)
+	}
+}
+
+// A token that cannot list zones is refused in the client's own words, naming the permission the screen has to tell
+// the person to add (ADR 0033 §2).
+func TestTheZonesCallNamesThePermissionItNeeded(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"success":false,"errors":[{"code":9109,"message":"Unauthorized to access requested resource"}]}`))
+	}))
+	defer server.Close()
+	_, err := (&Client{Token: "t", Base: server.URL}).Zones(context.Background())
+	if err == nil {
+		t.Fatal("a refused call reported success")
+	}
+	if !strings.Contains(err.Error(), string(scopeDNS)) {
+		t.Errorf("the refusal does not name the scope: %v", err)
 	}
 }
 

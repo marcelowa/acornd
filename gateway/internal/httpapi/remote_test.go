@@ -4,17 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/marcelowa/acornd/gateway/internal/identity"
 	"github.com/marcelowa/acornd/gateway/internal/people"
 	"github.com/marcelowa/acornd/gateway/internal/remote"
+	"github.com/marcelowa/acornd/gateway/internal/update"
 )
 
 // fakeCloudflare is the account the screen talks to: enough of it to see the order the handler works in.
@@ -50,6 +54,17 @@ func (f *fakeCloudflare) ZoneByName(_ context.Context, name string) (remote.Zone
 		return zone, nil
 	}
 	return remote.Zone{}, errors.New("no such zone")
+}
+
+// Zones is the setup screen's first question, answered from the zones this fake was told about. Sorted, because the
+// real one answers in Cloudflare's order and nothing here may depend on it.
+func (f *fakeCloudflare) Zones(context.Context) ([]remote.Zone, error) {
+	out := make([]remote.Zone, 0, len(f.zones))
+	for _, zone := range f.zones {
+		out = append(out, zone)
+	}
+	slices.SortFunc(out, func(a, b remote.Zone) int { return strings.Compare(a.Name, b.Name) })
+	return out, nil
 }
 
 func (f *fakeCloudflare) Tunnels(context.Context, string) ([]remote.Tunnel, error) {
@@ -155,6 +170,13 @@ func (f *fakeCloudflare) CreateAccessPolicy(_ context.Context, _, _, group strin
 // account behind the two remote routes.
 func screen(t *testing.T, api *fakeCloudflare) (http.Handler, *people.Book, string) {
 	t.Helper()
+	return screenWith(t, api, false, "")
+}
+
+// screenWith is screen with the two facts an enable reads: whether this boot built the door, and the --host the run
+// was started with. Both are facts of the gate, not of the file (ADR 0036 §6).
+func screenWith(t *testing.T, api *fakeCloudflare, publisher bool, runHost string) (http.Handler, *people.Book, string) {
+	t.Helper()
 	dir := t.TempDir()
 	opened, err := people.Open(filepath.Join(dir, people.File))
 	if err != nil {
@@ -166,8 +188,49 @@ func screen(t *testing.T, api *fakeCloudflare) (http.Handler, *people.Book, stri
 	previous := remoteAPI
 	remoteAPI = func(string) remote.API { return api }
 	t.Cleanup(func() { remoteAPI = previous })
-	gate := Gate{Door: stubDoor{caller: identity.Caller{Admin: true}}, People: opened, Dir: dir}
+	gate := Gate{Door: stubDoor{caller: identity.Caller{Admin: true}}, People: opened, Dir: dir, Publisher: publisher, RunHost: runHost}
 	return admitted(t, gate), opened, dir
+}
+
+// cloudflareAt points the remote routes at a test server through a real client, so a test reads the sentence the
+// client writes rather than a fake's imitation of it.
+func cloudflareAt(t *testing.T, base string) {
+	t.Helper()
+	previous := remoteAPI
+	remoteAPI = func(token string) remote.API { return &remote.Client{Token: token, Base: base} }
+	t.Cleanup(func() { remoteAPI = previous })
+}
+
+// saveDoorFile writes what an apply leaves behind: the hostname, and the two values the door is built from.
+func saveDoorFile(t *testing.T, dir, audience, domain string) {
+	t.Helper()
+	setup := remote.Setup{
+		Desired: remote.Desired{Hostname: "console.example.com", ZoneID: "z", AccountID: "a"},
+		State:   remote.State{TunnelID: "t", Audience: audience, TeamDomain: domain},
+	}
+	if err := remote.Save(dir, setup, time.Now()); err != nil {
+		t.Fatalf("save the door: %v", err)
+	}
+}
+
+// accountAt is Cloudflare enough for the preview: the zone list and the account's login domain, in the shapes the API
+// answers with. Every Authorization header it was sent is kept, so a test can prove which token made the call.
+func accountAt(t *testing.T, zones, authDomain string) (*httptest.Server, *[]string) {
+	t.Helper()
+	sent := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = append(sent, r.Header.Get("Authorization"))
+		switch {
+		case r.URL.Path == "/zones":
+			_, _ = fmt.Fprintf(w, `{"success":true,"result":%s}`, zones)
+		case strings.HasSuffix(r.URL.Path, "/access/organizations"):
+			_, _ = fmt.Fprintf(w, `{"success":true,"result":{"auth_domain":%q}}`, authDomain)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server, &sent
 }
 
 func TestRemoteStatusSaysNothingIsConfiguredYet(t *testing.T) {
@@ -415,5 +478,478 @@ func TestTheDoorCheckRefusesAnInstallWithNoDoor(t *testing.T) {
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/remote/check", nil))
 	if recorder.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409", recorder.Code)
+	}
+}
+
+// The screen's first press is a question and not a write: the token is asked what it can see, and the answer is the
+// zones it may write a record in, the account each lives in, and the login domain the door will be checked against.
+// The token stays where it was pasted — storing it is the apply's job (ADR 0033 §4, ADR 0036 §6).
+func TestThePreviewAnswersWhatTheTokenCanSee(t *testing.T) {
+	server, sent := accountAt(t,
+		`[{"id":"z1","name":"acornd.app","account":{"id":"acc-1"}},{"id":"z2","name":"example.com","account":{"id":"acc-1"}}]`,
+		"acornd.cloudflareaccess.com")
+	handler, _, dir := screen(t, newCloudflare())
+	cloudflareAt(t, server.URL)
+	saveDoorFile(t, dir, "aud", "acornd.cloudflareaccess.com")
+	before, err := remote.Load(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	before.APIToken = "stored-token"
+	if err := remote.Save(dir, before, time.Now()); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/remote/preview", strings.NewReader(`{"token":"pasted-token"}`))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var answer previewAnswer
+	if err := json.Unmarshal(recorder.Body.Bytes(), &answer); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(answer.Zones) != 2 {
+		t.Fatalf("the preview answered %+v, want both zones the token can see", answer.Zones)
+	}
+	if answer.Zones[0].Name != "acornd.app" || answer.Zones[0].ID != "z1" || answer.Zones[0].AccountID != "acc-1" {
+		t.Errorf("the first zone is %+v, want its name, its id and its account", answer.Zones[0])
+	}
+	if answer.TeamDomain != "acornd.cloudflareaccess.com" {
+		t.Errorf("teamDomain = %q, want the account's login domain", answer.TeamDomain)
+	}
+	if !strings.Contains(recorder.Body.String(), `"teamDomain"`) {
+		t.Errorf("the answer does not name the field the screen reads: %s", recorder.Body.String())
+	}
+	if len(*sent) == 0 || (*sent)[0] != "Bearer pasted-token" {
+		t.Errorf("the calls carried %v, want the token that was pasted", *sent)
+	}
+	after, err := remote.Load(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if after.APIToken != "stored-token" {
+		t.Error("the preview stored the token it was given, which only an apply may do")
+	}
+}
+
+// A token missing a permission is the whole point of the screen: the refusal is the client's own sentence, naming the
+// scope to add, rather than "could not validate" (ADR 0033 §2).
+func TestThePreviewNamesTheScopeTheTokenIsMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"success":false,"errors":[{"code":9109,"message":"Unauthorized to access requested resource"}]}`))
+	}))
+	defer server.Close()
+	handler, _, _ := screen(t, newCloudflare())
+	cloudflareAt(t, server.URL)
+	request := httptest.NewRequest(http.MethodPost, "/api/remote/preview", strings.NewReader(`{"token":"pasted-token"}`))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "Zone · DNS · Edit") {
+		t.Errorf("the refusal does not name the missing scope: %s", recorder.Body.String())
+	}
+}
+
+// An account whose Access has never been used answers with no login domain, and that is not a failure: the zones are
+// still the answer, and the apply fills the team domain in when a door is made (ADR 0036 §6).
+func TestAnAccountWithNoAccessShowsItsZonesAndNoTeamDomain(t *testing.T) {
+	server, _ := accountAt(t, `[{"id":"z1","name":"acornd.app","account":{"id":"acc-1"}}]`, "")
+	handler, _, _ := screen(t, newCloudflare())
+	cloudflareAt(t, server.URL)
+	request := httptest.NewRequest(http.MethodPost, "/api/remote/preview", strings.NewReader(`{"token":"pasted-token"}`))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var answer previewAnswer
+	if err := json.Unmarshal(recorder.Body.Bytes(), &answer); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(answer.Zones) != 1 || answer.Zones[0].Name != "acornd.app" {
+		t.Errorf("the zones are %+v, want the one the token can see", answer.Zones)
+	}
+	if answer.TeamDomain != "" {
+		t.Errorf("teamDomain = %q, want none recorded", answer.TeamDomain)
+	}
+}
+
+// A token that may see zones but not organizations still answers the question it was asked: the team domain is a
+// display value, and the scope it would need is named by the apply that needs it.
+func TestATeamDomainTheTokenCannotReadIsNotAFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/zones" {
+			_, _ = w.Write([]byte(`{"success":true,"result":[{"id":"z1","name":"acornd.app","account":{"id":"acc-1"}}]}`))
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"success":false,"errors":[{"code":9109,"message":"Unauthorized"}]}`))
+	}))
+	defer server.Close()
+	handler, _, _ := screen(t, newCloudflare())
+	cloudflareAt(t, server.URL)
+	request := httptest.NewRequest(http.MethodPost, "/api/remote/preview", strings.NewReader(`{"token":"pasted-token"}`))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var answer previewAnswer
+	if err := json.Unmarshal(recorder.Body.Bytes(), &answer); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(answer.Zones) != 1 || answer.TeamDomain != "" {
+		t.Errorf("the answer is %+v, want the zone and no team domain", answer)
+	}
+}
+
+// A form with nothing to preview is refused in the words that name what to paste, before Cloudflare is asked.
+func TestThePreviewNeedsAToken(t *testing.T) {
+	t.Setenv("ACORND_CLOUDFLARE_TOKEN", "")
+	handler, _, _ := screen(t, newCloudflare())
+	request := httptest.NewRequest(http.MethodPost, "/api/remote/preview", strings.NewReader(`{}`))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "Cloudflare API token") {
+		t.Errorf("the refusal does not say what is missing: %s", recorder.Body.String())
+	}
+}
+
+// The apply completes a label with the zone before anything is created, and refuses a name in another zone rather
+// than writing a record into a zone this install does not manage (ADR 0036 §6).
+func TestTheApplyCompletesALabelWithItsZone(t *testing.T) {
+	cases := []struct {
+		name, hostname, want string
+		status               int
+	}{
+		{name: "a label", hostname: "console", want: "console.example.com", status: http.StatusOK},
+		{name: "a whole name", hostname: "console.example.com", want: "console.example.com", status: http.StatusOK},
+		{name: "another zone", hostname: "console.acornd.app", want: "", status: http.StatusBadRequest},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			api := newCloudflare()
+			api.zones = map[string]remote.Zone{"example.com": {ID: "zone-1", Account: "acc-1"}}
+			handler, _, dir := screen(t, api)
+			body := strings.NewReader(`{"hostname":"` + test.hostname + `","zone":"example.com","token":"api-token"}`)
+			request := httptest.NewRequest(http.MethodPost, "/api/remote/apply", body)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != test.status {
+				t.Fatalf("status = %d, want %d: %s", recorder.Code, test.status, recorder.Body.String())
+			}
+			if test.status != http.StatusOK {
+				if len(api.createdIn) != 0 {
+					t.Errorf("a refused hostname created %v", api.createdIn)
+				}
+				if !strings.Contains(recorder.Body.String(), "example.com") {
+					t.Errorf("the refusal does not name the zone: %s", recorder.Body.String())
+				}
+				return
+			}
+			var answer remoteState
+			if err := json.Unmarshal(recorder.Body.Bytes(), &answer); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if answer.Hostname != test.want {
+				t.Errorf("the answer says %q, want %q", answer.Hostname, test.want)
+			}
+			setup, err := remote.Load(dir)
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			if setup.Desired.Hostname != test.want {
+				t.Errorf("the file records %q, want %q", setup.Desired.Hostname, test.want)
+			}
+		})
+	}
+}
+
+// A door in the file and no door in this process is the one fact the screen turns into Turn on: the apply wrote the
+// file after the boot that is serving. A boot that built the door says false however the file reads, because a
+// restart would change nothing (ADR 0036 §6).
+func TestTheStatusSaysWhetherARestartIsWhatIsMissing(t *testing.T) {
+	cases := []struct {
+		name                string
+		configured          bool
+		audience            string
+		publisher, expected bool
+	}{
+		{name: "a recorded door this boot has not built", configured: true, audience: "aud-1", expected: true},
+		{name: "a door this boot built", configured: true, audience: "aud-1", publisher: true, expected: false},
+		{name: "a half-finished apply", configured: true, expected: false},
+		{name: "no door at all", expected: false},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if test.configured {
+				saveDoorFile(t, dir, test.audience, "team.cloudflareaccess.com")
+			}
+			gate := Gate{Dir: dir, Publisher: test.publisher, Door: stubDoor{caller: identity.Caller{Admin: true}}, People: claimed(t)}
+			recorder := httptest.NewRecorder()
+			admitted(t, gate).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/remote", nil))
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", recorder.Code)
+			}
+			var answer remoteState
+			if err := json.Unmarshal(recorder.Body.Bytes(), &answer); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if answer.RestartRequired != test.expected {
+				t.Errorf("restartRequired = %v, want %v", answer.RestartRequired, test.expected)
+			}
+		})
+	}
+}
+
+// The apply's answer carries the same fact, so the screen can draw Turn on without asking the status again.
+func TestTheApplyAnswerSaysWhetherARestartIsMissing(t *testing.T) {
+	cases := []struct {
+		name                string
+		publisher, expected bool
+	}{
+		{name: "this boot has no door", expected: true},
+		{name: "this boot built it", publisher: true, expected: false},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			api := newCloudflare()
+			api.zones = map[string]remote.Zone{"example.com": {ID: "zone-1", Account: "acc-1"}}
+			handler, _, _ := screenWith(t, api, test.publisher, "")
+			body := strings.NewReader(`{"hostname":"console","zone":"example.com","token":"api-token"}`)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/remote/apply", body))
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+			}
+			var answer remoteState
+			if err := json.Unmarshal(recorder.Body.Bytes(), &answer); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if answer.RestartRequired != test.expected {
+				t.Errorf("restartRequired = %v, want %v", answer.RestartRequired, test.expected)
+			}
+		})
+	}
+}
+
+// enableScreen is the console itself, for the tests that press Turn on: a claimed book, the admin's proof, an update tier
+// to restart through, and a restart that is a function — a test must not become the console.
+func enableScreen(t *testing.T, publisher bool, runHost string) (*Server, string, chan struct{}) {
+	t.Helper()
+	dir := t.TempDir()
+	gate := Gate{
+		Dir:       dir,
+		Publisher: publisher,
+		RunHost:   runHost,
+		Door:      stubDoor{caller: identity.Caller{Admin: true}},
+		People:    claimed(t),
+	}
+	static := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<!doctype html>")}}
+	server := New(nil, static, update.New(dir, ""), gate)
+	restarts := make(chan struct{}, 4)
+	server.restart = func() error {
+		restarts <- struct{}{}
+		return nil
+	}
+	return server, dir, restarts
+}
+
+// enabled presses the button and answers what the screen was told.
+func enabled(t *testing.T, server *Server) (int, map[string]any, string) {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/remote/enable", nil))
+	var answer map[string]any
+	if recorder.Code == http.StatusOK {
+		if err := json.Unmarshal(recorder.Body.Bytes(), &answer); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+	}
+	return recorder.Code, answer, recorder.Body.String()
+}
+
+// A file that does not record a door is nothing to turn on, and the refusal names the piece an apply would write
+// next: a restart here would look like the button did something (ADR 0036 §6).
+func TestTheEnableRefusesAHalfFinishedDoor(t *testing.T) {
+	cases := []struct {
+		name      string
+		write     bool
+		audience  string
+		team      string
+		refusalIs string
+	}{
+		{name: "no file", refusalIs: "nothing to turn on"},
+		{name: "no audience", write: true, team: "team.cloudflareaccess.com", refusalIs: "no audience"},
+		{name: "no team domain", write: true, audience: "aud-1", refusalIs: "no team domain"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			server, dir, restarts := enableScreen(t, false, "")
+			if test.write {
+				saveDoorFile(t, dir, test.audience, test.team)
+			}
+			code, _, body := enabled(t, server)
+			if code != http.StatusConflict {
+				t.Fatalf("status = %d, want 409: %s", code, body)
+			}
+			if !strings.Contains(body, test.refusalIs) {
+				t.Errorf("the refusal does not say %q: %s", test.refusalIs, body)
+			}
+			select {
+			case <-restarts:
+				t.Error("a refused enable restarted the console")
+			default:
+			}
+		})
+	}
+}
+
+// A door this boot already built is nothing to do, and saying so is the answer: a restart with no reason is a console
+// that disappears for a moment for a button that did nothing (ADR 0036 §6).
+func TestTheEnableSaysWhenThereIsNothingToDo(t *testing.T) {
+	server, dir, restarts := enableScreen(t, true, "")
+	saveDoorFile(t, dir, "aud-1", "team.cloudflareaccess.com")
+	code, answer, body := enabled(t, server)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", code, body)
+	}
+	if answer["restarting"] != false {
+		t.Errorf("the answer is %v, want restarting: false", answer)
+	}
+	select {
+	case <-restarts:
+		t.Error("a door that is already on restarted the console")
+	default:
+	}
+}
+
+// One press turns it on: the answer leaves, and the process becomes one that reads remote.json as the door — the same
+// exec the update screen finishes with, once and once only (ADR 0036 §6).
+func TestTheEnableRestartsTheConsoleOnce(t *testing.T) {
+	server, dir, restarts := enableScreen(t, false, "127.0.0.1")
+	saveDoorFile(t, dir, "aud-1", "team.cloudflareaccess.com")
+	code, answer, body := enabled(t, server)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", code, body)
+	}
+	if answer["restarting"] != true {
+		t.Errorf("the answer is %v, want restarting: true", answer)
+	}
+	select {
+	case <-restarts:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the press answered restarting and nothing restarted")
+	}
+	select {
+	case <-restarts:
+		t.Error("the console restarted twice for one press")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// A restart keeps the arguments the process already has, so a console started on every interface cannot become a door
+// install by pressing the button: the sentence says to start it again without --host (ADR 0036 §5–§6).
+func TestTheEnableRefusesARunStartedOnEveryInterface(t *testing.T) {
+	server, dir, restarts := enableScreen(t, false, "0.0.0.0")
+	saveDoorFile(t, dir, "aud-1", "team.cloudflareaccess.com")
+	code, _, body := enabled(t, server)
+	if code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", code, body)
+	}
+	for _, want := range []string{"--host 0.0.0.0", "without --host"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the refusal does not say %q: %s", want, body)
+		}
+	}
+	select {
+	case <-restarts:
+		t.Error("a run that cannot become a door restarted anyway")
+	default:
+	}
+}
+
+// A build with no update tier cannot replace itself, and names the command that does it instead of pretending.
+func TestTheEnableNeedsAnUpdateTier(t *testing.T) {
+	dir := t.TempDir()
+	saveDoorFile(t, dir, "aud-1", "team.cloudflareaccess.com")
+	gate := Gate{Dir: dir, Door: stubDoor{caller: identity.Caller{Admin: true}}, People: claimed(t)}
+	server := New(nil, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<!doctype html>")}}, nil, gate)
+	code, _, body := enabled(t, server)
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503: %s", code, body)
+	}
+	if !strings.Contains(body, "start it again") {
+		t.Errorf("the refusal does not say what to do: %s", body)
+	}
+}
+
+// Which listen addresses are this machine only, in the terms the run uses: a name, or an address the IP parser knows
+// to be loopback. A door on one address and a hole on the others is the failure this list prevents (ADR 0032 §8).
+func TestWhichAddressesAreThisMachineOnly(t *testing.T) {
+	cases := map[string]bool{
+		"127.0.0.1":   true,
+		"::1":         true,
+		"localhost":   true,
+		"LOCALHOST":   true,
+		"0.0.0.0":     false,
+		"192.0.2.1":   false,
+		"example.com": false,
+		"":            false,
+	}
+	for host, want := range cases {
+		if got := loopbackHost(host); got != want {
+			t.Errorf("loopbackHost(%q) = %v, want %v", host, got, want)
+		}
+	}
+}
+
+// The check judges the redirect and the keys from the issuer the door is built from. A file-only install sets no
+// variable, so the issuer comes from the team domain an apply wrote down — and the environment, when it set one, is
+// the override it always was (ADR 0036 §5, ADR 0033 §8).
+func TestTheDoorCheckUsesTheIssuerTheDoorUses(t *testing.T) {
+	cases := []struct {
+		name        string
+		environment string
+		want        string
+	}{
+		{name: "the file", want: "https://team.cloudflareaccess.com"},
+		{name: "the environment", environment: "https://env.cloudflareaccess.com", want: "https://env.cloudflareaccess.com"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			asked := make(chan string, 1)
+			previous := doorCheck
+			doorCheck = func(_ context.Context, _ *http.Client, _, issuer string) remote.DoorReport {
+				asked <- issuer
+				return remote.DoorReport{Detail: "a test's answer"}
+			}
+			t.Cleanup(func() { doorCheck = previous })
+			t.Setenv("ACORND_IDENTITY_ISSUER", test.environment)
+			handler, _, dir := screen(t, newCloudflare())
+			saveDoorFile(t, dir, "aud-1", "team.cloudflareaccess.com")
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/remote/check", nil))
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+			}
+			select {
+			case got := <-asked:
+				if got != test.want {
+					t.Errorf("the check was given the issuer %q, want %q", got, test.want)
+				}
+			default:
+				t.Fatal("the check never ran")
+			}
+		})
 	}
 }

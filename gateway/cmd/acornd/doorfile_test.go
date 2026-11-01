@@ -132,7 +132,7 @@ func TestTheDoorComesFromTheFile(t *testing.T) {
 	keysFrom(t, world, "https://"+testTeam+"/cdn-cgi/access/certs")
 	saveDoor(t, dir, "aud-file", testTeam)
 
-	door, err := identityDoor(dir, "127.0.0.1")
+	door, _, err := identityDoor(dir, "127.0.0.1")
 	if err != nil {
 		t.Fatalf("door: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestAHalfFinishedApplyLeavesTheLocalDoor(t *testing.T) {
 			clearIdentityEnvironment(t)
 			saveDoor(t, dir, test.audience, test.domain)
 			out := logs(t, func() {
-				door, err := identityDoor(dir, "127.0.0.1")
+				door, _, err := identityDoor(dir, "127.0.0.1")
 				if err != nil {
 					t.Fatalf("door: %v", err)
 				}
@@ -200,7 +200,7 @@ func TestTheEnvironmentWinsOverTheFile(t *testing.T) {
 	t.Setenv("ACORND_IDENTITY_ISSUER", "https://env.cloudflareaccess.com")
 	t.Setenv("ACORND_IDENTITY_KEYS", world.server.URL)
 
-	door, err := identityDoor(dir, "127.0.0.1")
+	door, _, err := identityDoor(dir, "127.0.0.1")
 	if err != nil {
 		t.Fatalf("door: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestAFileWithADoorRefusesEveryInterface(t *testing.T) {
 	dir := t.TempDir()
 	clearIdentityEnvironment(t)
 	saveDoor(t, dir, "aud-file", testTeam)
-	_, err := identityDoor(dir, "0.0.0.0")
+	_, _, err := identityDoor(dir, "0.0.0.0")
 	if err == nil || !strings.Contains(err.Error(), "loopback only") {
 		t.Fatalf("err = %v, want the loopback refusal", err)
 	}
@@ -236,11 +236,62 @@ func TestTheEnvironmentIsNotMergedWithTheFile(t *testing.T) {
 	t.Setenv("ACORND_IDENTITY_AUDIENCE", "aud-env")
 	t.Setenv("ACORND_IDENTITY_ISSUER", "https://env.cloudflareaccess.com")
 	t.Setenv("ACORND_IDENTITY_KEYS", world.server.URL)
-	door, err := identityDoor(dir, "127.0.0.1")
+	door, _, err := identityDoor(dir, "127.0.0.1")
 	if err != nil {
 		t.Fatalf("the environment was not enough: %v", err)
 	}
 	if _, err := door.Prove(withAssertion(world.assertion(t, "aud-env", "https://env.cloudflareaccess.com"))); err != nil {
 		t.Errorf("a request from the environment's publisher was refused: %v", err)
+	}
+}
+
+// Whether this boot built the door is reported rather than asked for a second time: it is the one fact a restart is
+// the fix for, and the console says "no publisher" from it (ADR 0036 §6).
+func TestTheDoorSaysWhetherThisBootBuiltThePublisher(t *testing.T) {
+	dir := t.TempDir()
+	clearIdentityEnvironment(t)
+	if _, publisher, err := identityDoor(dir, "127.0.0.1"); err != nil || publisher {
+		t.Fatalf("publisher = %v, err = %v; want the local door and no publisher", publisher, err)
+	}
+	// A file that records an audience and a team domain is a door, and the boot that reads it built it.
+	saveDoor(t, dir, "aud-file", testTeam)
+	if _, publisher, err := identityDoor(dir, "127.0.0.1"); err != nil || !publisher {
+		t.Fatalf("publisher = %v, err = %v; want the door the file records", publisher, err)
+	}
+	// An apply that died between the two writes records one and not the other: the local door is what this boot has,
+	// so a restart would not change anything and it must not say it would.
+	saveDoor(t, dir, "aud-file", "")
+	if _, publisher, err := identityDoor(dir, "127.0.0.1"); err != nil || publisher {
+		t.Fatalf("publisher = %v, err = %v; want no publisher for a half-finished apply", publisher, err)
+	}
+	// The environment's door is a publisher too, which is what a test and a machine behind somebody else's proxy use.
+	world := newPublisher(t)
+	t.Setenv("ACORND_IDENTITY", "access")
+	t.Setenv("ACORND_IDENTITY_AUDIENCE", "aud-env")
+	t.Setenv("ACORND_IDENTITY_ISSUER", "https://env.cloudflareaccess.com")
+	t.Setenv("ACORND_IDENTITY_KEYS", world.server.URL)
+	if _, publisher, err := identityDoor(dir, "127.0.0.1"); err != nil || !publisher {
+		t.Fatalf("publisher = %v, err = %v; want the door the environment names", publisher, err)
+	}
+}
+
+// The gate carries the two facts the remote screen cannot read for itself: whether this boot built the door, and the
+// address the run was started with, which an exec would keep (ADR 0036 §5–§6).
+func TestTheGateCarriesWhatARestartWouldChange(t *testing.T) {
+	dir := t.TempDir()
+	clearIdentityEnvironment(t)
+	saveDoor(t, dir, "aud-file", testTeam)
+	if err := writeRunRecord(dir, runRecord{PID: 1, Args: []string{"start", "--host", "0.0.0.0"}, Address: "0.0.0.0:7777"}); err != nil {
+		t.Fatalf("record the run: %v", err)
+	}
+	gate, err := openGate(dir, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("open gate: %v", err)
+	}
+	if !gate.Publisher {
+		t.Error("the boot that read a finished door says it built no publisher")
+	}
+	if gate.RunHost != "0.0.0.0" {
+		t.Errorf("RunHost = %q, want the --host the record names", gate.RunHost)
 	}
 }

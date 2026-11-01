@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -41,6 +42,10 @@ func remoteUsage(w *os.File) {
   status                  what this install recorded, and whether it is ready
   apply --zone DOMAIN     make Cloudflare match it, for --hostname HOST
                           --token T, or ACORND_CLOUDFLARE_TOKEN
+
+The hostname is a label (console) or a whole name (console.acornd.app): a label is
+completed with the zone, and a name in another zone is refused. The zone is the one
+the record and the tunnel belong to.
 
 The API token needs Account · Cloudflare Tunnel · Edit, Zone · DNS · Edit, and
 Access: Apps and Policies · Edit plus Organizations, IdP and Groups · Edit.
@@ -112,6 +117,15 @@ func remoteApply(argv []string) {
 	if *hostname == "" || *zoneName == "" {
 		logFatal(fmt.Errorf("remote apply needs --hostname and --zone"))
 	}
+	// A label is completed with the zone before anything is created, and a name in another zone is refused here
+	// rather than by Cloudflare halfway through an apply (ADR 0036 §6). Desired.Validate is still the last word.
+	name, err := remote.Hostname(*hostname, *zoneName)
+	if err != nil {
+		logFatal(err)
+	}
+	if line := completionLine(*hostname, *zoneName, name); line != "" {
+		fmt.Println(line)
+	}
 	apiToken := *token
 	if apiToken == "" {
 		apiToken = os.Getenv("ACORND_CLOUDFLARE_TOKEN")
@@ -124,9 +138,19 @@ func remoteApply(argv []string) {
 	// the same context so a cancelled run does not keep creating things.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	if err := applyRemote(ctx, dir, *hostname, *zoneName, apiToken); err != nil {
+	if err := applyRemote(ctx, dir, name, *zoneName, apiToken); err != nil {
 		logFatal(err)
 	}
+}
+
+// completionLine is what an apply says when the name it applies is not the string it was given: the person typed
+// console, and the door answers on console.acornd.app, which they should read rather than discover in remote.json
+// afterwards.
+func completionLine(input, zone, hostname string) string {
+	if strings.EqualFold(strings.TrimSpace(input), hostname) {
+		return ""
+	}
+	return fmt.Sprintf("acornd: --hostname %s is completed with the zone %s to %s", strings.TrimSpace(input), zone, hostname)
 }
 
 // applyRemote is the whole of the work, so the command above is flags and one failure path.

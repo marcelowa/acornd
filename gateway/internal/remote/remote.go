@@ -108,6 +108,9 @@ type Step struct {
 // tested without an account: every rule in here is a decision about order and identity, and none of it needs
 // the network to be wrong.
 type API interface {
+	// Zones is the one call that is not part of an apply: it is what the setup screen shows before anything is
+	// created, so the person picks a zone from what the token can see (ADR 0036 §6).
+	Zones(ctx context.Context) ([]Zone, error)
 	Tunnels(ctx context.Context, account string) ([]Tunnel, error)
 	CreateTunnel(ctx context.Context, account, name string) (Tunnel, error)
 	TunnelToken(ctx context.Context, account, tunnel string) (string, error)

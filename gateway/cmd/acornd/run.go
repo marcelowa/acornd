@@ -117,6 +117,43 @@ func runningRecord(dir string) (runRecord, bool) {
 	return record, true
 }
 
+// recordedHost is the --host this run was started with, when the record says it was given one, and "" when the run
+// took the default.
+//
+// An enable has to know: an exec keeps the argv the process already has, so a console started on every interface
+// cannot restart itself into a door that binds loopback, and the person is told to start it again instead
+// (ADR 0036 §5–§6). The record is the answer rather than this process's own flags, because a run started by
+// `restart` or by an update re-exec has the record's argv and not the one somebody typed.
+func recordedHost(dir string) string {
+	record, err := readRunRecord(dir)
+	if err != nil {
+		return ""
+	}
+	return flagValue(record.Args, "host")
+}
+
+// flagValue is one flag's value in a recorded argv, in either spelling a Go flag set accepts: --host x, -host x and
+// --host=x all mean the same thing, and the record holds whichever the person typed.
+func flagValue(args []string, name string) string {
+	value := ""
+	for index, arg := range args {
+		trimmed := strings.TrimLeft(arg, "-")
+		if trimmed == arg {
+			continue
+		}
+		if trimmed == name {
+			if index+1 < len(args) {
+				value = args[index+1]
+			}
+			continue
+		}
+		if after, found := strings.CutPrefix(trimmed, name+"="); found {
+			value = after
+		}
+	}
+	return value
+}
+
 // removeRunRecord forgets the run. Called by the process on its way out and by stop, because
 // either can be the one that finishes last and both mean the same thing.
 func removeRunRecord(dir string) {
