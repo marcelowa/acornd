@@ -92,7 +92,7 @@ need root. Run with nothing to see what this machine needs.
 // fail reports a setup failure and exits with the code that failure deserves: 2 is "this could
 // not be asked", 1 is "this was asked and the answer is no".
 func fail(code int, err error) {
-	logf("acornd setup: %v", err)
+	logf("acornd: %v", err)
 	os.Exit(code)
 }
 
