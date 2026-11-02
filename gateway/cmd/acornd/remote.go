@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -41,6 +42,10 @@ func remoteUsage(w *os.File) {
   status                  what this install recorded, and whether it is ready
   apply --zone DOMAIN     make Cloudflare match it, for --hostname HOST
                           --token T, or ACORND_CLOUDFLARE_TOKEN
+
+The hostname is a label (console) or a whole name (console.acornd.app): a label is
+completed with the zone, and a name in another zone is refused. The zone is the one
+the record and the tunnel belong to.
 
 The API token needs Account · Cloudflare Tunnel · Edit, Zone · DNS · Edit, and
 Access: Apps and Policies · Edit plus Organizations, IdP and Groups · Edit.
@@ -77,6 +82,7 @@ func remoteStatus(argv []string) {
 		{"identity provider", setup.State.IdentityID},
 		{"access group", setup.State.GroupID},
 		{"access app", setup.State.AppID},
+		{"team domain", setup.State.TeamDomain},
 		{"audience", setup.State.Audience},
 		{"policy", setup.State.PolicyID},
 	} {
@@ -111,6 +117,15 @@ func remoteApply(argv []string) {
 	if *hostname == "" || *zoneName == "" {
 		logFatal(fmt.Errorf("remote apply needs --hostname and --zone"))
 	}
+	// A label is completed with the zone before anything is created, and a name in another zone is refused here
+	// rather than by Cloudflare halfway through an apply (ADR 0036 §6). Desired.Validate is still the last word.
+	name, err := remote.Hostname(*hostname, *zoneName)
+	if err != nil {
+		logFatal(err)
+	}
+	if line := completionLine(*hostname, *zoneName, name); line != "" {
+		fmt.Println(line)
+	}
 	apiToken := *token
 	if apiToken == "" {
 		apiToken = os.Getenv("ACORND_CLOUDFLARE_TOKEN")
@@ -123,9 +138,19 @@ func remoteApply(argv []string) {
 	// the same context so a cancelled run does not keep creating things.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	if err := applyRemote(ctx, dir, *hostname, *zoneName, apiToken); err != nil {
+	if err := applyRemote(ctx, dir, name, *zoneName, apiToken); err != nil {
 		logFatal(err)
 	}
+}
+
+// completionLine is what an apply says when the name it applies is not the string it was given: the person typed
+// console, and the door answers on console.acornd.app, which they should read rather than discover in remote.json
+// afterwards.
+func completionLine(input, zone, hostname string) string {
+	if strings.EqualFold(strings.TrimSpace(input), hostname) {
+		return ""
+	}
+	return fmt.Sprintf("acornd: --hostname %s is completed with the zone %s to %s", strings.TrimSpace(input), zone, hostname)
 }
 
 // applyRemote is the whole of the work, so the command above is flags and one failure path.
@@ -147,7 +172,7 @@ func applyRemote(ctx context.Context, dir, hostname, zoneName, apiToken string) 
 	for _, step := range steps {
 		fmt.Printf("%-8s %s%s\n", stepVerb(step), step.Name, stepDetail(step))
 	}
-	fmt.Printf("\n%s now reaches this machine; the door needs ACORND_IDENTITY=access and the audience %s\n", desire.Hostname, state.Audience)
+	fmt.Printf("\n%s now reaches this machine; %s holds the door, with the audience %s: restart acornd to open it\n", desire.Hostname, remote.File, state.Audience)
 	return nil
 }
 
@@ -165,10 +190,17 @@ func applyDesire(
 	state, steps, applyErr := (&remote.Provisioner{API: api}).Apply(ctx, desire, setup.State, admitted)
 	// Written whatever happened: what an apply made before it failed is the ids a resume reads instead of
 	// starting over, and losing them is how a second tunnel appears.
-	if err := remote.Save(dir, remote.Setup{Desired: desire, State: state}, time.Now()); err != nil {
+	if err := remote.Save(dir, setupAfterApply(desire, state, setup), time.Now()); err != nil {
 		return state, steps, fmt.Errorf("%w (and the ids it made could not be written: %w)", applyErr, err)
 	}
 	return state, steps, applyErr
+}
+
+// setupAfterApply is the file an apply leaves behind: what was asked for, what exists now, and the API token
+// the console already stored. The token is not the apply's to drop — the door follows the book with it, and a
+// reconcile at boot would otherwise erase the credential after its first run (ADR 0033 §4).
+func setupAfterApply(desire remote.Desired, state remote.State, prior remote.Setup) remote.Setup {
+	return remote.Setup{Desired: desire, State: state, APIToken: prior.APIToken}
 }
 
 // stepVerb is what happened to one piece, in a word a person reads rather than decodes.

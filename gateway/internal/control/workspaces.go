@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/marcelowa/acornd/gateway/internal/protocol"
@@ -242,6 +243,10 @@ type WorkspacesOptions struct {
 // Workspaces is the install: a registry of workspaces and their started Controls.
 type Workspaces struct {
 	opts WorkspacesOptions
+	// owner is the admin the book names, once somebody has claimed this install. It is atomic rather than
+	// read under mu because it is answered from paths that already hold the lock, and the boot value in
+	// opts.AdminEmail is only what the last start knew (ADR 0036 §3).
+	owner atomic.Pointer[string]
 
 	// mu guards the registry and the controls.
 	//
@@ -525,6 +530,41 @@ func (w *Workspaces) Create(name, creator string) (Workspace, error) {
 
 // Add registers a workspace at a folder of the caller's choosing. The API does not use it;
 // the CLI and anyone editing the registry do.
+// ClaimOwner hands the rooms that predate an owner to the person who just claimed the install.
+//
+// A fresh install boots with nobody in the book, so its own workspace is made with no members. The claim is the
+// moment that changes, and a running console has to learn it without a restart: the room whose list is empty
+// becomes the new admin's, which is the same answer boot gives an install that already had an owner (ADR 0036
+// §3). Rooms that already hold somebody are left alone, so a second claim — refused by the book anyway — could
+// not take somebody else's room.
+func (w *Workspaces) ClaimOwner(email string) error {
+	address := strings.ToLower(strings.TrimSpace(email))
+	if address == "" {
+		return errors.New("a claim needs an address")
+	}
+	w.owner.Store(&address)
+	// The migration boot runs for an install that already had an owner, run now for the one that just got one:
+	// empty rooms are filled with the admin, and every record keeps the roles it already had.
+	changed, _, _ := w.migrateRooms()
+	if !changed {
+		return nil
+	}
+	// A workspace that is already running holds its own copy of the record, and the permissions it answers with
+	// come from that copy: the registry alone would let the claim through and refuse the new owner's next press.
+	w.mu.RLock()
+	records := make(map[string]Workspace, len(w.registry))
+	for name, workspace := range w.registry {
+		records[name] = workspace
+	}
+	w.mu.RUnlock()
+	for name, workspace := range records {
+		if live := w.controlFor(name); live != nil {
+			live.SetWorkspace(workspace)
+		}
+	}
+	return w.persist()
+}
+
 func (w *Workspaces) Add(workspace Workspace) error {
 	if err := validateWorkspace(workspace); err != nil {
 		return err
@@ -1443,10 +1483,20 @@ func (w *Workspaces) renameGeneralToPersonal() (bool, error) {
 	return true, nil
 }
 
+// adminAddress is who owns this install now: the claim the book accepted during this run when there is one,
+// and otherwise what the boot read. A room made after the claim is the new admin's, which a value captured at
+// boot could not say (ADR 0036 §3).
+func (w *Workspaces) adminAddress() string {
+	if owner := w.owner.Load(); owner != nil {
+		return *owner
+	}
+	return strings.ToLower(strings.TrimSpace(w.opts.AdminEmail))
+}
+
 // ownerMembers is the admin's address as the install's own room, when this install knows who the admin is. An
 // install with no book keeps an empty list: nobody is named in it yet, and the room is the machine's.
 func (w *Workspaces) ownerMembers() []Member {
-	admin := strings.ToLower(strings.TrimSpace(w.opts.AdminEmail))
+	admin := w.adminAddress()
 	if admin == "" {
 		return nil
 	}

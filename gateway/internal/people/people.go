@@ -508,6 +508,11 @@ func (b *Book) SignIn(email string) (Person, error) {
 	return Person{}, ErrUnknown{Email: address}
 }
 
+// Address is the book's own check on an address, for a caller that has to answer before it writes:
+// the claim form refuses a typo with the sentence `acornd people` prints, rather than with a 500 from
+// a write that never happened.
+func Address(email string) (string, error) { return address(email) }
+
 // address normalises an address, because an identity compared case-sensitively admits one person twice.
 func address(email string) (string, error) {
 	address := strings.ToLower(strings.TrimSpace(email))

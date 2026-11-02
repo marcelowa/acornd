@@ -90,15 +90,23 @@ func Save(dir string, setup Setup, now time.Time) error {
 	return os.Rename(path, filepath.Join(dir, File))
 }
 
-// Env is the identity configuration a run needs once this setup is applied: the three values the assertion
+// Env is the identity configuration a run needs once this setup is applied: the four values the assertion
 // door checks an assertion against (ADR 0032 §2). The issuer is the team's own domain and the keys live under
-// it, so the admin does not have to remember either.
-func (s Setup) Env(teamDomain string) map[string]string {
-	domain := strings.TrimSuffix(strings.TrimSpace(teamDomain), "/")
+// it, so the apply writes down one value and the run derives the other two (ADR 0036 §5).
+//
+// The scheme is added here and not at the reader: the verifier compares the issuer against a claim byte for
+// byte, and a bare host is what the API answers with, so "https://" belongs to this function.
+func (s Setup) Env() map[string]string {
+	domain := strings.TrimSuffix(strings.TrimSpace(s.State.TeamDomain), "/")
+	issuer, keys := "", ""
+	if domain != "" {
+		issuer = "https://" + domain
+		keys = issuer + "/cdn-cgi/access/certs"
+	}
 	return map[string]string{
 		"ACORND_IDENTITY":          "access",
 		"ACORND_IDENTITY_AUDIENCE": s.State.Audience,
-		"ACORND_IDENTITY_ISSUER":   domain,
-		"ACORND_IDENTITY_KEYS":     domain + "/cdn-cgi/access/certs",
+		"ACORND_IDENTITY_ISSUER":   issuer,
+		"ACORND_IDENTITY_KEYS":     keys,
 	}
 }

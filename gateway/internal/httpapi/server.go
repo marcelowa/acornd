@@ -14,6 +14,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"sync"
 )
 
 type Server struct {
@@ -21,6 +22,13 @@ type Server struct {
 	static     fs.FS
 	update     *update.Manager
 	gate       Gate
+	// restart is how a press replaces this process with itself, keeping the argv and the environment it was
+	// started with: the update tier's exec, for a different reason (ADR 0036 §6). It is a field rather than a
+	// call straight into that tier so a test can press the button without the test process becoming a console.
+	restart func() error
+	// peopleReconcile serialises the applies a People change starts. They run beside the write, so two changes a
+	// second apart each start one; without this the slower one can write the older list last.
+	peopleReconcile sync.Mutex
 }
 
 // Gate is what the edge admits by: the door that proves who is calling, and the book of people it has to
@@ -31,13 +39,77 @@ type Server struct {
 type Gate struct {
 	Door   identity.Door
 	People *people.Book
-	// Dir is the install folder. The remote-access screen reads and writes remote.json there, and nothing else
-	// on the edge needs a path at all.
+	// Dir is the install folder. The remote-access screen reads and writes remote.json there, the
+	// sign-in routes read the token and the setup code, and nothing else on the edge needs a path.
 	Dir string
+	// Publisher says this boot built the Access verifier, so assertions from the edge are checked. It is what
+	// remote.json cannot answer: a file written after the listener opened is a door this process does not have,
+	// and the screen can say a restart is what is missing rather than a second apply (ADR 0036 §6).
+	Publisher bool
+	// RunHost is the --host this run was started with, when it was given one, and "" when it took the default.
+	// An enable reads it because an exec cannot change the argv the process already has: a console started on
+	// every interface cannot restart itself into a door (ADR 0036 §5).
+	RunHost string
+}
+
+// mode is what the gate admits by, in the three states ADR 0036 §3 names: open with nothing
+// configured at all, setup while the book has no admin, and door once it has one.
+type mode int
+
+const (
+	// modeOpen is ADR 0020's single admin: no door to prove with, so every request is answered as it
+	// always was.
+	modeOpen mode = iota
+	// modeSetup is an install nobody owns yet: the claim form and the sign-in have to be reachable, and
+	// everything else waits for a proof (ADR 0036 §3).
+	modeSetup
+	// modeDoor is an install with an owner: every request needs one of the door's proofs.
+	modeDoor
+)
+
+// mode answers what this gate is now. It is read on every request rather than once at boot, because
+// the answer changes without a restart: claiming the install is one POST (ADR 0036 §3).
+func (g Gate) mode() mode {
+	switch {
+	case g.Door == nil:
+		return modeOpen
+	case g.People == nil:
+		// A door with no book: there is nobody to claim and nothing to set up, so the proof is the
+		// whole rule. The entry point never builds this; a test that is about the door does.
+		return modeDoor
+	default:
+		noOwner, err := g.noOwner()
+		if err != nil || !noOwner {
+			// A book nobody can read is not a fresh install: setup is the larger authority of the two,
+			// and a damaged file must not hand it out.
+			return modeDoor
+		}
+		return modeSetup
+	}
+}
+
+// noOwner reports whether the book has no admin, which is the fact setup mode is made of: the setup
+// code is accepted, the claim route answers, and every other API route waits for a proof. An
+// unreadable book answers with its error rather than with "no owner" (ADR 0036 §3).
+func (g Gate) noOwner() (bool, error) {
+	if g.People == nil {
+		return false, nil
+	}
+	_, claimed, err := g.People.Admin()
+	if err != nil {
+		return false, err
+	}
+	return !claimed, nil
 }
 
 func New(workspaces *control.Workspaces, static fs.FS, updates *update.Manager, gate Gate) *Server {
-	return &Server{workspaces: workspaces, static: static, update: updates, gate: gate}
+	server := &Server{workspaces: workspaces, static: static, update: updates, gate: gate}
+	if updates != nil {
+		// The same exec the update screen finishes with: same args, same environment, a new process that reads
+		// remote.json as the door it now is (ADR 0036 §6).
+		server.restart = updates.Restart
+	}
+	return server
 }
 
 // controlFor finds the workspace a request is about. The workspace-scoped routes name it;

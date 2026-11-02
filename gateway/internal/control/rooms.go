@@ -187,7 +187,7 @@ type migrated struct {
 // admin's claim fills in. It answers with what it changed, and with the rooms whose reading was a guess or
 // that it had to leave with nobody in them, so the load can say each one in a line.
 func (w *Workspaces) migrateRooms() (changed bool, guessed, ownerless []string) {
-	admin := strings.ToLower(strings.TrimSpace(w.opts.AdminEmail))
+	admin := w.adminAddress()
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for name, workspace := range w.registry {

@@ -87,16 +87,39 @@ echo "$OPENCODE_API_KEY" | ./bin/acornd provider add opencode-go
 Every command answers `-h`, and `acornd` with no arguments lists them:
 
 ```
-start      run the gateway
+start      run the gateway (foreground; -d detaches and logs to the install folder)
+stop       stop the run recorded in this install folder
+restart    start it again with the arguments it was started with
+status     is it running, where, and since when
 setup      check this machine, and make it able to run sandboxes
+setup-code print, rotate, or remove the code that claims a fresh install
 doctor     report what the sandbox engines can do here; changes nothing
 workspace  list, add, forget, and purge workspaces
 secret     list, add, show, rotate, and remove secrets
 provider   list, add, and remove model provider keys
 model      list or choose the default model
+people     who may use this install, and what they may do
+remote     the tunnel a browser comes through, and who it admits
+token      print the token that proves you own this install
 update     check for a release, and install it
 version    print the running version
 ```
+
+`acornd start` stays in the terminal. `-d` detaches it into the install folder: its own session,
+`<data-dir>/acornd.log` for everything it would have printed, and the command returns once the
+console answers. `stop`, `restart`, and `status` read the run recorded in that folder — one run per
+folder, `restart` reuses the arguments it was started with, and nothing restarts it after a crash
+(ADR 0036).
+
+A fresh install prints `http://<host>:7777/setup?code=…` on every start until somebody claims it,
+and `acornd setup-code` prints that code, rotates it (`--rotate`) or removes it (`--disable`) — the
+install token from `acornd token` signs in on the same form, so a rotated or disabled code is never
+a lockout ([ADR 0036](docs/adr/0036-a-console-that-sets-itself-up.md)).
+
+In a browser, a fresh install shows a claim form asking for a name, an email and the setup code. When
+the session is gone — the cookie expired, or the install token was rotated — the console shows a
+sign-in form instead, which takes the setup code or the install token. `acornd start` prints the
+code and `acornd setup-code` prints it again; `acornd token` prints the token.
 
 ### Sandbox engines
 
@@ -145,9 +168,12 @@ One line:
 curl -fsSL https://raw.githubusercontent.com/marcelowa/acornd/main/scripts/install.sh | sh
 ```
 
-It picks the binary for this machine, checks its checksum, and puts it in `~/.acornd/bin`.
-Then `acornd setup` says what the machine needs and offers to do it, and `acornd start`
-serves the console on `http://<host>:7777`.
+It picks the binary for this machine, checks its checksum, and puts it in `~/.acornd/bin`. Then it
+runs `acornd setup --yes`, which does the steps this machine allows without a password and prints the
+rest, and starts the console detached on `http://<host>:7777` with the line that claims it. A machine
+that cannot be prepared non-interactively gets the plan as commands; the console serves either way.
+`--no-start` stops after the binary is in place, `--no-setup` leaves the machine alone, and
+`--version <tag>` pins a release.
 
 By hand, if you would rather see every step:
 
@@ -169,6 +195,28 @@ the host. After that it self-updates from Settings > Updates: one
 click, it restarts itself. Headless, `acornd update` does the same thing: it checks, shows the
 new tag and its first lines, and asks `install vX? [Y/n]` — `--yes` skips the question, `--check`
 only reports. With no gateway running it installs to disk and takes effect at the next start.
+
+### From a fresh machine, in order
+
+Five steps, and the console asks for each of them ([ADR 0036](docs/adr/0036-a-console-that-sets-itself-up.md)):
+
+1. **Install.** The one line above puts the binary under `~/.acornd/bin`, prepares the machine as far as
+   it can without a password, and starts the console detached. It prints the address that claims it:
+   `http://<host>:7777/setup?code=…`.
+2. **Claim it.** Open that address and type your name and email. The code proves you started the machine;
+   from then on the install is yours, and this browser holds a signed cookie for a month. Lost the code?
+   `acornd setup-code` prints it again until somebody claims the install.
+3. **Teach it a model.** Settings → Providers: paste a provider key and tick the models this install may
+   spend on it. Then Settings → General → Defaults: choose what a new conversation starts from.
+4. **Give it a door.** Settings → Remote: paste a Cloudflare API token, pick the zone it can see, type a
+   hostname (`console`, or the whole `console.example.com`), press **Apply**, then **Turn on**. Apply
+   creates the tunnel, the `CNAME`, the one-time PIN, the application and the group; Turn on restarts the
+   console so it serves them, and this LAN address stops answering.
+5. **Invite people.** Open `https://<hostname>` and sign in with the code Cloudflare emails you. Settings
+   → People: add an address, then send them the URL yourself. They get in with a code to their email, and
+   nothing else does.
+
+Settings → General opens with **Getting started**, which shows which of the last four is still open.
 
 Useful flags: `--data-dir <dir>` (default `~/.acornd`), `--host` and `--port`
 (default `0.0.0.0:7777`), `--workspaces-dir <dir>` (default `~/acornd/workspaces`),
@@ -195,20 +243,31 @@ wins over the variable.
 
 ### Reaching it from another machine
 
-The gateway listens on every interface and needs no token by default:
+The gateway listens on every interface, and the console is closed from the first minute: a fresh
+install answers its pages and a sign-in, and refuses every other request until somebody claims it
+([ADR 0036](docs/adr/0036-a-console-that-sets-itself-up.md)).
 
 ```bash
-./bin/acornd start           # binds 0.0.0.0:7777
+./bin/acornd start           # binds 0.0.0.0:7777, and prints where to claim it
 ```
 
-Open `http://<machine>:7777` from another device. Anyone who can reach port 7777 gets the
-console, its workspaces, and the provider key it spends, so keep that port on a network you
-trust. See [ADR 0020](docs/adr/0020-open-by-default.md).
+Open the printed `http://<machine>:7777/setup?code=…` from another device and claim the install
+with your name and address. A script talks to the API with `Authorization: Bearer $(acornd token)`;
+a browser signs in on the same form with that token or the setup code, and holds an HttpOnly session
+cookie for a month. EventSource cannot set a header, which is why the cookie exists. Keep the port on
+a network you trust anyway.
 
-A token is opt-in. `--token <secret>` or `ACORND_TOKEN` guards every request. A client
-sends `Authorization: Bearer <secret>`, or opens `?token=<secret>` once, which sets an
-HttpOnly cookie and redirects to `/` so the secret does not stay in the address bar.
-EventSource cannot set headers, which is why the cookie exists.
+With remote access configured ([ADR 0033](docs/adr/0033-remote-access.md)) the console listens on
+loopback by default and is reached only through Cloudflare, or over an SSH tunnel with the install token.
+
+Settings → Remote is how that gets configured without a terminal ([ADR 0036](docs/adr/0036-a-console-that-sets-itself-up.md) §6):
+the screen takes a Cloudflare API token and shows the zones that token can see, so the zone is a choice;
+the hostname is a label (`console`) or a full name (`console.acornd.app`), a label is completed with the
+zone, and a name in another zone is refused. **Apply** creates what is missing — the tunnel, the `CNAME`,
+the one-time PIN, the application, the group and its policy — and writes the ids down, so a second press
+creates nothing and a run that died halfway resumes. Then **Turn on** restarts the console, because the
+door and the tunnel are read at boot: the console listens on loopback, the tunnel carries the browser, and
+the LAN address stops answering.
 
 To keep it off the network, bind loopback and use an SSH tunnel:
 

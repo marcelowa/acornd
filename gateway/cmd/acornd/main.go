@@ -20,6 +20,7 @@ import (
 	"github.com/marcelowa/acornd/gateway/internal/control"
 	"github.com/marcelowa/acornd/gateway/internal/httpapi"
 	"github.com/marcelowa/acornd/gateway/internal/ready"
+	"github.com/marcelowa/acornd/gateway/internal/remote"
 	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 	"github.com/marcelowa/acornd/gateway/internal/update"
 	"github.com/marcelowa/acornd/gateway/internal/vault"
@@ -54,6 +55,9 @@ var commands = map[string]func([]string){
 			log.Fatalf("acornd: %v", err)
 		}
 	},
+	"stop":      stopCommand,
+	"restart":   restartCommand,
+	"status":    statusCommand,
 	"setup":     setupCommand,
 	"doctor":    doctorCommand,
 	"workspace": workspaceCommand,
@@ -63,12 +67,15 @@ var commands = map[string]func([]string){
 	"people":    peopleCommand,
 	"remote":    remoteCommand,
 	"token":     tokenCommand,
-	"update":    updateCommand,
-	"version":   versionCommand,
-	"internal":  internalCommand,
-	"help":      func([]string) { usage(os.Stdout) },
-	"-h":        func([]string) { usage(os.Stdout) },
-	"--help":    func([]string) { usage(os.Stdout) },
+	// setup-code sits beside token in the table because the two are the credentials an install prints:
+	// one proves ownership, the other claims a fresh install before there is an owner (ADR 0036 §3).
+	"setup-code": setupCodeCommand,
+	"update":     updateCommand,
+	"version":    versionCommand,
+	"internal":   internalCommand,
+	"help":       func([]string) { usage(os.Stdout) },
+	"-h":         func([]string) { usage(os.Stdout) },
+	"--help":     func([]string) { usage(os.Stdout) },
 }
 
 // internalCommand dispatches the verbs that binaries call. An unknown one is refused like any
@@ -94,8 +101,12 @@ func internalCommand(argv []string) {
 func usage(w io.Writer) {
 	fmt.Fprint(w, `usage: acornd <command> [flags]
 
-  start      run the gateway
+  start      run the gateway (foreground; -d detaches and logs to the install folder)
+  stop       stop the run recorded in this install folder
+  restart    start it again with the arguments it was started with
+  status     is it running, where, and since when
   setup      check this machine, and make it able to run sandboxes
+  setup-code print, rotate, or remove the code that claims a fresh install
   doctor     report what the sandbox engines can do here; changes nothing
   workspace  list, add, forget, and purge workspaces
   secret     list, add, show, rotate, and remove secrets
@@ -111,23 +122,41 @@ acornd <command> -h    explains that command's flags
 `)
 }
 
+// announceSetup writes the line that claims a fresh install, right after the address it is reachable at. A
+// detached run logs it too: the log is 0600, and the code is what the person starting the install needs
+// (ADR 0036 §3).
+func announceSetup(dir, address string) {
+	if line := setupLine(dir, address); line != "" {
+		log.Print(line)
+	}
+}
+
 func serve(argv []string) error {
 	flags := flag.NewFlagSet("acornd start", flag.ContinueOnError)
-	host := flags.String("host", "0.0.0.0", "interface to listen on (default: every interface)")
+	host := flags.String("host", "", "interface to listen on (default: 127.0.0.1 when remote access is configured, otherwise every interface)")
 	port := flags.Int("port", 7777, "port to listen on")
 	dataDir := flags.String("data-dir", "", "the acornd folder: config, credentials, state, workspaces (default: ~/.acornd)")
 	workspacesDir := flags.String("workspaces-dir", "", "where workspaces are created (default: ~/acornd/workspaces)")
 	workerCommand := flags.String("worker", "", `worker command (default: ensured bun over ensured sources)`)
 	cloudflaredPath := flags.String("cloudflared", "", `the connector binary (default: the pinned one, ensured under the install folder)`)
+	detach := flags.Bool("d", false, "detach: log to <data-dir>/acornd.log and return")
 	if err := flags.Parse(argv); err != nil {
 		return err
 	}
 
-	install, err := openInstall(*dataDir)
+	if *detach {
+		return startDetached(argv, *dataDir, *host, *port)
+	}
+
+	install, err := openInstall(*dataDir, *host)
 	if err != nil {
 		return err
 	}
 	dir, userHome, secrets := install.dir, install.userHome, install.vault
+	if err := recordRun(dir, net.JoinHostPort(install.host, strconv.Itoa(*port))); err != nil {
+		return err
+	}
+	defer removeRunRecord(dir)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -158,7 +187,7 @@ func serve(argv []string) error {
 	// The gate is opened before the registry, because the registry needs one answer out of it: whose the
 	// workspaces that predate people are. Control is told an address, not a file — it knows what a
 	// workspace is and not what a people file is.
-	gate, err := openGate(dir, *host)
+	gate, err := openGate(dir, install.host)
 	if err != nil {
 		return err
 	}
@@ -171,13 +200,40 @@ func serve(argv []string) error {
 	wireUpdates(updates, workspaces, engine)
 
 	logReadiness(ready.Check(readyInputForBoot(dir, updates, engine)))
-	// The account is made to match what this install recorded, then the connector is started: reconcile first,
-	// so a tunnel that was replaced or a record that was deleted is fixed before anything dials out to it. Both
-	// run under the same context and neither blocks the door.
-	go reconcileRemote(ctx, dir)
-	startTunnel(ctx, dir, *cloudflaredPath)
 
-	return listen(ctx, *host, *port, httpapi.New(workspaces, web.Files, updates, gate).Handler(), dir)
+	return serveConsole(ctx, install.host, *port, dir, workspaces, updates, gate, *cloudflaredPath)
+}
+
+// listenHost is where a run binds, now that the default follows the door rather than a flag (ADR 0036 §5). Its
+// answer is resolved once and then used by the gate, the listener, the setup URL and the run record, so all four
+// name the same address.
+//
+// An explicit --host wins, and an explicit one that is not loopback is refused later, by the door. Otherwise an
+// install with remote access configured listens on loopback and is reached through Cloudflare, and an install
+// without it listens on every interface, because a headless machine has to be reachable on the LAN to be
+// configured at all.
+func listenHost(explicit, dir string) (string, error) {
+	if host := strings.TrimSpace(explicit); host != "" {
+		return host, nil
+	}
+	setup, err := remote.Load(dir)
+	if err != nil {
+		return "", err
+	}
+	if setup.Configured() {
+		return "127.0.0.1", nil
+	}
+	return "0.0.0.0", nil
+}
+
+// serveConsole starts what runs beside the listener and then serves. The account is made to match
+// what this install recorded before the connector dials out, so a tunnel that was replaced or a
+// record that was deleted is fixed first; both run under the same context and neither blocks the
+// door.
+func serveConsole(ctx context.Context, host string, port int, dir string, workspaces *control.Workspaces, updates *update.Manager, gate httpapi.Gate, cloudflaredPath string) error {
+	go reconcileRemote(ctx, dir)
+	startTunnel(ctx, dir, cloudflaredPath)
+	return listen(ctx, host, port, httpapi.New(workspaces, web.Files, updates, gate).Handler(), dir)
 }
 
 // newWorkspaces is the workspace layer as this boot configured it: where its folders are, what
@@ -216,18 +272,26 @@ func newWorkspaces(
 }
 
 // install is where this install lives, opened: its folder, the user's home the sandbox mounts
-// from, and the vault.
+// from, the vault, and the interface this run listens on.
 type install struct {
 	dir      string
 	userHome string
 	vault    *vault.Store
+	// host is where this run binds, resolved with the folder because every later answer uses it: the gate,
+	// the listener, the setup URL and the run record (ADR 0036 §5).
+	host string
 }
 
-// openInstall resolves the install once, and creates the folders a sandbox will mount from. The
-// user's home is resolved here rather than inside control: the sandbox mounts `~/.agents` at the
-// same path the worker reads it from, and both have to be answering about the same folder.
-func openInstall(dataDir string) (install, error) {
+// openInstall resolves the install once, creates the folders a sandbox will mount from, and resolves the
+// interface this run listens on. The user's home is resolved here rather than inside control: the sandbox
+// mounts `~/.agents` at the same path the worker reads it from, and both have to be answering about the same
+// folder.
+func openInstall(dataDir, explicitHost string) (install, error) {
 	dir, err := resolveDataDir(dataDir)
+	if err != nil {
+		return install{}, err
+	}
+	host, err := listenHost(explicitHost, dir)
 	if err != nil {
 		return install{}, err
 	}
@@ -247,7 +311,7 @@ func openInstall(dataDir string) (install, error) {
 	if err := sandbox.EnsureGlobal(dir, userHome); err != nil {
 		return install{}, err
 	}
-	return install{dir: dir, userHome: userHome, vault: store}, nil
+	return install{dir: dir, userHome: userHome, vault: store, host: host}, nil
 }
 
 // bootUpdates opens the self-update tier and runs whatever migrate is pending. A failing migrate
@@ -348,6 +412,9 @@ func listen(ctx context.Context, host string, port int, handler http.Handler, di
 	}
 	bound := listener.Addr().String()
 	log.Printf("acornd listening on http://%s  home=%s", displayAddr(bound), dir)
+	// Where to claim it, once the address is the one that was actually bound: with a port of 0 the configured
+	// address names no port at all, and a URL a person cannot open is worse than no line (ADR 0036 §3).
+	announceSetup(dir, bound)
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 		return err
 	}

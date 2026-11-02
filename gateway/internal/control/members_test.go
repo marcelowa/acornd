@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -319,5 +320,91 @@ func TestAnInstallWithNoAdminKeepsBothShapesOfTheOwnRoom(t *testing.T) {
 	one := workspaces.registry["ana"]
 	if one.Owner() != "ana@example.com" || !one.Personal() {
 		t.Errorf("a room with one member is %+v, want somebody's own, owned by them", one)
+	}
+}
+
+// A claim after boot is the same moment as an install that had an owner from the start: the room that predates
+// people becomes the new admin's, without a restart, and a room somebody already holds is left alone.
+func TestClaimingTheInstallHandsTheOwnerlessRoomToTheNewAdmin(t *testing.T) {
+	workspaces := registryWithAdmins(t, "", []Workspace{
+		{Name: PersonalWorkspaceName, Path: "/w/personal"},
+		{Name: "ana", Path: "/w/ana", Kind: KindPersonal, Members: []Member{{Email: "ana@example.com", Role: RoleOwner}}},
+	})
+	if err := workspaces.loadRegistry(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := workspaces.ClaimOwner("Me@Example.com"); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	owned := workspaces.registry[PersonalWorkspaceName]
+	if owned.Owner() != "me@example.com" {
+		t.Errorf("the install's room is owned by %q, want the new admin", owned.Owner())
+	}
+	if ana := workspaces.registry["ana"]; ana.Owner() != "ana@example.com" {
+		t.Errorf("a room with an owner was taken: %v", ana.Members)
+	}
+	// Written, not just held: a restart has to find the same answer.
+	reloaded := registryWithAdmins(t, "", nil)
+	reloaded.opts.DataDir = workspaces.opts.DataDir
+	if err := reloaded.loadRegistry(); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.registry[PersonalWorkspaceName].Owner() != "me@example.com" {
+		t.Errorf("the claim was not written down: %+v", reloaded.registry[PersonalWorkspaceName])
+	}
+	if err := workspaces.ClaimOwner("other@example.com"); err != nil {
+		t.Fatalf("second claim: %v", err)
+	}
+	if workspaces.registry[PersonalWorkspaceName].Owner() != "me@example.com" {
+		t.Error("a second claim took a room that already had an owner")
+	}
+}
+
+// The install's own room names the admin when there is one, and nobody when there is not: the claim is what puts
+// a person in it, and a room that invented a member before anybody claimed would be a room with no owner.
+func TestTheInstallsOwnRoomNamesTheAdminOnlyWhenThereIsOne(t *testing.T) {
+	withAdmin := registryWithAdmins(t, "Me@Example.com", nil)
+	members := withAdmin.ownerMembers()
+	if len(members) != 1 || members[0].Email != "me@example.com" || members[0].Role != RoleOwner {
+		t.Fatalf("ownerMembers() = %+v, want the admin as the owner", members)
+	}
+	if none := registryWithAdmins(t, "", nil).ownerMembers(); len(none) != 0 {
+		t.Errorf("an install with no admin invented %+v", none)
+	}
+}
+
+// A member written as a bare address is read with no role; an empty value is a refusal and not a panic.
+func TestAMemberOnItsOwnIsReadAsAnAddress(t *testing.T) {
+	var member Member
+	if err := json.Unmarshal([]byte(`"Ana@Example.com"`), &member); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if member.Email != "Ana@Example.com" || member.Role != "" {
+		t.Errorf("a bare address became %+v", member)
+	}
+	if err := member.UnmarshalJSON(nil); err == nil {
+		t.Error("an empty value was read as a member")
+	}
+}
+
+// A room change the registry cannot save is an error, not a success the next start will forget: the folder is
+// broken here (a data folder whose parent is a file), which no user can write to and no root can either.
+func TestARoomChangeThatCannotBeSavedIsAnError(t *testing.T) {
+	workspaces := registryWithAdmins(t, "owner@example.com", []Workspace{
+		{
+			Name: "room", Path: "/w/room", Kind: KindRoom,
+			Members: []Member{{Email: "owner@example.com", Role: RoleOwner}, {Email: "guest@example.com", Role: RoleGuest}},
+		},
+	})
+	if err := workspaces.loadRegistry(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	blocked := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocked, []byte("not a folder"), 0o600); err != nil {
+		t.Fatalf("block the folder: %v", err)
+	}
+	workspaces.opts.DataDir = filepath.Join(blocked, "sub")
+	if _, err := workspaces.RemoveMember(Caller{Email: "owner@example.com"}, "room", "guest@example.com"); err == nil {
+		t.Fatal("a change that could not be saved was reported as saved")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/marcelowa/acornd/gateway/internal/httpapi"
 	"github.com/marcelowa/acornd/gateway/internal/identity"
 	"github.com/marcelowa/acornd/gateway/internal/people"
+	"github.com/marcelowa/acornd/gateway/internal/remote"
 )
 
 // tokenCommand prints the install's token, minting one on first use.
@@ -60,17 +62,16 @@ func printToken(out, notes io.Writer, dir string, rotate bool) error {
 }
 
 // openGate builds what this run admits by: the door that proves who is calling, and the book of people
-// it must then know. Both are nil for the single-admin install ADR 0020 describes, because a door
-// nothing configured is how a switched-off guard comes back.
+// it must then know.
+//
+// The book is opened on every install now, not only one with a door: the console configures its own
+// remote access, and that needs a book to name people in before the door exists (ADR 0036 §5). The mode
+// follows from it — no admin means setup, an admin means the door — and it is read per request, so the
+// claim that ends setup takes effect without a restart (ADR 0036 §3).
 func openGate(dir, host string) (httpapi.Gate, error) {
-	door, err := identityDoor(dir, host)
+	door, publisher, err := identityDoor(dir, host)
 	if err != nil {
 		return httpapi.Gate{}, err
-	}
-	if door == nil {
-		// No door, but still an install folder: the edge reads the provider allowlist from it, and a gate with
-		// no Dir would let the single-admin install offer models its own allowlist refuses.
-		return httpapi.Gate{Dir: dir}, nil
 	}
 	book, err := people.Open(filepath.Join(dir, people.File))
 	if err != nil {
@@ -79,52 +80,130 @@ func openGate(dir, host string) (httpapi.Gate, error) {
 	if _, claimed, err := book.Admin(); err != nil {
 		return httpapi.Gate{}, err
 	} else if !claimed {
-		// Loud at boot rather than at the first browser: a console with a door and no admin is one only
-		// the machine can get into, and the fix is one command.
-		fmt.Fprintln(os.Stderr, "acornd: this install has people but no admin yet; `acornd people claim you@example.com` names one")
+		// A fresh install generates the code it is claimed with on first boot (ADR 0036 §3). Failing here
+		// is the boot being unable to write its own folder, which every other file in it would also fail.
+		if _, _, err := identity.EnsureSetupCode(dir); err != nil {
+			return httpapi.Gate{}, err
+		}
 	}
-	return httpapi.Gate{Door: door, People: book, Dir: dir}, nil
+	// The two facts the remote screen cannot read for itself: whether this boot built the door, and the address
+	// the run was started with, which an exec would keep (ADR 0036 §6).
+	return httpapi.Gate{Door: door, People: book, Dir: dir, Publisher: publisher, RunHost: recordedHost(dir)}, nil
 }
 
-// identityDoor builds the proof this run requires, or nil for the single-admin install ADR 0020
-// describes. The door is off unless this run names a publisher, so an install that never turns people
-// on behaves exactly as it did before there was a door.
+// identityDoor builds the proof this run requires: the install token, the owner's session cookie, and
+// the assertion door when this install has a publisher in front of it. The second answer is whether this boot
+// built that assertion door — the fact a restart is the fix for, reported here so the console does not have to ask
+// a second time (ADR 0036 §6).
 //
-// ACORND_IDENTITY=access means a browser arrives through Cloudflare Access, with the assertion it
-// signs; `token` means only the command line, which is what a machine behind somebody else's proxy
-// wants. The token door is in the set either way: the command line is how the admin reaches a console
-// that has people, and how they get back in when the proxy is what broke.
-func identityDoor(dir, host string) (identity.Door, error) {
-	kind := strings.TrimSpace(os.Getenv("ACORND_IDENTITY"))
-	if kind == "" {
-		return nil, nil
+// The door is always there, because the console is closed by default now (ADR 0036 §3). Where the assertion
+// door comes from is the one thing that moved: `remote.json` is the door, and the environment is an override
+// for tests and for a machine behind somebody else's proxy (ADR 0036 §5). ACORND_IDENTITY is no longer what
+// turns Access on; a file an apply wrote is.
+func identityDoor(dir, host string) (identity.Door, bool, error) {
+	byEnvironment := identityFromEnvironment()
+	setup := remote.Setup{}
+	if !byEnvironment {
+		loaded, err := remote.Load(dir)
+		if err != nil {
+			return nil, false, err
+		}
+		setup = loaded
 	}
-	// A console with a door listens on loopback only. The door is reached through a proxy on this
-	// machine (ADR 0033), and a listener on every interface would be reachable without one — a door on
-	// one address and a hole on the others.
-	if !loopback(host) {
-		return nil, fmt.Errorf("a console with people listens on loopback only, and --host %q is not one: reach it through cloudflared, or unset ACORND_IDENTITY for a single-admin install", host)
+	if (byEnvironment || setup.Configured()) && !loopback(host) {
+		// A console behind a publisher listens on loopback only. The door is reached through a proxy on this
+		// machine (ADR 0033), and a listener on every interface would be reachable without one — a door on one
+		// address and a hole on the others. Without a publisher there is nothing in front to reach it through,
+		// so an install with no remote access keeps binding 0.0.0.0 (ADR 0036 §5).
+		return nil, false, fmt.Errorf("a console behind a publisher listens on loopback only, and --host %q is not one: bind 127.0.0.1 and reach it through cloudflared", host)
 	}
+	// The session cookie is signed with a key derived from this token, so every install has one, door or
+	// no door (ADR 0036 §4).
 	if _, minted, err := identity.EnsureToken(dir); err != nil {
-		return nil, err
+		return nil, false, err
 	} else if minted {
 		fmt.Fprintln(os.Stderr, "acornd: this install had no token; `acornd token` prints the new one")
 	}
 
-	remote, err := remoteDoor(kind)
+	publisher, err := publisherDoor(setup, byEnvironment)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	if remote == nil {
-		return identity.Any(identity.Token{Dir: dir}), nil
+	if publisher == nil {
+		return identity.Any(identity.Token{Dir: dir}, identity.Session{Dir: dir}), false, nil
 	}
-	return identity.Any(identity.Token{Dir: dir}, remote), nil
+	return identity.Any(identity.Token{Dir: dir}, publisher, identity.Session{Dir: dir}), true, nil
 }
 
-// remoteDoor is the door a publisher's name builds, or nil for a console only the command line opens.
+// identityEnvironment is the four variables that put a publisher in front of the console by hand. Any of them
+// carrying a value makes the environment the door, and the file is not read at all: that is what a test and a
+// machine behind somebody else's proxy need, and it is how every install was configured before remote.json was
+// one (ADR 0036 §5).
+var identityEnvironment = []string{
+	"ACORND_IDENTITY",
+	"ACORND_IDENTITY_AUDIENCE",
+	"ACORND_IDENTITY_ISSUER",
+	"ACORND_IDENTITY_KEYS",
+}
+
+func identityFromEnvironment() bool {
+	for _, name := range identityEnvironment {
+		if strings.TrimSpace(os.Getenv(name)) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// publisherDoor is the assertion door this run has, or nil when only the local proofs open the console: the
+// environment's four values when it set any of them, and otherwise the two values an apply wrote down, with
+// the issuer and keys URL derived from the team domain.
+func publisherDoor(setup remote.Setup, byEnvironment bool) (identity.Door, error) {
+	if byEnvironment {
+		return remoteDoor(strings.TrimSpace(os.Getenv("ACORND_IDENTITY")))
+	}
+	if !setup.Configured() {
+		return nil, nil
+	}
+	if missing := missingDoorValue(setup); missing != "" {
+		// A configured file with no audience or no team domain is an apply that did not finish. The console is
+		// closed to the install token and the owner's cookie, and the person who ran it is told once, here,
+		// rather than at the first browser (ADR 0036 §5).
+		log.Printf("acornd: remote access is configured but its apply is half-finished (%s): the door is the install token and the owner's cookie until `acornd remote apply` finishes", missing)
+		return nil, nil
+	}
+	values := setup.Env()
+	return identity.Assertion{
+		Audience: values["ACORND_IDENTITY_AUDIENCE"],
+		Issuer:   values["ACORND_IDENTITY_ISSUER"],
+		Keys:     identityKeys(values["ACORND_IDENTITY_KEYS"]),
+	}, nil
+}
+
+// missingDoorValue names what a half-finished apply did not record, in the words of the file's fields.
+func missingDoorValue(setup remote.Setup) string {
+	audience, domain := setup.State.Audience == "", setup.State.TeamDomain == ""
+	switch {
+	case audience && domain:
+		return "no audience and no team domain"
+	case audience:
+		return "no audience"
+	case domain:
+		return "no team domain"
+	}
+	return ""
+}
+
+// identityKeys is the verifier's key source. A variable so a test can point a door built from a file at a
+// publisher it runs, without the file having to name a URL a test server can answer.
+var identityKeys = func(url string) *identity.Keys { return &identity.Keys{URL: url} }
+
+// remoteDoor is the door the environment's ACORND_IDENTITY builds, or nil when the token and the cookie are the
+// whole of it: `access` reads the other three values, and `token` — or nothing at all — means a console with no
+// proxy in front, which is what a machine behind somebody else's wants (ADR 0036 §5).
 func remoteDoor(kind string) (identity.Door, error) {
 	switch kind {
-	case "token":
+	case "", "token":
 		return nil, nil
 	case "access":
 		audience, issuer, keys, err := accessValues()

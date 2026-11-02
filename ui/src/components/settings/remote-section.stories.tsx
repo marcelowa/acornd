@@ -4,7 +4,7 @@ import { RemoteSection } from "./remote-section";
 const meta: Meta<typeof RemoteSection> = {
 	title: "Settings/Remote access",
 	component: RemoteSection,
-	args: { onApply: () => undefined },
+	args: { onApply: () => undefined, onPreview: () => undefined, onEnable: () => undefined },
 };
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -20,6 +20,7 @@ export const Made: Story = {
 			configured: true,
 			tokenStored: true,
 			hostname: "console.example.com",
+			teamDomain: "acornd.cloudflareaccess.com",
 			audience: "c52dbf9750d9619950bffb6e96106adba22bdd4f8957362c0505a14718873982",
 			updated: "2026-10-30T21:47:20Z",
 			steps: [
@@ -82,5 +83,64 @@ export const CheckedAndOpen: Story = {
 			keys: false,
 			detail: "the console answered directly, so nothing is in front of it: this is worse than a door that does not open",
 		},
+	},
+};
+
+/** The token checked: what it can see, before any of it is stored. One zone is already chosen. */
+export const TokenChecked: Story = {
+	args: {
+		preview: {
+			teamDomain: "acornd.cloudflareaccess.com",
+			zones: [{ name: "example.com", id: "z1", accountId: "a1" }],
+		},
+	},
+};
+
+/** Two zones the token can see: the picker is the choice, and nothing has been made yet. */
+export const TwoZones: Story = {
+	args: {
+		preview: {
+			teamDomain: "acornd.cloudflareaccess.com",
+			zones: [
+				{ name: "example.com", id: "z1", accountId: "a1" },
+				{ name: "acornd.app", id: "z2", accountId: "a1" },
+			],
+		},
+	},
+};
+
+/** Cloudflare is ready and the running process is not: turning it on restarts the console onto its name. */
+export const RestartRequired: Story = {
+	args: {
+		onEnable: () => undefined,
+		status: {
+			configured: true,
+			tokenStored: true,
+			restartRequired: true,
+			hostname: "console.example.com",
+			teamDomain: "acornd.cloudflareaccess.com",
+			audience: "c52dbf9750d9619950bffb6e96106adba22bdd4f8957362c0505a14718873982",
+			updated: "2026-10-30T21:47:20Z",
+			steps: [{ name: "tunnel", created: true }],
+		},
+	},
+};
+
+/** The press in flight: the process is replacing itself, and the address underneath is about to go. */
+export const Restarting: Story = {
+	args: { ...RestartRequired.args, restarting: true },
+};
+
+/** It came back on its own name: this page will not answer again, so the link is the way on. */
+export const Restarted: Story = {
+	args: { ...RestartRequired.args, restarted: true },
+};
+
+/** A press the gateway refused: a recorded run started on every interface cannot become a door by restarting. */
+export const EnableRefused: Story = {
+	args: {
+		...RestartRequired.args,
+		failure:
+			"this console was started with --host 0.0.0.0, and a restart keeps the arguments it already has: stop it and start it again without --host",
 	},
 };

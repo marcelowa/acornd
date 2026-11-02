@@ -4,6 +4,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -20,6 +21,11 @@ import (
 // Health is the one route in front of the door, on purpose: it names nothing, a supervisor and the
 // tunnel's own health check read it, and a liveness probe that needs a credential turns a working
 // console into a restart loop.
+//
+// The routes that need no proof depend on what the gate is (ADR 0036 §3): an install nobody owns yet
+// has to load its interface and answer the claim form, and an install with an owner still has to be
+// able to sign a browser in before there is a cookie to check. A proof is a proof in every mode, so a
+// token or a cookie reaches everything else in setup mode exactly as it does behind the door.
 func (s *Server) admit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" {
@@ -30,42 +36,89 @@ func (s *Server) admit(next http.Handler) http.Handler {
 			http.Error(w, "this request came from another site, and the console refuses to act on one", http.StatusForbidden)
 			return
 		}
-		caller, err := s.gate.Door.Prove(r)
-		if err != nil {
-			// 401 and the sentence the door wrote. There is no login page to send anyone to: the edge
-			// does the signing in, before the request gets here (ADR 0033).
-			http.Error(w, err.Error(), http.StatusUnauthorized)
+		settingUp := s.gate.mode() == modeSetup
+		if withoutProof(settingUp, r) {
+			next.ServeHTTP(w, r)
 			return
 		}
-		// A proof of an address is not permission to use this install: the admin names people, and the
-		// ones not named are refused before a handler runs and before anything is written. The token is
-		// the admin, and does not need a record to be let in (ADR 0032 §3).
-		if !caller.Admin {
-			person, err := s.gate.People.SignIn(caller.Email)
-			if err != nil {
-				// 403 rather than 401: the proof was good and this person may not come in. Signing in
-				// again would not help, and a page that says so only sends them round the loop.
-				http.Error(w, err.Error(), http.StatusForbidden)
-				return
-			}
-			// The book names the admin, and an address the edge proved *is* that person: the token door
-			// proves ownership by itself, while a browser proves an address and lets the book answer the
-			// rest. Without this the admin arrives through the same door as everybody else and is a
-			// lesser caller for it — refused their own install's business with a sentence telling them
-			// only its admin may do it.
-			caller.Admin = person.Role == people.RoleAdmin
+		caller, err := s.gate.Door.Prove(r)
+		if err != nil {
+			refuseProof(w, settingUp, err)
+			return
+		}
+		caller, err = s.admitted(caller)
+		if err != nil {
+			// 403 rather than 401: the proof was good and this person may not come in. Signing in again
+			// would not help, and a page that says so only sends them round the loop.
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
 		}
 		next.ServeHTTP(w, r.WithContext(withCaller(r.Context(), s.who(caller))))
 	})
 }
 
+// withoutProof reports whether this request reaches its handler with no proof, given the gate's mode. Setup
+// is the one state with such routes: the interface has to load before it can draw a claim form, and signing
+// in has to work before there is anything to sign in to. Once the install has an owner only the sign-in
+// routes stay open, because a browser that lost its cookie could otherwise never get one back (ADR 0036
+// §3–§4).
+func withoutProof(settingUp bool, r *http.Request) bool {
+	// The interface itself is public in every closed mode: it is a static bundle with no install data in
+	// it, and it is what draws the claim form and the sign-in. Refusing it would leave a browser holding a
+	// 401 with nothing to render — the API behind it is what stays closed.
+	if r.Method == http.MethodGet && !strings.HasPrefix(r.URL.Path, "/api/") {
+		return true
+	}
+	if settingUp {
+		return openDuringSetup(r)
+	}
+	return signInRoute(r)
+}
+
+// refuseProof is the 401 a request gets in one of the gate's two closed modes: the setup sentence while
+// nobody owns the install, and the door's own words otherwise.
+func refuseProof(w http.ResponseWriter, settingUp bool, err error) {
+	if settingUp {
+		// The interface reads this header to show the claim form rather than a sign-in it cannot answer
+		// yet, and the body stays one sentence because the screen is the next slice.
+		w.Header().Set(setupHeader, "1")
+		http.Error(w, "setup required", http.StatusUnauthorized)
+		return
+	}
+	// 401 and the sentence the door wrote. There is no login page to send anyone to: the edge does the
+	// signing in, before the request gets here (ADR 0033).
+	http.Error(w, err.Error(), http.StatusUnauthorized)
+}
+
+// admitted applies the book to a caller a door proved: a person must be named in it, and the address it
+// names as the admin is the admin whatever door proved them. Without this the admin arrives through the
+// same door as everybody else and is a lesser caller for it (ADR 0032 §3).
+//
+// A door with no book has no allowlist, and nobody passes that: the entry point always opens a book, so
+// this is a gate built by a test that is about something else.
+func (s *Server) admitted(caller identity.Caller) (identity.Caller, error) {
+	if caller.Admin {
+		return caller, nil
+	}
+	if s.gate.People == nil {
+		return identity.Caller{}, errors.New("this install has no book of people yet, so it cannot know who may come in")
+	}
+	person, err := s.gate.People.SignIn(caller.Email)
+	if err != nil {
+		return identity.Caller{}, err
+	}
+	caller.Admin = person.Role == people.RoleAdmin
+	return caller, nil
+}
+
 // sameSite refuses a state-changing request whose Origin says another site made it.
 //
-// The console sets no cookie of its own, so SameSite protects nothing here: the edge's cookie
-// authenticates a cross-site form POST perfectly well, and a door that opens for the attacker is not
-// a door. A request with no Origin is allowed — the command line does not send one, and it is not the
-// party this is aimed at — while a browser sends one on same-origin requests too, so the check costs
-// a real page nothing.
+// The console's own cookie is SameSite=Lax, and the edge's is the edge's to configure; neither is a
+// fact this door can see. A proof that arrives in a header — the install token — rides a cross-site
+// form post perfectly well, and a door that opens for the attacker's page is not a door. A request
+// with no Origin is allowed — the command line does not send one, and it is not the party this is
+// aimed at — while a browser sends one on same-origin requests too, so the check costs a real page
+// nothing.
 func sameSite(r *http.Request) bool {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
@@ -80,6 +133,28 @@ func sameSite(r *http.Request) bool {
 		return false
 	}
 	return strings.EqualFold(parsed.Host, r.Host)
+}
+
+// setupHeader marks a refusal that means "nobody owns this install yet" rather than "your proof was
+// refused": the interface shows the claim form for the first and a sign-in for the second.
+const setupHeader = "X-Acornd-Setup"
+
+// openDuringSetup is what a caller may reach while nobody owns the install: the four routes that make
+// an owner or sign one in, on top of the interface every closed mode serves. Everything else is the
+// install's own business, and an install with no owner has no business to be about (ADR 0036 §3).
+func openDuringSetup(r *http.Request) bool {
+	switch r.Method + " " + r.URL.Path {
+	case "GET /api/session", "POST /api/session", "DELETE /api/session", "POST /api/setup/claim":
+		return true
+	}
+	return false
+}
+
+// signInRoute is how a browser becomes somebody again once the install has an owner: the sign-in form
+// has to answer before there is a cookie to check, or a browser that lost its cookie could never get
+// one back (ADR 0036 §4).
+func signInRoute(r *http.Request) bool {
+	return strings.HasPrefix(r.URL.Path, "/api/session")
 }
 
 // callerKey carries who a proven request is from, in control's words, from the edge to the handlers that

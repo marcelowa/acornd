@@ -25,6 +25,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/defaults/agent", s.admin(s.setInstallDefaultAgent))
 
 	mux.HandleFunc("GET /healthz", s.health)
+	s.sessionRoutes(mux)
 	s.updateRoutes(mux)
 	s.secretRoutes(mux)
 	s.workspaceRoutes(mux)
@@ -37,8 +38,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /", noCache(http.FileServerFS(s.static)))
 
 	// The door is in front of everything, which is what makes "no path reaches a handler unproven" true
-	// by construction rather than by each handler remembering.
-	if s.gate.Door != nil {
+	// by construction rather than by each handler remembering. Setup is a state of the same door: the
+	// routes that have to answer without a proof are named in one place, and admit decides per request
+	// which ones they are (ADR 0036 §3).
+	if s.gate.mode() != modeOpen {
 		return s.admit(mux)
 	}
 	return mux
@@ -84,10 +87,13 @@ func (s *Server) updateRoutes(mux *http.ServeMux) {
 	// Replacing the binary is the admin's: a person who could restart the gateway could take the install
 	// down for everybody, which is not a workspace-sized decision.
 	mux.HandleFunc("GET /api/update/status", s.admin(s.updateStatus))
-	// The remote-access screen: what the install recorded, and the apply that makes Cloudflare match it. Both are
-	// the install's own business, and the token the second one takes is used and dropped (ADR 0033 §4).
+	// The remote-access screen: what the install recorded, what a pasted token can see, the apply that makes
+	// Cloudflare match it, and the press that restarts the console so the door starts with it. All of them are the
+	// install's own business, and the token they take is used and dropped (ADR 0033 §4, ADR 0036 §6).
 	mux.HandleFunc("GET /api/remote", s.admin(s.remoteStatus))
+	mux.HandleFunc("POST /api/remote/preview", s.admin(s.remotePreview))
 	mux.HandleFunc("POST /api/remote/apply", s.admin(s.remoteApply))
+	mux.HandleFunc("POST /api/remote/enable", s.admin(s.remoteEnable))
 	mux.HandleFunc("POST /api/remote/check", s.admin(s.remoteCheck))
 	mux.HandleFunc("POST /api/remote/forget-token", s.admin(s.remoteForgetToken))
 	// What a provider's key may be spent on, and the catalog it is chosen from: the install's own business.
@@ -137,12 +143,17 @@ func (s *Server) workspaceRoutes(mux *http.ServeMux) {
 // pageRoutes are the interface's own screens: /c/<workspace>/<conversation> is a conversation,
 // /w/<workspace> is a workspace with whichever conversation it lands on. Routes rather than a
 // catch-all, so a reload and a shared link land where someone was.
+//
+// /setup is a page for the same reason every other one is: `acornd start` prints it with the code
+// in the query, and the browser has to load the document that draws the claim form before it holds
+// a cookie. The page carries nothing of the install; the claim route behind it does (ADR 0036 §3).
 func (s *Server) pageRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /c/{ws}/{id}", s.page)
 	mux.HandleFunc("GET /c/{id}", s.page)
 	mux.HandleFunc("GET /w/{ws}", s.page)
 	mux.HandleFunc("GET /update", s.page)
 	mux.HandleFunc("GET /update/{tag}", s.page)
+	mux.HandleFunc("GET /setup", s.page)
 	mux.HandleFunc("GET /settings", s.page)
 	mux.HandleFunc("GET /settings/", s.page)
 	mux.HandleFunc("GET /workspaces", s.page)

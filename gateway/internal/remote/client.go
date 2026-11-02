@@ -54,27 +54,52 @@ const (
 	scopeGroups scope = "Account · Access: Organizations, Identity Providers and Groups · Edit"
 )
 
+// zonePayload is a zone as the API carries it: its id, its name, and the account it lives in. The account is why
+// a zone is enough to place a tunnel, and why the token needs no Account · Read of its own.
+type zonePayload struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Account struct {
+		ID string `json:"id"`
+	} `json:"account"`
+}
+
+func (z zonePayload) zone() Zone { return Zone{ID: z.ID, Name: z.Name, Account: z.Account.ID} }
+
 // ZoneByName resolves the zone the hostname belongs to, and the account it lives in. It is how the admin names
 // a domain instead of two ids, and it is why the token does not need Account · Read: a zone says which account
 // it is in.
 func (c *Client) ZoneByName(ctx context.Context, name string) (Zone, error) {
-	var found []struct {
-		ID      string `json:"id"`
-		Name    string `json:"name"`
-		Account struct {
-			ID string `json:"id"`
-		} `json:"account"`
-	}
+	var found []zonePayload
 	query := url.Values{"name": {name}, "per_page": {"1"}}
 	if err := c.call(ctx, scopeDNS, http.MethodGet, "/zones?"+query.Encode(), nil, &found); err != nil {
 		return Zone{}, err
 	}
 	for _, zone := range found {
 		if zone.Name == name {
-			return Zone{ID: zone.ID, Name: zone.Name, Account: zone.Account.ID}, nil
+			return zone.zone(), nil
 		}
 	}
 	return Zone{}, fmt.Errorf("this token cannot see a zone called %q", name)
+}
+
+// Zones is what the setup screen asks first: every domain this token can see, with the account each lives in, so
+// the person chooses one instead of typing a domain and two ids (ADR 0036 §6).
+//
+// It needs the DNS permission the zone lookup needs and nothing more: a token that can create the record can read
+// the list it is created in, and the account id rides on the zone rather than on a second call.
+func (c *Client) Zones(ctx context.Context) ([]Zone, error) {
+	var zones []zonePayload
+	// Fifty is the API's largest page: an account with more zones than that scrolls a list the screen draws, and this
+	// call does not have to paginate it to be useful.
+	if err := c.call(ctx, scopeDNS, http.MethodGet, "/zones?per_page=50", nil, &zones); err != nil {
+		return nil, err
+	}
+	out := make([]Zone, 0, len(zones))
+	for _, zone := range zones {
+		out = append(out, zone.zone())
+	}
+	return out, nil
 }
 
 func (c *Client) Tunnels(ctx context.Context, account string) ([]Tunnel, error) {
@@ -221,6 +246,19 @@ func (c *Client) CreateOneTimePIN(ctx context.Context, account string) (Identity
 	return IdentityProvider{ID: created.ID, Type: created.Type}, nil
 }
 
+// AccessOrganization answers the account's team domain, which is the host every assertion from this edge is
+// issued by and the one the keys live under. It needs the Access scope that already covers organizations: the
+// same permission the group and the provider use, because it is the same setting (ADR 0036 §5).
+func (c *Client) AccessOrganization(ctx context.Context, account string) (string, error) {
+	var organization struct {
+		AuthDomain string `json:"auth_domain"`
+	}
+	if err := c.call(ctx, scopeGroups, http.MethodGet, "/accounts/"+account+"/access/organizations", nil, &organization); err != nil {
+		return "", err
+	}
+	return organization.AuthDomain, nil
+}
+
 func (c *Client) AccessGroups(ctx context.Context, account string) ([]Group, error) {
 	var groups []groupPayload
 	if err := c.call(ctx, scopeGroups, http.MethodGet, "/accounts/"+account+"/access/groups", nil, &groups); err != nil {
@@ -295,7 +333,7 @@ func (c *Client) AccessApps(ctx context.Context, account string) ([]App, error) 
 	return out, nil
 }
 
-func (c *Client) CreateAccessApp(ctx context.Context, account, name, hostname string) (App, error) {
+func (c *Client) CreateAccessApp(ctx context.Context, account, name, hostname, idp string) (App, error) {
 	var created struct {
 		ID       string `json:"id"`
 		Name     string `json:"name"`
@@ -303,12 +341,18 @@ func (c *Client) CreateAccessApp(ctx context.Context, account, name, hostname st
 		Audience string `json:"aud"`
 	}
 	body := map[string]any{
-		"name":             name,
-		"domain":           hostname,
-		"type":             "self_hosted",
-		"session_duration": "24h",
+		"name":   name,
+		"domain": hostname,
+		"type":   "self_hosted",
+		// A month is Access's ceiling: both the application and the account cap a session there, so a year is
+		// not a value the platform accepts and the family re-enters an emailed code monthly (ADR 0036 §6).
+		// Written as hours because that is the only shape the API takes ("24h", "10h45m"); it refused "1mo".
+		"session_duration": "720h",
+		// The one-time PIN is the only identity provider on this application, so the page asks for an address
+		// rather than offering a picker in which the other entries admit nobody.
+		"auto_redirect_to_identity": true,
+		"allowed_idps":              []string{idp},
 		// A browser that is not on a policy is refused by default: the policy below is the only way in.
-		"auto_redirect_to_identity": false,
 	}
 	if err := c.call(ctx, scopeApps, http.MethodPost, "/accounts/"+account+"/access/apps", body, &created); err != nil {
 		return App{}, err

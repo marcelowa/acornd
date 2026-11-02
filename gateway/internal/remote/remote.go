@@ -82,11 +82,15 @@ type State struct {
 	// refuses an assertion minted for anything else at the same edge (ADR 0032 §2).
 	Audience string `json:"audience,omitempty"`
 	PolicyID string `json:"policy_id,omitempty"`
+	// TeamDomain is the account's own login domain, a bare host such as acornd.cloudflareaccess.com. The
+	// door's issuer and keys URL are made of it, which is why an install no longer needs four variables set
+	// by hand (ADR 0036 §5).
+	TeamDomain string `json:"team_domain,omitempty"`
 }
 
 // Ready reports whether everything the door needs is recorded.
 func (s State) Ready() bool {
-	return s.TunnelID != "" && s.TunnelToken != "" && s.AppID != "" && s.Audience != ""
+	return s.TunnelID != "" && s.TunnelToken != "" && s.AppID != "" && s.Audience != "" && s.TeamDomain != ""
 }
 
 // Step is one thing an apply did, in the order it did it, so the console can show a line per step rather
@@ -104,6 +108,9 @@ type Step struct {
 // tested without an account: every rule in here is a decision about order and identity, and none of it needs
 // the network to be wrong.
 type API interface {
+	// Zones is the one call that is not part of an apply: it is what the setup screen shows before anything is
+	// created, so the person picks a zone from what the token can see (ADR 0036 §6).
+	Zones(ctx context.Context) ([]Zone, error)
 	Tunnels(ctx context.Context, account string) ([]Tunnel, error)
 	CreateTunnel(ctx context.Context, account, name string) (Tunnel, error)
 	TunnelToken(ctx context.Context, account, tunnel string) (string, error)
@@ -114,11 +121,14 @@ type API interface {
 	CreateCNAME(ctx context.Context, zone, hostname, target string) (DNSRecord, error)
 	IdentityProviders(ctx context.Context, account string) ([]IdentityProvider, error)
 	CreateOneTimePIN(ctx context.Context, account string) (IdentityProvider, error)
+	// AccessOrganization answers the account's team domain: the one value the door's issuer and keys URL
+	// are derived from.
+	AccessOrganization(ctx context.Context, account string) (string, error)
 	AccessGroups(ctx context.Context, account string) ([]Group, error)
 	CreateAccessGroup(ctx context.Context, account, name string, emails []string) (Group, error)
 	UpdateAccessGroup(ctx context.Context, account, id, name string, emails []string) (Group, error)
 	AccessApps(ctx context.Context, account string) ([]App, error)
-	CreateAccessApp(ctx context.Context, account, name, hostname string) (App, error)
+	CreateAccessApp(ctx context.Context, account, name, hostname, idp string) (App, error)
 	AccessPolicies(ctx context.Context, account, app string) ([]Policy, error)
 	CreateAccessPolicy(ctx context.Context, account, app, group string) (Policy, error)
 }
@@ -182,18 +192,14 @@ func (p *Provisioner) Apply(ctx context.Context, desired Desired, prior State, p
 	}
 	state := prior
 	state.Hostname, state.ZoneID, state.AccountID = desired.Hostname, desired.ZoneID, desired.AccountID
-	steps := make([]Step, 0, 6)
+	steps := make([]Step, 0, 8)
 
-	tunnel, step, err := p.tunnel(ctx, desired, prior)
+	tunnel, tunnelToken, step, err := p.connect(ctx, desired, prior)
 	if err != nil {
 		return state, steps, err
 	}
 	steps = append(steps, step)
-	state.TunnelID = tunnel.ID
-	state.TunnelToken, err = p.token(ctx, desired, prior, tunnel, step.Created)
-	if err != nil {
-		return state, steps, err
-	}
+	state.TunnelID, state.TunnelToken = tunnel.ID, tunnelToken
 
 	step, err = p.ingress(ctx, desired, tunnel.ID)
 	if err != nil {
@@ -208,12 +214,13 @@ func (p *Provisioner) Apply(ctx context.Context, desired Desired, prior State, p
 	steps = append(steps, step)
 	state.DNSRecordID = record.ID
 
-	identity, step, err := p.identity(ctx, desired)
+	access, err := p.access(ctx, desired, prior)
+	steps = append(steps, access.steps...)
+	state.TeamDomain = access.teamDomain
 	if err != nil {
 		return state, steps, err
 	}
-	steps = append(steps, step)
-	state.IdentityID = identity.ID
+	state.IdentityID = access.provider.ID
 
 	group, step, err := p.group(ctx, desired, prior, people)
 	if err != nil {
@@ -222,7 +229,7 @@ func (p *Provisioner) Apply(ctx context.Context, desired Desired, prior State, p
 	steps = append(steps, step)
 	state.GroupID = group.ID
 
-	app, step, err := p.app(ctx, desired, prior)
+	app, step, err := p.app(ctx, desired, prior, access.provider.ID)
 	if err != nil {
 		return state, steps, err
 	}
@@ -237,6 +244,20 @@ func (p *Provisioner) Apply(ctx context.Context, desired Desired, prior State, p
 	state.PolicyID = policy.ID
 
 	return state, steps, nil
+}
+
+// connect is the tunnel and its own credential, which are one thing an apply produces: a token cannot be read
+// before the tunnel exists, and a tunnel nobody holds a token for is a door with nothing dialling out of it.
+func (p *Provisioner) connect(ctx context.Context, desired Desired, prior State) (Tunnel, string, Step, error) {
+	tunnel, step, err := p.tunnel(ctx, desired, prior)
+	if err != nil {
+		return Tunnel{}, "", Step{}, err
+	}
+	token, err := p.token(ctx, desired, prior, tunnel, step.Created)
+	if err != nil {
+		return Tunnel{}, "", Step{}, err
+	}
+	return tunnel, token, step, nil
 }
 
 func (p *Provisioner) tunnel(ctx context.Context, desired Desired, prior State) (Tunnel, Step, error) {
@@ -319,6 +340,49 @@ func (p *Provisioner) record(ctx context.Context, desired Desired, prior State, 
 	return created, Step{Name: "dns", Created: true, Detail: created.Name}, nil
 }
 
+// teamDomain is the account's own login domain, which the door's issuer and keys URL are made of. It is the
+// one Access value an apply used to ask a person for and never write down (ADR 0036 §5).
+//
+// It is reported as created when this apply is what learned it, and kept otherwise, so a screen can show the
+// run that found it and every run after as a no-op. An account whose Access has never been used answers with
+// none: that is not a failure and does not wipe what a previous apply recorded, because the door stays closed
+// and the next apply asks again.
+func (p *Provisioner) teamDomain(ctx context.Context, desired Desired, prior State) (string, Step, error) {
+	answer, err := p.API.AccessOrganization(ctx, desired.AccountID)
+	if err != nil {
+		return prior.TeamDomain, Step{}, fmt.Errorf("reading the team's login domain: %w", err)
+	}
+	domain := strings.TrimSpace(answer)
+	if domain == "" {
+		return prior.TeamDomain, Step{Name: "team domain", Detail: prior.TeamDomain}, nil
+	}
+	return domain, Step{Name: "team domain", Created: domain != prior.TeamDomain, Detail: domain}, nil
+}
+
+// accessSetup is what an Access account provides before an application names a hostname: the team's own login
+// domain, which the door's issuer and keys URL are derived from, and the one-time-PIN provider a browser signs
+// in with. Both are account-level and both are what the application is built on (ADR 0036 §5–§6).
+type accessSetup struct {
+	teamDomain string
+	provider   IdentityProvider
+	steps      []Step
+}
+
+// access reads or makes the two account-level pieces in one pass, and keeps the domain a previous apply
+// recorded when this one could not read it: the apply writes its state even when it fails, so a step that did
+// not run must not erase what an earlier run learned.
+func (p *Provisioner) access(ctx context.Context, desired Desired, prior State) (accessSetup, error) {
+	domain, domainStep, err := p.teamDomain(ctx, desired, prior)
+	if err != nil {
+		return accessSetup{teamDomain: prior.TeamDomain}, err
+	}
+	provider, providerStep, err := p.identity(ctx, desired)
+	if err != nil {
+		return accessSetup{teamDomain: domain, steps: []Step{domainStep}}, err
+	}
+	return accessSetup{teamDomain: domain, provider: provider, steps: []Step{domainStep, providerStep}}, nil
+}
+
 func (p *Provisioner) identity(ctx context.Context, desired Desired) (IdentityProvider, Step, error) {
 	providers, err := p.API.IdentityProviders(ctx, desired.AccountID)
 	if err != nil {
@@ -361,7 +425,7 @@ func (p *Provisioner) group(ctx context.Context, desired Desired, prior State, p
 	return created, Step{Name: "access group", Created: true, Detail: fmt.Sprintf("%d addresses", len(emails))}, nil
 }
 
-func (p *Provisioner) app(ctx context.Context, desired Desired, prior State) (App, Step, error) {
+func (p *Provisioner) app(ctx context.Context, desired Desired, prior State, idp string) (App, Step, error) {
 	apps, err := p.API.AccessApps(ctx, desired.AccountID)
 	if err != nil {
 		return App{}, Step{}, fmt.Errorf("listing access applications: %w", err)
@@ -371,7 +435,7 @@ func (p *Provisioner) app(ctx context.Context, desired Desired, prior State) (Ap
 			return app, Step{Name: "access app", Detail: app.Domain}, nil
 		}
 	}
-	created, err := p.API.CreateAccessApp(ctx, desired.AccountID, AppName, desired.Hostname)
+	created, err := p.API.CreateAccessApp(ctx, desired.AccountID, AppName, desired.Hostname, idp)
 	if err != nil {
 		return App{}, Step{}, fmt.Errorf("creating the access application: %w", err)
 	}

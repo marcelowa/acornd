@@ -8,6 +8,19 @@
  * model in `map.ts` before a component sees them.
  */
 
+/**
+ * The session document, as `GET`, `POST` and `DELETE /api/session` all answer it, so a screen never
+ * has to know which one it asked (ADR 0036 §3–§4). `setup` is the install's state — nobody owns it
+ * yet — and `signedIn` is this browser's. `email` is the cookie's answer, which is empty for a cookie
+ * minted from the install token; `owner` is the address the book records as the admin.
+ */
+export interface WireSession {
+	setup: boolean;
+	owner: string;
+	email: string;
+	signedIn: boolean;
+}
+
 /** One person in a room: their address, and what they are in it. A room has one owner and its guests
  * (ADR 0034 §3); the name is the book's, and the room's record keeps the address alone. */
 export interface WireMember {

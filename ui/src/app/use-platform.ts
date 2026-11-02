@@ -4,7 +4,9 @@ import {
 	addMember,
 	addPerson as addPersonRequest,
 	applyRemote,
+	enableRemote as enableRemoteRequest,
 	forgetRemoteToken,
+	previewRemote as previewRemoteRequest,
 	checkRemote as checkRemoteRequest,
 	fetchProviderAllowlist,
 	fetchProviderCatalog,
@@ -58,6 +60,7 @@ import {
 	type UpdatePrefs,
 	type DoorReport,
 	type ProviderCatalogEntry,
+	type RemotePreview,
 	type RemoteStatus,
 	type UpdateStatus,
 } from "./client";
@@ -405,6 +408,15 @@ export interface Platform {
 	forgetRemote: () => Promise<void>;
 	remoteBusy: boolean;
 	remoteFailure?: string | undefined;
+	/** What the token can see, once somebody checks it: the zones to choose from, and the team domain. */
+	remotePreview?: RemotePreview | undefined;
+	/** A token is being checked. */
+	remotePreviewBusy: boolean;
+	previewRemote: (token: string) => void;
+	/** The file records a door this process did not start with; one press restarts into it. */
+	enableRemote: () => void;
+	remoteRestarting: boolean;
+	remoteRestarted: boolean;
 	/** The last answer from outside, and whether a check is in flight. */
 	remoteCheck?: DoorReport | undefined;
 	/** The provider whose models are being chosen, with the catalog and the list as they stand. */
@@ -1465,7 +1477,10 @@ export function usePlatform(): Platform {
 	const [peopleFailure, setPeopleFailure] = useState<string | undefined>(undefined);
 	const admin = state?.admin === true;
 	useEffect(() => {
-		if (route.screen !== "settings" || route.settingsTab !== "people" || !admin) return;
+		// The book is read as soon as the settings open, not when the People page is picked: the Getting started
+		// checklist on the first page has to know whether anybody has been invited, and a page that lies about
+		// that is worse than one that does not mention it.
+		if (route.screen !== "settings" || !admin || peopleBook !== undefined) return;
 		let cancelled = false;
 		setPeopleLoading(true);
 		setPeopleFailure(undefined);
@@ -1487,7 +1502,7 @@ export function usePlatform(): Platform {
 		return () => {
 			cancelled = true;
 		};
-	}, [route.screen, route.settingsTab, admin]);
+	}, [route.screen, route.settingsTab, admin, peopleBook]);
 
 	/** One write on the book: its answer is the whole document, and a refusal is the page's own sentence. */
 	const writeBook = useCallback((request: Promise<WirePerson[]>): void => {
@@ -1526,6 +1541,10 @@ export function usePlatform(): Platform {
 	const [remote, setRemote] = useState<RemoteStatus | undefined>(undefined);
 	const [remoteFailure, setRemoteFailure] = useState<string | undefined>(undefined);
 	const [remoteBusy, setRemoteBusy] = useState(false);
+	const [remotePreview, setRemotePreview] = useState<RemotePreview | undefined>(undefined);
+	const [remotePreviewBusy, setRemotePreviewBusy] = useState(false);
+	const [remoteRestarting, setRemoteRestarting] = useState(false);
+	const [remoteRestarted, setRemoteRestarted] = useState(false);
 	const [remoteCheck, setRemoteCheck] = useState<DoorReport | undefined>(undefined);
 	const [modelChoice, setModelChoice] = useState<
 		{ provider: ProviderCatalogEntry; allowed: string[] } | undefined
@@ -1616,6 +1635,36 @@ export function usePlatform(): Platform {
 			})
 			.finally(() => setRemoteChecking(false));
 	}, []);
+
+	const previewRemoteNow = useCallback((token: string): void => {
+		setRemotePreviewBusy(true);
+		setRemoteFailure(undefined);
+		void previewRemoteRequest(token)
+			.then(setRemotePreview, (cause: unknown) => {
+				// A token that cannot do this is a sentence about the token, which is what the person pasted.
+				setRemoteFailure(cause instanceof Error ? cause.message : String(cause));
+			})
+			.finally(() => setRemotePreviewBusy(false));
+	}, []);
+
+	const enableRemoteNow = useCallback((): void => {
+		if (remoteRestarting) return;
+		setRemoteRestarting(true);
+		setRemoteFailure(undefined);
+		void enableRemoteRequest().then(
+			(answer) => {
+				// The answer arrives before the process replaces itself: either it is already serving the door, or
+				// it is about to, and the address this page was opened on will not answer again.
+				setRemoteRestarting(false);
+				setRemoteRestarted(true);
+				if (!answer.restarting) setRemotePreview(undefined);
+			},
+			(cause: unknown) => {
+				setRemoteRestarting(false);
+				setRemoteFailure(cause instanceof Error ? cause.message : String(cause));
+			},
+		);
+	}, [remoteRestarting]);
 
 	const refreshUpdate = useCallback((): void => {
 		void fetchUpdateStatus().then(setFetchedUpdate, reportError);
@@ -1784,6 +1833,12 @@ export function usePlatform(): Platform {
 		forgetRemote: forgetRemoteNow,
 		remoteBusy,
 		remoteFailure,
+		remotePreview,
+		remotePreviewBusy,
+		previewRemote: previewRemoteNow,
+		enableRemote: enableRemoteNow,
+		remoteRestarting,
+		remoteRestarted,
 		remoteCheck,
 		modelChoice,
 		openProviderModels,

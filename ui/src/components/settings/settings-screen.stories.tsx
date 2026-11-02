@@ -6,6 +6,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { PeopleSection } from "./people-section";
 import { ProvidersSection } from "./providers-section";
 import { RemoteSection } from "./remote-section";
+import { SessionSectionView } from "./session-section";
 import { SettingsScreen } from "./settings-screen";
 import { Text } from "@/components/typography/text";
 import { UpdatesSection } from "@/components/release/updates-section";
@@ -146,6 +147,17 @@ export const Default: Story = {
 		),
 		install,
 		remote: <RemoteSection onApply={noop} />,
+		session: (
+			<SessionSectionView
+				session={{
+					setup: false,
+					owner: "marcelo@example.com",
+					email: "marcelo@example.com",
+					signedIn: true,
+				}}
+				onSignOut={noop}
+			/>
+		),
 		people: (
 			<PeopleSection
 				people={[]}

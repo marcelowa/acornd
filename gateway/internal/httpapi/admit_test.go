@@ -41,6 +41,17 @@ func book(t *testing.T) *people.Book {
 	return opened
 }
 
+// claimed is a book with an admin: the install has an owner, so the gate is a door and every request
+// needs a proof. A book nobody has claimed is setup mode, and session_test.go is where that lives.
+func claimed(t *testing.T) *people.Book {
+	t.Helper()
+	opened := book(t)
+	if _, err := opened.Claim("owner@example.com", "Owner"); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	return opened
+}
+
 // A request nothing proved never reaches a handler. The route used here is one that answers without any
 // state at all, so the 401 is the door's and not a nil dereference wearing a 500.
 func TestARequestNoDoorProvedIsRefused(t *testing.T) {
@@ -91,10 +102,10 @@ func TestNoGateMeansTheConsoleIsOpen(t *testing.T) {
 // A proof of an address is not permission to use the install. Someone the admin never named is refused
 // with 403 — the proof was good, so signing in again would not help — and nothing is written.
 func TestAnEmailTheAdminNeverNamedIsRefused(t *testing.T) {
-	opened := book(t)
+	opened := claimed(t)
 	handler := admitted(t, Gate{Door: stubDoor{caller: identity.Caller{Email: "stranger@example.com"}}, People: opened})
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/update/status", nil))
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", recorder.Code)
 	}
@@ -105,7 +116,7 @@ func TestAnEmailTheAdminNeverNamedIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(list) != 0 {
+	if len(list) != 1 {
 		t.Errorf("a refused request wrote %v", list)
 	}
 }
@@ -113,29 +124,38 @@ func TestAnEmailTheAdminNeverNamedIsRefused(t *testing.T) {
 // An invited person becomes active on their first real request, which is the moment their personal
 // workspace is created (ADR 0032 §3). One request is one visit, and the visit is recorded.
 func TestAnInvitedPersonIsActiveAfterTheirFirstRequest(t *testing.T) {
-	opened := book(t)
+	opened := claimed(t)
 	if _, err := opened.Add("ana@example.com", "Ana"); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	handler := admitted(t, Gate{Door: stubDoor{caller: identity.Caller{Email: "ana@example.com"}}, People: opened})
+	// The door alone, in front of a handler that only records that it ran: the routes this suite can
+	// reach without a workspace are the install's own, and those would refuse a member for a different
+	// reason than the one this test is about.
+	var reached bool
+	server := New(nil, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<!doctype html>")}}, nil,
+		Gate{Door: stubDoor{caller: identity.Caller{Email: "ana@example.com"}}, People: opened})
+	handler := server.admit(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusOK)
+	}))
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want the client the handler serves", recorder.Code)
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/state", nil))
+	if recorder.Code != http.StatusOK || !reached {
+		t.Fatalf("status = %d, reached = %v, want the door to let her through", recorder.Code, reached)
 	}
-	list, err := opened.List()
-	if err != nil || len(list) != 1 {
-		t.Fatalf("list = %v, %v", list, err)
+	ana, found, err := opened.Find("ana@example.com")
+	if err != nil || !found {
+		t.Fatalf("find = %v, %v", found, err)
 	}
-	if list[0].State != people.Active {
-		t.Errorf("state = %q, want active", list[0].State)
+	if ana.State != people.Active {
+		t.Errorf("state = %q, want active", ana.State)
 	}
 }
 
 // Someone the admin removed is refused from their next request on, with the reason rather than a 401: a
 // door that says "sign in" to a person who was revoked sends them round a loop they cannot leave.
 func TestARevokedPersonIsRefused(t *testing.T) {
-	opened := book(t)
+	opened := claimed(t)
 	if _, err := opened.Add("ana@example.com", "Ana"); err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -144,7 +164,7 @@ func TestARevokedPersonIsRefused(t *testing.T) {
 	}
 	handler := admitted(t, Gate{Door: stubDoor{caller: identity.Caller{Email: "ana@example.com"}}, People: opened})
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/update/status", nil))
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", recorder.Code)
 	}
@@ -326,5 +346,19 @@ func TestTheAdminsAddressMayDoTheInstallsBusiness(t *testing.T) {
 	other.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/update/status", nil))
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("ana reached the install's business: %d", recorder.Code)
+	}
+}
+
+// A door with no book has no allowlist, so nobody but the admin passes it: the entry point always opens a
+// book, and a gate without one is a configuration mistake rather than an open console.
+func TestADoorWithNoBookAdmitsNobodyButTheAdmin(t *testing.T) {
+	handler := admitted(t, Gate{Door: stubDoor{caller: identity.Caller{Email: "ana@example.com"}}})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/update/status", nil))
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", recorder.Code)
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, "no book of people") {
+		t.Errorf("the refusal does not say what is missing: %q", body)
 	}
 }

@@ -1,6 +1,8 @@
 # ADR 0033 — A browser reaches the machine through a tunnel we configure
 
-Status: accepted (2026-10-30), built; the API token is stored (amended 2026-10-31)
+Status: accepted (2026-10-30), built; the API token is stored (amended 2026-10-31); the door comes from
+`remote.json` and the environment is its override (amended by
+[ADR 0036](0036-a-console-that-sets-itself-up.md) §5)
 Date: 2026-10-30
 
 ## Context

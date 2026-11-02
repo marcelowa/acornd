@@ -21,6 +21,8 @@ import { ProviderModelsDialog } from "@/components/settings/provider-models-dial
 import { PeopleSection } from "@/components/settings/people-section";
 import { ProvidersSection } from "@/components/settings/providers-section";
 import { RemoteSection } from "@/components/settings/remote-section";
+import { SessionSection } from "@/components/settings/session-section";
+import { SetupChecklist } from "@/components/settings/setup-checklist";
 import { SecretsSection } from "@/components/settings/secrets-section";
 import { SecretRequestDialog } from "@/components/secrets/secret-request-dialog";
 import { ProviderLoginDialog } from "@/components/settings/provider-login-dialog";
@@ -495,11 +497,17 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 	const remote = (
 		<RemoteSection
 			status={platform.remote}
+			preview={platform.remotePreview}
+			previewBusy={platform.remotePreviewBusy}
+			restarting={platform.remoteRestarting}
+			restarted={platform.remoteRestarted}
 			failure={platform.remoteFailure}
 			busy={platform.remoteBusy}
 			check={platform.remoteCheck}
 			checking={platform.remoteChecking}
 			onCheck={platform.checkRemote}
+			onPreview={platform.previewRemote}
+			onEnable={platform.enableRemote}
 			onApply={(request) => {
 				void platform.applyRemote(request);
 			}}
@@ -514,6 +522,23 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			status={platform.update}
 			onSavePrefs={platform.setUpdatePrefs}
 			onOpenReleases={() => platform.showUpdate()}
+		/>
+	);
+
+	// Who this browser is, and the press that signs it out. The section reads its own session, because
+	// the settings page is allowed to open long after the gate asked.
+	const session = <SessionSection />;
+
+	// What a new install still needs. The facts are the ones the console already has; the book is read when the
+	// settings open, which is what makes the last step honest (ADR 0036 §7).
+	const setup = (
+		<SetupChecklist
+			hasProvider={platform.providers.some((provider) => provider.authenticated)}
+			hasModel={platform.model.value !== ""}
+			remoteConfigured={platform.remote?.configured === true}
+			remoteRestartRequired={platform.remote?.restartRequired === true}
+			memberCount={platform.people?.people.length}
+			onOpen={platform.showSettingsTab}
 		/>
 	);
 
@@ -610,6 +635,8 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 				install={install}
 				remote={remote}
 				people={people}
+				session={session}
+				setup={setup}
 				admin={platform.admin}
 				version={platform.update?.current}
 				onClose={() => platform.showScreen("conversation")}

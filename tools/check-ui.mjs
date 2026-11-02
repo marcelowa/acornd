@@ -11,7 +11,7 @@
 // for one: the checks that did are in the history, with the toggle they pressed.
 //
 // Needs a gateway on --addr; run with: bun run tools/check-ui.mjs [url]
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import puppeteer from "puppeteer-core";
 
@@ -99,6 +99,38 @@ async function showConversationWithContent(page) {
 	return true;
 }
 
+/**
+ * The console is closed from the first minute (ADR 0036 §3), so the suite has to be somebody before it can
+ * drive anything: it claims the fresh install the make target started, with the code that install printed, and
+ * keeps the session cookie the claim hands back. A folder that is already claimed signs in with its token
+ * instead, which is what a second run against the same folder does.
+ */
+async function signInCookie() {
+	const dir = process.env.ACORND_UI_DIR;
+	if (dir === undefined) throw new Error("ACORND_UI_DIR is not set: the suite cannot sign in");
+	const respond = async (path, body, label) => {
+		const response = await fetch(`${url}${path}`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(body),
+		});
+		if (!response.ok) throw new Error(`${label}: ${response.status} ${(await response.text()).trim()}`);
+		const pair = (response.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+		const value = pair.slice(pair.indexOf("=") + 1);
+		if (value === "") throw new Error(`${label}: no session cookie came back`);
+		return value;
+	};
+	try {
+		const code = readFileSync(join(dir, "setup-code"), "utf8").trim();
+		return await respond("/api/setup/claim", { code, email: "ui-check@example.com", name: "UI Check" }, "claiming the install");
+	} catch {
+		const token = readFileSync(join(dir, "token"), "utf8").trim();
+		return await respond("/api/session", { secret: token }, "signing in");
+	}
+}
+
+const cookie = await signInCookie();
+
 const browser = await puppeteer.launch({
 	executablePath: chrome,
 	headless: true,
@@ -107,6 +139,14 @@ const browser = await puppeteer.launch({
 
 try {
 	const page = await browser.newPage();
+	await page.setCookie({
+		name: "acornd_session",
+		value: cookie,
+		domain: new URL(url).hostname,
+		path: "/",
+		httpOnly: true,
+		sameSite: "Lax",
+	});
 	// The app asks before renaming, and a modal dialog blocks the renderer: a stray click on
 	// Rename would otherwise wedge the whole run, close included.
 	page.on("dialog", (dialog) => void dialog.dismiss());
@@ -120,7 +160,10 @@ try {
 		// 409, and something that is not there is a 404, which is what a non-member and a missing
 		// workspace both answer (ADR 0032 §4) — and the app shows it in the error strip.
 		if (/Failed to load resource.*(404|409)/.test(message.text())) return;
-		problems.push(`console: ${message.text()}`);
+		// The URL is what makes a "403" a finding rather than a number: the console message itself names only the
+		// status, and the request it belongs to is the one thing a reader needs.
+		const where = message.location()?.url ?? "";
+		problems.push(`console: ${message.text()}${where === "" ? "" : ` (${where})`}`);
 	});
 	page.on("pageerror", (error) => problems.push(`page: ${error.message}`));
 	page.on("requestfailed", (request) => {

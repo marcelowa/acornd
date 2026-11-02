@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,20 +19,24 @@ import (
 // fake is a Cloudflare account in memory. Every call is recorded, so a test can assert not only what was
 // created but that a second run created nothing at all.
 type fake struct {
-	calls     []string
-	tunnels   []Tunnel
-	records   []DNSRecord
-	idps      []IdentityProvider
-	groups    []Group
-	apps      []App
-	policies  []Policy
-	failOn    string
-	nextID    int
-	accountID string
-	ingress   string
+	calls      []string
+	tunnels    []Tunnel
+	records    []DNSRecord
+	idps       []IdentityProvider
+	groups     []Group
+	apps       []App
+	policies   []Policy
+	failOn     string
+	nextID     int
+	orgAccount string
+	ingress    string
+	teamDomain string
+	appIDP     string
+	// visible is what the token can see, which is the question the setup screen asks before an apply.
+	visible []Zone
 }
 
-func newFake() *fake { return &fake{accountID: "acc"} }
+func newFake() *fake { return &fake{teamDomain: "team.cloudflareaccess.com"} }
 
 func (f *fake) id() string {
 	f.nextID++
@@ -56,6 +61,15 @@ func (f *fake) created() []string {
 		}
 	}
 	return out
+}
+
+// Zones is the setup screen's first question: what can this token see. It records the call like the rest, so a test
+// can assert the preview asked without creating anything.
+func (f *fake) Zones(context.Context) ([]Zone, error) {
+	if err := f.record("zones"); err != nil {
+		return nil, err
+	}
+	return f.visible, nil
 }
 
 func (f *fake) Tunnels(context.Context, string) ([]Tunnel, error) {
@@ -142,6 +156,13 @@ func (f *fake) CreateOneTimePIN(context.Context, string) (IdentityProvider, erro
 	return provider, nil
 }
 
+func (f *fake) AccessOrganization(_ context.Context, account string) (string, error) {
+	if err := f.record("accessOrganization"); err != nil {
+		return "", err
+	}
+	f.orgAccount = account
+	return f.teamDomain, nil
+}
 func (f *fake) AccessGroups(context.Context, string) ([]Group, error) {
 	if err := f.record("accessGroups"); err != nil {
 		return nil, err
@@ -178,10 +199,11 @@ func (f *fake) AccessApps(context.Context, string) ([]App, error) {
 	return f.apps, nil
 }
 
-func (f *fake) CreateAccessApp(_ context.Context, _, name, hostname string) (App, error) {
+func (f *fake) CreateAccessApp(_ context.Context, _, name, hostname, idp string) (App, error) {
 	if err := f.record("createAccessApp"); err != nil {
 		return App{}, err
 	}
+	f.appIDP = idp
 	app := App{ID: f.id(), Name: name, Domain: hostname, Audience: f.id()}
 	f.apps = append(f.apps, app)
 	return app, nil
@@ -228,13 +250,79 @@ func TestTheFirstApplyCreatesEverything(t *testing.T) {
 	if state.Audience == "" {
 		t.Error("the application's audience tag was not recorded, and an assertion is checked against it")
 	}
-	if len(steps) != 7 {
+	if api.appIDP != state.IdentityID {
+		t.Errorf("the application was made for provider %q, want the one this apply created (%q): a browser has to see the PIN form", api.appIDP, state.IdentityID)
+	}
+	if len(steps) != 8 {
 		t.Fatalf("%d steps, want one per piece", len(steps))
 	}
 	for _, step := range steps {
 		if !step.Created {
 			t.Errorf("%s was not reported as created", step.Name)
 		}
+	}
+}
+
+// The team domain is what the door's issuer and keys URL are made of, and the apply is what learns it: read
+// from the account, written beside the ids, and reported as a step of its own. The first run is the one that
+// found it; every run after keeps it (ADR 0036 §5).
+func TestTheApplyRecordsTheTeamDomain(t *testing.T) {
+	api := newFake()
+	state, steps, err := (&Provisioner{API: api}).Apply(context.Background(), desired(), State{}, []string{"ana@example.com"})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if state.TeamDomain != "team.cloudflareaccess.com" {
+		t.Errorf("team domain = %q, want the account's", state.TeamDomain)
+	}
+	if api.orgAccount != "acc" {
+		t.Errorf("the team domain was read for account %q, want the one the zone named", api.orgAccount)
+	}
+	if !slices.Contains(api.calls, "accessOrganization") {
+		t.Errorf("the apply never asked the account for its team domain: %v", api.calls)
+	}
+	found := false
+	for _, step := range steps {
+		if step.Name == "team domain" {
+			found = step.Created && step.Detail == "team.cloudflareaccess.com"
+		}
+	}
+	if !found {
+		t.Errorf("the team domain was not reported as learned: %+v", steps)
+	}
+
+	// The second apply finds the same domain and keeps it, so a boot says nothing changed.
+	_, steps, err = (&Provisioner{API: api}).Apply(context.Background(), desired(), state, []string{"ana@example.com"})
+	if err != nil {
+		t.Fatalf("second apply: %v", err)
+	}
+	for _, step := range steps {
+		if step.Name == "team domain" && step.Created {
+			t.Errorf("the second apply reported the team domain as newly learned: %+v", step)
+		}
+	}
+}
+
+// The same file round-trips the domain through an apply and a write, because a boot reads it from there rather
+// than from four variables.
+func TestTheTeamDomainIsSavedWithTheRest(t *testing.T) {
+	dir := t.TempDir()
+	state, _, err := (&Provisioner{API: newFake()}).Apply(context.Background(), desired(), State{}, nil)
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if err := Save(dir, Setup{Desired: desired(), State: state}, time.Now()); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if loaded.State.TeamDomain != "team.cloudflareaccess.com" {
+		t.Errorf("the saved state holds %q", loaded.State.TeamDomain)
+	}
+	if env := loaded.Env(); env["ACORND_IDENTITY_ISSUER"] != "https://team.cloudflareaccess.com" {
+		t.Errorf("a saved setup names no issuer: %v", env)
 	}
 }
 
@@ -339,7 +427,9 @@ func TestWhatAlreadyExistsIsAdopted(t *testing.T) {
 		t.Errorf("state = %+v, want the ids that were already there", state)
 	}
 	for _, step := range steps {
-		if step.Created && step.Name != "access group" {
+		// The group is rewritten and the team domain is learned: neither is a thing this account already had,
+		// and everything else was found rather than made.
+		if step.Created && step.Name != "access group" && step.Name != "team domain" {
 			t.Errorf("%s was created although it existed", step.Name)
 		}
 	}
@@ -375,8 +465,11 @@ func TestAFailureKeepsWhatItHadAlreadyWritten(t *testing.T) {
 	if state.AppID != "" {
 		t.Errorf("the failed step recorded an id: %+v", state)
 	}
-	if len(steps) != 5 {
-		t.Errorf("%d steps reported, want the five that finished", len(steps))
+	if state.TeamDomain == "" {
+		t.Error("the team domain was not recorded, and the door is made of it")
+	}
+	if len(steps) != 6 {
+		t.Errorf("%d steps reported, want the six that finished", len(steps))
 	}
 }
 
@@ -466,6 +559,66 @@ func TestAZoneNamesItsAccount(t *testing.T) {
 	}
 }
 
+// The setup screen's first question, answered by the account: every zone this token can see, each with the account
+// it lives in, because that is where the tunnel will be made (ADR 0036 §6).
+func TestTheZonesAreWhatTheTokenCanSee(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/zones" || r.URL.Query().Get("per_page") != "50" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"success":true,"result":[` +
+			`{"id":"z1","name":"acornd.app","account":{"id":"a1"}},` +
+			`{"id":"z2","name":"example.com","account":{"id":"a2"}}]}`))
+	}))
+	defer server.Close()
+	zones, err := (&Client{Token: "t", Base: server.URL}).Zones(context.Background())
+	if err != nil {
+		t.Fatalf("zones: %v", err)
+	}
+	want := []Zone{{ID: "z1", Name: "acornd.app", Account: "a1"}, {ID: "z2", Name: "example.com", Account: "a2"}}
+	if !slices.Equal(zones, want) {
+		t.Errorf("zones = %+v, want %+v", zones, want)
+	}
+}
+
+// A token that cannot list zones is refused in the client's own words, naming the permission the screen has to tell
+// the person to add (ADR 0033 §2).
+func TestTheZonesCallNamesThePermissionItNeeded(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"success":false,"errors":[{"code":9109,"message":"Unauthorized to access requested resource"}]}`))
+	}))
+	defer server.Close()
+	_, err := (&Client{Token: "t", Base: server.URL}).Zones(context.Background())
+	if err == nil {
+		t.Fatal("a refused call reported success")
+	}
+	if !strings.Contains(err.Error(), string(scopeDNS)) {
+		t.Errorf("the refusal does not name the scope: %v", err)
+	}
+}
+
+// The account's own login domain, read from the endpoint that has always held it: the apply no longer asks a
+// person for a value Cloudflare already knows.
+func TestTheAccountNamesItsTeamDomain(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/accounts/acc/access/organizations" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"success":true,"result":{"auth_domain":"acornd.cloudflareaccess.com"}}`))
+	}))
+	defer server.Close()
+	domain, err := (&Client{Token: "t", Base: server.URL}).AccessOrganization(context.Background(), "acc")
+	if err != nil {
+		t.Fatalf("organization: %v", err)
+	}
+	if domain != "acornd.cloudflareaccess.com" {
+		t.Errorf("domain = %q", domain)
+	}
+}
+
 // A group is a list of include rules, one per address: what is read back is what was written.
 func TestAGroupIsAListOfAddresses(t *testing.T) {
 	var posted map[string]any
@@ -487,13 +640,37 @@ func TestAGroupIsAListOfAddresses(t *testing.T) {
 	}
 }
 
+// The application is the door's own settings: a session of a month, which is Access's ceiling, and the one-time
+// PIN as the only identity provider — so a browser is asked for an address rather than offered a picker. A
+// browser off the policy is still refused, which is what the policy is for (ADR 0036 §6).
+func TestTheAccessAppIsAMonthAndThePINIsTheOnlyWayIn(t *testing.T) {
+	var posted map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&posted)
+		_, _ = w.Write([]byte(`{"success":true,"result":{"id":"a1","name":"acornd","domain":"console.example.com","aud":"aud-1"}}`))
+	}))
+	defer server.Close()
+	if _, err := (&Client{Token: "t", Base: server.URL}).CreateAccessApp(context.Background(), "acc", AppName, "console.example.com", "idp-1"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if posted["session_duration"] != "720h" {
+		t.Errorf("session_duration = %v, want 720h (a month is written as hours; the API refused \"1mo\")", posted["session_duration"])
+	}
+	if posted["auto_redirect_to_identity"] != true {
+		t.Errorf("auto_redirect_to_identity = %v, want true", posted["auto_redirect_to_identity"])
+	}
+	if got, _ := posted["allowed_idps"].([]any); !reflect.DeepEqual(got, []any{"idp-1"}) {
+		t.Errorf("allowed_idps = %v, want only the one-time PIN", posted["allowed_idps"])
+	}
+}
+
 // The setup file is the record: it holds the tunnel's token, so it is 0600, and it is written whole so a crash
 // leaves either the old state or the new one.
 func TestTheSetupIsAFileWithItsToken(t *testing.T) {
 	dir := t.TempDir()
 	setup := Setup{
 		Desired:  Desired{Hostname: "testing.acornd.app", ZoneID: "z", AccountID: "a"},
-		State:    State{TunnelID: "t", TunnelToken: "secret", AppID: "app", Audience: "aud"},
+		State:    State{TunnelID: "t", TunnelToken: "secret", AppID: "app", Audience: "aud", TeamDomain: "team.cloudflareaccess.com"},
 		APIToken: "api-token",
 	}
 	if err := Save(dir, setup, time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)); err != nil {
@@ -512,6 +689,12 @@ func TestTheSetupIsAFileWithItsToken(t *testing.T) {
 	}
 	if loaded.State.TunnelToken != "secret" || loaded.Desired.Hostname != "testing.acornd.app" || loaded.APIToken != "api-token" {
 		t.Errorf("loaded = %+v", loaded)
+	}
+	if loaded.State.TeamDomain != "team.cloudflareaccess.com" {
+		t.Errorf("the team domain did not survive the file: %+v", loaded.State)
+	}
+	if payload, err := os.ReadFile(filepath.Join(dir, File)); err != nil || !strings.Contains(string(payload), `"team_domain"`) {
+		t.Errorf("the file does not name the team domain it holds (%v): %s", err, payload)
 	}
 	if loaded.Updated != "2026-10-30T12:00:00Z" {
 		t.Errorf("updated = %q", loaded.Updated)
@@ -544,11 +727,12 @@ func TestASetupThatCannotBeReadIsReported(t *testing.T) {
 	}
 }
 
-// The three values the door needs, derived from the audience and the team's domain, so nobody has to remember
-// what the certs URL is.
+// The four values the door needs, derived from the audience and the team's domain, so nobody has to remember
+// what the certs URL is. The scheme is part of the issuer: a claim is compared against it byte for byte, and a
+// bare host there is a door that refuses every assertion the edge signs (ADR 0036 §5).
 func TestTheSetupNamesTheIdentityConfiguration(t *testing.T) {
-	setup := Setup{State: State{Audience: "aud-1"}}
-	env := setup.Env("https://team.cloudflareaccess.com/")
+	setup := Setup{State: State{Audience: "aud-1", TeamDomain: "team.cloudflareaccess.com/"}}
+	env := setup.Env()
 	for name, want := range map[string]string{
 		"ACORND_IDENTITY":          "access",
 		"ACORND_IDENTITY_AUDIENCE": "aud-1",
@@ -557,6 +741,21 @@ func TestTheSetupNamesTheIdentityConfiguration(t *testing.T) {
 	} {
 		if env[name] != want {
 			t.Errorf("%s = %q, want %q", name, env[name], want)
+		}
+	}
+}
+
+// A half-finished apply has no team domain, so there is no issuer to compare and no certs URL to fetch. The
+// values are empty rather than the strings "https://" and "https:///cdn-cgi/access/certs", which would be a
+// door built out of nothing.
+func TestASetupWithNoTeamDomainNamesNoIssuer(t *testing.T) {
+	env := (Setup{State: State{Audience: "aud-1"}}).Env()
+	if env["ACORND_IDENTITY_AUDIENCE"] != "aud-1" {
+		t.Errorf("the audience was dropped: %q", env["ACORND_IDENTITY_AUDIENCE"])
+	}
+	for _, name := range []string{"ACORND_IDENTITY_ISSUER", "ACORND_IDENTITY_KEYS"} {
+		if env[name] != "" {
+			t.Errorf("%s = %q, want empty while there is no team domain", name, env[name])
 		}
 	}
 }
