@@ -26,7 +26,6 @@ type fakeCloudflare struct {
 	zones      map[string]remote.Zone
 	zoneErr    error
 	tunnels    []remote.Tunnel
-	ingress    string
 	records    []remote.DNSRecord
 	groups     []remote.Group
 	apps       []remote.App
@@ -34,6 +33,7 @@ type fakeCloudflare struct {
 	idps       []remote.IdentityProvider
 	nextID     int
 	createdIn  []string
+	ingress    remote.Route
 	teamDomain string
 	// onGroupWrite runs after a group is created or rewritten: a test that needs the book to move while the apply
 	// is in the air hangs the change here, because that is the only place the two orders can be made to differ.
@@ -86,12 +86,12 @@ func (f *fakeCloudflare) TunnelToken(context.Context, string, string) (string, e
 	return "token", nil
 }
 
-func (f *fakeCloudflare) TunnelIngress(context.Context, string, string) (string, error) {
+func (f *fakeCloudflare) TunnelRoute(context.Context, string, string) (remote.Route, error) {
 	return f.ingress, nil
 }
 
-func (f *fakeCloudflare) SetTunnelIngress(_ context.Context, _, _, _, service string) error {
-	f.ingress = service
+func (f *fakeCloudflare) SetTunnelIngress(_ context.Context, _, _, hostname, service string) error {
+	f.ingress = remote.Route{Hostname: hostname, Service: service}
 	f.createdIn = append(f.createdIn, "ingress")
 	return nil
 }

@@ -114,7 +114,7 @@ type API interface {
 	Tunnels(ctx context.Context, account string) ([]Tunnel, error)
 	CreateTunnel(ctx context.Context, account, name string) (Tunnel, error)
 	TunnelToken(ctx context.Context, account, tunnel string) (string, error)
-	TunnelIngress(ctx context.Context, account, tunnel string) (string, error)
+	TunnelRoute(ctx context.Context, account, tunnel string) (Route, error)
 	SetTunnelIngress(ctx context.Context, account, tunnel, hostname, service string) error
 	UpdateCNAME(ctx context.Context, zone string, record DNSRecord, target string) (DNSRecord, error)
 	DNSRecords(ctx context.Context, zone, hostname string) ([]DNSRecord, error)
@@ -137,6 +137,13 @@ type API interface {
 type Tunnel struct {
 	ID   string
 	Name string
+}
+
+// Route is the one rule a tunnel holds: the hostname it answers for, and the service behind it. Both matter:
+// two installs can point their tunnels at the same loopback port on two different machines.
+type Route struct {
+	Hostname string
+	Service  string
 }
 
 // DNSRecord is one record in the zone.
@@ -265,14 +272,39 @@ func (p *Provisioner) tunnel(ctx context.Context, desired Desired, prior State) 
 	if err != nil {
 		return Tunnel{}, Step{}, fmt.Errorf("listing tunnels: %w", err)
 	}
-	if found, ok := pickTunnel(tunnels, prior.TunnelID, TunnelName); ok {
+	name := tunnelNameFor(desired.Hostname)
+	if found, ok := pickTunnel(tunnels, prior.TunnelID, ""); ok {
+		ours, err := p.owns(ctx, desired, prior, found.ID)
+		if err != nil {
+			return Tunnel{}, Step{}, err
+		}
+		if ours {
+			return found, Step{Name: "tunnel", Detail: found.Name}, nil
+		}
+	}
+	if found, ok := pickTunnel(tunnels, "", name); ok {
 		return found, Step{Name: "tunnel", Detail: found.Name}, nil
 	}
-	created, err := p.API.CreateTunnel(ctx, desired.AccountID, TunnelName)
+	created, err := p.API.CreateTunnel(ctx, desired.AccountID, name)
 	if err != nil {
 		return Tunnel{}, Step{}, fmt.Errorf("creating the tunnel: %w", err)
 	}
 	return created, Step{Name: "tunnel", Created: true, Detail: created.Name}, nil
+}
+
+// owns reports whether a tunnel is this install's. A tunnel whose one rule names another hostname belongs to
+// another install in the same Cloudflare account — the account is shared, and adopting it would leave this door
+// pointing at that host, which is a 404 for the hostname the person just asked for. A rename of this install's
+// own hostname is still ours, which is why the state's previous hostname counts too.
+func (p *Provisioner) owns(ctx context.Context, desired Desired, prior State, tunnel string) (bool, error) {
+	route, err := p.API.TunnelRoute(ctx, desired.AccountID, tunnel)
+	if err != nil {
+		return false, fmt.Errorf("reading the tunnel's route: %w", err)
+	}
+	if route.Hostname == "" || strings.EqualFold(route.Hostname, desired.Hostname) {
+		return true, nil
+	}
+	return prior.Hostname != "" && strings.EqualFold(route.Hostname, prior.Hostname), nil
 }
 
 // token is the tunnel's own credential: read when this apply made the tunnel, and otherwise carried over from
@@ -296,11 +328,13 @@ func (p *Provisioner) token(ctx context.Context, desired Desired, prior State, t
 // It is read before it is written, so a second apply leaves it alone and the reconcile stays a no-op.
 func (p *Provisioner) ingress(ctx context.Context, desired Desired, tunnel string) (Step, error) {
 	want := desired.local()
-	current, err := p.API.TunnelIngress(ctx, desired.AccountID, tunnel)
+	current, err := p.API.TunnelRoute(ctx, desired.AccountID, tunnel)
 	if err != nil {
 		return Step{}, fmt.Errorf("reading the tunnel's route: %w", err)
 	}
-	if current == want {
+	// The hostname is half the rule. Comparing only the service is what let a second install keep a route that
+	// names the first install's hostname: the port matched, the door did not, and the browser got the catch-all.
+	if strings.EqualFold(current.Hostname, desired.Hostname) && strings.TrimSpace(current.Service) == want {
 		return Step{Name: "ingress", Detail: want}, nil
 	}
 	// The rule names the hostname rather than matching everything: Cloudflare refuses a catch-all first rule,
@@ -473,6 +507,30 @@ func pickTunnel(tunnels []Tunnel, id, name string) (Tunnel, bool) {
 		}
 	}
 	return Tunnel{}, false
+}
+
+// tunnelNameFor is the tunnel this install makes its own. One per hostname, because a Cloudflare account is
+// shared and a tunnel holds one route: two installs that both called theirs "acornd" joined one tunnel, and the
+// second hostname fell through to the catch-all. The state's tunnel id keeps an install on the tunnel it made.
+func tunnelNameFor(hostname string) string {
+	label := strings.SplitN(strings.ToLower(strings.TrimSpace(hostname)), ".", 2)[0]
+	var kept strings.Builder
+	for _, r := range label {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-':
+			kept.WriteRune(r)
+		default:
+			kept.WriteRune('-')
+		}
+	}
+	clean := strings.Trim(kept.String(), "-")
+	if len(clean) > 40 {
+		clean = strings.Trim(clean[:40], "-")
+	}
+	if clean == "" {
+		return TunnelName
+	}
+	return "acornd-" + clean
 }
 
 // normalise is the address list as Access wants it: lowercase, trimmed, sorted, and without repeats, so two
