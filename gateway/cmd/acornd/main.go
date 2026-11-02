@@ -143,6 +143,7 @@ func serve(argv []string) error {
 	if err := flags.Parse(argv); err != nil {
 		return err
 	}
+	startWithKVMGroup(argv) // the kvm group this session may be missing; see kvmsg.go
 
 	if *detach {
 		return startDetached(argv, *dataDir, *host, *port)

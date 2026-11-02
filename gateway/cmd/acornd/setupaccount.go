@@ -160,14 +160,15 @@ func accountID(value string) (uint32, error) {
 // question; for another one it is the same binary run with that account's credentials, which is
 // how root can ask without sudo, without a password, and without a shell.
 func probeAs(who setupAccount, dataDir string) (setupReport, error) {
+	if report, ok := probeInProcess(who, dataDir); ok {
+		return report, nil
+	}
 	current, err := user.Current()
 	if err != nil {
 		return setupReport{}, err
 	}
-	if current.Username == who.Name {
-		return gatherSetup(dataDir), nil
-	}
-	if os.Geteuid() != 0 {
+	sameAccount := current.Username == who.Name
+	if !sameAccount && os.Geteuid() != 0 {
 		return setupReport{}, fmt.Errorf("cannot check %s from this account: run setup as %s", who.Name, who.Name)
 	}
 	executable, err := os.Executable()
@@ -178,10 +179,7 @@ func probeAs(who setupAccount, dataDir string) (setupReport, error) {
 	if err != nil {
 		return setupReport{}, err
 	}
-	command := exec.Command(executable, "setup", "--probe", "--data-dir", dataDir)
-	if attr := credentialFor(who.UID, who.GID, groupIDs); attr != nil {
-		command.SysProcAttr = attr
-	}
+	command := probeCommand(executable, dataDir, sameAccount, who, groupIDs)
 	// The child's environment is the account's, not root's: PATH decides which bwrap and pasta it
 	// finds, and HOME decides nothing (the folder is passed) but a sessionless root's env would
 	// still be a lie about whose machine this is.
@@ -200,6 +198,35 @@ func probeAs(who setupAccount, dataDir string) (setupReport, error) {
 		return setupReport{}, fmt.Errorf("checking as %s: %w", who.Name, err)
 	}
 	return decodeProbe(output)
+}
+
+// probeInProcess answers in this process when the account is this one and the session is not missing a group the
+// account has: that is the cheap path, and the only one that needs no child.
+func probeInProcess(who setupAccount, dataDir string) (setupReport, bool) {
+	current, err := user.Current()
+	if err != nil || current.Username != who.Name {
+		return setupReport{}, false
+	}
+	if kvmGroupNeeded() {
+		return setupReport{}, false
+	}
+	return gatherSetup(dataDir), true
+}
+
+// probeCommand is the probe as a child: the same account but a session missing the kvm group goes through sg,
+// which lends it; another account is given that account's ids and groups directly.
+func probeCommand(executable, dataDir string, sameAccount bool, who setupAccount, groupIDs []uint32) *exec.Cmd {
+	if sameAccount {
+		line := sgQuote(executable) + " setup --probe --data-dir " + sgQuote(dataDir)
+		command := exec.Command("sg", "kvm", "-c", line)
+		command.Env = append(os.Environ(), "ACORND_KVM_SG=1")
+		return command
+	}
+	command := exec.Command(executable, "setup", "--probe", "--data-dir", dataDir)
+	if attr := credentialFor(who.UID, who.GID, groupIDs); attr != nil {
+		command.SysProcAttr = attr
+	}
+	return command
 }
 
 // groupIDsFor is every group the account is in, which is what a login would give it.
