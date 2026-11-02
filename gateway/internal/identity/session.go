@@ -76,6 +76,8 @@ func (s Session) Mint(email string, admin bool) (*http.Cookie, error) {
 	}
 	payload := encodePart(role+":"+email) + "." +
 		encodePart(strconv.FormatInt(s.now().Add(sessionLifetime).Unix(), 10))
+	// #nosec G124 -- Secure is set by the caller from the request, which is the only party that knows whether
+	// the browser arrived over TLS (identity.OverTLS); HttpOnly and SameSite are here.
 	return &http.Cookie{
 		Name:     SessionCookie,
 		Value:    payload + "." + encodePart(string(s.sign(key, payload))),
@@ -190,6 +192,7 @@ func (s Session) now() time.Time {
 // ClearSession is the cookie that removes a session: the same name, path and flags as a minted one,
 // empty and already expired, so a browser drops it rather than keeping a copy under another path.
 func ClearSession(r *http.Request) *http.Cookie {
+	// #nosec G124 -- Secure comes from the request on the line below; HttpOnly and SameSite are here.
 	return &http.Cookie{
 		Name:     SessionCookie,
 		Value:    "",
