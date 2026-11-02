@@ -71,7 +71,50 @@ want="$(grep " $asset\$" "$DIR/sha256sums.txt" | cut -d" " -f1)"
 [ "$(sum "$DIR/acornd")" = "$want" ] || { echo "install.sh: CHECKSUM MISMATCH, refusing"; exit 1; }
 echo "install.sh: checksum OK"
 chmod +x "$DIR/acornd"
-BIN="$DIR/acornd"
+BIN="$(cd "$DIR" && pwd)/acornd"
+
+# Put acornd on PATH without asking anyone to export it. Two ways, both silent when they do not apply: a
+# link in a folder PATH already holds takes effect in every new command at once, and a marked block in the
+# shell's own file survives a new terminal. A shell that is already running cannot be changed from here —
+# no child process can — so what is left to do is open one, never to type an export.
+link_into_path() {
+	for dir in /usr/local/bin "$HOME/.local/bin"; do
+		[ -d "$dir" ] && [ -w "$dir" ] || continue
+		case ":$PATH:" in *":$dir:"*) ;; *) continue ;; esac
+		ln -sf "$BIN" "$dir/acornd" 2>/dev/null || continue
+		echo "install.sh: $dir/acornd → $BIN"
+		return 0
+	done
+	return 1
+}
+
+add_to_rc() {
+	file="$1"
+	[ -f "$file" ] || return 0
+	grep -qF '# acornd: path' "$file" 2>/dev/null && return 0
+	{
+		printf '\n# acornd: path\n'
+		printf 'case ":$PATH:" in *":%s:"*) ;; *) PATH="%s:$PATH" ;; esac\n' "$DIR" "$DIR"
+		printf 'export PATH\n'
+	} >>"$file" 2>/dev/null || return 0
+	echo "install.sh: $file now has $DIR on PATH"
+}
+
+case ":$PATH:" in *":$DIR:"*) ;; *)
+	link_into_path || true
+	rc_any=""
+	for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+		[ -f "$rc" ] && rc_any=1
+		add_to_rc "$rc"
+	done
+	if [ -z "$rc_any" ]; then
+		case "${SHELL:-}" in
+			*/zsh) rc="$HOME/.zshrc" ;;
+			*) rc="$HOME/.bashrc" ;;
+		esac
+		: >"$rc" && add_to_rc "$rc"
+	fi
+	;; esac
 
 # The machine first, and only as far as it can go without a password: setup runs the steps it can,
 # prints the rest as commands, and never makes the install depend on this succeeding — a console that
@@ -96,6 +139,6 @@ fi
 cat <<EOF
 
 install.sh: next
-  export PATH="\$PATH:$DIR"
   $( [ "$START" = "1" ] && echo "open the address above to claim this install" || echo "acornd start -d" )
+  a shell that was already open keeps its PATH: open a new terminal, or source the file named above
 EOF
