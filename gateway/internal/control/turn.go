@@ -312,6 +312,11 @@ func (c *Control) onFrame(frame protocol.Frame) {
 	case "secret_list":
 		go c.answerSecretList(frame)
 		return
+	case "sandbox_wake":
+		// Off the read loop: the answer is a command, and a Call made here would wait for a
+		// response this goroutine is the one that reads.
+		go c.answerSandboxWake(frame)
+		return
 	}
 	c.publish(frame)
 	// Titles are derived from the first user message, so a settled run is the

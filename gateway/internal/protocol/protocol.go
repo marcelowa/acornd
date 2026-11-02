@@ -73,6 +73,11 @@ type Command struct {
 	SecretScope     string       `json:"secretScope,omitempty"`
 	RestartRequired bool         `json:"restartRequired,omitempty"`
 	Reason          string       `json:"reason,omitempty"`
+	// ReplyTo answers a frame that asked control for something. The envelope's ID is the
+	// worker pool's, so the frame's own id travels here.
+	ReplyTo string `json:"replyTo,omitempty"`
+	// Error answers a wake that could not start the sandbox. Empty is success.
+	Error string `json:"error,omitempty"`
 	// Host file an upload staged; the worker only reads it. Tag names match
 	// the worker protocol, which says name, mime, and size.
 	TempPath string `json:"tempPath,omitempty"`

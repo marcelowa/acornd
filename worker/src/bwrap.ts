@@ -23,7 +23,11 @@ export function engineName(): string {
 	return "bwrap";
 }
 
-export async function openSandbox(name: string, workspace: string): Promise<SandboxClient> {
+export async function openSandbox(
+	name: string,
+	workspace: string,
+	_wake?: () => Promise<void>,
+): Promise<SandboxClient> {
 	const state = process.env.ACORND_BWRAP_STATE;
 	if (state === undefined || state === "") {
 		throw new Error(

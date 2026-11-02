@@ -15,7 +15,11 @@ export function engineName(): string {
 	return "host";
 }
 
-export async function openSandbox(_name: string, workspace: string): Promise<SandboxClient> {
+export async function openSandbox(
+	_name: string,
+	workspace: string,
+	_wake?: () => Promise<void>,
+): Promise<SandboxClient> {
 	return new HostClient(workspace);
 }
 

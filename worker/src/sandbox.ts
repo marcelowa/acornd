@@ -39,7 +39,15 @@ export interface SandboxClient extends Files {
  */
 export interface SandboxEngine {
 	engineName(): string;
-	openSandbox(name: string, workspace: string): Promise<SandboxClient>;
+	/**
+	 * `wake` starts a stopped sandbox through control, which holds the values a substitute
+	 * secret's stored source names. An engine that cannot be woken this way ignores it.
+	 */
+	openSandbox(
+		name: string,
+		workspace: string,
+		wake?: () => Promise<void>,
+	): Promise<SandboxClient>;
 }
 
 export interface ExecChunk {
