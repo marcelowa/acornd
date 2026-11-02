@@ -190,6 +190,12 @@ jobs:
     # issue. Now the diff decides which packages are swept, `--max` bounds the cost at two of
     # them, and a survivor fails the run: an assertion that stopped distinguishing is exactly the
     # standard going down quietly.
+    #
+    # The timeout coefficient is gremlins' per-mutant allowance multiplied by the coverage run's
+    # wall time, and a mutant that spins costs all of it. At the default 500 one identity mutant
+    # held this job for an hour; 100 caps that at a couple of minutes and still leaves 30x headroom
+    # over the coverage run (workspace note MUTATIONS-SLOWDOWN.md, §4).
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -210,6 +216,7 @@ jobs:
         if: steps.targets.outputs.value != ''
         env:
           TARGETS: ${{ steps.targets.outputs.value }}
+          MUTATION_TIMEOUT: "100"
         run: |
           for pkg in $TARGETS; do
             echo "::group::make mutations PKG=$pkg"
