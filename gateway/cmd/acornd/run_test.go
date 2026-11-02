@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -223,5 +224,34 @@ func TestTheRecordNamesTheHostTheRunWasStartedWith(t *testing.T) {
 	// that never had the flag.
 	if got := recordedHost(t.TempDir()); got != "" {
 		t.Errorf("recordedHost of an install that never started = %q, want empty", got)
+	}
+}
+
+// A status names the place a run writes. A foreground run writes its terminal, and the log in the folder is an
+// earlier detached run's: printing that path sent a reader to a file that was not this run's.
+func TestStatusSaysWhereTheRunWrites(t *testing.T) {
+	dir := t.TempDir()
+	foreground := runRecord{Address: "127.0.0.1:7777"}
+	if got := whereItRan(dir, foreground); strings.Contains(got, runLogPath(dir)) {
+		t.Errorf("a foreground run was pointed at a file: %q", got)
+	} else if !strings.Contains(got, "terminal") {
+		t.Errorf("a foreground run does not say where its output is: %q", got)
+	}
+	if got := whyItStopped(dir, foreground); strings.Contains(got, runLogPath(dir)) {
+		t.Errorf("a stopped foreground run was pointed at a file: %q", got)
+	}
+
+	detached := runRecord{Address: "127.0.0.1:7777", Detached: true}
+	if got := whereItRan(dir, detached); !strings.Contains(got, runLogPath(dir)) {
+		t.Errorf("a detached run does not name its log: %q", got)
+	}
+	if got := whyItStopped(dir, detached); !strings.Contains(got, runLogPath(dir)) {
+		t.Errorf("a stopped detached run does not name its log: %q", got)
+	}
+	if err := os.WriteFile(runLogPath(dir), []byte("first\nlast line\n"), 0o600); err != nil {
+		t.Fatalf("write the log: %v", err)
+	}
+	if got := whyItStopped(dir, detached); !strings.Contains(got, "last line: last line") {
+		t.Errorf("a stopped detached run does not say how it ended: %q", got)
 	}
 }
