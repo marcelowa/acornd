@@ -23,14 +23,15 @@ func (s *Server) sessionRoutes(mux *http.ServeMux) {
 }
 
 // sessionState is what the sign-in screen asks first: is this install claimed, who owns it, and is
-// this browser already somebody. `email` is the cookie's answer and not the door's, because a request
-// proved by an assertion has a person behind it and no session of ours.
+// this browser already somebody. It asks every door, not only the cookie: through Cloudflare Access there is no
+// cookie of ours, and a browser the edge has just proved was told to sign in again — at a form it could not
+// answer without a token from the machine (ADR 0036 §4).
 func (s *Server) sessionState(w http.ResponseWriter, r *http.Request) {
 	email, signedIn := "", false
-	if s.gate.Dir != "" {
-		if caller, err := (identity.Session{Dir: s.gate.Dir}).Prove(r); err == nil {
-			// A cookie minted from the token proves the owner and names no address, so `email` alone
-			// cannot answer "is this browser signed in" — the screen needs both facts.
+	if s.gate.Door != nil {
+		if caller, err := s.gate.Door.Prove(r); err == nil {
+			// A cookie or token proves the owner and may name no address, so `email` alone cannot answer
+			// "is this browser signed in" — the screen needs both facts.
 			email, signedIn = caller.Email, true
 		}
 	}
