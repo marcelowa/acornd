@@ -158,6 +158,11 @@ func (s *Server) remoteApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	answer := s.answerFor(desire, state, steps)
+	// A new tunnel is a new connector: the running one holds the token of the tunnel it was started with, so the
+	// screen has to ask for the restart that picks this one up rather than say the door is ready.
+	if request.setup.State.TunnelID != "" && state.TunnelID != request.setup.State.TunnelID {
+		answer.RestartRequired = true
+	}
 	answer.TokenStored = stored != ""
 	if applyErr != nil {
 		// 502: Cloudflare, or the way to it, is what failed; the steps so far travel with the refusal so the

@@ -30,6 +30,7 @@ type fake struct {
 	nextID     int
 	orgAccount string
 	ingress    string
+	hostname   string
 	teamDomain string
 	appIDP     string
 	// visible is what the token can see, which is the question the setup screen asks before an apply.
@@ -95,18 +96,18 @@ func (f *fake) TunnelToken(_ context.Context, _, id string) (string, error) {
 	return "token-for-" + id, nil
 }
 
-func (f *fake) TunnelIngress(context.Context, string, string) (string, error) {
-	if err := f.record("tunnelIngress"); err != nil {
-		return "", err
+func (f *fake) TunnelRoute(context.Context, string, string) (Route, error) {
+	if err := f.record("tunnelRoute"); err != nil {
+		return Route{}, err
 	}
-	return f.ingress, nil
+	return Route{Hostname: f.hostname, Service: f.ingress}, nil
 }
 
 func (f *fake) SetTunnelIngress(_ context.Context, _, _, hostname, service string) error {
 	if err := f.record("setTunnelIngress"); err != nil {
 		return err
 	}
-	f.ingress = service
+	f.ingress, f.hostname = service, hostname
 	f.calls = append(f.calls, "hostname="+hostname)
 	return nil
 }
@@ -365,7 +366,7 @@ func TestAnApplyResumesFromTheIdsItWrote(t *testing.T) {
 	api := newFake()
 	prior := State{TunnelID: "t-existing", TunnelToken: "kept", DNSRecordID: "r-existing"}
 	api.tunnels = []Tunnel{{ID: "t-existing", Name: TunnelName}}
-	api.ingress = DefaultLocal
+	api.ingress, api.hostname = DefaultLocal, "testing.acornd.app"
 	api.records = []DNSRecord{{ID: "r-existing", Name: "testing.acornd.app", Type: "CNAME", Content: "t-existing.cfargotunnel.com"}}
 
 	state, steps, err := (&Provisioner{API: api}).Apply(context.Background(), desired(), prior, nil)
@@ -404,12 +405,51 @@ func TestTheGroupFollowsTheBook(t *testing.T) {
 	}
 }
 
+// A second install in the same Cloudflare account must not join the first install's tunnel: one tunnel carries
+// one hostname, so the second hostname would fall through to the catch-all — the 404 this fixes.
+func TestASecondInstallMakesItsOwnTunnel(t *testing.T) {
+	api := newFake()
+	api.tunnels = []Tunnel{{ID: "shared", Name: TunnelName}}
+	api.hostname, api.ingress = "tests.acornd.app", DefaultLocal
+	state, _, err := (&Provisioner{API: api}).Apply(context.Background(), desired(), State{TunnelID: "shared", Hostname: "testing.acornd.app", TunnelToken: "old"}, []string{"ana@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.TunnelID == "shared" {
+		t.Fatal("the second install joined the first install's tunnel")
+	}
+	for _, tunnel := range api.tunnels {
+		if tunnel.Name == "acornd-testing" {
+			return
+		}
+	}
+	t.Errorf("no tunnel named for this install: %+v", api.tunnels)
+}
+
+// The hostname is half the rule. A tunnel whose service matches but whose name belongs to another host is a 404
+// for the name that was asked for, so it is rewritten rather than reported as already right.
+func TestIngressIsRewrittenWhenTheHostnameDiffers(t *testing.T) {
+	api := newFake()
+	api.tunnels = []Tunnel{{ID: "t", Name: "acornd-testing"}}
+	api.hostname, api.ingress = "old.acornd.app", DefaultLocal
+	_, steps, err := (&Provisioner{API: api}).Apply(context.Background(), desired(), State{TunnelID: "t", Hostname: "testing.acornd.app", TunnelToken: "x"}, []string{"ana@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if api.hostname != "testing.acornd.app" {
+		t.Errorf("the route names %q", api.hostname)
+	}
+	if len(steps) < 2 || !steps[1].Created || steps[1].Name != "ingress" {
+		t.Errorf("the ingress was not written: %+v", steps)
+	}
+}
+
 // An account somebody configured by hand is adopted, not duplicated: a tunnel, an application and a group with
 // our names are ours, whatever made them.
 func TestWhatAlreadyExistsIsAdopted(t *testing.T) {
 	api := newFake()
-	api.tunnels = []Tunnel{{ID: "made-by-hand", Name: TunnelName}}
-	api.ingress = DefaultLocal
+	api.tunnels = []Tunnel{{ID: "made-by-hand", Name: "acornd-testing"}}
+	api.ingress, api.hostname = DefaultLocal, "testing.acornd.app"
 	api.records = []DNSRecord{{ID: "r-hand", Name: "testing.acornd.app", Type: "CNAME", Content: "made-by-hand.cfargotunnel.com"}}
 	api.idps = []IdentityProvider{{ID: "pin", Type: "onetimepin"}}
 	api.groups = []Group{{ID: "g-hand", Name: GroupName}}
@@ -801,7 +841,7 @@ func TestTheTunnelIsPointedAtThisConsole(t *testing.T) {
 func TestARecordPointingAtAnotherTunnelIsRepointed(t *testing.T) {
 	api := newFake()
 	api.tunnels = []Tunnel{{ID: "t-existing", Name: TunnelName}}
-	api.ingress = DefaultLocal
+	api.ingress, api.hostname = DefaultLocal, "testing.acornd.app"
 	api.records = []DNSRecord{{ID: "r-existing", Name: "console.example.com", Type: "CNAME", Content: "t-gone.cfargotunnel.com"}}
 	prior := State{TunnelID: "t-existing", TunnelToken: "kept", DNSRecordID: "r-existing"}
 

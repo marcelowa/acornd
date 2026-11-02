@@ -238,3 +238,20 @@ the environment; it fails rather than skips when the variable is set, the same r
 - **Email sent by acornd.** The door proves the mailbox; the invitation is a message the owner
   sends. Sending mail would mean owning a sender reputation.
 - **Self-hosted tunnel servers**, and any deployment where the machine has a public address.
+
+## Amendment (2026-11-02): one tunnel per install
+
+**The tunnel is named for the install, not for the product.** `TunnelName` was `acornd` for every install,
+so a second install in the same Cloudflare account found the first one's tunnel and adopted it. A tunnel
+holds one route, so the second hostname fell through to the catch-all and answered 404 after sign-in.
+The tunnel is now `acornd-<first label of the hostname>`; the state's tunnel id keeps an install on the
+tunnel it made, and an existing tunnel whose route names another hostname is not adopted.
+
+**The route is compared by hostname and service.** The ingress step read only the service, so a tunnel
+pointing `http://127.0.0.1:7777` at someone else's hostname looked already right. The route is now read as
+a name and a service, and both are compared before the step is allowed to be a no-op.
+
+**A changed tunnel asks for a restart.** The running connector holds the token of the tunnel it was started
+with; an apply that records a different tunnel sets `restartRequired`, so the screen asks for the restart
+instead of saying the door is ready. The catch-all remains the honest answer for a name this install does
+not serve — but it is no longer the answer for the name it was just asked to serve.

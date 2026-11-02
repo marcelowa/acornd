@@ -139,23 +139,26 @@ func (c *Client) TunnelToken(ctx context.Context, account, tunnel string) (strin
 	return token, nil
 }
 
-// TunnelIngress answers the service a remotely-managed tunnel forwards to, or "" when it has no route: a tunnel
-// that exists and goes nowhere is the state this step exists to find.
-func (c *Client) TunnelIngress(ctx context.Context, account, tunnel string) (string, error) {
+// TunnelRoute answers the first rule a remotely-managed tunnel holds, or an empty route when it has none: a
+// tunnel that exists and goes nowhere is the state this package exists to find. The hostname is part of the
+// answer, not decoration — a tunnel with the right port and the wrong name is a door into a 404.
+func (c *Client) TunnelRoute(ctx context.Context, account, tunnel string) (Route, error) {
 	var configuration struct {
 		Config *struct {
 			Ingress []struct {
-				Service string `json:"service"`
+				Hostname string `json:"hostname"`
+				Service  string `json:"service"`
 			} `json:"ingress"`
 		} `json:"config"`
 	}
 	if err := c.call(ctx, scopeTunnel, http.MethodGet, "/accounts/"+account+"/cfd_tunnel/"+tunnel+"/configurations", nil, &configuration); err != nil {
-		return "", err
+		return Route{}, err
 	}
 	if configuration.Config == nil || len(configuration.Config.Ingress) == 0 {
-		return "", nil
+		return Route{}, nil
 	}
-	return configuration.Config.Ingress[0].Service, nil
+	first := configuration.Config.Ingress[0]
+	return Route{Hostname: first.Hostname, Service: first.Service}, nil
 }
 
 // SetTunnelIngress writes the route: this console, and a 404 for anything else. The catch-all is required — a
