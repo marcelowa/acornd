@@ -508,6 +508,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 			onCheck={platform.checkRemote}
 			onPreview={platform.previewRemote}
 			onEnable={platform.enableRemote}
+			onRefresh={platform.refreshRemote}
 			onApply={(request) => {
 				void platform.applyRemote(request);
 			}}

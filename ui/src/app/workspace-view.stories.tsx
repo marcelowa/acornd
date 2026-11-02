@@ -358,6 +358,7 @@ function makePlatform(overrides: Partial<Platform> = {}): Platform {
 		setUpdatePrefs: noop,
 		applyRemote: async () => undefined,
 		previewRemote: () => undefined,
+		refreshRemote: () => undefined,
 		enableRemote: () => undefined,
 		remotePreviewBusy: false,
 		remoteRestarting: false,

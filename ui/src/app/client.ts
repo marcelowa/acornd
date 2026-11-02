@@ -199,6 +199,10 @@ export interface RemoteStatus {
 	tunnelId?: string | undefined;
 	/** The file records a door this process did not start with: a restart is what turns it on. */
 	restartRequired?: boolean | undefined;
+	/** What the connector is doing: starting, connecting, connected, restarting, stopped, or off. */
+	tunnel?: string | undefined;
+	/** Why the connector is not running, when it is not. */
+	tunnelDetail?: string | undefined;
 	steps?: RemoteStep[] | undefined;
 }
 

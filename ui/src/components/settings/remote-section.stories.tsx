@@ -4,7 +4,13 @@ import { RemoteSection } from "./remote-section";
 const meta: Meta<typeof RemoteSection> = {
 	title: "Settings/Remote access",
 	component: RemoteSection,
-	args: { onApply: () => undefined, onPreview: () => undefined, onEnable: () => undefined },
+	args: {
+		onApply: () => undefined,
+		onPreview: () => undefined,
+		onEnable: () => undefined,
+		onRefresh: () => undefined,
+		onCheck: () => undefined,
+	},
 };
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -109,10 +115,9 @@ export const TwoZones: Story = {
 	},
 };
 
-/** Cloudflare is ready and the running process is not: turning it on restarts the console onto its name. */
+/** Cloudflare has not published the application yet: the screen says so and asks again while it waits. */
 export const RestartRequired: Story = {
 	args: {
-		onEnable: () => undefined,
 		status: {
 			configured: true,
 			tokenStored: true,
@@ -123,20 +128,75 @@ export const RestartRequired: Story = {
 			updated: "2026-10-30T21:47:20Z",
 			steps: [{ name: "tunnel", created: true }],
 		},
+		check: {
+			guarded: true,
+			status: 302,
+			login: "https://acornd.cloudflareaccess.com/cdn-cgi/access/login/console.example.com?kid=another-application",
+			keys: true,
+			detail: "the door is up: an unauthenticated browser is sent to the login page",
+		},
 	},
 };
 
-/** The press in flight: the process is replacing itself, and the address underneath is about to go. */
+/** Published: the screen opens the door itself, and says what will happen to this address. */
+export const Opening: Story = {
+	args: {
+		...RestartRequired.args,
+		check: {
+			guarded: true,
+			status: 302,
+			login: "https://acornd.cloudflareaccess.com/cdn-cgi/access/login/console.example.com?kid=c52dbf9750d9619950bffb6e96106adba22bdd4f8957362c0505a14718873982",
+			keys: true,
+			detail: "the door is up: an unauthenticated browser is sent to the login page",
+		},
+	},
+};
+
+/** The restart is in flight: the process is replacing itself, and the address underneath is about to go. */
 export const Restarting: Story = {
-	args: { ...RestartRequired.args, restarting: true },
+	args: { ...Opening.args, restarting: true },
 };
 
-/** It came back on its own name: this page will not answer again, so the link is the way on. */
+/** It came back: this page will not answer again, so the link is the way on. */
 export const Restarted: Story = {
-	args: { ...RestartRequired.args, restarted: true },
+	args: { ...Opening.args, restarted: true },
 };
 
-/** A press the gateway refused: a recorded run started on every interface cannot become a door by restarting. */
+/** The door is open and the connector says so; the check from outside is the last confirmation. */
+export const Live: Story = {
+	args: {
+		status: {
+			configured: true,
+			tokenStored: true,
+			restartRequired: false,
+			tunnel: "connected",
+			hostname: "console.example.com",
+			teamDomain: "acornd.cloudflareaccess.com",
+			audience: "c52dbf9750d9619950bffb6e96106adba22bdd4f8957362c0505a14718873982",
+			updated: "2026-10-30T21:47:20Z",
+		},
+	},
+};
+
+/** A connector that is not running: the line says why, which the public hostname cannot. */
+export const TunnelDown: Story = {
+	args: {
+		status: {
+			configured: true,
+			tokenStored: true,
+			restartRequired: false,
+			tunnel: "not started",
+			tunnelDetail:
+				"this build has no pinned cloudflared for this platform: install it yourself and pass --cloudflared <path>",
+			hostname: "console.example.com",
+			teamDomain: "acornd.cloudflareaccess.com",
+			audience: "c52dbf9750d9619950bffb6e96106adba22bdd4f8957362c0505a14718873982",
+			updated: "2026-10-30T21:47:20Z",
+		},
+	},
+};
+
+/** A press the gateway refused, in its own words. */
 export const EnableRefused: Story = {
 	args: {
 		...RestartRequired.args,
