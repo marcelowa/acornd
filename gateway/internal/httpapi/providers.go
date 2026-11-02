@@ -42,11 +42,15 @@ func (s *Server) setProviderAllowlist(w http.ResponseWriter, r *http.Request) {
 
 // providerCatalog answers every provider with every model it has, unfiltered: it is what the admin chooses from, and
 // narrowing it by the allowlist would make the list impossible to widen again from the screen.
+//
+// It reads the control's state directly rather than through stateOf, because stateOf is the filtered view the
+// interface gets: an install with no allowlist entry for a provider was told that provider had zero models, and the
+// dialog that would have ticked the first one had nothing to tick.
 func (s *Server) providerCatalog(w http.ResponseWriter, r *http.Request) {
 	ctl, err := s.controlFor(r)
 	if err != nil {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"providers": s.stateOf(ctl, callerOf(r), "").Providers})
+	writeJSON(w, http.StatusOK, map[string]any{"providers": ctl.StateFor(callerOf(r), "").Providers})
 }
