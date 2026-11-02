@@ -23,9 +23,19 @@ another worker, not changing the control plane.
 
 ## Requirements
 
-- Go 1.27+ (exact version in `gateway/go.mod`)
-- bun 1.4+
+- Go **1.27.3** — the patch, not just the minor: `gateway/go.mod` pins it, and CI reads the
+  version from that file rather than naming its own
+- bun **1.4.3** — the release runtime pins it in `gateway/internal/update/worker.go`, and the
+  worker's code depends on 1.4 behaviour
 - make, gcc (builds and the `-race` tests)
+- `unzip`, which the bun installer needs, and `procps` for `pgrep`, which two end-to-end tests
+  use to find the worker
+- `git` with an `origin/main` ref: `make test` compares the coverage and mutation floors
+  against it, so a `--single-branch` clone fails the gate until `git fetch origin main`
+- a browser for `make ui` and `make ui-check`, at `CHROME_PATH` (default `/usr/bin/chromium`)
+- room to build: `make tools` compiles six Go tools, so the caches want about 6 GB of disk —
+  and on a machine with 2 GB of RAM, `GOGC=20 GOMAXPROCS=1 make tools`, or the compiler is
+  killed partway through gosec
 - an API key for a supported provider (or the dev provider below)
 - one sandbox engine, and the engine a new workspace gets is the first one this machine can
   actually run ([ADR 0026](docs/adr/0026-rootless-host.md)):
@@ -39,10 +49,28 @@ another worker, not changing the control plane.
 No toolchain, and you just want the binary? [Install from a release](#install-from-a-release-one-binary-no-toolchain)
 puts one file on the machine and skips everything below.
 
-With the sources, first ask the machine what it needs — and let it fix it:
+With the sources, install what builds it first — `acornd` does not exist yet, and it is what
+probes the machine a step below.
 
 ```bash
-acornd setup     # probes, then asks for your password only for the steps that need root
+# Go: https://go.dev/dl — match the patch version gateway/go.mod pins
+curl -fsSL https://bun.sh/install | bash  # bun, into ~/.bun/bin
+sudo apt install make gcc                  # Debian/Ubuntu build tools
+
+make deps    # bun install in worker/, ui/, tools/
+make tools   # the six Go linters, compiled from source: minutes, not seconds
+make build   # -> ./bin/acornd
+```
+
+`make tools` installs staticcheck, golangci-lint, deadcode, gremlins, govulncheck and gosec,
+and the worker's dependencies with them. Skipping it does not stop `make lint`: the analyzer
+half prints `not installed (make tools)` and passes, so a green gate there proves less than it
+looks.
+
+Then ask the machine what it needs — and let it fix it:
+
+```bash
+./bin/acornd setup   # probes, then asks for your password only for the steps that need root
 ```
 
 It names each step before asking (install `bubblewrap passt`, allow user namespaces, make
@@ -57,17 +85,6 @@ acornd, not the one typing: the owner of the acornd folder, `--for USER` to say 
 Root can open `/dev/kvm` and make a user namespace whatever the policy says, so a check run as
 root would report a machine that works while the service's workspaces cannot boot.
 
-Then:
-
-```bash
-# Go: https://go.dev/dl — match the version in gateway/go.mod
-curl -fsSL https://bun.sh/install | bash  # bun, into ~/.bun/bin
-sudo apt install make gcc                  # Debian/Ubuntu build tools
-
-make deps    # bun install in worker/, ui/, tools/
-make tools   # the linters make lint runs (staticcheck, worker deps)
-```
-
 `bun` must stay on `PATH` for development: with `ACORND_WORKER` pointing at the sources the
 gateway starts workers with system bun, and a worker fails to start without it. Releases
 need no bun and no sources: the gateway downloads a pinned bun once and
@@ -81,8 +98,13 @@ scripts bake into the binary. Nothing lives outside the install folder.
 make build                     # go build -> ./bin/acornd
 
 echo "$OPENCODE_API_KEY" | ./bin/acornd provider add opencode-go
-./bin/acornd start             # http://<host>:7777
+ACORND_WORKER=$(pwd)/worker ./bin/acornd start   # http://<host>:7777
 ```
+
+`ACORND_WORKER` is not optional in a source tree. Without it the gateway looks for the worker a
+release would have downloaded into `<data-dir>/worker`, and a `dev` build never fetches one: it
+starts, answers `/healthz`, and then restarts a worker whose directory does not exist, forever.
+`make dev` sets the same variable, and adds the scripted provider.
 
 Every command answers `-h`, and `acornd` with no arguments lists them:
 
@@ -417,7 +439,7 @@ make dev
   runs first and stops the update on failure; VM disks are not backed up. Keep VMs is
   the default; Start clean wipes the sandbox root only. A running conversation blocks
   with a choice: wait for drain, stop runs and update, or cancel. The new binary
-  migrates at boot (`scripts/migrate/<tag>.sh`, non-zero stops boot) and `GET /healthz`
+  migrates at boot (`gateway/internal/update/migrate/<tag>.sh`, non-zero stops boot) and `GET /healthz`
   must pass for 30s; failure restores `acornd.bak` and names the cause on the screen.
   Pin a tag for no prompts. See [ADR 0019](docs/adr/0019-self-update.md).
 
@@ -459,18 +481,24 @@ ADR 0012 lists what the sandbox deliberately does not cover yet.
 ## Development
 
 ```bash
-make check         # fast: the compiler and the unit tests, no processes (~6s)
-make lint          # the static rules: gofmt, vet, staticcheck, tsc, oxlint, oxfmt
+make check         # fast: the bundle, the compiler and the unit tests, no processes
+make lint          # the static rules: gofmt, vet, tsc, oxlint, oxfmt, the architecture test and
+                   # three cross-builds, then golangci-lint and deadcode
 make modernize     # the Go idiom analyzer; a daily workflow prompts with it, the gate does not
-make test          # the default gate: units + the feature suite, no hypervisor (~30s)
-make test-sandbox  # the microVM engine boundary: live driver + SDK + 4 e2e tests (~35s; needs /dev/kvm)
+make test          # the default gate: lint, the floors, the unit tests, then the feature suite
+make test-sandbox  # the microVM engine boundary: live driver + SDK + 4 e2e tests (needs /dev/kvm)
+make test-bwrap    # the bubblewrap engine end to end; it fetches an image, so `make test` skips it
 make ui            # drives the real client in headless chromium (needs a running gateway)
+make ui-check      # the browser suite: builds, starts its own gateway, stops it after
 make build         # gateway build
-make dev           # dev provider + gateway, workspace = current directory
+make dev           # dev provider + gateway, data dir $HOME/.acornd
 ```
 
 `docs/engineering/standards.md` is what the code is held to, rule by rule, with the check that
 enforces each and the bug behind the ones that matter. `make tools` installs the linters.
+
+A workstation runs these in seconds to a minute; a two-vCPU container spends minutes in the Go
+test run, which is most of `make check` — that is the one to loop on.
 
 `docs/features.md` is the inventory: what the platform does, stated as things that are
 observable, and the test that covers each one. Read it before changing behaviour, and add to it
