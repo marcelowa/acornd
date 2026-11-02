@@ -8,7 +8,9 @@ import (
 	"context"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/marcelowa/acornd/gateway/internal/protocol"
 	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 	"github.com/marcelowa/acornd/gateway/internal/workerpool"
 )
@@ -152,6 +154,40 @@ func (c *Control) provisionSandbox(ctx context.Context) SandboxState {
 	}
 	state.Tools = true
 	return state
+}
+
+// sandboxWakeTimeout is how long a tool call waits for control to bring a stopped sandbox
+// back. It covers a start, not an install: a worker only exists after the first provision.
+const sandboxWakeTimeout = 2 * time.Minute
+
+// answerSandboxWake starts a sandbox the engine stopped for being idle, then tells the
+// worker to attach. The worker cannot start it itself: a substitute secret's stored config
+// names a host variable whose value lives in this process's vault, and a start from the
+// worker would resolve it from an environment that never had it (issue #13).
+func (c *Control) answerSandboxWake(frame protocol.Frame) {
+	ctx, cancel := context.WithTimeout(context.Background(), sandboxWakeTimeout)
+	defer cancel()
+	c.lifecycle.Lock()
+	state := c.provisionSandbox(ctx)
+	c.lifecycle.Unlock()
+
+	c.mu.Lock()
+	c.sandbox = state
+	c.mu.Unlock()
+	c.publish(protocol.Frame{Type: "state"})
+
+	worker, err := c.currentWorker()
+	if err != nil {
+		workerpool.Log("answer sandbox wake: %v", err)
+		return
+	}
+	if _, err := worker.Call(ctx, protocol.Command{
+		Type:    "sandbox_wake",
+		ReplyTo: frame.ID,
+		Error:   state.Problem,
+	}); err != nil {
+		workerpool.Log("answer sandbox wake: %v", err)
+	}
 }
 
 // sandboxRefusal is why there is no sandbox, when there is not one: an engine this build has

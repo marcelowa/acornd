@@ -92,10 +92,10 @@ Three consequences worth writing down:
   "a workspace that runs a cron job" a thing that can be true.
 - **microsandbox's own `idle_timeout` stays, and is not a second owner after all.** Three things
   asked and answered: control's eviction never touches the general workspace and does not run at
-  all when the gateway is dead, so the engine's timer is the net under both; the worker attaches
-  with `connectOrStart`, so a sandbox the engine stopped for being idle is a cold start rather
-  than an error (that is why the client already had a wake path, see `openSandbox` in
-  `worker/src/microsandbox.ts`); and what it *must* not do is fire on a workspace that asked to
+  all when the gateway is dead, so the engine's timer is the net under both; the worker asks
+  control to start a sandbox the engine stopped for being idle, so the start carries the vault's
+  values instead of resolving them from the worker ([ADR 0037](0037-a-wake-goes-through-control.md));
+  and what it *must* not do is fire on a workspace that asked to
   be kept alive, so `keep_alive` sets the policy's idle timeout to
   `KeptAliveIdleTimeout` — control still decides, the engine is told what to do about it.
 - **The sandbox has its own idle timer too**, `--idle-timeout`, fed by the same policy value as

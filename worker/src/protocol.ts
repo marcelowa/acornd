@@ -116,6 +116,14 @@ export type Command =
 			secrets: SecretInfo[];
 			reason?: string;
 	  }
+	| {
+			id: string;
+			type: "sandbox_wake";
+			/** The frame this answers; the envelope id is the worker pool's own. */
+			replyTo: string;
+			/** Why control could not start the sandbox. Empty is success. */
+			error?: string;
+	  }
 	| { id: string; type: "usage" }
 	| { id: string; type: "shutdown" };
 
@@ -245,7 +253,8 @@ export type Frame =
 			description?: string;
 			hosts?: string[];
 	  }
-	| { type: "secret_list"; id: string; conversationId: string };
+	| { type: "secret_list"; id: string; conversationId: string }
+	| { type: "sandbox_wake"; id: string };
 
 /** One line of JSON on stdout. A single write keeps frames from interleaving. */
 export function emit(frame: Frame): void {

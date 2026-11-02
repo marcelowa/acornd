@@ -243,6 +243,64 @@ test("parallel tool calls join one wake, not one boot each", async () => {
 	expect(boots).toBe(1);
 });
 
+test("a wake asks control to start the sandbox before attaching", async () => {
+	const files = new Map([["/work/notes.txt", "hello\n"]]);
+	const order: string[] = [];
+	let boots = 0;
+	let connects = 0;
+	const woken = fakeSession(liveFs(files));
+	const handle = {
+		connectOrStart: async () => {
+			boots += 1;
+			order.push("start");
+			return woken;
+		},
+		connect: async () => {
+			connects += 1;
+			order.push("connect");
+			return woken;
+		},
+	} as unknown as MicrosandboxHandle;
+	const client = new MicrosandboxClient(
+		"acornd-fake-0000",
+		handle,
+		fakeSession(deadFs()),
+		async () => {
+			order.push("control");
+		},
+	);
+
+	expect(await client.read("/work/notes.txt")).toBe("hello\n");
+	// Control starts it with the vault's value; this side only attaches. Starting here is
+	// what resolved the secret's source from an environment that never had it (issue #13).
+	expect(order).toEqual(["control", "connect"]);
+	expect(boots).toBe(0);
+	expect(connects).toBe(1);
+});
+
+test("a wake control refuses does not start the sandbox here", async () => {
+	let boots = 0;
+	const handle = {
+		connectOrStart: async (): Promise<MicrosandboxSession> => {
+			boots += 1;
+			return fakeSession(liveFs(new Map()));
+		},
+	} as unknown as MicrosandboxHandle;
+	const client = new MicrosandboxClient(
+		"acornd-fake-0000",
+		handle,
+		fakeSession(deadFs()),
+		async () => {
+			throw new Error(
+				"invalid config: secret GITHUB_PAT: host environment variable GITHUB_PAT is not set",
+			);
+		},
+	);
+
+	expect(client.read("/work/notes.txt")).rejects.toThrow(/host environment variable GITHUB_PAT/);
+	expect(boots).toBe(0);
+});
+
 test("a genuine missing file is still null, without waking", async () => {
 	const { handle, boots } = fakeHandle(fakeSession(liveFs(new Map())));
 	const client = new MicrosandboxClient(

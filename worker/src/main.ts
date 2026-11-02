@@ -98,6 +98,8 @@ import {
 const CONTEXT = BACKGROUND_CONTEXT;
 const TITLE_SCAN_LIMIT = 20;
 const TITLE_MAX = 64;
+/** How long a tool call waits for control to start a stopped sandbox. */
+const SANDBOX_WAKE_TIMEOUT_MS = 2 * 60_000;
 
 interface Args {
 	workspace: string;
@@ -168,11 +170,13 @@ async function openSandboxForWorkspace(options: Args): Promise<SandboxClient> {
 			`this workspace's sandbox belongs to engine ${options.sandboxEngine}, which this build does not support`,
 		);
 	}
-	return await engine.openSandbox(options.sandbox, options.workspace).catch((error: unknown) => {
-		return refusedSandbox(
-			`cannot attach to the sandbox ${options.sandbox}: ${error instanceof Error ? error.message : String(error)}`,
-		);
-	});
+	return await engine
+		.openSandbox(options.sandbox, options.workspace, wakeSandbox)
+		.catch((error: unknown) => {
+			return refusedSandbox(
+				`cannot attach to the sandbox ${options.sandbox}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		});
 }
 
 /** The engine modules this build implements, by the name control sends. */
@@ -713,6 +717,43 @@ function reportUnknownKeys(catalog: Catalog): void {
 	}
 }
 
+interface SandboxWake {
+	resolve: () => void;
+	reject: (error: Error) => void;
+	timer: ReturnType<typeof setTimeout>;
+}
+
+/**
+ * Wakes waiting for control's answer, by the frame id that asked. A stopped sandbox is
+ * started by control, not here: a substitute secret's stored config names a host variable
+ * whose value lives in the gateway's vault, and this process never has it (issue #13).
+ */
+const sandboxWakes = new Map<string, SandboxWake>();
+
+/** Ask control to start the stopped sandbox and wait for it to say the start landed. */
+function wakeSandbox(): Promise<void> {
+	const id = crypto.randomUUID();
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			sandboxWakes.delete(id);
+			reject(new Error("the gateway did not answer the sandbox wake"));
+		}, SANDBOX_WAKE_TIMEOUT_MS);
+		timer.unref?.();
+		sandboxWakes.set(id, { resolve, reject, timer });
+		emit({ type: "sandbox_wake", id });
+	});
+}
+
+/** Settle the wake control answered. A reason is a start that did not land, so the call fails closed. */
+function answerSandboxWake(replyTo: string, reason: string | undefined): void {
+	const pending = sandboxWakes.get(replyTo);
+	if (pending === undefined) return;
+	sandboxWakes.delete(replyTo);
+	clearTimeout(pending.timer);
+	if (reason !== undefined && reason !== "") pending.reject(new Error(reason));
+	else pending.resolve();
+}
+
 async function main(): Promise<void> {
 	harness.resume();
 	// The root conversation exists in every install and is adopted as the first
@@ -773,6 +814,13 @@ async function main(): Promise<void> {
 				secrets: command.secrets ?? [],
 				reason: command.reason,
 			});
+			emit({ type: "response", id: command.id, ok: true });
+			return;
+		}
+		// A wake answer arrives while the tool call that asked is blocked, so it bypasses the
+		// queue for the same reason a card's answer does.
+		if (command.type === "sandbox_wake") {
+			answerSandboxWake(command.replyTo, command.error);
 			emit({ type: "response", id: command.id, ok: true });
 			return;
 		}
@@ -838,6 +886,7 @@ type HandledCommand = Exclude<
 	| { type: "auth_cancel" }
 	| { type: "secret_answer" }
 	| { type: "secret_list_answer" }
+	| { type: "sandbox_wake" }
 >;
 
 async function handle(command: HandledCommand): Promise<unknown> {

@@ -66,16 +66,29 @@ async function defaultReadPackage(): Promise<{ version?: unknown }> {
  * `sandboxNotRunning`. The engine stops idle sandboxes on its own (30m), while the
  * gateway keeps a watched workspace's worker alive past that, so a worker whose
  * session died under it is the normal state after half an hour of quiet — not a
- * failure. `connectOrStart` wakes that sandbox instead of failing, detached so the
- * worker attaches without taking lifecycle ownership: control owns the lifecycle
- * from the command line, and the worker must not. See issue #58.
+ * failure. Control owns the start: a substitute secret's stored config names a host
+ * variable whose value lives in the gateway's vault, so a start from this process would
+ * resolve it from an environment that never had it (issue #13). The wake callback asks
+ * control to start the sandbox, then this side only attaches. See issue #58.
  */
-export async function openSandbox(name: string, _workspace: string): Promise<SandboxClient> {
+export async function openSandbox(
+	name: string,
+	_workspace: string,
+	wake?: () => Promise<void>,
+): Promise<SandboxClient> {
 	// First, so a wrong SDK never touches the shared store: its first write would
 	// migrate the catalog past what the gateway's pinned engine can read.
 	await checkEngineVersion();
 	const handle = await Sandbox.get(name);
-	return new MicrosandboxClient(name, handle, await handle.connectOrStart({ detached: true }));
+	// Control provisioned this sandbox immediately before starting the worker. A wake here
+	// would race the worker's own registration in control; the first dead session after
+	// that goes through the callback below.
+	return new MicrosandboxClient(
+		name,
+		handle,
+		await handle.connectOrStart({ detached: true }),
+		wake,
+	);
 }
 
 /**
@@ -132,11 +145,19 @@ export class MicrosandboxClient implements SandboxClient {
 	 * parallel tool calls must join one boot, not start one each.
 	 */
 	private waking: Promise<MicrosandboxSession> | undefined;
+	/** Starts a stopped sandbox through control, which holds the secret values. */
+	private readonly wakeThroughControl: (() => Promise<void>) | undefined;
 
-	constructor(name: string, handle: MicrosandboxHandle, session: MicrosandboxSession) {
+	constructor(
+		name: string,
+		handle: MicrosandboxHandle,
+		session: MicrosandboxSession,
+		wake?: () => Promise<void>,
+	) {
 		this.name = name;
 		this.handle = handle;
 		this.session = session;
+		this.wakeThroughControl = wake;
 	}
 
 	/**
@@ -170,6 +191,16 @@ export class MicrosandboxClient implements SandboxClient {
 
 	private async doWake(): Promise<MicrosandboxSession> {
 		try {
+			if (this.wakeThroughControl !== undefined) {
+				// The value is control's, not this process's: let it start the sandbox and only
+				// attach here. A start from this side would fail closed on the missing host
+				// variable, which is the outage of issue #13.
+				await this.wakeThroughControl();
+				this.session = await this.handle.connect();
+				return this.session;
+			}
+			// No control channel (the integration suite drives this class directly): the
+			// engine's own start is the only way to wake it.
 			const session = await this.handle.connectOrStart({ detached: true });
 			this.session = session;
 			return session;

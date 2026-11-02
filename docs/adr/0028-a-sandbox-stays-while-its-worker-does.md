@@ -8,8 +8,8 @@ A bwrap workspace is one long-lived sandbox per workspace ([ADR 0023](0023-bwrap
 the supervisor inside it stops itself after `--idle-timeout` with nothing running — thirty minutes
 by default, from the policy. It exists as the net under a gateway that died, and
 [ADR 0024](0024-one-lifecycle.md) says both engines answer "stop when idle" the same way: the
-microVM engine stops an idle sandbox and its worker wakes it with `connectOrStart`; bwrap was
-supposed to be the same case.
+microVM engine stops an idle sandbox and its worker asks control to start it
+([ADR 0037](0037-a-wake-goes-through-control.md)); bwrap was supposed to be the same case.
 
 It was not. The timer counts **commands**, and a worker can sit attached for hours with nothing to
 run — a conversation that is open and quiet. When the window passed, the supervisor shut itself
@@ -72,7 +72,8 @@ what is stopped.
   window.
 - The cost is one Unix-socket connect per five minutes (under a millisecond) and a sandbox held
   while a workspace is open — which is what "one long-lived sandbox per workspace" already meant.
-- The microVM path is unchanged: its engine stops idle sandboxes and the client wakes them. Both
+- The microVM path keeps its engine timer, and a wake goes through control so a substitute
+  secret's value comes from the vault ([ADR 0037](0037-a-wake-goes-through-control.md)). Both
   engines now keep tools working across an idle window, by different mechanisms.
 - **A sandbox created by an earlier binary does not know `keepalive`** and answers "unknown
   request". The client ignores that, so such a sandbox still idles out; it is recreated with the
