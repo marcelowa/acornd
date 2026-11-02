@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { enableRemote, forgetRemoteToken, previewRemote } from "../src/app/client";
-import { completeHostname } from "../src/app/remote";
+import { completeHostname, doorPublished, tunnelLine } from "../src/app/remote";
 
 /**
  * The one call that removes the Cloudflare token: what a page can get wrong is the verb and the route, and a
@@ -75,5 +75,44 @@ describe("turning the door on", () => {
 		expect(calls[0]?.url).toBe("/api/remote/enable");
 		expect(calls[0]?.init?.method).toBe("POST");
 		expect(answer.restarting).toBe(true);
+	});
+});
+
+describe("whether Cloudflare has published the application", () => {
+	const audience = "abc123";
+	test("the login redirect carrying our audience is the answer", () => {
+		expect(
+			doorPublished(
+				"https://team.cloudflareaccess.com/cdn-cgi/access/login/console.example.com?kid=abc123&redirect_url=%2F",
+				audience,
+			),
+		).toBe(true);
+	});
+
+	test("another application's audience is not ours", () => {
+		expect(
+			doorPublished(
+				"https://team.cloudflareaccess.com/cdn-cgi/access/login/console.example.com?kid=someone-else",
+				audience,
+			),
+		).toBe(false);
+	});
+
+	test("no answer yet, no query, or no audience is not published", () => {
+		expect(doorPublished(undefined, audience)).toBe(false);
+		expect(doorPublished("https://team.cloudflareaccess.com/login", audience)).toBe(false);
+		expect(doorPublished("https://team.cloudflareaccess.com/login?kid=abc123", undefined)).toBe(
+			false,
+		);
+	});
+});
+
+describe("the connector line", () => {
+	test("each state reads as one sentence, and a reason is carried through", () => {
+		expect(tunnelLine("connected", undefined)).toBe("the tunnel is connected");
+		expect(tunnelLine("connecting", undefined)).toBe("the tunnel is connecting…");
+		expect(tunnelLine("restarting", undefined)).toBe("the tunnel is restarting");
+		expect(tunnelLine("not started", "no token")).toBe("the tunnel is not running: no token");
+		expect(tunnelLine(undefined, undefined)).toBe("");
 	});
 });

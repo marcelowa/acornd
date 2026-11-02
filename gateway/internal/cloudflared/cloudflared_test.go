@@ -214,3 +214,40 @@ func writeScript(t *testing.T, body string) string {
 	}
 	return path
 }
+
+// The supervisor reports every state change, so a screen can say "connecting" before "connected" and
+// "restarting" when the process dies, without reading a log.
+func TestTheSupervisorReportsWhatItIsDoing(t *testing.T) {
+	script := writeScript(t, "#!/bin/sh\necho 'INF Registered tunnel connection connIndex=0'\nsleep 0.15\nexit 1\n")
+	var mu sync.Mutex
+	var seen []Status
+	supervisor := &Supervisor{Path: script, Command: func(ctx context.Context, path, token string) *exec.Cmd {
+		return exec.CommandContext(ctx, path)
+	}, Report: func(status Status) {
+		mu.Lock()
+		defer mu.Unlock()
+		seen = append(seen, status)
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	if err := supervisor.Run(ctx); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	states := make([]string, 0, len(seen))
+	for _, status := range seen {
+		states = append(states, status.State)
+	}
+	for _, want := range []string{StateConnecting, StateConnected, StateRestarting, StateStopped} {
+		found := false
+		for _, state := range states {
+			if state == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("the supervisor never reported %q: %v", want, states)
+		}
+	}
+}

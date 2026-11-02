@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/marcelowa/acornd/gateway/internal/control"
 	"github.com/marcelowa/acornd/gateway/internal/identity"
 	"github.com/marcelowa/acornd/gateway/internal/people"
+	"github.com/marcelowa/acornd/gateway/internal/ready"
 )
 
 // admit refuses a request no door proved, refuses a state-changing one that came from another site,
@@ -30,6 +32,9 @@ func (s *Server) admit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" {
 			next.ServeHTTP(w, r)
+			return
+		}
+		if s.setupBlocked(w, r) {
 			return
 		}
 		if !sameSite(r) {
@@ -110,6 +115,81 @@ func (s *Server) admitted(caller identity.Caller) (identity.Caller, error) {
 	caller.Admin = person.Role == people.RoleAdmin
 	return caller, nil
 }
+
+// setupBlocked answers a request that arrived through the door while this install is not finished setting itself
+// up. The owner is let through, because they are the one finishing it; everybody else gets one plain sentence
+// instead of a half-configured console. A request with no assertion — the LAN address, the command line — is not
+// this question: a friend cannot reach the LAN address, and the owner's own browser is the console's business.
+func (s *Server) setupBlocked(w http.ResponseWriter, r *http.Request) bool {
+	if s.gate.Door == nil || s.gate.People == nil {
+		return false
+	}
+	if strings.TrimSpace(r.Header.Get(identity.AssertionHeader)) == "" {
+		return false
+	}
+	if !s.setupIncomplete() {
+		return false
+	}
+	caller, err := s.gate.Door.Prove(r)
+	if err != nil {
+		return false // a proof this door refuses is answered by the door, not by this page
+	}
+	if admin, ok, err := s.gate.People.Admin(); err == nil && ok && strings.EqualFold(admin.Email, caller.Email) {
+		return false
+	}
+	s.setupInProgress(w, r)
+	return true
+}
+
+// setupIncomplete is the Getting started list as the server can see it: a provider key, a model in force, and
+// somebody else in the book. The door itself is the fourth step, and a request that got this far is using it.
+func (s *Server) setupIncomplete() bool {
+	if s.gate.People == nil {
+		return true
+	}
+	admitted, err := s.gate.People.Admitted()
+	if err != nil || len(admitted) < 2 {
+		return true
+	}
+	if !ready.HasCredential(s.gate.Dir) && strings.TrimSpace(os.Getenv("ACORND_DEV_PROVIDER")) == "" {
+		return true
+	}
+	defaults, err := control.LoadDefaults(control.ProviderModelsPath(s.gate.Dir))
+	if err != nil {
+		return true
+	}
+	return defaults.Model.Provider == "" && strings.TrimSpace(os.Getenv("ACORND_MODEL")) == ""
+}
+
+// setupInProgress is the one page a visitor gets while the owner is still setting the install up, and the refusal
+// an API call gets. 503 rather than 200: this is not a page to read, it is a service that is not ready.
+func (s *Server) setupInProgress(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/api/") {
+		http.Error(w, "setup in progress: this install is not ready yet", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("content-type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	fmt.Fprint(w, setupInProgressPage)
+}
+
+const setupInProgressPage = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Setup in progress</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { display: grid; place-items: center; background: #111214; color: #e8e6e3;
+         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 30rem; padding: 2rem; }
+  h1 { font-size: 1.25rem; margin: 0 0 0.75rem; }
+  p { margin: 0; color: #a8a5a0; }
+</style></head>
+<body><main>
+  <h1>Setup in progress</h1>
+  <p>This install is not ready yet. Ask whoever runs it to finish setting it up, then come back.</p>
+</main></body></html>
+`
 
 // sameSite refuses a state-changing request whose Origin says another site made it.
 //

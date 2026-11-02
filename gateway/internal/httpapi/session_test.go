@@ -547,3 +547,20 @@ func TestAClaimWithABrokenCodeFileIsTheInstallsProblem(t *testing.T) {
 		t.Fatalf("claim = %d, want 500 (%s)", recorder.Code, recorder.Body.String())
 	}
 }
+
+// A browser the edge proved is signed in even though it holds no cookie of ours: Access is the sign-in, and the
+// assertion arrives on every request. Asking only for the cookie put an owner at a form they could not answer.
+func TestTheBrowserTheDoorProvedIsSignedIn(t *testing.T) {
+	console := newConsole(t)
+	console.gate.Door = stubDoor{caller: identity.Caller{Email: "me@example.com"}}
+	console.handler = New(nil, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<!doctype html>")}}, nil, console.gate).Handler()
+
+	recorder := console.do(t, http.MethodGet, "/api/session", "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("session = %d", recorder.Code)
+	}
+	doc := sessionOf(t, recorder)
+	if !doc.SignedIn || doc.Email != "me@example.com" {
+		t.Fatalf("a door-proved browser reads as %+v, want signed in as the address", doc)
+	}
+}

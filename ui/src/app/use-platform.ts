@@ -413,6 +413,8 @@ export interface Platform {
 	/** A token is being checked. */
 	remotePreviewBusy: boolean;
 	previewRemote: (token: string) => void;
+	/** Ask the gateway for the remote state again, which is how the tunnel line stays current. */
+	refreshRemote: () => void;
 	/** The file records a door this process did not start with; one press restarts into it. */
 	enableRemote: () => void;
 	remoteRestarting: boolean;
@@ -1636,6 +1638,10 @@ export function usePlatform(): Platform {
 			.finally(() => setRemoteChecking(false));
 	}, []);
 
+	const refreshRemoteNow = useCallback((): void => {
+		void fetchRemote().then(setRemote, () => undefined);
+	}, []);
+
 	const previewRemoteNow = useCallback((token: string): void => {
 		setRemotePreviewBusy(true);
 		setRemoteFailure(undefined);
@@ -1836,6 +1842,7 @@ export function usePlatform(): Platform {
 		remotePreview,
 		remotePreviewBusy,
 		previewRemote: previewRemoteNow,
+		refreshRemote: refreshRemoteNow,
 		enableRemote: enableRemoteNow,
 		remoteRestarting,
 		remoteRestarted,
