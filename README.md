@@ -168,7 +168,10 @@ One line:
 curl -fsSL https://raw.githubusercontent.com/marcelowa/acornd/main/scripts/install.sh | sh
 ```
 
-It picks the binary for this machine, checks its checksum, and puts it in `~/.acornd/bin`. Then it
+It picks the binary for this machine, checks its checksum, and puts it in `~/.acornd/bin`, on `PATH` —
+a link in `/usr/local/bin` or `~/.local/bin` when one of them is writable, and a marked block in the
+shell's rc file either way, so nobody has to export it by hand. A shell that was already open keeps the
+`PATH` it started with: open a new terminal. Then it
 runs `acornd setup --yes`, which does the steps this machine allows without a password and prints the
 rest, and starts the console detached on `http://<host>:7777` with the line that claims it. A machine
 that cannot be prepared non-interactively gets the plan as commands; the console serves either way.
