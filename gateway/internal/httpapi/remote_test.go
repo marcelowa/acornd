@@ -1016,3 +1016,30 @@ func (f *fakeCloudflare) groupWritten(include []string) {
 		f.onGroupWrite(include)
 	}
 }
+
+// The connector's state travels with the remote status: Cloudflare Access answers before the tunnel does, so the
+// hostname cannot tell the screen whether the thing that carries traffic is running (ADR 0033 §5).
+func TestTheRemoteStatusCarriesTheTunnelState(t *testing.T) {
+	api := newCloudflare()
+	_, opened, dir := screen(t, api)
+	if err := remote.Save(dir, remote.Setup{
+		Desired: remote.Desired{Hostname: "console.example.com", ZoneID: "z", AccountID: "a"},
+		State:   remote.State{TunnelID: "t", Audience: "aud-1", TeamDomain: "team.cloudflareaccess.com"},
+	}, time.Now()); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	gate := Gate{People: opened, Dir: dir, Tunnel: func() (string, string) { return "connected", "" }}
+	handler := New(nil, fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<!doctype html>")}}, nil, gate).Handler()
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/remote", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
+	var answer remoteState
+	if err := json.Unmarshal(recorder.Body.Bytes(), &answer); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if answer.Tunnel != "connected" {
+		t.Errorf("tunnel = %q, want connected", answer.Tunnel)
+	}
+}

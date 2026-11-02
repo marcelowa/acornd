@@ -133,7 +133,8 @@ func TestReconcileSaysItCannotWithoutAnAPITokenFromTheFile(t *testing.T) {
 // line to say about it, whatever the environment holds (ADR 0036 §5).
 func TestTheTunnelAsksTheFileNotTheEnvironment(t *testing.T) {
 	t.Setenv("ACORND_IDENTITY", "access")
-	out := logs(t, func() { startTunnel(context.Background(), t.TempDir(), "") })
+	report := &tunnelReport{}
+	out := logs(t, func() { startTunnel(context.Background(), t.TempDir(), "", report) })
 	if out != "" {
 		t.Errorf("an install with no record said %q", out)
 	}
@@ -149,7 +150,8 @@ func TestTheTunnelSaysItHasNoToken(t *testing.T) {
 	}, time.Now()); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	out := logs(t, func() { startTunnel(context.Background(), dir, "") })
+	report := &tunnelReport{}
+	out := logs(t, func() { startTunnel(context.Background(), dir, "", report) })
 	if !strings.Contains(out, "remote apply") {
 		t.Errorf("the boot did not say what to run to finish the tunnel: %q", out)
 	}
@@ -173,5 +175,27 @@ func TestAnApplyKeepsTheTokenTheConsoleStored(t *testing.T) {
 	}
 	if next.State.TeamDomain != "team.cloudflareaccess.com" {
 		t.Errorf("the team domain was not written: %+v", next.State)
+	}
+}
+
+// The screen's tunnel line comes from this report, not from the public hostname: an install with no record is
+// off, and one whose apply stopped before the tunnel had a token says why it is not running.
+func TestTheTunnelReportsWhyItIsNotRunning(t *testing.T) {
+	empty := &tunnelReport{}
+	startTunnel(context.Background(), t.TempDir(), "", empty)
+	if state, detail := empty.get(); state != "off" || !strings.Contains(detail, "no remote access") {
+		t.Errorf("an install with no record reports %q (%q)", state, detail)
+	}
+	dir := t.TempDir()
+	if err := remote.Save(dir, remote.Setup{
+		Desired: remote.Desired{Hostname: "console.example.com", ZoneID: "z", AccountID: "a"},
+		State:   remote.State{TunnelID: "t", Audience: "aud", TeamDomain: "team.cloudflareaccess.com"},
+	}, time.Now()); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	report := &tunnelReport{}
+	startTunnel(context.Background(), dir, "", report)
+	if state, detail := report.get(); state != "not started" || !strings.Contains(detail, "remote apply") {
+		t.Errorf("a record with no tunnel token reports %q (%q)", state, detail)
 	}
 }

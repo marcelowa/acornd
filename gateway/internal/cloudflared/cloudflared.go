@@ -24,6 +24,28 @@ import (
 	"time"
 )
 
+// Status is what the connector is doing, in the two pieces a screen shows: a state a person can read, and the
+// reason when it is not running. The console cannot learn this from the public hostname — Cloudflare Access
+// answers before the tunnel does — so the process that holds the connector is the only one that knows.
+type Status struct {
+	State  string
+	Detail string
+}
+
+// The states a connector is in, as the console shows them.
+const (
+	// StateStarting is the moment before the first dial: the binary is there, the process is not yet.
+	StateStarting = "starting"
+	// StateConnecting is a process that has started and has not registered a tunnel connection yet.
+	StateConnecting = "connecting"
+	// StateConnected is a registered tunnel connection: traffic can arrive.
+	StateConnected = "connected"
+	// StateRestarting is a connector that exited and is waiting out its backoff.
+	StateRestarting = "restarting"
+	// StateStopped is a connector the console asked to stop.
+	StateStopped = "stopped"
+)
+
 // Version is the one cloudflared this build runs. Pinned rather than "latest": a connector that changes under
 // an install without a test run is how a door stops opening on a Tuesday.
 const Version = "2026.10.7"
@@ -161,6 +183,17 @@ type Supervisor struct {
 	// announced is the one line a person needs, said once: "it is up". Both output streams are read, and a
 	// reconnect says it again only through the restart line that preceded it.
 	announced sync.Once
+	// Report hears every state change, so the console can say what the connector is doing without reading a
+	// log. The console keeps the last one; the supervisor does not need to. Nil discards them, which is what
+	// tests want.
+	Report func(Status)
+}
+
+// setStatus tells whoever is listening what the connector is doing.
+func (s *Supervisor) setStatus(state, detail string) {
+	if s.Report != nil {
+		s.Report(Status{State: state, Detail: detail})
+	}
 }
 
 // Run supervises until ctx is cancelled. It returns nil on a clean stop: a cancelled context is the caller
@@ -182,15 +215,18 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		started := time.Now()
 		err := s.once(ctx)
 		if ctx.Err() != nil {
+			s.setStatus(StateStopped, "")
 			return nil
 		}
 		if time.Since(started) >= healthy {
 			// It worked for a while, so the next death is news rather than a loop: start the wait over.
 			wait = base
 		}
+		s.setStatus(StateRestarting, err.Error())
 		s.logf("cloudflared stopped (%v); restarting in %s", err, wait.Round(time.Millisecond))
 		select {
 		case <-ctx.Done():
+			s.setStatus(StateStopped, "")
 			return nil
 		case <-time.After(wait):
 		}
@@ -214,6 +250,7 @@ func (s *Supervisor) once(ctx context.Context) error {
 	if err := command.Start(); err != nil {
 		return err
 	}
+	s.setStatus(StateConnecting, "")
 	var readers sync.WaitGroup
 	readers.Add(2)
 	go s.watch(&readers, stdout)
@@ -242,6 +279,7 @@ func (s *Supervisor) watch(readers *sync.WaitGroup, source io.Reader) {
 	scanner.Buffer(make([]byte, 0, 4096), 64*1024)
 	for scanner.Scan() {
 		if strings.Contains(scanner.Text(), "Registered tunnel connection") {
+			s.setStatus(StateConnected, "")
 			s.announced.Do(func() { s.logf("tunnel: connected") })
 		}
 	}

@@ -71,8 +71,27 @@ type remoteState struct {
 	// RestartRequired says the door is recorded and this process has none of it: remote.json was written after the
 	// boot that is serving, so the tunnel and the assertion door start at the next restart and not before
 	// (ADR 0036 §6). A boot that did build the door says false, because a restart would change nothing.
-	RestartRequired bool         `json:"restartRequired"`
-	Steps           []remoteStep `json:"steps,omitempty"`
+	RestartRequired bool `json:"restartRequired"`
+	// Tunnel is the connector's own state (starting, connecting, connected, restarting, stopped), and
+	// TunnelDetail the reason when it is not running. The public hostname cannot say this: Access answers
+	// before the tunnel does, so a dead connector still looks like a door (ADR 0033 §5).
+	Tunnel       string       `json:"tunnel,omitempty"`
+	TunnelDetail string       `json:"tunnelDetail,omitempty"`
+	Steps        []remoteStep `json:"steps,omitempty"`
+}
+
+// tunnel is the connector's state as this run knows it, or two empty strings when the install has none.
+func (s *Server) tunnel() (string, string) {
+	if s.gate.Tunnel == nil {
+		return "", ""
+	}
+	return s.gate.Tunnel()
+}
+
+// withTunnel adds what only the process holding the connector knows.
+func (s *Server) withTunnel(state remoteState) remoteState {
+	state.Tunnel, state.TunnelDetail = s.tunnel()
+	return state
 }
 
 // remoteStatus answers what is recorded. Nothing secret: the tunnel's token and the API token never leave the
@@ -83,7 +102,7 @@ func (s *Server) remoteStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.remoteStateFor(setup))
+	writeJSON(w, http.StatusOK, s.withTunnel(s.remoteStateFor(setup)))
 }
 
 // remoteStateFor is what the screen reads: ids and a yes/no about the token, never the token.
@@ -225,7 +244,7 @@ func (s *Server) remoteForgetToken(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.remoteStateFor(setup))
+	writeJSON(w, http.StatusOK, s.withTunnel(s.remoteStateFor(setup)))
 }
 
 // remotePreview answers the screen's first question before anything is stored: what can this token see? The zones
@@ -362,7 +381,7 @@ func (s *Server) reconcileAdmitted(admitted []string) error {
 
 // answerFor is what the screen renders: the state it will show next time, and what this press changed.
 func (s *Server) answerFor(desire remote.Desired, state remote.State, steps []remote.Step) remoteState {
-	answer := s.remoteStateFor(remote.Setup{Desired: desire, State: state})
+	answer := s.withTunnel(s.remoteStateFor(remote.Setup{Desired: desire, State: state}))
 	answer.Configured = true
 	answer.Steps = make([]remoteStep, 0, len(steps))
 	for _, step := range steps {

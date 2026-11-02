@@ -46,6 +46,9 @@ type Gate struct {
 	// remote.json cannot answer: a file written after the listener opened is a door this process does not have,
 	// and the screen can say a restart is what is missing rather than a second apply (ADR 0036 §6).
 	Publisher bool
+	// Tunnel is what this install's connector is doing, when it has one: a state word and the reason it is
+	// not running. Nil means no remote access, and a handler answers with nothing.
+	Tunnel func() (string, string)
 	// RunHost is the --host this run was started with, when it was given one, and "" when it took the default.
 	// An enable reads it because an exec cannot change the argv the process already has: a console started on
 	// every interface cannot restart itself into a door (ADR 0036 §5).

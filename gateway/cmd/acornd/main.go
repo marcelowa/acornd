@@ -191,6 +191,10 @@ func serve(argv []string) error {
 	if err != nil {
 		return err
 	}
+	// The Remote screen asks this process what its connector is doing: the public hostname cannot answer for it,
+	// because Cloudflare Access replies before the tunnel ever sees the request (ADR 0033 §5).
+	tunnel := &tunnelReport{}
+	gate.Tunnel = tunnel.get
 	workspaces := newWorkspaces(dir, userHome, *workspacesDir, command, worker, updates, secrets, engine, tier, ownerEmail(gate.People))
 	if err := workspaces.Open(ctx); err != nil {
 		return err
@@ -201,7 +205,7 @@ func serve(argv []string) error {
 
 	logReadiness(ready.Check(readyInputForBoot(dir, updates, engine)))
 
-	return serveConsole(ctx, install.host, *port, dir, workspaces, updates, gate, *cloudflaredPath)
+	return serveConsole(ctx, install.host, *port, dir, workspaces, updates, gate, *cloudflaredPath, tunnel)
 }
 
 // listenHost is where a run binds, now that the default follows the door rather than a flag (ADR 0036 §5). Its
@@ -230,9 +234,9 @@ func listenHost(explicit, dir string) (string, error) {
 // what this install recorded before the connector dials out, so a tunnel that was replaced or a
 // record that was deleted is fixed first; both run under the same context and neither blocks the
 // door.
-func serveConsole(ctx context.Context, host string, port int, dir string, workspaces *control.Workspaces, updates *update.Manager, gate httpapi.Gate, cloudflaredPath string) error {
+func serveConsole(ctx context.Context, host string, port int, dir string, workspaces *control.Workspaces, updates *update.Manager, gate httpapi.Gate, cloudflaredPath string, tunnel *tunnelReport) error {
 	go reconcileRemote(ctx, dir)
-	startTunnel(ctx, dir, cloudflaredPath)
+	startTunnel(ctx, dir, cloudflaredPath, tunnel)
 	return listen(ctx, host, port, httpapi.New(workspaces, web.Files, updates, gate).Handler(), dir)
 }
 
