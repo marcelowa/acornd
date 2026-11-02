@@ -50,12 +50,16 @@ var Allowed = map[string][]string{
 	// control is the rule, and a second copy of "which engines exist" is how the two drift apart.
 	// It reaches `remote` for the two calls the remote-access screen makes: that package is a leaf
 	// that talks to Cloudflare, and control does not own a tunnel (ADR 0033 §2).
+	// The edge's one look at readiness: the door asks whether this install has a provider key, because a door that
+	// opens onto a half-configured console is not a door (ADR 0036 §3). It uses ready's reader rather than a
+	// second parse of the same file.
 	"internal/httpapi": {
 		"internal/control",
 		"internal/remote",
 		"internal/identity",
 		"internal/people",
 		"internal/protocol",
+		"internal/ready",
 		"internal/update",
 		"internal/vault",
 	},
