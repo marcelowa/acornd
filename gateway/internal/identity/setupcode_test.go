@@ -242,3 +242,46 @@ func TestDisableSetupCodeReportsWhatItCannotRemove(t *testing.T) {
 		t.Fatal("a directory that shares the code's name was reported as removed")
 	}
 }
+
+// The limit is the only thing standing between a uniform draw and a code whose first characters are likelier
+// than its last: 256 - 256%30 is 240, and the sixteen bytes above it are drawn again.
+func TestTheDrawLimitIsTheLargestMultipleOfTheAlphabet(t *testing.T) {
+	for _, test := range []struct{ alphabet, want int }{
+		{30, 240},
+		{16, 256},
+		{26, 234},
+	} {
+		if got := drawLimit(test.alphabet); got != test.want {
+			t.Errorf("drawLimit(%d) = %d, want %d", test.alphabet, got, test.want)
+		}
+	}
+}
+
+// The boundary belongs to the rejected side: a byte equal to the limit is one `value % alphabet` would bias.
+func TestOnlyBytesBelowTheLimitAreAccepted(t *testing.T) {
+	for _, test := range []struct {
+		value int
+		want  bool
+	}{
+		{239, true},
+		{240, false},
+		{241, false},
+		{0, true},
+	} {
+		if got := acceptable(test.value, 240); got != test.want {
+			t.Errorf("acceptable(%d, 240) = %v, want %v", test.value, got, test.want)
+		}
+	}
+}
+
+// A destination that cannot be replaced is an error, not a silent success: the credential was never written.
+func TestWriteWholeReportsARenameItCouldNotDo(t *testing.T) {
+	dir := t.TempDir()
+	blocked := filepath.Join(dir, "blocked")
+	if err := os.MkdirAll(filepath.Join(blocked, "child"), 0o700); err != nil {
+		t.Fatalf("make the destination: %v", err)
+	}
+	if err := writeWhole(dir, "blocked", "secret"); err == nil {
+		t.Fatal("writeWhole reported success with a destination it could not replace")
+	}
+}

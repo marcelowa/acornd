@@ -112,15 +112,20 @@ func MatchSetupCode(dir, given string) (bool, error) {
 // characters more likely than the last fourteen; those bytes are drawn again instead.
 func mintSetupCode() (string, error) {
 	alphabet := len(setupAlphabet)
-	limit := 256 - 256%alphabet
+	limit := drawLimit(alphabet)
 	letters := make([]byte, 0, setupCodeLength)
-	draw := make([]byte, setupCodeLength+(setupCodeLength/2))
-	for len(letters) < setupCodeLength {
+	// Twelve bytes a draw for eight characters, as a literal: a buffer size computed here is arithmetic no
+	// reader needs, and every operation is a mutant a test would have to chase.
+	draw := make([]byte, 12)
+	// The number of draws is bounded rather than "until it works": a wrong limit (a mutation of the arithmetic
+	// above, say) would otherwise reject every byte and spin forever. Thirty-two draws are 384 bytes for eight
+	// characters, and a byte is rejected about one time in sixteen, so this is a formality that also cannot hang.
+	for range 32 {
 		if _, err := rand.Read(draw); err != nil {
 			return "", fmt.Errorf("minting a setup code: %w", err)
 		}
 		for _, value := range draw {
-			if int(value) >= limit {
+			if !acceptable(int(value), limit) {
 				continue
 			}
 			letters = append(letters, setupAlphabet[int(value)%alphabet])
@@ -128,9 +133,22 @@ func mintSetupCode() (string, error) {
 				break
 			}
 		}
+		if len(letters) == setupCodeLength {
+			break
+		}
+	}
+	if len(letters) != setupCodeLength {
+		return "", errors.New("minting a setup code: the draws never produced enough characters")
 	}
 	return string(letters[:4]) + "-" + string(letters[4:]), nil
 }
+
+// drawLimit is the largest multiple of the alphabet that fits in a byte. Bytes at or above it are drawn again,
+// because taking them modulo a number that does not divide 256 would favour the first characters.
+func drawLimit(alphabet int) int { return 256 - 256%alphabet }
+
+// acceptable reports whether a drawn byte is inside that unbiased range.
+func acceptable(value, limit int) bool { return value < limit }
 
 // writeWhole replaces a file inside the install folder with its content, 0600 and whole: written
 // beside its destination and renamed onto it, so a reader never sees a half-written credential and
