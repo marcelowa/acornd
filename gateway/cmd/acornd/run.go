@@ -345,19 +345,41 @@ func statusCommand(argv []string) {
 	}
 	if !processAlive(record.PID) {
 		fmt.Printf("acornd: down (pid %d is gone, started %s)\n", record.PID, describeSince(record))
-		reportLastLogLine(dir)
+		fmt.Println(whyItStopped(dir, record))
 		return
 	}
 	if !processLooksLikeAcornd(record.PID) {
 		fmt.Printf("acornd: down (pid %d is something else now)\n", record.PID)
-		reportLastLogLine(dir)
+		fmt.Println(whyItStopped(dir, record))
 		return
 	}
 	fmt.Printf("acornd: up, pid %d, %s, since %s\n", record.PID, record.Address, describeSince(record))
 	if url := healthURL(record.Address); url != "" && !waitHealthy(url, 2*time.Second) {
 		fmt.Println("acornd: the process is up and not answering yet (still booting, or wedged)")
 	}
-	fmt.Printf("acornd: log %s\n", runLogPath(dir))
+	fmt.Println(whereItRan(dir, record))
+}
+
+// whereItRan is where a run that is still up writes: its log file when it was detached, and the terminal that
+// started it when it was not. A foreground run has no file of its own, and the one in the folder belongs to an
+// earlier detached run — printing that path was the one thing this command got wrong.
+func whereItRan(dir string, record runRecord) string {
+	if record.Detached {
+		return fmt.Sprintf("acornd: log %s", runLogPath(dir))
+	}
+	return "acornd: foreground: its output is the terminal that started it"
+}
+
+// whyItStopped is the same answer for a run that is gone, with the last line when there is a file to read.
+func whyItStopped(dir string, record runRecord) string {
+	if !record.Detached {
+		return "acornd: foreground: it ran in a terminal, and its last words were there"
+	}
+	path := runLogPath(dir)
+	if line, ok := lastLogLine(path); ok {
+		return fmt.Sprintf("acornd: log %s\nacornd: last line: %s", path, line)
+	}
+	return fmt.Sprintf("acornd: log %s", path)
 }
 
 // describeSince is "2026-11-01T14:02:11Z (2h14m)", because both the stamp and the age are useful.
