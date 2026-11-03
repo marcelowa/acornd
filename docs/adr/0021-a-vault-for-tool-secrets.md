@@ -79,7 +79,7 @@ contains it. The interface shows the name, description, scope, hosts, substituti
 `allowEnv`, and when it was rotated. The value is entered once and never returned.
 
 **The guest holds a placeholder, and the prompt says how to send it.** On a substitute engine
-the environment variable is the literal `$MSB_<NAME>`; a command sends that value, for
+the environment variable `<NAME>` holds the literal `$MSB_<NAME>`; a command sends that value, for
 example in an `Authorization` header. `${NAME}` and `{{NAME}}` are not placeholders and pass
 through unchanged, and substitution is HTTPS only: the engine intercepts TLS on 443, so a
 plain HTTP request is never substituted. The prompt and the list tool name the placeholder

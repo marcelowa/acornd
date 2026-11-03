@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { parseSecrets, secretSection } from "../src/secrets.ts";
+import { formatList } from "../src/secret-tool.ts";
 
 describe("the secrets control sends", () => {
 	test("a JSON array of names, descriptions, hosts, and delivery", () => {
@@ -80,10 +81,28 @@ describe("the prompt section", () => {
 		]);
 		expect(section).toContain("never print a secret");
 		expect(section).toContain(
-			"GITHUB_TOKEN: read-only token The environment holds the literal $MSB_GITHUB_TOKEN; send that value for api.github.com, github.com over HTTPS.",
+			"GITHUB_TOKEN is set to the literal $MSB_GITHUB_TOKEN; use $GITHUB_TOKEN in a shell or send $MSB_GITHUB_TOKEN directly for api.github.com, github.com over HTTPS.",
 		);
+		expect(section).toContain("$MSB_NAME is not itself a variable");
 		expect(section).toContain(
 			"DB_PASSWORD: the project database The sandbox environment holds the real value.",
 		);
+	});
+
+	test("the list names the variable that holds the placeholder, not a variable named after it", () => {
+		const list = formatList({
+			secrets: [
+				{
+					name: "GITHUB_PAT",
+					description: "the release token",
+					hosts: ["api.github.com"],
+					delivery: "substitute",
+					status: "delivered",
+					placeholder: "$MSB_GITHUB_PAT",
+				},
+			],
+		});
+		expect(list).toContain("GITHUB_PAT holds the literal $MSB_GITHUB_PAT");
+		expect(list).not.toContain("the env holds");
 	});
 });
