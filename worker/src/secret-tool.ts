@@ -1,4 +1,4 @@
-import { Type } from "@earendil-works/pi-ai";
+import { arr, obj, oneOf, opt, str } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { emit, log, type SecretInfo } from "./protocol.ts";
 
@@ -126,19 +126,19 @@ export function secretExtension() {
 				name: "secret",
 				description:
 					"List the secrets this workspace may use, or ask the user to set one. A value is never in this conversation: use request and the user enters it in a card. Never ask the user to paste a secret as text.",
-				parameters: Type.Object({
-					action: Type.Union([Type.Literal("list"), Type.Literal("request")]),
-					name: Type.Optional(
-						Type.String({
+				parameters: obj({
+					action: oneOf(["list", "request"]),
+					name: opt(
+						str({
 							description:
 								"Environment variable name for request, uppercase letters, digits, and underscores",
 						}),
 					),
-					description: Type.Optional(
-						Type.String({ description: "What the secret is for, shown in the list" }),
+					description: opt(
+						str({ description: "What the secret is for, shown in the list" }),
 					),
-					hosts: Type.Optional(
-						Type.Array(Type.String(), {
+					hosts: opt(
+						arr(str(), {
 							description:
 								"Hosts the value may be substituted for, as a suggestion for the card",
 						}),

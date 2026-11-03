@@ -14,7 +14,8 @@
  *   delegation-tasks.ts; this file is the model-facing surface and the policy.
  */
 import type { Context } from "@earendil-works/chord";
-import { Type, type ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { bool, obj, oneOf, opt, str } from "@earendil-works/pi-schema";
 import {
 	AgentDoc,
 	type Conversation,
@@ -318,49 +319,35 @@ export function delegationExtension(deps: DelegationDeps) {
 			"stop aborts what it is doing now. An answer to a message you sent comes back to you as a",
 			"new message unless you pass fireAndForget.",
 		].join(" "),
-		parameters: Type.Object({
-			action: Type.Union([
-				Type.Literal("spawn"),
-				Type.Literal("send"),
-				Type.Literal("list"),
-				Type.Literal("read"),
-				Type.Literal("stop"),
-			]),
-			name: Type.Optional(Type.String({ description: "The subagent's name" })),
-			conversation: Type.Optional(
-				Type.String({
+		parameters: obj({
+			action: oneOf(["spawn", "send", "list", "read", "stop"]),
+			name: opt(str({ description: "The subagent's name" })),
+			conversation: opt(
+				str({
 					description: "Conversation id, instead of a name, for send, read, and stop",
 				}),
 			),
-			peer: Type.Optional(
-				Type.Boolean({
+			peer: opt(
+				bool({
 					description:
 						"Create a normal conversation instead of a subagent: it appears in the user's list and outlives you",
 				}),
 			),
-			fireAndForget: Type.Optional(
-				Type.Boolean({
+			fireAndForget: opt(
+				bool({
 					description:
 						"Deliver the message, but do not bring its answer back. The conversation still answers in its own transcript; you are just not woken with it. Default: false",
 				}),
 			),
-			message: Type.Optional(
-				Type.String({ description: "What to tell it, for spawn and send" }),
-			),
-			followUp: Type.Optional(
-				Type.Boolean({
+			message: opt(str({ description: "What to tell it, for spawn and send" })),
+			followUp: opt(
+				bool({
 					description: "Queue after its current answer instead of steering it now",
 				}),
 			),
-			agent: Type.Optional(
-				Type.String({ description: "Agent definition to run it as, for spawn" }),
-			),
-			model: Type.Optional(
-				Type.String({ description: "provider/modelId override, for spawn" }),
-			),
-			thinking: Type.Optional(
-				Type.String({ description: "Thinking level override, for spawn" }),
-			),
+			agent: opt(str({ description: "Agent definition to run it as, for spawn" })),
+			model: opt(str({ description: "provider/modelId override, for spawn" })),
+			thinking: opt(str({ description: "Thinking level override, for spawn" })),
 		}),
 		// Repeating `stop` could stop newer work, so an interrupted call is not rerun.
 		replay: "unsafe",
@@ -625,11 +612,11 @@ export function delegationExtension(deps: DelegationDeps) {
 			"would rather keep working while it does. It shares this working directory, so do not",
 			"delegate edits to files you are editing yourself.",
 		].join(" "),
-		parameters: Type.Object({
-			task: Type.String({
+		parameters: obj({
+			task: str({
 				description: "A complete, self-contained instruction for the subagent",
 			}),
-			agent: Type.Optional(Type.String({ description: "Agent definition name to run as" })),
+			agent: opt(str({ description: "Agent definition name to run as" })),
 		}),
 		// A rerun after a crash finds the child it already made, because the ownership
 		// index is committed in the same commit that creates it.

@@ -8,6 +8,7 @@ import {
 	type BinaryReader,
 	type DirReader,
 	type ExecutionEnv,
+	type FileChange,
 	type FileInfo,
 	type FileWatcher,
 	type Result,
@@ -15,7 +16,6 @@ import {
 	type ShellExecResult,
 	type TextLine,
 	type TextLineReader,
-	type WatchChange,
 	type WatchTarget,
 } from "@earendil-works/pi-durable/env";
 import type { ExecResult, SandboxClient } from "./sandbox.ts";
@@ -402,7 +402,7 @@ export class SandboxExecutionEnv implements ExecutionEnv {
 	 */
 	async watch(
 		targets: readonly WatchTarget[],
-		onChange: (change: WatchChange) => void,
+		onChange: (change: FileChange) => void,
 		context: Context,
 	): Promise<Result<FileWatcher, FileError>> {
 		if (isAborted(context)) return err(abortedFileError(""));
@@ -423,7 +423,7 @@ export class SandboxExecutionEnv implements ExecutionEnv {
 					if (!next.has(path)) changed.push(path);
 				}
 				snapshot = next;
-				if (changed.length > 0) onChange({ paths: changed });
+				if (changed.length > 0) onChange({ kind: "paths", paths: changed });
 			} finally {
 				polling = false;
 			}
@@ -437,7 +437,7 @@ export class SandboxExecutionEnv implements ExecutionEnv {
 		context.abortSignal?.addEventListener("abort", onAbort, { once: true });
 		return ok({
 			mode: "polling",
-			close: async () => {
+			stop: async () => {
 				stopped = true;
 				clearInterval(timer);
 				context.abortSignal?.removeEventListener("abort", onAbort);
