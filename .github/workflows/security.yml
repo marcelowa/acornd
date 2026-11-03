@@ -88,6 +88,12 @@ jobs:
     # survived, and nothing more. Writing the test that kills it needs judgement, and a fix PR made
     # without it would be a guess with a green tick on it. The issue carries the report, so the fix
     # is a five-minute job with the evidence already in hand.
+    #
+    # No engine is booted here, and that is why this job — unlike the sandbox tier — does nothing
+    # about /dev/kvm: gremlins runs the package's tests once per mutant, so a live boot is a boot in
+    # every pass. The package's live tests ask for ACORND_LIVE_SANDBOX, which `make test-sandbox`
+    # sets and this job does not. A sweep that reported a nested microVM's abort as a survivor is
+    # what #18 was, and the step below now separates "a mutant lived" from "no verdict at all".
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -103,29 +109,71 @@ jobs:
           tools: true
       - name: mutations ${{ matrix.package }}
         id: mutants
+        env:
+          PACKAGE: ${{ matrix.package }}
         run: |
           set +e
-          make mutations PKG=${{ matrix.package }} > "$RUNNER_TEMP/mutants.log" 2>&1
+          make mutations PKG="$PACKAGE" > "$RUNNER_TEMP/mutants.log" 2>&1
           status=$?
           cat "$RUNNER_TEMP/mutants.log"
           echo "status=$status" >> "$GITHUB_OUTPUT"
-          # The report a person needs, written where the issue step can read it.
-          {
-            echo "make mutations PKG=${{ matrix.package }} failed on \`${{ github.sha }}\`."
-            echo
-            echo '```'
-            grep -E 'LIVED|Killed:|Test efficacy' "$RUNNER_TEMP/mutants.log" | sed 's/^ *//' | head -40
-            echo '```'
-            echo
-            echo "A surviving mutant is a test that ran and did not distinguish, and the floor in"
-            echo "\`.mutationfloors\` may only move up — so the fix is a test, not a number."
-          } > "$RUNNER_TEMP/body.md"
-          [ "$status" -eq 0 ] || exit 1
+
+          # What this step is allowed to report: a mutant that lived. A sweep that died before its
+          # summary — a baseline test that aborted, a compiler that failed — leaves a log full of
+          # reasons and no survivor in it, and filing that under this job's title is how #18 was
+          # opened saying nothing at all. So the two questions are asked apart: did a mutant live,
+          # and did the sweep finish.
+          lived=$(grep -cE '(^|[[:space:]])LIVED([[:space:]]|$)' "$RUNNER_TEMP/mutants.log")
+          summarized=$(grep -cE '^Killed: [0-9]+, Lived: [0-9]+' "$RUNNER_TEMP/mutants.log")
+          verdict=no-verdict
+          if [ "$status" -eq 0 ]; then
+            if [ "$summarized" -gt 0 ]; then verdict=clean; else verdict=no-sweep; fi
+          elif [ "$lived" -gt 0 ]; then
+            verdict=survivors
+          fi
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+
+          if [ "$verdict" = "no-sweep" ]; then
+            # `make mutations` passes when gremlins is not installed, so that a workstation without
+            # the tools is not a red build. The tools are installed here, and a green sweep that
+            # swept nothing is the one outcome this job must not report as one.
+            echo "::error title=No sweep ran::make mutations PKG=$PACKAGE exited 0 without a summary; gremlins did not run."
+            exit 1
+          fi
+
+          if [ "$verdict" = "no-verdict" ]; then
+            echo "::error title=The sweep did not reach a verdict::make mutations PKG=$PACKAGE failed with no mutant living. Nothing here is a survivor: the log is a baseline or tooling failure, and no issue is filed for it."
+            {
+              echo "### \`make mutations PKG=$PACKAGE\` did not reach a verdict"
+              echo
+              echo "No mutant lived and no summary was written, so there is nothing to write a test for."
+              echo
+              echo '```'
+              tail -n 30 "$RUNNER_TEMP/mutants.log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          if [ "$verdict" = "survivors" ]; then
+            # The report a person needs, written where the issue step can read it.
+            {
+              echo "make mutations PKG=$PACKAGE failed on \`${{ github.sha }}\`."
+              echo
+              echo '```'
+              grep -E 'LIVED|Killed:|Test efficacy' "$RUNNER_TEMP/mutants.log" | sed 's/^ *//' | head -40
+              echo '```'
+              echo
+              echo "A surviving mutant is a test that ran and did not distinguish, and the floor in"
+              echo "\`.mutationfloors\` may only move up — so the fix is a test, not a number."
+            } > "$RUNNER_TEMP/body.md"
+            exit 1
+          fi
       - name: File what survived
-        # `failure()` and the outcome: a step's own `if` is read as `success() && …`, so the
-        # outcome alone skips this in exactly the case it exists for — and the outcome alone also
-        # keeps a broken install from being filed as "a test is missing".
-        if: failure() && steps.mutants.outcome == 'failure'
+        # `failure()`, `outcome` and a verdict of `survivors`: a step's own `if` is read as
+        # `success() && …`, so the first is what makes this run — and the verdict is what keeps a
+        # run with no survivor in it from being filed as one.
+        if: failure() && steps.mutants.outcome == 'failure' && steps.mutants.outputs.verdict == 'survivors'
         env:
           GH_TOKEN: ${{ github.token }}
           PACKAGE: ${{ matrix.package }}

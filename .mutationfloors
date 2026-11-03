@@ -34,11 +34,13 @@ internal/people      98   66
 # pass at those tests executed the code without asserting what it sent, which is why 22 of them lived
 # for a while; asserting the commands, the order, the args and the environment took it back up.
 #
-# sandbox's killed count is 389 where the engine is not installed and 416 where it is: without
-# bubblewrap the live lifecycle test skips, so fewer mutants are reachable. The nightly job runs
-# without it on purpose — installing bubblewrap there made that test run inside every mutant's
-# test pass, sixteen seconds times four hundred mutants — so the floor sits at the low count. On a
-# machine with the engine the same commit reads 416, which is above the floor and may not go down.
+# sandbox's floor is the count a sweep reads on a machine that boots no engine: its live tests
+# ask for ACORND_LIVE_SANDBOX, which `make test-sandbox` sets and a mutation sweep does not, so a
+# real boot never lands inside a mutant's test pass — sixteen seconds times four hundred mutants.
+# The count used to depend on whether the runner image happened to ship bubblewrap, and when the
+# 26.04 image started shipping it the nested-microVM test woke up in the weekly sweep and aborted
+# on a /dev/kvm nothing there had made readable. A number that moves with an image is not a
+# property of these tests; the switch is what makes it one.
 #
 # supervise's eight are timing: the idle check's clamps are `interval < 100ms` and `interval >
 # 30s`, and `<=`/`>=` produce the same value at the boundary, because the clamp assigns the same

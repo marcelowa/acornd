@@ -630,13 +630,30 @@ func TestTheTrustBundleIsTheImagesRootsAndThisInstallsCA(t *testing.T) {
 // The nested microVM tier: the host's engine, the host's store, and a real microVM inside a
 // bwrap sandbox with the devices and caps a workspace gets by default. It is in the sandbox
 // tier because it boots a real microVM; the fast suite skips it with -short.
+//
+// The switch is the one the rest of the live suite already asks for, and this test has a reason
+// they do not: the mutation sweep runs this package once per mutant, so a boot here is a boot in
+// every one of several hundred passes. It used to ask the machine instead of the caller — "is
+// bubblewrap installed" — which was right for as long as the runner image shipped none. The
+// 26.04 image ships one, the sweep started booting microVMs, and the boot aborted on a /dev/kvm
+// the job had no reason to make readable; the abort reached the report as a mutation survivor.
 func TestAMicroVMStartsInsideABwrapSandbox(t *testing.T) {
 	if testing.Short() {
 		t.Skip("the microVM tier")
 	}
+	if os.Getenv("ACORND_LIVE_SANDBOX") == "" {
+		t.Skip("set ACORND_LIVE_SANDBOX=1 to boot a microVM inside a bwrap sandbox")
+	}
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		t.Skip("no bubblewrap on this machine")
 	}
+	// A hypervisor this user cannot open is not a skip: the engine answers it with an abort, and
+	// the report is then a crash inside the engine rather than the device that was missing.
+	device, err := os.Open("/dev/kvm")
+	if err != nil {
+		t.Fatalf("the nested microVM needs /dev/kvm, and this machine will not open it: %v%s", err, kvmHint())
+	}
+	_ = device.Close()
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Skip("no home folder for the engine store")
