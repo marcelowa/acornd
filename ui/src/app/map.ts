@@ -155,6 +155,7 @@ export function toConversation(
 function toolEntry(
 	slot: WireToolSlot,
 	calls: Map<string, { name?: string | undefined; args?: unknown }>,
+	running: boolean,
 ): TranscriptEntry {
 	return {
 		kind: "tool",
@@ -162,8 +163,10 @@ function toolEntry(
 		callId: slot.callId,
 		name: slot.name,
 		// Only done is done: a pending call has not started yet, but its round is live,
-		// so the card stays open and counts as the run happening.
-		status: slot.status === "done" ? "done" : "running",
+		// so the card stays open and counts as the run happening. When the state says the
+		// run is over, a slot still here is a view that outlived it: the card settles
+		// rather than pulsing a promise the turn can no longer keep.
+		status: slot.status === "done" || !running ? "done" : "running",
 		isError: (slot.diagnostics ?? []).some((diagnostic) => diagnostic.severity === "error"),
 		args: calls.get(slot.callId)?.args,
 		output: slot.output ?? "",
@@ -555,12 +558,14 @@ export function toTranscript(
 	// Whether the run left visible evidence: streaming text, a running tool, the
 	// thinking itself, or an accepted draft. A run with none of those is silence, and
 	// silence gets the dots — but only while the run is real, so a stuck flag cannot
-	// promise forever.
+	// promise forever. The same rule holds for what the live document already holds: a
+	// view can outlive the run it describes — the client missed the frame that ended it —
+	// and then its words are still evidence, but nothing about it is still live.
 	let liveContent = false;
 	for (const slot of live?.tools ?? []) {
 		if (settled.has(slot.callId)) continue;
-		if (slot.status === "running") liveContent = true;
-		transcript.push(toolEntry(slot, calls));
+		if (slot.status === "running" && running) liveContent = true;
+		transcript.push(toolEntry(slot, calls, running));
 	}
 
 	const streaming = live?.generation?.message;
@@ -578,7 +583,7 @@ export function toTranscript(
 				id: "live-thinking",
 				text: thinking,
 				at: at(streaming),
-				live: true,
+				live: running,
 			});
 		}
 		if (failure !== undefined) {
@@ -597,7 +602,10 @@ export function toTranscript(
 				id: "live",
 				markdown,
 				at: at(streaming),
-				live: true,
+				// The words are kept when the run is over — they may be all the reader
+				// ever sees of this reply — but as a settled pane: the dots would be a
+				// promise the state has already said will not be kept.
+				live: running,
 			});
 		}
 	}
