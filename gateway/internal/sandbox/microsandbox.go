@@ -398,22 +398,35 @@ func (m *Microsandbox) Create(ctx context.Context, policy Policy, policyDir stri
 		return err
 	}
 	args := []string{"create", "--conf", path, "--name", Name(policy.Workspace), "--label", "acornd"}
-	// The engine is told about nesting only if it knows the flag, but then it is told either
-	// way: allowed and possible is `--nested-virt`, refused is `--nested-virt=false` —
-	// explicit, so that a default in the engine's own configuration cannot overrule the
-	// workspace. An engine without the flag has nothing to hear. (On the pinned 0.7.6 a
-	// refusal cannot be honored — there is no off switch — which the ADR owns as an interim
-	// limitation: the sandbox still boots.)
 	args = append(args, networkArgs(policy)...)
-	if engine := m.engineNesting(ctx); engine.Available {
-		if policy.DisableVMNesting {
-			args = append(args, "--nested-virt=false")
-		} else if m.hostNesting().Available {
-			args = append(args, "--nested-virt")
-		}
-	}
+	args = append(args, m.nestingArgs(ctx, policy)...)
 	_, err := m.runEnv(ctx, secretEnvValues(policy.Secrets), args...)
 	return err
+}
+
+// nestingArgs is what the sandbox may do with virtualization, said out loud for every case.
+//
+// The switch is a flag, not a policy key: the engine reads sandbox.yaml strictly and 0.7.13
+// has no nesting field in it, so the generated file cannot carry this. Both directions are
+// stated instead — `--nested-virt` to turn it on, `--nested-virt=false` to turn it off — so
+// that nothing in the engine's own configuration can overrule a workspace, the way
+// `network: none` is written out rather than left to a default.
+//
+// On is the workspace's default, and it is granted only where it can be honored: an
+// explicitly enabled setting fails the boot on a host that cannot nest (0.7.9 and later), and
+// a default must not cost anybody their workspace. That machine is told `false` anyway: the
+// engine is never left to its own default, and what happens is what the state reports.
+// docs/adr/0018-disable-vm-nesting.md owns the three cases and the reasons.
+func (m *Microsandbox) nestingArgs(ctx context.Context, policy Policy) []string {
+	if !m.engineNesting(ctx).Available {
+		// An engine that predates the flag has nothing to hear, and an unknown flag would
+		// fail the create: the pin is not assumed to be what is installed.
+		return nil
+	}
+	if policy.DisableVMNesting || !m.hostNesting().Available {
+		return []string{"--nested-virt=false"}
+	}
+	return []string{"--nested-virt"}
 }
 
 // networkArgs is what a workspace may reach, said out loud for every case.

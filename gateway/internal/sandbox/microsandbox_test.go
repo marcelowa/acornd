@@ -342,14 +342,27 @@ func createCall(t *testing.T, runner *helpRunner) []string {
 	return nil
 }
 
+// nestingFlag is the nesting argument a create call carries, or "" when it carries none.
+// `--nested-virt=false` contains `--nested-virt`, so a test that only looks for the prefix
+// cannot tell on from off.
+func nestingFlag(t *testing.T, runner *helpRunner) string {
+	t.Helper()
+	for _, arg := range createCall(t, runner) {
+		if arg == "--nested-virt" || strings.HasPrefix(arg, "--nested-virt=") {
+			return arg
+		}
+	}
+	return ""
+}
+
 func TestCreateAsksForNestingWhenPossible(t *testing.T) {
 	driver, runner := nestingDriver(t, nestedHelp, NestingSupport{Available: true})
 	// The zero policy allows nesting: absence is not a refusal.
 	if err := driver.Create(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(strings.Join(createCall(t, runner), " "), "--nested-virt") {
-		t.Errorf("a capable engine and machine should be asked for nesting: %v", runner.calls)
+	if flag := nestingFlag(t, runner); flag != "--nested-virt" {
+		t.Errorf("a capable engine and machine should be asked for nesting, got %q: %v", flag, runner.calls)
 	}
 }
 
@@ -361,41 +374,38 @@ func TestCreateRefusesNestingExplicitlyWhenDisabled(t *testing.T) {
 	}
 	// A refusal is said explicitly, so a default in the engine's own configuration cannot
 	// turn nesting on under a workspace that chose against it.
-	if !strings.Contains(strings.Join(createCall(t, runner), " "), "--nested-virt=false") {
-		t.Errorf("a workspace that refuses nesting should say so: %v", runner.calls)
+	if flag := nestingFlag(t, runner); flag != "--nested-virt=false" {
+		t.Errorf("a workspace that refuses nesting should say so, got %q: %v", flag, runner.calls)
 	}
 }
 
 func TestCreateSaysNothingAboutNestingToAnEngineThatCannot(t *testing.T) {
-	driver, runner := nestingDriver(t, "Options:\n      --cpus", NestingSupport{Available: true})
-	if err := driver.Create(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(strings.Join(createCall(t, runner), " "), "--nested-virt") {
-		t.Errorf("an engine without the flag has nothing to be told: %v", runner.calls)
-	}
-}
-
-func TestCreateCannotRefuseToAnEngineWithoutTheFlag(t *testing.T) {
-	driver, runner := nestingDriver(t, "Options:\n      --cpus", NestingSupport{Available: true})
-	policy := Policy{Workspace: "/home/me/work", DisableVMNesting: true}
-	if err := driver.Create(context.Background(), policy, t.TempDir()); err != nil {
-		t.Fatal(err)
-	}
-	// There is no off switch to send it on. An engine that predates the flag must not be
-	// told to do what it cannot hear.
-	if strings.Contains(strings.Join(createCall(t, runner), " "), "--nested-virt") {
-		t.Errorf("an engine without the flag cannot nest and must not be told to: %v", runner.calls)
+	// An engine that predates the flag has nothing to hear, so neither direction is stated:
+	// the flag is not in the pinned release's help, and passing one would fail the create
+	// rather than nest or refuse. The pinned 0.7.13 advertises it, so this is what keeps a
+	// stale install from breaking a workspace.
+	for _, refuse := range []bool{false, true} {
+		driver, runner := nestingDriver(t, "Options:\n      --cpus", NestingSupport{Available: true})
+		policy := Policy{Workspace: "/home/me/work", DisableVMNesting: refuse}
+		if err := driver.Create(context.Background(), policy, t.TempDir()); err != nil {
+			t.Fatal(err)
+		}
+		if flag := nestingFlag(t, runner); flag != "" {
+			t.Errorf("an engine without the flag must not be told to nest (refuse=%t), got %q: %v", refuse, flag, runner.calls)
+		}
 	}
 }
 
-func TestCreateLeavesNestingOffWhenTheMachineCannot(t *testing.T) {
+func TestCreateTurnsNestingOffExplicitlyWhenTheMachineCannot(t *testing.T) {
 	driver, runner := nestingDriver(t, nestedHelp, unavailable("the host kernel has nested virtualization off"))
 	if err := driver.Create(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(strings.Join(createCall(t, runner), " "), "--nested-virt") {
-		t.Errorf("a machine that cannot nest must not be asked to: %v", runner.calls)
+	// On is the default, but an explicitly enabled setting fails the boot on a host that
+	// cannot nest — so the sandbox is told off, not left to the engine's own default. The
+	// workspace keeps its sandbox, and the state says why it does not nest.
+	if flag := nestingFlag(t, runner); flag != "--nested-virt=false" {
+		t.Errorf("a machine that cannot nest should be told off explicitly, got %q: %v", flag, runner.calls)
 	}
 }
 
