@@ -41,7 +41,12 @@ another worker, not changing the control plane.
   actually run ([ADR 0026](docs/adr/0026-rootless-host.md)):
   - `bwrap` — `apt install bubblewrap passt`, no root needed beyond that. On Ubuntu 23.10+ it also
     needs unprivileged user namespaces: `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`
-    (or an AppArmor profile for `/usr/bin/bwrap`, which covers a workspace with no egress)
+    (or an AppArmor profile for `/usr/bin/bwrap`, which covers a workspace with no egress). On
+    Ubuntu 26.04+ the `passt` package also ships an AppArmor profile that lets pasta execute only
+    `/usr/bin` and `/bin` binaries, and acornd's supervisor lives in its own install folder — so
+    disable that one too, or every sandbox with egress refuses with
+    `Failed to start command or shell: Permission denied`:
+    `sudo ln -s /etc/apparmor.d/usr.bin.pasta /etc/apparmor.d/disable/ && sudo apparmor_parser -R /etc/apparmor.d/usr.bin.pasta`
   - `microsandbox` — a hypervisor: `/dev/kvm`, and your user in the `kvm` group
 
 ## Setup
