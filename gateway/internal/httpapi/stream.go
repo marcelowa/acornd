@@ -30,8 +30,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	// conversations without agreeing on an active one — and every state it is sent is its
 	// caller's, because the landing and the draft are per person (ADR 0034 §7).
 	caller := callerOf(r)
-	conversationID := r.URL.Query().Get("conversation")
-	id, frames, stale, initial, err := ctl.Subscribe(r.Context(), caller, conversationID)
+	subscription, err := ctl.Subscribe(r.Context(), caller, r.URL.Query().Get("conversation"))
 	if err != nil {
 		// The stream is already open, so a status line here would be a second header that no
 		// client reads. Say it on the stream and close: the client reconnects, which is what
@@ -40,12 +39,12 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 		return
 	}
-	defer ctl.Unsubscribe(id)
+	defer ctl.Unsubscribe(subscription.ID)
 
-	if !s.sendOpening(w, flusher, ctl, caller, conversationID, initial) {
+	if !s.sendOpening(w, flusher, ctl, caller, subscription.Conversation, subscription.Initial) {
 		return
 	}
-	s.forward(w, flusher, r, ctl, caller, conversationID, frames, stale)
+	s.forward(w, flusher, r, ctl, caller, subscription)
 }
 
 // openStream writes the headers and the reconnect interval. Everything after this is events:
@@ -93,34 +92,73 @@ func (s *Server) forward(
 	r *http.Request,
 	ctl *control.Control,
 	caller control.Caller,
-	conversationID string,
-	frames <-chan protocol.Frame,
-	stale <-chan struct{},
+	subscription control.Subscription,
 ) {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-ticker.C:
-			if err := writeEvent(w, "ping", map[string]int64{"at": time.Now().UnixMilli()}); err != nil {
-				return
-			}
-			flusher.Flush()
-		case frame := <-frames:
-			if err := writeEvent(w, "frame", frame); err != nil {
-				return
-			}
-			flusher.Flush()
-		// The state moved, and the client's copy is stale. It is answered with the state
-		// itself, built now rather than when the signal was raised: the signal can wait,
-		// the state cannot be old.
-		case <-stale:
-			if err := writeEvent(w, "state", s.stateOf(ctl, caller, conversationID)); err != nil {
-				return
-			}
-			flusher.Flush()
-		}
+	for s.forwardOnce(w, flusher, r.Context().Done(), ticker.C, ctl, caller, subscription) {
 	}
+}
+
+// forwardOnce writes whatever one wakeup carries: a keepalive, a queued event, or a fresh state
+// or view. False means the client is gone.
+func (s *Server) forwardOnce(
+	w http.ResponseWriter,
+	flusher http.Flusher,
+	done <-chan struct{},
+	ping <-chan time.Time,
+	ctl *control.Control,
+	caller control.Caller,
+	subscription control.Subscription,
+) bool {
+	select {
+	case <-done:
+		return false
+	case <-ping:
+		return sendEvent(w, flusher, "ping", map[string]int64{"at": time.Now().UnixMilli()})
+	case frame := <-subscription.Frames:
+		return sendEvent(w, flusher, "frame", frame)
+	// The state moved, and the client's copy is stale. It is answered with the state itself,
+	// built now rather than when the signal was raised: the signal can wait, the state cannot
+	// be old.
+	case <-subscription.State:
+		return s.sendState(w, flusher, ctl, caller, subscription.Conversation)
+	case <-subscription.View:
+		return sendView(w, flusher, ctl, subscription.Conversation)
+	}
+}
+
+// sendState builds the state now and writes it. The signal can wait; the state cannot be old.
+func (s *Server) sendState(
+	w http.ResponseWriter,
+	flusher http.Flusher,
+	ctl *control.Control,
+	caller control.Caller,
+	conversationID string,
+) bool {
+	return sendEvent(w, flusher, "state", s.stateOf(ctl, caller, conversationID))
+}
+
+// sendView reads the newest complete view when the signal fires. The signal carries no value
+// because one read is enough for any number of skipped frames: a client that fell behind loses
+// the middle of a run, never the frame that says the run ended — which is the one it cannot get
+// from anywhere else. Nothing cached yet is not a failure: the first view will wake the client.
+func sendView(
+	w http.ResponseWriter,
+	flusher http.Flusher,
+	ctl *control.Control,
+	conversationID string,
+) bool {
+	frame, found := ctl.CachedView(conversationID)
+	return !found || sendEvent(w, flusher, "frame", frame)
+}
+
+// sendEvent writes one event and flushes it: every case in the stream loop does the same two
+// things, and false means the client is gone.
+func sendEvent(w http.ResponseWriter, flusher http.Flusher, name string, value any) bool {
+	if err := writeEvent(w, name, value); err != nil {
+		return false
+	}
+	flusher.Flush()
+	return true
 }

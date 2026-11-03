@@ -62,9 +62,11 @@ a delta — resumption is therefore correct by construction.
 
 ### Backpressure
 
-One writer goroutine per attachment; a slow client is dropped and re-synchronized with a
-fresh `view` rather than blocking the worker reader. The worker's stdout is read
-unconditionally and fanned out to in-memory attachment queues.
+One writer goroutine per attachment. The worker's stdout is read unconditionally and fanned
+out to in-memory attachment queues. A view is a complete value, so it is cached and
+announced rather than queued: a slow client loses the middle of a run, never its end, and
+re-synchronizes by reading the newest cached view. Events keep a bounded queue, which drops
+its oldest rather than blocking the worker reader.
 
 ## HTTP surface (v0)
 

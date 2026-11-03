@@ -325,10 +325,15 @@ type Control struct {
 	subscribers map[int]chan protocol.Frame
 	// staleSignals wakes one client per state change. It is a channel of its own because a
 	// state frame is a signal, not a transcript: on the frame channel a slow write would drop
-	// it, or the signal would evict a view frame the client has not read yet, and a client
-	// that never hears the state moved keeps the state it read before — busy sign and all.
+	// it, or the signal would evict an event the client has not read yet, and a client that
+	// never hears the state moved keeps the state it read before — busy sign and all.
 	staleSignals map[int]chan struct{}
-	nextSub      int
+	// viewSignals wakes one client when its conversation's view moved. Views do not queue:
+	// a slow write would fill the queue behind them and drop the newest one — the one that
+	// says the run ended — and the next view may never come, because nothing is running any
+	// more. The signal coalesces, and the client reads the newest cached view when it wakes.
+	viewSignals map[int]chan struct{}
+	nextSub     int
 	// Which conversation each subscriber watches, and how many watch each. Several
 	// clients watching different conversations is what makes browser tabs work.
 	subscriberConversation map[int]string
@@ -378,6 +383,7 @@ func New(opts Options) *Control {
 		views:                  map[string]cachedView{},
 		subscribers:            map[int]chan protocol.Frame{},
 		staleSignals:           map[int]chan struct{}{},
+		viewSignals:            map[int]chan struct{}{},
 		subscriberConversation: map[int]string{},
 		attachments:            map[string]int{},
 		policies:               map[string]json.RawMessage{},

@@ -12,19 +12,43 @@ import (
 // A transcript frame belongs to one conversation and must reach only the clients watching it.
 // The three types that carry a conversation are checked by name, so each one has to be tested as
 // itself: a view read in the wrong room shows a run writing into the room just opened, and a
-// secret prompt read in the wrong room asks somebody else to type a key.
+// secret prompt read in the wrong room asks somebody else to type a key. A view travels as a
+// wakeup and a cache read rather than as a queued frame, and the wakeup is what has to stay in
+// its own room.
 func TestATranscriptFrameReachesOnlyItsOwnRoom(t *testing.T) {
 	for _, kind := range []string{"view", "submission", "secret"} {
 		control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}, DataDir: t.TempDir()})
 		other := make(chan protocol.Frame, 4)
 		own := make(chan protocol.Frame, 4)
+		otherView := make(chan struct{}, 4)
+		ownView := make(chan struct{}, 4)
 		control.subscribers[1] = other
 		control.subscriberConversation[1] = "somewhere-else"
+		control.viewSignals[1] = otherView
 		control.subscribers[2] = own
 		control.subscriberConversation[2] = "here"
+		control.viewSignals[2] = ownView
 
-		control.publish(protocol.Frame{Type: kind, ConversationID: "here", Status: "running"})
+		control.publish(protocol.Frame{Type: kind, ConversationID: "here", Seq: 2, Status: "running"})
 
+		if kind == "view" {
+			select {
+			case <-ownView:
+			default:
+				t.Error("view: the room's own watcher was not woken")
+			}
+			select {
+			case <-otherView:
+				t.Error("view: a client watching another room was woken")
+			default:
+			}
+			select {
+			case frame := <-own:
+				t.Errorf("view: a view is a wakeup, not a queued frame, got %q", frame.Type)
+			default:
+			}
+			continue
+		}
 		select {
 		case frame := <-own:
 			if frame.Type != kind {
