@@ -154,7 +154,7 @@ A workspace runs on one engine, chosen when it is created and kept with its reco
 
 | engine | what it is | needs |
 |---|---|---|
-| `microsandbox` | one microVM per workspace (the default, and the strongest boundary) | `/dev/kvm`, and it fetches a 67 MB engine on first use |
+| `microsandbox` | one microVM per workspace (the default, and the strongest boundary) | `/dev/kvm`, and it fetches a 72 MB engine on first use |
 | `bwrap` | the workspace's own image in one long-lived bubblewrap sandbox per workspace (beta) | a user namespace, one image pull, and pasta for egress: `apt install bubblewrap passt`; no KVM, 1.1 ms per command, 82 MB of disk per workspace |
 | `host` | no sandbox: the tools run on your machine | nothing, and it is not isolated |
 

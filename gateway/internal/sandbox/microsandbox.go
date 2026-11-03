@@ -50,22 +50,18 @@ type Runner interface {
 	Run(ctx context.Context, args ...string) (string, error)
 }
 
-// Version is the engine release acornd pins. The SDK the worker uses ships the same
-// version, and the two share their on-disk state, so this is not a free upgrade.
-//
-// 0.7.6 is pinned on purpose, not left behind. 0.7.7 added a CPUID mask to its krun crate
-// with the flag off and no way to ask for it, so its guests stopped seeing hardware
-// virtualization — upstream issue #1778 — and the opt-in that restores it (microsandbox
-// #823, `msb create --nested-virt`) is in no release yet. 0.7.6 predates the mask, so a
-// guest nests whenever the machine can. Move this forward when the release carrying #823
-// exists: nesting then becomes a choice per workspace instead of an engine default.
+// Version is the engine release acornd runs. Nesting is a switch here rather than an engine
+// default: 0.7.9 was the first release to carry it (microsandbox #823, `msb create
+// --nested-virt`, off unless asked), and every release since has it. The SDK the worker uses
+// ships the same version, and the two share their on-disk state, so the pin stays one value
+// in two languages: the CLI, the SDK, and the store move in one commit.
+const Version = "0.7.13"
+
 // EngineVersion is the release this build runs. The store the engine keeps carries its own
 // schema and migrates itself forward, so anything that shares that store — an image cache, a
 // suite's state directory — is keyed by this: a directory shared across versions is one an
 // older build refuses to read, and one a newer build silently migrates.
 func EngineVersion() string { return Version }
-
-const Version = "0.7.6"
 
 const releaseBase = "https://github.com/microsandbox/microsandbox/releases/download"
 
@@ -339,20 +335,15 @@ func needsQuotes(value string) bool {
 func (m *Microsandbox) Egress() error { return nil }
 
 // Nesting reports whether a sandbox here could nest virtual machines. Two things have to
-// agree: the engine has to allow nesting on its side and the machine has to be able to
-// grant it (nested virtualization on the host). On the pinned 0.7.6 there is no switch
-// to offer — its guests nest by default whenever the machine can — so the host half is
-// the whole answer there; remove that branch when the pin moves to the release carrying
-// `msb create --nested-virt`.
+// agree: the engine has to offer the switch and the machine has to be able to grant what it
+// asks for (nested virtualization on the host). The switch exists in the pinned release; it
+// is asked for rather than assumed because an install can be older than the build.
 func (m *Microsandbox) Nesting(ctx context.Context) NestingSupport {
 	engine := m.engineNesting(ctx)
-	if engine.Available {
-		return m.hostNesting()
+	if !engine.Available {
+		return engine
 	}
-	if m.Installed() && Version == "0.7.6" {
-		return m.hostNesting()
-	}
-	return engine
+	return m.hostNesting()
 }
 
 // engineNesting answers the engine half: whether this build of it offers nesting at all. It
@@ -407,22 +398,35 @@ func (m *Microsandbox) Create(ctx context.Context, policy Policy, policyDir stri
 		return err
 	}
 	args := []string{"create", "--conf", path, "--name", Name(policy.Workspace), "--label", "acornd"}
-	// The engine is told about nesting only if it knows the flag, but then it is told either
-	// way: allowed and possible is `--nested-virt`, refused is `--nested-virt=false` —
-	// explicit, so that a default in the engine's own configuration cannot overrule the
-	// workspace. An engine without the flag has nothing to hear. (On the pinned 0.7.6 a
-	// refusal cannot be honored — there is no off switch — which the ADR owns as an interim
-	// limitation: the sandbox still boots.)
 	args = append(args, networkArgs(policy)...)
-	if engine := m.engineNesting(ctx); engine.Available {
-		if policy.DisableVMNesting {
-			args = append(args, "--nested-virt=false")
-		} else if m.hostNesting().Available {
-			args = append(args, "--nested-virt")
-		}
-	}
+	args = append(args, m.nestingArgs(ctx, policy)...)
 	_, err := m.runEnv(ctx, secretEnvValues(policy.Secrets), args...)
 	return err
+}
+
+// nestingArgs is what the sandbox may do with virtualization, said out loud for every case.
+//
+// The switch is a flag, not a policy key: the engine reads sandbox.yaml strictly and 0.7.13
+// has no nesting field in it, so the generated file cannot carry this. Both directions are
+// stated instead — `--nested-virt` to turn it on, `--nested-virt=false` to turn it off — so
+// that nothing in the engine's own configuration can overrule a workspace, the way
+// `network: none` is written out rather than left to a default.
+//
+// On is the workspace's default, and it is granted only where it can be honored: an
+// explicitly enabled setting fails the boot on a host that cannot nest (0.7.9 and later), and
+// a default must not cost anybody their workspace. That machine is told `false` anyway: the
+// engine is never left to its own default, and what happens is what the state reports.
+// docs/adr/0018-disable-vm-nesting.md owns the three cases and the reasons.
+func (m *Microsandbox) nestingArgs(ctx context.Context, policy Policy) []string {
+	if !m.engineNesting(ctx).Available {
+		// An engine that predates the flag has nothing to hear, and an unknown flag would
+		// fail the create: the pin is not assumed to be what is installed.
+		return nil
+	}
+	if policy.DisableVMNesting || !m.hostNesting().Available {
+		return []string{"--nested-virt=false"}
+	}
+	return []string{"--nested-virt"}
 }
 
 // networkArgs is what a workspace may reach, said out loud for every case.

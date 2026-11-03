@@ -672,18 +672,45 @@ func TestAMicroVMStartsInsideABwrapSandbox(t *testing.T) {
 	if err := os.MkdirAll(store, 0o755); err != nil {
 		t.Fatalf("make the engine store: %v", err)
 	}
+	// Where the host's install and the host's store appear inside the sandbox. The root there
+	// is bubblewrap's, so the paths are this test's to choose.
+	const (
+		nestedEngine = "/engine"
+		nestedStore  = "/store"
+	)
 	args := []string{
-		"--ro-bind", "/", "/",
+		// The sandbox's own root, not the host's. Inside a user namespace that maps one
+		// account, the host's / belongs to nobody this process can name, and 0.7.13 refuses an
+		// engine store when an ancestor could be substituted by another account — the refusal
+		// reads "catalog ancestor / permits path substitution". A root bubblewrap makes is the
+		// fix, and it is also the shape the product's own bwrap engine has: a rootfs, with what
+		// the engine needs from the host bound into it read-only.
+		"--tmpfs", "/",
+		"--ro-bind", "/usr", "/usr",
+		"--ro-bind", "/bin", "/bin",
+		"--ro-bind-try", "/sbin", "/sbin",
+		"--ro-bind", "/lib", "/lib",
+		// aarch64 Linux has no /lib64, and a missing source is an error rather than a no-op.
+		"--ro-bind-try", "/lib64", "/lib64",
+		"--ro-bind", "/etc", "/etc",
+		// The runners' /etc/resolv.conf is a link into /run, and a root without /run has a
+		// resolver that points at nothing: the first pull then fails with "error sending
+		// request", which reads like a network outage rather than a missing file.
+		"--ro-bind-try", "/run", "/run",
+		// The host's install and the host's store, at paths inside that root: the store is the
+		// point — the CLI and the SDK share it — and its files stay owned by this account.
+		"--ro-bind", engine.InstallDir(), nestedEngine,
+		"--bind", store, nestedStore,
 		"--dev", "/dev",
 		"--dev-bind", "/dev/net/tun", "/dev/net/tun",
 		"--dev-bind", "/dev/kvm", "/dev/kvm",
 		"--cap-add", "ALL",
 		"--proc", "/proc",
 		"--tmpfs", "/tmp",
-		"--bind", store, store,
 		"--unshare-all", "--share-net",
 		"--uid", "0", "--gid", "0",
-		"--", "env", "MSB_HOME=" + store, engine.binary(), "run", "--net", "public",
+		"--", "env", "MSB_HOME=" + nestedStore, filepath.Join(nestedEngine, "bin", "msb"),
+		"run", "--net", "public",
 		"debian:stable-slim", "--", "/bin/echo", "nested-msb-ok",
 	}
 	output, err := exec.CommandContext(ctx, "bwrap", args...).CombinedOutput()
