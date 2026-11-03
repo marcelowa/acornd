@@ -80,4 +80,6 @@ direction. The engine's own check remains the authority once the flag is passed.
   the engine's `--nested-virt` says what it does with a sandbox.
 - Tests: the machines' answers (Linux KVM parameters, Apple chip and OS version) are pure
   functions, tested on every platform; the create path — the flag, the explicit false, or
-  nothing — is pinned against a fake engine.
+  nothing — is pinned against a fake engine. The flag itself reaches a guest in
+  `TestALiveSandboxNestsOnlyWhenTheWorkspaceAllowsIt`: a real microVM nests, and a workspace
+  that refuses nesting gets a guest with no hypervisor in it.
