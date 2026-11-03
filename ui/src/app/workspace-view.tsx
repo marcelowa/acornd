@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactElement, useEffect, useRef, useState } from "react";
 import { Plus, Settings, X } from "lucide-react";
 import type { DefaultScope, ProviderAuthType, UploadedAttachment } from "./client";
 import type { ConversationSummary, ProviderSummary } from "./view-models";
@@ -39,10 +39,22 @@ import { StatusPill } from "@/components/ui/status-pill";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Text } from "@/components/typography/text";
 import { Shell } from "@/screens/shell";
+import { ambientState } from "./ambient";
 import type { Platform } from "./use-platform";
 
 export interface WorkspaceViewProps {
 	platform: Platform;
+}
+
+/** The pill for that state, carrying the harness's own words when it is the harness. */
+function ambientPill(platform: Platform): ReactElement | null {
+	const state = ambientState(platform);
+	if (state === undefined) return null;
+	return state === "harness-down" ? (
+		<StatusPill state="harness-down" detail={platform.workerError} />
+	) : (
+		<StatusPill state={state} />
+	);
 }
 
 /** The files that can ride a message, as the server knows them: staged, with their ids. */
@@ -754,24 +766,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 								if (match !== undefined) edit(`/${match.name} `);
 							}}
 							onSlashDismiss={() => setSlashHiddenFor(slashKey)}
-							ambient={
-								<>
-									{/* Ambient state: a dropped stream or a dead harness is the thing to know
-									 * before choosing a model, and it stays in the folded row — a fold that hid
-									 * it would make a dead run look alive (step 06, J11). Nothing renders while
-									 * everything is well. */}
-									{platform.workerUp ? (
-										platform.connection === "reconnecting" ? (
-											<StatusPill state="reconnecting" />
-										) : null
-									) : (
-										<StatusPill
-											state="harness-down"
-											detail={platform.workerError}
-										/>
-									)}
-								</>
-							}
+							ambient={ambientPill(platform)}
 							controls={
 								<ChoiceControl
 									agent={platform.agent}
