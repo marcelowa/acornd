@@ -21,7 +21,7 @@ jobs:
     # and each job gets its own machine. The self-hosted box it used to sit on runs one job at
     # a time, so a report whose whole point is that it gets read queued behind a release for an
     # hour — 15s of work behind a 1h43m queue on 2026-10-29.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7

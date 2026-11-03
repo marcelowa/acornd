@@ -28,7 +28,7 @@ jobs:
           - { goos: linux, goarch: arm64 }
           - { goos: darwin, goarch: amd64 }
           - { goos: darwin, goarch: arm64 }
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -61,7 +61,7 @@ jobs:
     # Platform-independent: one tarball for every leg. Sources only, never
     # node_modules — the gateway installs those once, under the install
     # folder, so no release bytes are spent on them and no host is touched.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - run: tar -czf worker.tar.gz -C worker package.json bun.lock src
@@ -72,7 +72,7 @@ jobs:
 
   publish:
     needs: binaries
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       # The tag message is read from the repository, so the job needs the tag:
       # a shallow checkout with tags, nothing else. It runs first because the
