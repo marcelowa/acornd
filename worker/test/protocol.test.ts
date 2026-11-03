@@ -323,6 +323,41 @@ describe("the worker protocol", () => {
 		expect(moved?.updatedAt).toBeGreaterThan(Date.now() - 60_000);
 	});
 
+	test("a long talk arrives whole, not as the window the view holds", async () => {
+		// A view is a window over the transcript: the newest 50 entries, dropping its oldest
+		// past 100. The interface draws one frame as the whole talk, and a conversation is
+		// opened on a later day with all of it already written, so what the worker sends is
+		// the transcript and not the window. Forty turns are more entries than the window
+		// holds, which is what makes the difference visible.
+		const created = await worker.call<{ conversationId: string }>({ type: "create" });
+		await worker.call({
+			type: "open",
+			conversationId: created.conversationId,
+			agent: { provider: "faux", modelId: "faux-1" },
+		});
+		const turns = 40;
+		for (let i = 0; i < turns; i++) {
+			const { submissionId } = await worker.call<{ submissionId: string }>({
+				type: "prompt",
+				conversationId: created.conversationId,
+				text: `hello ${i}`,
+			});
+			await worker.wait(
+				(frame) => frame.type === "submission" && frame.submissionId === submissionId,
+				60_000,
+			);
+		}
+
+		// Attached only now: the first frame is the one a fresh client sees.
+		await worker.call({ type: "attach", conversationId: created.conversationId });
+		const entries = await worker.entriesOf(created.conversationId, () => true);
+		expect(entries.length).toBeGreaterThan(50);
+		const transcript = JSON.stringify(entries);
+		for (let i = 0; i < turns; i++) {
+			expect(transcript).toContain(`hello ${i}`);
+		}
+	}, 120_000);
+
 	test("expand rewrites a command into what the model will see", async () => {
 		// The install's own commands folder, not the workspace's: this worker runs without a
 		// sandbox, so the workspace has no readable files at all — which is the point of the

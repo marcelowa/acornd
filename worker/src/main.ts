@@ -11,11 +11,13 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { BACKGROUND_CONTEXT, type Context } from "@earendil-works/chord/context";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/models";
 import {
 	AgentDoc,
 	type Conversation,
+	type ConversationView,
+	ConversationTranscript,
 	type Cursor,
 	type EntryId,
 	createRegistry,
@@ -601,9 +603,52 @@ async function attach(conversationId: string): Promise<void> {
 	const conversation = await conversationFor(conversationId);
 	subscriptions.get(conversationId)?.dispose();
 
-	const view = await conversation.viewState(CONTEXT);
-	enqueueView(conversationId, view.value);
-	view.subscribe((value) => enqueueView(conversationId, value));
+	// The view is a window over the transcript, not the transcript: it starts at the newest 50
+	// entries and drops its oldest in one splice past 100, so a long talk would reach the
+	// interface with its beginning missing. `ConversationTranscript` is the client for that —
+	// it merges each window and pages what it skipped with the conversation's own entries —
+	// and what this worker sends stays the shape the gateway and the interface already read.
+	const transcript = new ConversationTranscript((query, limit, context) =>
+		conversation.entries(query, limit, undefined, context),
+	);
+	// One publish at a time, in the order the frames arrived: paging the history in is a
+	// round trip, and a later window finishing first would hand the gateway an older value
+	// with a newer sequence number.
+	let publishing: Promise<void> = Promise.resolve();
+	const publish = (value: ConversationView, context: Context): Promise<void> => {
+		publishing = publishing.then(async () => {
+			let merged = transcript.merge(value);
+			// The first window of a long talk starts at its newest entries. `earlier` is the
+			// marker saying the transcript goes on above it, so the page is loaded before
+			// publishing: an interface that opens on a default install shows the whole talk.
+			while (merged.items[0]?.kind === "earlier") {
+				merged = await transcript.loadEarlier(context);
+			}
+			enqueueView(conversationId, {
+				conversation: merged.conversation,
+				docs: merged.docs,
+				entries: merged.items.flatMap((item) =>
+					item.kind === "entry" ? [item.entry] : [],
+				),
+			});
+		});
+		publishing = publishing.catch((error: unknown) =>
+			log(`view publish failed for ${conversationId}:`, error),
+		);
+		return publishing;
+	};
+
+	const view = await conversation.watch(CONTEXT, transcript.resume);
+	await publish(view.value, CONTEXT);
+	view.start(async (call, context) => {
+		// A failure the source recovers from does not end the watch: the next value arrives as
+		// a replacement, and the interface redraws from it. Nothing is lost but this frame.
+		if (call.kind === "failed") {
+			log(`view watch failed for ${conversationId}:`, call.error);
+			return;
+		}
+		await publish(call.value, context);
+	});
 
 	// Durable's view mounts only its own documents, so a commit that writes ours does
 	// not advance it and produces no frame. `watchDoc` is the documented way to observe
@@ -617,7 +662,7 @@ async function attach(conversationId: string): Promise<void> {
 
 	subscriptions.set(conversationId, {
 		dispose: () => {
-			view.dispose();
+			void view.stop();
 			void messages?.stop();
 		},
 	});

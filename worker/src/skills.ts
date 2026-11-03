@@ -7,7 +7,7 @@
  */
 import type { Files } from "./files.ts";
 import { isAbsolute, join, resolve } from "node:path";
-import { Type } from "@earendil-works/pi-ai";
+import { obj, opt, str } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool, section } from "@earendil-works/pi-durable";
 
 export interface Skill {
@@ -129,13 +129,11 @@ export function skillsExtension(
 				name: "skill",
 				description:
 					"Load the full instructions for a skill by name. Use it before work the skill describes.",
-				parameters: Type.Object({
-					name: Type.String({
+				parameters: obj({
+					name: str({
 						description: "Skill name, as listed in the skills section",
 					}),
-					args: Type.Optional(
-						Type.String({ description: "Optional request or arguments for the skill" }),
-					),
+					args: opt(str({ description: "Optional request or arguments for the skill" })),
 				}),
 				execute: async (args, api) => {
 					const available = permitted(String(api.conversationId));
