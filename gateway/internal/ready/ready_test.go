@@ -11,7 +11,7 @@ func testInput(dataDir string) Input {
 		DataDir:          dataDir,
 		Current:          "v0.9.0",
 		Worker:           "v0.9.0",
-		BunPath:          filepath.Join(dataDir, "tools", "bun-1.4.3", "bun"),
+		BunPath:          filepath.Join(dataDir, "tools", "bun-1.4.4", "bun"),
 		BunOK:            true,
 		EngineName:       "microsandbox",
 		EngineVersion:    "0.7.6",

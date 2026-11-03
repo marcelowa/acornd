@@ -25,7 +25,7 @@ another worker, not changing the control plane.
 
 - Go **1.27.3** — the patch, not just the minor: `gateway/go.mod` pins it, and CI reads the
   version from that file rather than naming its own
-- bun **1.4.3** — the release runtime pins it in `gateway/internal/update/worker.go`, and the
+- bun **1.4.4** — the release runtime pins it in `gateway/internal/update/worker.go`, and the
   worker's code depends on 1.4 behaviour
 - make, gcc (builds and the `-race` tests)
 - `unzip`, which the bun installer needs, and `procps` for `pgrep`, which two end-to-end tests
