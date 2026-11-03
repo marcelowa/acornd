@@ -284,6 +284,12 @@ func TestABwrapSandboxCannotReachPrivateNetworks(t *testing.T) {
 // sandbox refuses by default.
 func hostPrivateIPv4(t *testing.T) string {
 	t.Helper()
+	return firstPrivateIPv4(func(net.IP) bool { return true })
+}
+
+// firstPrivateIPv4 is the first private or link-local address this machine has that `usable`
+// takes, so that a test can name the kind of address it needs rather than the first one found.
+func firstPrivateIPv4(usable func(net.IP) bool) string {
 	addresses, err := net.InterfaceAddrs()
 	if err != nil {
 		return ""
@@ -293,9 +299,11 @@ func hostPrivateIPv4(t *testing.T) string {
 		if err != nil || ip.To4() == nil || ip.IsLoopback() {
 			continue
 		}
-		if ip.IsPrivate() || ip.IsLinkLocalUnicast() {
-			return ip.String()
+		inTheRanges := ip.IsPrivate() || ip.IsLinkLocalUnicast()
+		if !inTheRanges || !usable(ip) {
+			continue
 		}
+		return ip.String()
 	}
 	return ""
 }

@@ -673,11 +673,8 @@ func TestAMicroVMStartsInsideABwrapSandbox(t *testing.T) {
 		t.Fatalf("make the engine store: %v", err)
 	}
 	// Where the host's install and the host's store appear inside the sandbox. The root there
-	// is bubblewrap's, so the paths are this test's to choose.
-	const (
-		nestedEngine = "/engine"
-		nestedStore  = "/store"
-	)
+	// is bubblewrap's, so where the host's install appears is this test's to choose.
+	const nestedEngine = "/engine"
 	args := []string{
 		// The sandbox's own root, not the host's. Inside a user namespace that maps one
 		// account, the host's / belongs to nobody this process can name, and 0.7.13 refuses an
@@ -697,10 +694,12 @@ func TestAMicroVMStartsInsideABwrapSandbox(t *testing.T) {
 		// resolver that points at nothing: the first pull then fails with "error sending
 		// request", which reads like a network outage rather than a missing file.
 		"--ro-bind-try", "/run", "/run",
-		// The host's install and the host's store, at paths inside that root: the store is the
-		// point — the CLI and the SDK share it — and its files stay owned by this account.
+		// The host's install and the host's store. The store keeps its own path, and that is not
+		// tidiness: the engine records absolute paths inside it, so a store bound somewhere else
+		// inside the sandbox leaves entries the host cannot open afterwards. Bubblewrap creates
+		// the parents inside its root, so the ancestry the engine checks is this account's.
 		"--ro-bind", engine.InstallDir(), nestedEngine,
-		"--bind", store, nestedStore,
+		"--bind", store, store,
 		"--dev", "/dev",
 		"--dev-bind", "/dev/net/tun", "/dev/net/tun",
 		"--dev-bind", "/dev/kvm", "/dev/kvm",
@@ -709,7 +708,7 @@ func TestAMicroVMStartsInsideABwrapSandbox(t *testing.T) {
 		"--tmpfs", "/tmp",
 		"--unshare-all", "--share-net",
 		"--uid", "0", "--gid", "0",
-		"--", "env", "MSB_HOME=" + nestedStore, filepath.Join(nestedEngine, "bin", "msb"),
+		"--", "env", "MSB_HOME=" + store, filepath.Join(nestedEngine, "bin", "msb"),
 		"run", "--net", "public",
 		"debian:stable-slim", "--", "/bin/echo", "nested-msb-ok",
 	}

@@ -3,6 +3,7 @@ package e2e
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"strings"
 	"testing"
@@ -44,9 +45,9 @@ func TestForcedNoSandboxRefusesInsteadOfFallingBack(t *testing.T) {
 func TestAMicroVMSandboxCannotReachPrivateNetworks(t *testing.T) {
 	t.Parallel()
 	maybeSandbox(t)
-	address := hostPrivateIPv4(t)
+	address := microVMPrivateIPv4(t)
 	if address == "" {
-		t.Skip("this machine has no private IPv4 address to aim at")
+		t.Skip("this machine has no private IPv4 address a microVM can be aimed at")
 	}
 	listener, port := listenOn(t, address)
 	defer listener.Close()
@@ -73,9 +74,9 @@ func TestAMicroVMSandboxCannotReachPrivateNetworks(t *testing.T) {
 func TestAMicroVMSandboxWithTheGrantReachesPrivateNetworks(t *testing.T) {
 	t.Parallel()
 	maybeSandbox(t)
-	address := hostPrivateIPv4(t)
+	address := microVMPrivateIPv4(t)
 	if address == "" {
-		t.Skip("this machine has no private IPv4 address to aim at")
+		t.Skip("this machine has no private IPv4 address a microVM can be aimed at")
 	}
 	listener, port := listenOn(t, address)
 	defer listener.Close()
@@ -125,4 +126,28 @@ func privateProbeRule(address string, port int, reply string) scriptRule {
 		}}},
 		Reply: reply,
 	}
+}
+
+// microVMEngineNetwork is the block the microVM engine hands its sandboxes addresses out of:
+// the host answers to a name at 172.16.0.5 inside one, and a sandbox sits on 172.16.0.10/30 with
+// its own host at .9 (ADR 0012).
+var microVMEngineNetwork = netip.MustParsePrefix("172.16.0.0/24")
+
+// microVMPrivateIPv4 is this machine's private address that a microVM can be aimed at, or empty
+// when it has none.
+//
+// The address has to be outside the engine's own block. A machine whose private address is in
+// there — a dev container on a 172.16.0.x docker network, say — cannot be aimed at reliably: the
+// engine hands a new sandbox a subnet out of the same block, and one that lands on this machine's
+// own /30 leaves it unreachable from a guest, with the private grant and without it. Skipping is
+// the honest answer there, the same as a machine with no private address at all: the policy is
+// not in question, there is just no address to state it against.
+func microVMPrivateIPv4(t *testing.T) string {
+	t.Helper()
+	return firstPrivateIPv4(func(ip net.IP) bool {
+		// To4 first: a 16-byte net.IP yields the IPv4-mapped form, which an IPv4 prefix
+		// does not contain.
+		parsed, ok := netip.AddrFromSlice(ip.To4())
+		return ok && !microVMEngineNetwork.Contains(parsed)
+	})
 }
