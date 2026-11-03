@@ -129,6 +129,14 @@ Two things a sandbox cannot do for itself, both found by the CI tier rather than
   upstream servers instead, from the file the distribution writes them to, and the machine's own
   file when it names something reachable. The symptom this prevents is an `apt-get update` that
   works on the host and fails inside.
+- **A pasta that may execute acornd.** Ubuntu 26.04's `passt` package ships an AppArmor profile
+  for `/usr/bin/pasta` whose only execute rule is `/{usr/,}bin/** Ux`, so pasta may start a
+  program from those two directories and nothing else. The engine's first process is the
+  supervisor in acornd's own install folder, so every sandbox with egress fails with pasta's
+  `Failed to start command or shell: Permission denied`; `dmesg` names the profile and the path,
+  and `/bin/true` through the same command exits 0, which is what tells this apart from the
+  namespace or the tun device. Found by the CI tier going red on that image, not by reasoning —
+  the host grants it by disabling the profile, the same way the userns switch above is granted.
 
 ## What it costs
 
