@@ -361,15 +361,17 @@ test("a failed wake reports the wake's error", async () => {
 
 test("a loaded SDK that is not the pinned engine refuses before touching the store", async () => {
 	// The pin's value is checked against the gateway's by scripts/check-house-rules.mjs:
-	// the two share the store, so one value in two languages must stay one value.
+	// the two share the store, so one value in two languages must stay one value. The
+	// message is spelled from the constant so a moved pin cannot leave a stale literal here.
+	const want = `want ${ENGINE_VERSION}`;
 	await checkEngineVersion(async () => ({ version: ENGINE_VERSION }));
-	expect(checkEngineVersion(async () => ({ version: "0.7.7" }))).rejects.toThrow(/want 0\.7\.6/);
-	expect(checkEngineVersion(async () => ({}))).rejects.toThrow(/want 0\.7\.6/);
+	expect(checkEngineVersion(async () => ({ version: "0.7.7" }))).rejects.toThrow(want);
+	expect(checkEngineVersion(async () => ({}))).rejects.toThrow(want);
 	expect(
 		checkEngineVersion(async () => {
 			throw new Error("unreadable");
 		}),
-	).rejects.toThrow(/want 0\.7\.6/);
+	).rejects.toThrow(want);
 });
 
 test("isStoppedError tells a dead session from a missing file", () => {

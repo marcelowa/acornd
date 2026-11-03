@@ -301,7 +301,8 @@ func TestThePolicyFileIsWrittenBesideTheWorkspaceState(t *testing.T) {
 
 // -- nesting -------------------------------------------------------------------------
 
-// nestedHelp is the line a later engine advertises; the release this build pins has none.
+// nestedHelp is the line the pinned engine advertises: 0.7.9 added the switch and every
+// release since carries it.
 const nestedHelp = "Options:\n      --nested-virt  Enable nested virtualization"
 
 // helpRunner answers `create --help` with what the test says the engine publishes.
@@ -381,9 +382,8 @@ func TestCreateCannotRefuseToAnEngineWithoutTheFlag(t *testing.T) {
 	if err := driver.Create(context.Background(), policy, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
-	// There is no off switch to send it on. On the pinned 0.7.6 this refusal is an
-	// interim limitation the ADR owns: the sandbox still boots, nesting when the machine
-	// can. The engine without the flag must not be told to do what it cannot hear.
+	// There is no off switch to send it on. An engine that predates the flag must not be
+	// told to do what it cannot hear.
 	if strings.Contains(strings.Join(createCall(t, runner), " "), "--nested-virt") {
 		t.Errorf("an engine without the flag cannot nest and must not be told to: %v", runner.calls)
 	}
@@ -399,17 +399,13 @@ func TestCreateLeavesNestingOffWhenTheMachineCannot(t *testing.T) {
 	}
 }
 
-// On the pinned 0.7.6 there is no switch to offer and guests nest by default, so the
-// engine half never refuses: a flagless engine reports what the machine says, and the
-// state tells the truth while the pin lasts. Remove with the pin.
-func TestNestingNestsByDefaultOnThePinnedEngine(t *testing.T) {
+func TestNestingIsRefusedWhenTheEngineHasNoSwitch(t *testing.T) {
+	// Without the flag in the engine, the machine's own answer cannot be honored: a host
+	// that could grant nesting still has nothing to ask for it with.
 	engine, _ := nestingDriver(t, "Options:\n      --cpus", NestingSupport{Available: true})
-	if support := engine.Nesting(context.Background()); !support.Available {
-		t.Errorf("0.7.6 nests by default, so a capable machine should report nesting: %+v", support)
-	}
-	weak, _ := nestingDriver(t, "Options:\n      --cpus", unavailable("this machine cannot nest"))
-	if support := weak.Nesting(context.Background()); support.Available || support.Reason != "this machine cannot nest" {
-		t.Errorf("without the switch the machine's own reason is the whole answer: %+v", support)
+	if support := engine.Nesting(context.Background()); support.Available ||
+		!strings.Contains(support.Reason, "no nesting switch") {
+		t.Errorf("an engine with no switch cannot nest, whatever the machine can do: %+v", support)
 	}
 }
 
