@@ -80,7 +80,8 @@ function askForList(conversationId: string): Promise<SecretListAnswer> {
 	});
 }
 
-function formatList(answer: SecretListAnswer): string {
+/** The `secret list` tool's answer. Exported so its wording is tested without a worker. */
+export function formatList(answer: SecretListAnswer): string {
 	if (answer.reason !== undefined && answer.reason !== "") {
 		return `Could not read the secrets: ${answer.reason}`;
 	}
@@ -97,7 +98,7 @@ function formatList(answer: SecretListAnswer): string {
 			const hosts = secret.hosts?.length ? ` for ${secret.hosts.join(", ")} over HTTPS` : "";
 			const placeholder =
 				secret.delivery === "substitute" && secret.placeholder
-					? `; the env holds the literal ${secret.placeholder}`
+					? `; ${secret.name} holds the literal ${secret.placeholder}`
 					: "";
 			return `- ${secret.name}${description}${status}${delivery}${hosts}${placeholder}`;
 		}),

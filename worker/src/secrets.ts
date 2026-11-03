@@ -9,7 +9,7 @@ export interface SecretInfo {
 	description: string;
 	hosts: readonly string[];
 	delivery: "substitute" | "environment";
-	/** The literal the guest environment holds on a substitute engine. */
+	/** The value of the guest's NAME variable on a substitute engine: a literal placeholder. */
 	placeholder: string;
 }
 
@@ -56,7 +56,7 @@ export function parseSecrets(raw: string | undefined): SecretInfo[] {
 export function secretSection(secrets: readonly SecretInfo[]): string | undefined {
 	if (secrets.length === 0) return undefined;
 	const lines = [
-		"Secrets are available to commands as environment variables. A name is not its value: never print a secret, and never ask the user to paste one into the conversation. Use the secret tool to list them or ask the user to set one; the user enters the value in a card. Send it over HTTPS: a plain HTTP request is not substituted everywhere. Do not use ${NAME} or {{NAME}} as the placeholder; use the literal the secret tool or this section names, usually $MSB_NAME. A minimal image may not have curl; install one or use the project's HTTPS client.",
+		"Secrets are available to commands as environment variables. A name is not its value: never print a secret, and never ask the user to paste one into the conversation. Use the secret tool to list them or ask the user to set one; the user enters the value in a card. For a substitute secret, the variable named NAME holds the literal placeholder $MSB_NAME: use $NAME in a shell, or send the literal $MSB_NAME directly; $MSB_NAME is not itself a variable. Send it over HTTPS: a plain HTTP request is not substituted everywhere. ${NAME} and {{NAME}} are not placeholders and pass through. A minimal image may not have curl; install one or use the project's HTTPS client.",
 	];
 	for (const secret of secrets) {
 		const description = secret.description.trim() === "" ? "" : `${secret.description.trim()} `;
@@ -65,7 +65,7 @@ export function secretSection(secrets: readonly SecretInfo[]): string | undefine
 				? "The sandbox environment holds the real value."
 				: secret.hosts.length === 0
 					? "It is not delivered to the sandbox."
-					: `The environment holds the literal ${secret.placeholder}; send that value for ${secret.hosts.join(", ")} over HTTPS.`;
+					: `${secret.name} is set to the literal ${secret.placeholder}; use $${secret.name} in a shell or send ${secret.placeholder} directly for ${secret.hosts.join(", ")} over HTTPS.`;
 		lines.push(`- ${secret.name}: ${description}${how}`);
 	}
 	return lines.join("\n");

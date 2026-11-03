@@ -307,10 +307,11 @@ ssh -L 7777:127.0.0.1:7777 desktop
 A tool secret is a value a command needs, kept out of the transcript. Global entries are on
 every workspace; a workspace entry with the same name wins. The agent can list names and
 descriptions and ask for one through a card; the value goes to the gateway, never the model.
-On microsandbox the guest environment holds the literal `$MSB_<NAME>`; a command sends that
-value, for example `-H "Authorization: Bearer $GITHUB_TOKEN"`. The engine substitutes the
-real value only for the allowed hosts, and only over HTTPS; plain HTTP is not intercepted.
-`${NAME}` and `{{NAME}}` are not placeholders and pass through. An environment engine puts
+On microsandbox the guest environment variable `<NAME>` holds the literal `$MSB_<NAME>`; a
+command sends that value, for example `-H "Authorization: Bearer $GITHUB_TOKEN"`. `$MSB_<NAME>`
+is the placeholder value, not a second variable. The engine substitutes the real value only
+for the allowed hosts, and only over HTTPS; plain HTTP is not intercepted. `${NAME}` and
+`{{NAME}}` are not placeholders and pass through. An environment engine puts
 the real value in the sandbox, and `allowEnv: false` keeps it out. See
 [ADR 0021](docs/adr/0021-a-vault-for-tool-secrets.md).
 
