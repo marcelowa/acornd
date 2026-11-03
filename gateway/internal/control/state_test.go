@@ -249,26 +249,25 @@ func TestATimeOnlyChangeIsAnnounced(t *testing.T) {
 // the client was looking at.
 func TestAViewFrameReachesOnlyItsConversation(t *testing.T) {
 	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
-	running := make(chan protocol.Frame, 1)
-	other := make(chan protocol.Frame, 1)
-	control.subscribers[1] = running
-	control.subscribers[2] = other
+	running := make(chan struct{}, 1)
+	other := make(chan struct{}, 1)
+	control.subscribers[1] = make(chan protocol.Frame, 1)
+	control.viewSignals[1] = running
 	control.subscriberConversation[1] = "a"
+	control.subscribers[2] = make(chan protocol.Frame, 1)
+	control.viewSignals[2] = other
 	control.subscriberConversation[2] = "b"
 
 	control.publish(protocol.Frame{Type: "view", ConversationID: "a", Seq: 7})
 
 	select {
-	case frame := <-running:
-		if frame.ConversationID != "a" {
-			t.Errorf("the watcher of a run hears its frames, got %q", frame.ConversationID)
-		}
+	case <-running:
 	default:
-		t.Error("the watcher of a run hears its frames")
+		t.Error("the watcher of a run is woken for its view")
 	}
 	select {
-	case frame := <-other:
-		t.Fatalf("the room just opened is not the run's, got %q", frame.ConversationID)
+	case <-other:
+		t.Fatal("the room just opened is not the run's, so it is not woken")
 	default:
 	}
 }
@@ -299,12 +298,17 @@ func TestALoginBurstReachesTheClient(t *testing.T) {
 	}
 }
 
-// A full queue drops the view, not the event: the next view carries the whole transcript,
-// and the event a view would have displaced is one of a sequence, not replaceable.
-func TestAFullQueueKeepsTheEventAndDropsTheView(t *testing.T) {
+// A full queue must not lose the newest view. Views do not queue: the cache holds the newest
+// value and the watcher gets a signal, so the frame that says a run ended survives a socket
+// that was stalled while a whole run's worth of views went by. It used to be dropped — there
+// was no next view to carry it, so the transcript stayed mid-sentence and the busy dots stayed
+// with it.
+func TestAFullQueueKeepsTheNewestViewWithoutDisplacingTheEvent(t *testing.T) {
 	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
 	frames := make(chan protocol.Frame, 1)
+	views := make(chan struct{}, 1)
 	control.subscribers[1] = frames
+	control.viewSignals[1] = views
 	control.subscriberConversation[1] = "1"
 
 	control.publish(protocol.Frame{
@@ -312,16 +316,26 @@ func TestAFullQueueKeepsTheEventAndDropsTheView(t *testing.T) {
 		AuthID: "auth-1",
 		Event:  &protocol.AuthEvent{Kind: "prompt"},
 	})
-	control.publish(protocol.Frame{Type: "view", ConversationID: "1", Seq: 2})
+	control.publish(protocol.Frame{Type: "view", ConversationID: "1", Seq: 2, Value: []byte(`partial`)})
+	control.publish(protocol.Frame{Type: "view", ConversationID: "1", Seq: 3, Value: []byte(`complete`)})
 
 	frame := <-frames
 	if frame.Type != "auth" {
-		t.Fatalf("the event stays and the view goes, got a %q frame", frame.Type)
+		t.Fatalf("the event stays and the view never touches the queue, got a %q frame", frame.Type)
 	}
 	select {
 	case extra := <-frames:
 		t.Fatalf("only the event was waiting, got a %q frame too", extra.Type)
 	default:
+	}
+	select {
+	case <-views:
+	default:
+		t.Fatal("the watcher was not woken for the views")
+	}
+	got, found := control.CachedView("1")
+	if !found || got.Seq != 3 || string(got.Value) != "complete" {
+		t.Fatalf("the newest view is the one the watcher reads: %+v found=%v", got, found)
 	}
 }
 

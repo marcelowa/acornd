@@ -3,6 +3,7 @@ package e2e
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -240,6 +241,79 @@ func TestTheStreamAnnouncesStateChanges(t *testing.T) {
 	counts := c.streamEvents("personal", root, 4*time.Second)
 	if counts["state"] < 2 {
 		t.Errorf("a state change should be announced to an attached client: %v", counts)
+	}
+}
+
+// A view published while a client is attached arrives as a frame, without the client having to
+// reconnect. This is the frame a stalled socket used to lose: views were queued like events,
+// the queue filled while the write was blocked, and the newest view — the one that says the run
+// ended — was dropped with no later one to carry it. The stream wakes the writer and it reads
+// the cache now, so an attached client always gets the whole, finished transcript.
+func TestAnAttachedClientGetsTheViewThatEndsTheRun(t *testing.T) {
+	t.Parallel()
+	notSandbox(t)
+	s := start(t, withScript(scriptRule{Match: "hello frame", Reply: "the whole answer"}))
+	c := s.client()
+	root := c.waitForConversation("personal")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		fmt.Sprintf("%s/api/stream?workspace=%s&conversation=%s", c.base, "personal", root), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := c.stream.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+
+	views := make(chan view, 16)
+	go func() {
+		defer close(views)
+		scanner := bufio.NewScanner(response.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+		event, data := "", ""
+		for scanner.Scan() {
+			line := scanner.Text()
+			switch {
+			case strings.HasPrefix(line, "event: "):
+				event = strings.TrimPrefix(line, "event: ")
+			case strings.HasPrefix(line, "data: "):
+				data = strings.TrimPrefix(line, "data: ")
+			case line == "":
+				if event == "frame" && data != "" {
+					var frame struct {
+						Type  string `json:"type"`
+						Value view   `json:"value"`
+					}
+					if json.Unmarshal([]byte(data), &frame) == nil && frame.Type == "view" {
+						select {
+						case views <- frame.Value:
+						case <-ctx.Done():
+							return
+						}
+					}
+				}
+				event, data = "", ""
+			}
+		}
+	}()
+
+	c.prompt("personal", root, "hello frame")
+	for {
+		select {
+		case got, ok := <-views:
+			if !ok {
+				t.Fatal("the stream closed before the finished answer arrived")
+			}
+			if strings.Contains(got.all(), "the whole answer") {
+				return
+			}
+		case <-ctx.Done():
+			t.Fatal("an attached client never got a view carrying the finished answer")
+		}
 	}
 }
 

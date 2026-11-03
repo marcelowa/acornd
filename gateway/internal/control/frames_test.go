@@ -11,28 +11,37 @@ import (
 // mutation is a conversation that goes quiet or a client that sees another room's transcript.
 
 // A view is one conversation's transcript. A client watching another conversation must never see
-// it: switching away mid-run would otherwise show the run writing into the room just opened.
+// it: switching away mid-run would otherwise show the run writing into the room just opened. A
+// view is not queued as a frame — it wakes the watcher, which reads the newest cache — so the
+// signal is what has to stay in its own room.
 func TestAViewOnlyReachesTheClientWatchingThatConversation(t *testing.T) {
 	c := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
-	watching, other, anonymous := make(chan protocol.Frame, 4), make(chan protocol.Frame, 4), make(chan protocol.Frame, 4)
-	c.subscribers[1] = watching
+	watching, other := make(chan struct{}, 4), make(chan struct{}, 4)
+	c.subscribers[1] = make(chan protocol.Frame, 4)
 	c.subscriberConversation[1] = "room-1"
-	_ = other
-	c.subscribers[2] = other
+	c.viewSignals[1] = watching
+	c.subscribers[2] = make(chan protocol.Frame, 4)
 	c.subscriberConversation[2] = "room-2"
-	c.subscribers[3] = anonymous
+	c.viewSignals[2] = other
 
 	c.onFrame(protocol.Frame{Type: "view", ConversationID: "room-1", Seq: 7, Value: []byte(`{}`)})
 
-	if len(watching) != 1 {
-		t.Errorf("the client watching room-1 got %d frames", len(watching))
+	select {
+	case <-watching:
+	default:
+		t.Error("the client watching room-1 was not woken for its view")
 	}
-	if len(other) != 0 {
-		t.Errorf("a client watching room-2 saw room-1's view")
+	select {
+	case <-other:
+		t.Error("a client watching room-2 was woken for room-1's view")
+	default:
 	}
-	// And the cache holds the newest view, which is what a client that reconnects is given.
+	// And the cache holds the newest view, which is what the wakeup is for.
 	if got := c.views["room-1"].seq; got != 7 {
 		t.Errorf("cached seq = %d, want 7", got)
+	}
+	if frame, found := c.CachedView("room-1"); !found || frame.Seq != 7 {
+		t.Errorf("the cached view should be readable, got %+v found=%v", frame, found)
 	}
 }
 
