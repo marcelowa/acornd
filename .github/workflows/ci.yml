@@ -14,11 +14,13 @@
 # That includes the microVM tier: GitHub's hosted runners expose /dev/kvm once the udev rule
 # below makes it readable by the runner user, which was measured rather than assumed on 24.04 —
 # the whole tier passed there in 65 seconds, on the same machine as the three fast jobs. Every
-# job is on 26.04 now: it is the current GA image and the one GitHub moves `ubuntu-latest` to in
-# November 2026, so waiting would only mean meeting it on someone else's schedule. The tier
-# fails rather than skips when /dev/kvm is missing, so if the newer image does not carry it, the
-# pipeline says so in the first run instead of going quiet. The dispatch input stays, for
-# sending it to a runner with another hypervisor or another architecture.
+# job but one is on 26.04 now: it is the current GA image and the one GitHub moves
+# `ubuntu-latest` to in November 2026, so waiting would only mean meeting it on someone else's
+# schedule. The exception is the bwrap tier, on 24.04 until pasta's answer there is understood;
+# the reason and the measurement are beside that job. The microVM tier fails rather than skips
+# when /dev/kvm is missing, so if a newer image does not carry it, the pipeline says so in the
+# first run instead of going quiet. The dispatch input stays, for sending it to a runner with
+# another hypervisor or another architecture.
 #
 # The one cost is that the tools are installed per run, which is why the two Go jobs restore
 # `~/go/bin` from the cache: five linters compiled from source is minutes, not seconds.
@@ -274,7 +276,16 @@ jobs:
     # Ubuntu 24.04 and later gate unprivileged user namespaces behind AppArmor, so it gets the
     # switch Ubuntu documents for bubblewrap; without it the engine is unusable there for a
     # reason that has nothing to do with this code.
-    runs-on: ubuntu-26.04
+    #
+    # This is the one job that stays on 24.04 while every other one moved to 26.04, and it is
+    # measured rather than overlooked: on 26.04 bubblewrap itself is fine — the switch applies,
+    # the namespace is made, and the worker's own bwrap suite passes 61/61 — but every Go
+    # end-to-end bwrap test fails with "Failed to start command or shell: Permission denied",
+    # which is pasta refusing to exec the sandbox's first process. The microVM tier, including
+    # the nested one, passed on 26.04 in the same run, so the hypervisor is not what moved.
+    # A tier that proves the engine stays on the image where it proves it, until pasta's answer
+    # on 26.04 is understood.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
