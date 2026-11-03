@@ -153,7 +153,7 @@ describe("the wire mapping", () => {
 			entries: [],
 			docs: { "pi.live": { generation: { message: { content: "half a sen" } }, tools: [] } },
 		};
-		const entry = toTranscript(view, {})[0];
+		const entry = toTranscript(view, {}, true)[0];
 		expect(entry?.kind === "assistant" ? entry.live : undefined).toBe(true);
 	});
 
@@ -180,7 +180,7 @@ describe("the wire mapping", () => {
 				},
 			},
 		};
-		const [tool] = toTranscript(view, {});
+		const [tool] = toTranscript(view, {}, true);
 		if (tool?.kind !== "tool") throw new Error("expected the live tool");
 		expect(tool.status).toBe("running");
 	});
@@ -482,6 +482,46 @@ describe("thinking and silence", () => {
 		expect(
 			toTranscript(streaming, {}, true).filter((entry) => entry.id === "live"),
 		).toHaveLength(1);
+	});
+
+	test("a live document left behind by an ended run settles, without the dots", () => {
+		// The state says the turn is over while the view still holds the last streamed
+		// partial — a frame the client missed. The words are evidence and stay; nothing
+		// about the pane may keep pulsing, because no answer is coming.
+		const stale: WireView = {
+			entries: [],
+			docs: {
+				"pi.live": {
+					generation: {
+						message: {
+							content: [
+								{ type: "thinking", thinking: "weigh it" },
+								{ type: "text", text: "half a sen" },
+							],
+						},
+					},
+					tools: [{ callId: "c1", name: "bash", status: "running" }],
+				},
+			},
+		};
+		const ended = toTranscript(stale, {}, false);
+		const reply = ended.find((entry) => entry.kind === "assistant" && entry.id === "live");
+		if (reply?.kind !== "assistant") throw new Error("expected the partial reply");
+		expect(reply.markdown).toBe("half a sen");
+		expect(reply.live).toBe(false);
+		const thinking = ended.find((entry) => entry.kind === "thinking");
+		if (thinking?.kind !== "thinking") throw new Error("expected the thinking card");
+		expect(thinking.live).toBe(false);
+		const tool = ended.find((entry) => entry.kind === "tool");
+		if (tool?.kind !== "tool") throw new Error("expected the tool card");
+		expect(tool.status).toBe("done");
+		// And no bare dots pane was added on top of the evidence.
+		expect(
+			ended.filter(
+				(entry) =>
+					entry.kind === "assistant" && entry.markdown === "" && entry.live === true,
+			),
+		).toHaveLength(0);
 	});
 });
 
