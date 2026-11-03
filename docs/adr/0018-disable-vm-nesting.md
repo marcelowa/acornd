@@ -1,7 +1,7 @@
 # ADR 0018 — Disable VM nesting: an opt-out, granted by the engine and the machine
 
-Status: accepted, built — live on the interim 0.7.6 pin; the `--nested-virt` switch arms
-when the pin moves
+Status: accepted, built — armed by the 0.7.13 pin (2026-11-03): the switch is a flag, and
+nesting is on unless the workspace opts out. The engine is told either way
 Date: 2026-10-09
 
 ## Context
@@ -17,11 +17,13 @@ the flag off and no way to ask for it, so their guests never nest — the regres
 recorded as [#1778](https://github.com/superradcompany/microsandbox/issues/1778). The
 upstream fix is [microsandbox#823](https://github.com/superradcompany/microsandbox/pull/823):
 `msb create --nested-virt`, off by default, "startup fails if the host cannot honor an
-enabled setting". It is blocked on
+enabled setting". It was blocked on
 [libkrun#155](https://github.com/superradcompany/libkrun/pull/155) and
-[libkrunfw#32](https://github.com/superradcompany/libkrunfw/pull/32), and no release carries
-it — v0.7.8, the latest, still has no flag. 0.7.6 is pinned on purpose, not left behind: a
-sandbox nests today, while the switch that would make it a choice is still upstream.
+[libkrunfw#32](https://github.com/superradcompany/libkrunfw/pull/32), and no release carried
+it — v0.7.8, the latest, still had no flag. 0.7.6 was pinned on purpose, not left behind: a
+sandbox nested meanwhile, while the switch that would make it a choice was still upstream.
+v0.7.9 (2026-10-22) shipped #823, and the pin has followed it since: 0.7.13 is the release
+acornd runs.
 
 This surfaced from use, not from theory: acornd is developed inside an acornd workspace,
 and its own sandbox tier (`make test-sandbox`) needs `/dev/kvm` inside that workspace's guest.
@@ -33,14 +35,18 @@ granted; true refuses it. There is no install-wide switch: a refusal belongs to 
 a machine-wide one only made sense while every workspace was the same decision.
 Nesting is allowed unless refused, and the refusal behaves in three ways:
 
-- **Asked only where it can be granted.** The engine is told `--nested-virt` when it offers
-  the flag and the machine can nest; otherwise the sandbox boots without it. A default must
-  not cost anybody their workspace, and the hosts that cannot nest are common: M1/M2 Macs,
-  cloud VMs, CI runners, machines with the host kernel's `nested` off.
+- **Asked only where it can be granted, and said either way.** The switch is a flag and not a
+  field: the engine reads `sandbox.yaml` strictly and has no nesting key in it, so the
+  generated file cannot carry this. The create call does, and it always says something —
+  `--nested-virt` where the machine can nest, `--nested-virt=false` where it cannot — so no
+  engine-side configuration and no engine default decides for a workspace. A default must not
+  cost anybody their workspace, and the hosts that cannot nest are common: M1/M2 Macs, cloud
+  VMs, CI runners, machines with the host kernel's `nested` off. Asking is what would cost the
+  workspace there, since an enabled setting fails the boot; stating off costs nothing.
 - **Refused explicitly.** A workspace that turns nesting off is told to the engine anyway,
   `--nested-virt=false`, the way `network: none` is written out so an engine default cannot
   overrule a workspace.
-- **Silent only when it must be.** What is decided is said: `doctor` prints availability and
+- **Never left to a default.** What is decided is said: `doctor` prints availability and
   the reason it is not, and the workspace state carries whether the next sandbox will nest
   (`nested`) or why it will not (`nestedReason`). A workspace that allows nesting and does
   not get it is a sentence, not a surprise. A workspace that disables nesting carries
@@ -68,11 +74,14 @@ direction. The engine's own check remains the authority once the flag is passed.
 
 ## Consequences
 
-- On the pinned 0.7.6 there is no switch and guests nest whenever the machine can, so
-  `doctor` and the state report `nested: true` wherever the host half agrees — the truth,
-  while the pin lasts. A workspace that disables nesting still gets a nesting-capable
-  sandbox there: no off switch exists to honor it with. Moving the pin to the release
-  carrying `--nested-virt` arms both directions, and the commit that moves it should say so.
+- The pin carries the switch, so both directions are armed: a workspace that disables
+  nesting now gets a sandbox that cannot nest, which is the half 0.7.6 could not honor.
+  `doctor` and the state report `nested: true` where the host half agrees, and the reason
+  where it does not.
+- Nesting is still not in the generated policy file, and cannot be: 0.7.13's `sandbox.yaml`
+  refuses unknown fields and has no nesting key. `microsandbox.go` renders it into the create
+  call instead, beside `network: none`, and a person reading the policy file will not find it
+  there. "Explicit, never a default" is a rule about the create call for this setting.
 - `acornd doctor` grows a nesting line, text and JSON; the state frame grows two fields.
 - The install-wide switch is gone (it was `--disable-vm-nesting`): a workspace decides, and
   a refusal is recorded on the workspace rather than on the machine. The remaining difference
