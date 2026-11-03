@@ -27,7 +27,7 @@ on:
 
 jobs:
   vulnerabilities:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -40,7 +40,7 @@ jobs:
           cd gateway && govulncheck ./...
 
   sast:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -63,7 +63,7 @@ jobs:
           make sast
 
   secrets:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -88,7 +88,7 @@ jobs:
     # survived, and nothing more. Writing the test that kills it needs judgement, and a fix PR made
     # without it would be a guess with a green tick on it. The issue carries the report, so the fix
     # is a five-minute job with the evidence already in hand.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       issues: write

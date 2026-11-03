@@ -12,9 +12,13 @@
 # poisoned state directory that took the sandbox tier down on 2026-10-26 cannot survive a job.
 #
 # That includes the microVM tier: GitHub's hosted runners expose /dev/kvm once the udev rule
-# below makes it readable by the runner user, which was measured rather than assumed — the whole
-# tier passes there in 65 seconds, on the same machine as the three fast jobs. The dispatch
-# input stays, for sending it to a runner with another hypervisor or another architecture.
+# below makes it readable by the runner user, which was measured rather than assumed on 24.04 —
+# the whole tier passed there in 65 seconds, on the same machine as the three fast jobs. Every
+# job is on 26.04 now: it is the current GA image and the one GitHub moves `ubuntu-latest` to in
+# November 2026, so waiting would only mean meeting it on someone else's schedule. The tier
+# fails rather than skips when /dev/kvm is missing, so if the newer image does not carry it, the
+# pipeline says so in the first run instead of going quiet. The dispatch input stays, for
+# sending it to a runner with another hypervisor or another architecture.
 #
 # The one cost is that the tools are installed per run, which is why the two Go jobs restore
 # `~/go/bin` from the cache: five linters compiled from source is minutes, not seconds.
@@ -40,9 +44,9 @@ on:
   workflow_dispatch:
     inputs:
       runner:
-        description: "Runner for the microVM suite (default: ubuntu-24.04, which has /dev/kvm)"
+        description: "Runner for the microVM suite (default: ubuntu-26.04, which has /dev/kvm)"
         required: false
-        default: ubuntu-24.04
+        default: ubuntu-26.04
         type: string
 
 jobs:
@@ -50,7 +54,7 @@ jobs:
     # The compiler's half: formatting, vet, the layer table, the cross-platform build, and the
     # analysis (complexity, duplication, dead code, error shape). The only test here is the
     # architecture one, so a failure is a rule rather than a behaviour.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       # The only job that installs the linters: it is the only one that runs them.
@@ -62,7 +66,7 @@ jobs:
   go:
     # The Go suite, run **once**: COVER=1 instruments the same pass, so the test verdict and the
     # coverage floors come out of one run instead of two. This is the long pole.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -72,7 +76,7 @@ jobs:
     # The harness suite and the interface's unit tests: seconds each, and they need the bundle
     # built. The Go unit tests are not here — they are in the `go` job's single instrumented run,
     # and running them twice was most of what made this pipeline slow.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -82,7 +86,7 @@ jobs:
     # The behaviours a curl cannot see, against a real gateway and a real browser. The gateway is
     # started by the check itself on the host engine: a runner has no hypervisor for the engine
     # tiers, and this suite is about the console rather than the sandbox.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -110,7 +114,7 @@ jobs:
     # `sandbox` is the gate saying the thing it was asked not to.
     if: always()
     needs: [static, go, worker, browser, commits, floors, mutations, sandbox, bwrap]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Every job has to have passed
         env:
@@ -134,7 +138,7 @@ jobs:
   commits:
     # The commit format is a standard (`.pi/skills/conventional-commits`), so it is checked
     # rather than trusted — over the commits a push adds, not all of history.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -168,7 +172,7 @@ jobs:
     # request that would want to lower it — so this compares the tree with the base branch and
     # fails on a step down. It is deliberately its own job: a lowered floor is not a test failure
     # and should not read as one.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -196,7 +200,7 @@ jobs:
     # held this job for an hour; 100 caps that at a couple of minutes and still leaves 30x headroom
     # over the coverage run (workspace note MUTATIONS-SLOWDOWN.md, §4).
     timeout-minutes: 30
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -231,7 +235,7 @@ jobs:
     # (no udev, no sudo for it) rather than failed, and the tier itself still fails rather than
     # skips when /dev/kvm is missing or unreadable — a slow tier that silently does nothing is
     # how this bug class survives.
-    runs-on: ${{ inputs.runner || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.runner || 'ubuntu-26.04' }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -250,7 +254,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
           ls -l /dev/kvm
       - name: Let bubblewrap make user namespaces
-        # Ubuntu 24.04 gates unprivileged user namespaces behind AppArmor. The nested test
+        # Ubuntu 24.04 and later gate unprivileged user namespaces behind AppArmor. The nested test
         # and the bwrap lifecycle test both need one; without this they fail before reaching
         # any acornd code. The bwrap job already does this for its own tier.
         if: runner.environment == 'github-hosted' && runner.os == 'Linux'
@@ -267,10 +271,10 @@ jobs:
     #
     # It runs on a hosted runner because it needs three packages installed, and the self-hosted
     # runner has neither sudo nor root — the tier would fail on the box that is meant to run it.
-    # Ubuntu 24.04 gates unprivileged user namespaces behind AppArmor, so it gets the profile
-    # Ubuntu documents for bubblewrap; without it the engine is unusable there for a reason that
-    # has nothing to do with this code.
-    runs-on: ubuntu-24.04
+    # Ubuntu 24.04 and later gate unprivileged user namespaces behind AppArmor, so it gets the
+    # switch Ubuntu documents for bubblewrap; without it the engine is unusable there for a
+    # reason that has nothing to do with this code.
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -282,7 +286,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq bubblewrap passt
       - name: Let bubblewrap make user namespaces
-        # Ubuntu 24.04 gates unprivileged user namespaces behind AppArmor. A per-binary profile is
+        # Ubuntu 24.04 and later gate unprivileged user namespaces behind AppArmor. A per-binary profile is
         # enough for bubblewrap on its own, and *not* enough for the sandbox this tier runs: the
         # sandbox's user namespace nests inside the one pasta makes, and the second one is refused
         # ("Couldn't write to /proc/self/uid_map"). The switch is the documented host-wide answer,
