@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -15,7 +17,7 @@ import (
 // It is data and not a command line on purpose. The unprivileged command works out what is
 // missing and writes this; the privileged process reads it, refuses anything that is not in its
 // own vocabulary, and builds the commands itself. Nothing a caller can write becomes a program
-// that root runs, so the escalation is "these four machine-level steps and nothing else" rather
+// that root runs, so the escalation is "these five machine-level steps and nothing else" rather
 // than "whatever the file said".
 type rootPlan struct {
 	// Packages are distribution package names, from a fixed list.
@@ -27,6 +29,11 @@ type rootPlan struct {
 	Userns bool `json:"userns,omitempty"`
 	// Tun makes /dev/net/tun available, which is what pasta builds its interface from.
 	Tun bool `json:"tun,omitempty"`
+	// PastaProfile turns off the distribution's AppArmor profile for pasta, the one Ubuntu 26.04's
+	// passt package ships: it lets pasta start a program only from /usr/bin or /bin, and the
+	// sandbox's first process is acornd's supervisor, which is in neither. Only set when the probe
+	// refused and this machine has the profile, or when this plan installs the package that brings it.
+	PastaProfile bool `json:"pastaProfile,omitempty"`
 	// KVMUser and LingerUser are grants to one account. Empty means "not needed".
 	KVMUser    string `json:"kvmUser,omitempty"`
 	LingerUser string `json:"lingerUser,omitempty"`
@@ -42,7 +49,7 @@ var allowedPackages = []string{"bubblewrap", "passt"}
 var allowedManagers = []string{"apt-get", "dnf", "pacman", "apk"}
 
 func (p rootPlan) empty() bool {
-	return len(p.Packages) == 0 && !p.Userns && !p.Tun && p.KVMUser == "" && p.LingerUser == ""
+	return len(p.Packages) == 0 && !p.Userns && !p.Tun && !p.PastaProfile && p.KVMUser == "" && p.LingerUser == ""
 }
 
 // validate refuses anything this plan is not allowed to ask for. It is the only thing standing
@@ -87,18 +94,26 @@ func packageReason(packages []string) string {
 	}
 }
 
-// planAction is one step: either a command to run or a file to write, and the reason it is there
-// so a person reading the transcript knows what changed.
+// planAction is one step: a command to run, a file to write, or the distribution's profile for
+// pasta turned off, and the reason it is there so a person reading the transcript knows what
+// changed.
 type planAction struct {
 	Why   string
 	Run   []string
 	File  string
 	Write string
+	// PastaProfile is the one step that is not an argv: whether it applies, and which half of it
+	// does, is a question about this machine that is answered when it runs — the profile may not be
+	// here, and a machine that never loaded it needs no parser run.
+	PastaProfile bool
 }
 
 // actions turns the plan into steps in an order that works: the engine and its network tools
-// first, then the kernel permission they need, then the device pasta builds on, then the
-// per-account grants — a group added before the tool exists is a grant with nothing to grant.
+// first, then the kernel permission the sandbox needs, then the distribution's profile for pasta —
+// which has to come after it, because turning the profile off makes pasta unconfined and an
+// unconfined process cannot make a user namespace on a machine that still restricts them — then the
+// device pasta builds on, then the per-account grants: a group added before the tool exists is a
+// grant with nothing to grant.
 func (p rootPlan) actions() []planAction {
 	var actions []planAction
 	if len(p.Packages) > 0 {
@@ -122,6 +137,14 @@ func (p rootPlan) actions() []planAction {
 				Why: "apply it now",
 				Run: []string{"sysctl", "-w", "kernel.apparmor_restrict_unprivileged_userns=0"},
 			})
+	}
+	if p.PastaProfile {
+		// After the packages and after the kernel permission: the profile is the passt package's,
+		// and pasta cannot make the namespace it carries without the permission above.
+		actions = append(actions, planAction{
+			Why:          "turn off the AppArmor profile for pasta, which lets it start a program only from /usr/bin or /bin — acornd's supervisor is in neither",
+			PastaProfile: true,
+		})
 	}
 	if p.Tun {
 		// The node and its mode are restored at boot by tmpfiles, so a machine that has them now
@@ -207,27 +230,42 @@ func applyPlan(plan rootPlan) error {
 	}
 	for _, action := range actions {
 		fmt.Printf("· %s\n", action.Why)
-		if action.File != "" {
-			if err := writeStep(action.File, []byte(action.Write), 0o644); err != nil {
-				return fmt.Errorf("%s: %w", action.File, err)
-			}
-			continue
-		}
-		if err := runStep(action.Run[0], action.Run[1:]...); err != nil {
-			// A missing program is not always a failure: a kernel with tun built in has no
-			// module to load, and a machine without systemd has no tmpfiles to run. Those steps
-			// are best-effort, and what comes after them still proves the result.
-			if bestEffort[action.Run[0]] {
-				fmt.Printf("  (%s is not here; continuing)\n", action.Run[0])
-				continue
-			}
-			return fmt.Errorf("%s: %w", action.Run[0], err)
+		if err := runAction(action); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// The two ways a plan touches the machine, as variables. A test replaces them to see what a plan
+// runAction is one step. The three shapes a plan has are each run the way they have to be, and a
+// step that can only be a machine without that mechanism is not a failure: the probe afterwards is
+// the judge.
+func runAction(action planAction) error {
+	if action.PastaProfile {
+		if err := disablePastaProfile(); err != nil {
+			return fmt.Errorf("the pasta profile: %w", err)
+		}
+		return nil
+	}
+	if action.File != "" {
+		if err := writeStep(action.File, []byte(action.Write), 0o644); err != nil {
+			return fmt.Errorf("%s: %w", action.File, err)
+		}
+		return nil
+	}
+	if err := runStep(action.Run[0], action.Run[1:]...); err != nil {
+		// A missing program is not always a failure: a kernel with tun built in has no module to
+		// load, and a machine without systemd has no tmpfiles to run.
+		if bestEffort[action.Run[0]] {
+			fmt.Printf("  (%s is not here; continuing)\n", action.Run[0])
+			return nil
+		}
+		return fmt.Errorf("%s: %w", action.Run[0], err)
+	}
+	return nil
+}
+
+// The three ways a plan touches the machine, as variables. A test replaces them to see what a plan
 // would do: the argv and the file contents are the decision worth checking, and running apt-get
 // for real proves less while changing the machine it ran on.
 var (
@@ -240,7 +278,82 @@ var (
 	writeStep = func(path string, content []byte, mode os.FileMode) error {
 		return os.WriteFile(path, content, mode)
 	}
+	linkStep = func(target, link string) error { return os.Symlink(target, link) }
 )
+
+// pastaAppArmor is where the profile Ubuntu 26.04 ships for pasta is, where a disabled profile is
+// recorded, and the kernel's list of profiles in force. It is a value a test replaces, because
+// /etc/apparmor.d is not the test's machine.
+var pastaAppArmor = struct {
+	profile string
+	disable string
+	loaded  string
+}{
+	profile: "/etc/apparmor.d/usr.bin.pasta",
+	disable: "/etc/apparmor.d/disable",
+	loaded:  "/sys/kernel/security/apparmor/profiles",
+}
+
+// disablePastaProfile turns off the distribution's profile for pasta the way Ubuntu's own aa-disable
+// does: a symlink in /etc/apparmor.d/disable, which is what a boot reads, then the parser, which
+// takes away the profile loaded now. The profile is a real security boundary — pasta may start a
+// program from /usr/bin or /bin and nothing else — and it is turned off because the first process
+// pasta starts is acornd's supervisor, in the install folder, so every workspace with its network
+// on refuses to start with "Failed to start command or shell: Permission denied". ADR 0023 has the
+// measurements.
+//
+// Nothing here is a failure on a machine the profile is not about. A distribution that ships none
+// (Ubuntu 24.04, Debian, Fedora) and a machine that never loaded it skip the half that does not
+// apply, and the probe afterwards is the judge.
+func disablePastaProfile() error {
+	if _, err := os.Stat(pastaAppArmor.profile); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Printf("  (%s is not here: this distribution ships no pasta profile)\n", pastaAppArmor.profile)
+			return nil
+		}
+		return err
+	}
+	link := filepath.Join(pastaAppArmor.disable, filepath.Base(pastaAppArmor.profile))
+	if err := os.MkdirAll(pastaAppArmor.disable, 0o755); err != nil {
+		return err
+	}
+	if err := linkStep(pastaAppArmor.profile, link); err != nil && !errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("%s: %w", link, err)
+	}
+	fmt.Println("  a distribution security profile, off because no sandbox with a network can start with it")
+	fmt.Printf("  %s -> %s\n", link, pastaAppArmor.profile)
+	if !profileLoaded() {
+		fmt.Printf("  (pasta is not a loaded profile here; the symlink keeps it that way)\n")
+		return nil
+	}
+	return runStep("apparmor_parser", "-R", pastaAppArmor.profile)
+}
+
+// profileLoaded asks the kernel whether the distribution's profile for pasta is in force. It looks
+// for the profile's *name*, which is neither the file nor always the path it attaches to: Ubuntu
+// loads this one as `pasta`, a profile declared `profile <path>` is listed by its path, and a
+// package may name it after its own file (`usr.bin.pasta`). A name is split the way names use
+// separators, so all three answer yes and `passt` or `pasta-helper` do not.
+//
+// The list is absent when AppArmor is not enabled at all, which is the same answer for this
+// question: there is nothing to unload, and a parser run there would be a failure about a mechanism
+// this machine does not have.
+func profileLoaded() bool {
+	payload, err := os.ReadFile(pastaAppArmor.loaded)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(payload), "\n") {
+		// A line is "<name> (<mode>)", so the name is what comes before the first space.
+		name, _, _ := strings.Cut(strings.TrimSpace(line), " ")
+		for _, word := range strings.FieldsFunc(name, func(r rune) bool { return r == '/' || r == '.' }) {
+			if word == "pasta" {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // bestEffort names the steps whose absence is a machine without that mechanism, not a failure:
 // after them, the probe is the judge.

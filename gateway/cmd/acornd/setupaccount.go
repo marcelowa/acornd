@@ -261,6 +261,7 @@ type probeWire struct {
 	PastaProblem     string `json:"pastaProblem,omitempty"`
 	TunProblem       string `json:"tunProblem,omitempty"`
 	UsernsRestricted bool   `json:"usernsRestricted,omitempty"`
+	PastaProfile     bool   `json:"pastaProfile,omitempty"`
 	Container        bool   `json:"container,omitempty"`
 	KVMProblem       string `json:"kvmProblem,omitempty"`
 	LingerKnown      bool   `json:"lingerKnown,omitempty"`
@@ -298,6 +299,7 @@ func wireOf(report setupReport) probeWire {
 		PastaProblem:     problemText(report.PastaErr),
 		TunProblem:       problemText(report.TunErr),
 		UsernsRestricted: report.UsernsRestricted,
+		PastaProfile:     report.PastaProfile,
 		Container:        report.Container,
 		KVMProblem:       problemText(report.KVMErr),
 		LingerKnown:      report.LingerKnown,
@@ -317,6 +319,7 @@ func reportOf(wire probeWire) setupReport {
 		PastaErr:         problemError(wire.PastaProblem),
 		TunErr:           problemError(wire.TunProblem),
 		UsernsRestricted: wire.UsernsRestricted,
+		PastaProfile:     wire.PastaProfile,
 		Container:        wire.Container,
 		KVMErr:           problemError(wire.KVMProblem),
 		LingerKnown:      wire.LingerKnown,

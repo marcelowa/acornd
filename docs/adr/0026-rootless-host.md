@@ -28,6 +28,7 @@ What does need root, once, and can never be vendored:
 |---|---|---|
 | `kernel.apparmor_restrict_unprivileged_userns=0` (Ubuntu 23.10+) | the kernel refuses unprivileged user namespaces to unconfined binaries | every engine that isolates anything is unavailable; `host` is left |
 | `/dev/kvm` readable (`kvm` group) | the microVM engine's device | the microVM engine is unavailable; `bwrap` still works |
+| turning off `passt`'s AppArmor profile (Ubuntu 26.04+) | the profile lets pasta start a program only from `/usr/bin` or `/bin`, and the sandbox's first process is acornd's supervisor, in neither | every workspace with its network on refuses to start |
 | `loginctl enable-linger` | a user service that survives logout | the gateway runs only while a session does |
 | installing into `/usr/bin` | not needed at all: the data folder is the user's | — |
 
@@ -45,7 +46,7 @@ than discovered later. When the account is not this process's, root re-executes 
 with that account's ids and groups to ask. When a step needs
 root the command writes it to a plan, says why, and runs the same binary through `sudo`. The privileged half
 reads the plan as data and builds the commands itself, refusing anything outside its own short
-vocabulary, so escalation is "these four machine-level steps" rather than "whatever a file said".
+vocabulary, so escalation is "these five machine-level steps" rather than "whatever a file said".
 `--apply` no longer exists: a second invocation with a flag teaches the wrong habit. iproute2 is
 gone entirely: the sandbox's address and routes are set over netlink by `acornd netns` (a
 subcommand pasta runs as the sandbox's first process), so a refusal that cannot be installed fails
@@ -54,9 +55,13 @@ the start instead of being swallowed by a shell script.
 **What the step changes, and for how long.** The user-namespace policy is written to
 `/etc/sysctl.d/99-acornd-userns.conf` and not only applied, because a fix that disappears at the
 next reboot is worse than one that was never made; `/dev/net/tun` likewise gets a
-`/etc/tmpfiles.d` rule so the device is there after a boot. In a container neither is the answer:
-the policy and the device belong to whoever started the container, so the command says so and
-stops rather than proposing something that cannot work.
+`/etc/tmpfiles.d` rule so the device is there after a boot. The pasta profile is turned off the way
+the distribution's own `aa-disable` does it, and the symlink in `/etc/apparmor.d/disable` is both
+what keeps it off at the next boot and how a person puts it back: remove the symlink and load the
+profile again. It is named in the plan, with its reason, because it is a security profile and not a
+device. In a container neither the policy nor the device is the answer: they belong to whoever
+started the container, so the command says so and stops rather than proposing something that
+cannot work.
 
 **Vendoring the tools is rejected, not deferred.** The alternative was to ship pinned static
 `bwrap` and `pasta`, fetched into the data folder and used where the machine has none. It was

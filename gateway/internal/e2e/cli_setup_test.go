@@ -30,7 +30,8 @@ func TestTheProbeAnswersTheChecksAsJSON(t *testing.T) {
 	known := map[string]bool{
 		"packageManager": true, "bwrapPath": true, "bwrapVersion": true, "bwrapProblem": true,
 		"pastaPath": true, "pastaProblem": true, "tunProblem": true, "usernsRestricted": true,
-		"container": true, "kvmProblem": true, "lingerKnown": true, "linger": true,
+		"pastaProfile": true,
+		"container":    true, "kvmProblem": true, "lingerKnown": true, "linger": true,
 		"installDir": true, "installProblem": true,
 	}
 	for key := range probe {

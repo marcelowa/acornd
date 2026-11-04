@@ -896,6 +896,60 @@ func TestAPastaThatCannotMapItsUserNamespaceIsRefused(t *testing.T) {
 	}
 }
 
+// The program the probe hands pasta is the point of the probe: `/bin/true` is exactly what an
+// AppArmor profile for pasta allows, so a probe that ran it said the network worked while every
+// sandbox with one refused to start the supervisor. This asks for the same binary a sandbox does.
+func TestThePastaProbeHandsPastaThisBinaryAndNotBinTrue(t *testing.T) {
+	dir := t.TempDir()
+	record := filepath.Join(dir, "argv")
+	script := filepath.Join(dir, "pasta")
+	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + record + "\nexit 0\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := probePastaWithin(script, time.Second); err != nil {
+		t.Fatalf("the probe: %v", err)
+	}
+	raw, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The separator, then the program and its one argument.
+	if len(args) < 3 {
+		t.Fatalf("pasta was given %v", args)
+	}
+	if args[len(args)-2] != executable || args[len(args)-1] != "help" {
+		t.Errorf("the probe should run %s help, got %v", executable, args[len(args)-2:])
+	}
+	for _, argument := range args {
+		if argument == "/bin/true" {
+			t.Fatalf("the probe still runs /bin/true, which an AppArmor profile for pasta allows: %v", args)
+		}
+	}
+}
+
+// pasta refusing to start the program it was given is its own sentence, and exit 0 does not make
+// it a working network: the narrowed AppArmor profile is the cause a person needs named.
+func TestAPastaThatCannotStartTheProgramItIsGivenIsRefused(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "pasta")
+	body := "#!/bin/sh\necho \"Failed to start command or shell: Permission denied\" >&2\nexit 0\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := probePastaWithin(script, time.Second)
+	if err == nil {
+		t.Fatal("pasta could not start the supervisor; the probe must refuse it")
+	}
+	if !strings.Contains(err.Error(), "/usr/bin") || !strings.Contains(err.Error(), "acornd setup") {
+		t.Errorf("the refusal should name the profile and the fix: %v", err)
+	}
+}
+
 func TestBwrapIsARealEngineOfTheSeam(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
 	if !driver.Isolated() {

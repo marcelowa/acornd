@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/marcelowa/acornd/gateway/internal/control"
@@ -169,6 +170,11 @@ type engineReport struct {
 	Default  bool                   `json:"default,omitempty"`
 	Default_ bool                   `json:"-"`
 	Nesting  sandbox.NestingSupport `json:"nesting"`
+	// Egress is why a workspace with its network on cannot run here, when the engine itself is
+	// otherwise fine. It is separate from Problem because an engine that cannot carry a network
+	// still runs a workspace with it off, and a report that called that "unavailable" would be
+	// saying something doctor did not ask.
+	Egress string `json:"egress,omitempty"`
 }
 
 // sandboxReports asks every engine this build knows, in the order a workspace would be given
@@ -186,11 +192,21 @@ func sandboxReports(dataDir string) []engineReport {
 		// Read the store through the pinned engine, so a catalog migrated forward by a
 		// newer binary shows as a problem instead of a ready tier that refuses work.
 		manager.Verify(context.Background())
-		reports = append(reports, engineReport{
+		report := engineReport{
 			Report:  manager.Report(),
 			Default: name == defaultEngine,
 			Nesting: manager.Nesting(context.Background()),
-		})
+		}
+		// The network is asked separately from Usable, because an engine that cannot carry one still
+		// runs a workspace with its network off. It is the question a workspace with the network on
+		// asks at its start, and doctor is where a person is meant to find out first. An engine that
+		// is not here has no network to ask about.
+		if manager.Driver().Installed() {
+			if err := manager.Driver().Egress(); err != nil {
+				report.Egress = strings.TrimPrefix(err.Error(), "sandbox unavailable: ")
+			}
+		}
+		reports = append(reports, report)
 	}
 	return reports
 }
@@ -231,9 +247,22 @@ func printEngineDetail(engine engineReport) {
 			fmt.Printf("  %-14s nesting no (%s)\n", "", engine.Nesting.Reason)
 		}
 	}
+	if why := engineNetworkProblem(engine); why != "" {
+		fmt.Printf("  %-14s network no (%s)\n", "", why)
+	}
 	if engine.Problem != "" && engine.Installed {
 		fmt.Printf("  %-14s problem %s\n", "", engine.Problem)
 	}
+}
+
+// engineNetworkProblem is the network line's text, or empty when there is nothing to say: an engine
+// that is not downloaded yet has no network to ask about, and one that cannot run at all already
+// says why in its problem line.
+func engineNetworkProblem(engine engineReport) string {
+	if !engine.Installed || engine.Problem != "" {
+		return ""
+	}
+	return engine.Egress
 }
 
 // stateOf is one word for what an engine can do here, written so the three read as a column.

@@ -283,3 +283,162 @@ func TestThePrivilegedHalfRefusesToRunAsACommand(t *testing.T) {
 		t.Fatal("unreachable")
 	}
 }
+
+// The pasta profile is the one plan step that is not an argv, and each half of it depends on this
+// machine: a profile that is not here, one that was never loaded, and one that refuses pasta. The
+// paths are the test's, because /etc/apparmor.d is not.
+type pastaMachine struct {
+	profile string
+	disable string
+}
+
+// withPastaProfile points the plan at a machine of its own: present says the distribution ships the
+// profile, loaded says the kernel has it in force.
+func withPastaProfile(t *testing.T, present, loaded bool) (pastaMachine, *[]step, *[]string) {
+	t.Helper()
+	dir := t.TempDir()
+	machine := pastaMachine{profile: filepath.Join(dir, "usr.bin.pasta"), disable: filepath.Join(dir, "disable")}
+	if present {
+		if err := os.WriteFile(machine.profile, []byte("# a profile\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	profiles := filepath.Join(dir, "profiles")
+	content := ""
+	if loaded {
+		// The name Ubuntu loads it under, which is not the path it attaches to.
+		content = "pasta (enforce)\n"
+	}
+	if err := os.WriteFile(profiles, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	savedMachine, savedLink := pastaAppArmor, linkStep
+	t.Cleanup(func() {
+		pastaAppArmor, linkStep = savedMachine, savedLink
+	})
+	pastaAppArmor = struct {
+		profile string
+		disable string
+		loaded  string
+	}{profile: machine.profile, disable: machine.disable, loaded: profiles}
+	steps, _, _ := capturePlan(t)
+	var links []string
+	linkStep = func(target, link string) error {
+		links = append(links, target+" -> "+link)
+		return nil
+	}
+	return machine, steps, &links
+}
+
+// Turning the profile off is the pair Ubuntu's own aa-disable does: the symlink a reboot reads,
+// then the parser that takes away the profile loaded now.
+func TestAPlanTurnsOffThePastaProfileTheWayAaDisableDoes(t *testing.T) {
+	machine, steps, links := withPastaProfile(t, true, true)
+	if err := applyPlan(rootPlan{PastaProfile: true}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	want := []step{{"apparmor_parser", []string{"-R", machine.profile}}}
+	if !sameSteps(*steps, want) {
+		t.Errorf("ran %v, want %v", *steps, want)
+	}
+	wantLink := machine.profile + " -> " + filepath.Join(machine.disable, "usr.bin.pasta")
+	if len(*links) != 1 || (*links)[0] != wantLink {
+		t.Errorf("linked %v, want %s", *links, wantLink)
+	}
+}
+
+// A distribution that ships no profile is not the machine this step is about: Ubuntu 24.04 and
+// every other supported release must go on working, with no step and no dangling symlink.
+func TestAPlanLeavesAMachineWithoutThePastaProfileAlone(t *testing.T) {
+	_, steps, links := withPastaProfile(t, false, false)
+	if err := applyPlan(rootPlan{PastaProfile: true}); err != nil {
+		t.Fatalf("a machine without the profile is not a failure: %v", err)
+	}
+	if len(*steps) != 0 || len(*links) != 0 {
+		t.Errorf("ran %v and linked %v on a machine with no profile", *steps, *links)
+	}
+}
+
+// A profile the kernel never loaded needs no parser run, and an unload there would be a failure
+// about a mechanism this machine does not have. The symlink still keeps it from loading later.
+func TestAPlanLinksButDoesNotUnloadAProfileThatIsNotLoaded(t *testing.T) {
+	machine, steps, links := withPastaProfile(t, true, false)
+	if err := applyPlan(rootPlan{PastaProfile: true}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(*steps) != 0 {
+		t.Errorf("ran %v with no loaded profile", *steps)
+	}
+	if len(*links) != 1 || (*links)[0] != machine.profile+" -> "+filepath.Join(machine.disable, "usr.bin.pasta") {
+		t.Errorf("the symlink is what keeps it off at the next boot, linked %v", *links)
+	}
+}
+
+// The profile is a package's, so the step that turns it off comes after the step that installs the
+// package: on a fresh 26.04 both are in one plan.
+func TestThePastaProfileStepComesAfterThePackage(t *testing.T) {
+	_, steps, _ := withPastaProfile(t, true, true)
+	if err := applyPlan(rootPlan{Packages: []string{"passt"}, Manager: "apt-get", PastaProfile: true}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	want := []step{
+		{"apt-get", []string{"install", "-y", "passt"}},
+		{"apparmor_parser", []string{"-R", pastaAppArmor.profile}},
+	}
+	if !sameSteps(*steps, want) {
+		t.Errorf("ran %v, want %v", *steps, want)
+	}
+}
+
+// A plan of one profile step is not an empty plan: setup would say "nothing to change" on the one
+// machine this exists for.
+func TestAPlanWithOnlyThePastaProfileIsNotAnEmptyPlan(t *testing.T) {
+	if (rootPlan{PastaProfile: true}).empty() {
+		t.Fatal("a plan that turns off the pasta profile has a step to run")
+	}
+}
+
+// The profile comes after the kernel permission as well, and for a reason that is not cosmetic:
+// turning the profile off makes pasta unconfined, and an unconfined process cannot make a user
+// namespace on a machine that still restricts them. A plan that turned the profile off first would
+// break the network it is trying to fix if the next step failed.
+func TestThePastaProfileStepComesAfterTheUserNamespaceSwitch(t *testing.T) {
+	_, steps, _ := withPastaProfile(t, true, true)
+	if err := applyPlan(rootPlan{Userns: true, PastaProfile: true}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	want := []step{
+		{"sysctl", []string{"-w", "kernel.apparmor_restrict_unprivileged_userns=0"}},
+		{"apparmor_parser", []string{"-R", pastaAppArmor.profile}},
+	}
+	if !sameSteps(*steps, want) {
+		t.Errorf("ran %v, want %v", *steps, want)
+	}
+}
+
+// The kernel lists a profile by the name it was loaded under, and that is not the file it came
+// from: Ubuntu loads this one as `pasta`, where a profile declared `profile <path>` is listed by
+// its path. The CI run that produced this test had the profile in force and the check said it was
+// not, which is how the first version shipped a symlink and no unload.
+func TestTheLoadedProfileIsFoundByNameAndNotByALongerWord(t *testing.T) {
+	saved := pastaAppArmor
+	t.Cleanup(func() { pastaAppArmor = saved })
+	for content, want := range map[string]bool{
+		"pasta (enforce)\n":                            true,
+		"/usr/bin/pasta (enforce)\n":                   true,
+		"usr.bin.pasta (enforce)\n":                    true,
+		"other (enforce)\n/usr/bin/pasta (complain)\n": true,
+		"/usr/bin/passt (enforce)\n":                   false,
+		"/usr/bin/pasta-helper (enforce)\n":            false,
+		"":                                             false,
+	} {
+		path := filepath.Join(t.TempDir(), "profiles")
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		pastaAppArmor.loaded = path
+		if got := profileLoaded(); got != want {
+			t.Errorf("%q: got %v, want %v", content, got, want)
+		}
+	}
+}
