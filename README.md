@@ -47,6 +47,20 @@ The script adds a link in `/usr/local/bin` or `~/.local/bin` when one is writabl
 marked block in your shell's rc file either way. A shell that was already open keeps its old
 `PATH`, so open a new terminal.
 
+### If the machine is remote
+
+If the printed address does not open from your machine, forward the port over SSH and use the
+local address:
+
+```bash
+ssh -L 7777:127.0.0.1:7777 user@machine
+# then open http://localhost:7777/setup?code=…
+```
+
+The same tunnel is the way in when the console was started with `acornd start --host 127.0.0.1`.
+Use it for the first claim. After that, **Settings > Remote** puts the console behind Cloudflare,
+or keep using the tunnel.
+
 ### By hand
 
 ```bash
