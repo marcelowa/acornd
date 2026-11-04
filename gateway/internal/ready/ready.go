@@ -138,6 +138,11 @@ func engine(input Input) Requirement {
 	if input.EngineProblem != "" {
 		return Requirement{"engine", false, input.EngineProblem, "see the sandbox section above; tools refuse until it is fixed"}
 	}
+	if input.EngineName == "" {
+		// No default engine at all: not one that is waiting to be downloaded. A machine that can
+		// run no sandbox is the answer, and the consequence is that the tools refuse.
+		return Requirement{"engine", false, "no sandbox engine can run here", "see the sandbox section above; acornd setup says what this machine needs"}
+	}
 	if !input.EngineInstalled {
 		return Requirement{"engine", false, input.EngineName + " not installed", "open a workspace: the engine installs on first use (needs network once)"}
 	}

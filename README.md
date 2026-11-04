@@ -166,7 +166,9 @@ running, it installs to disk and takes effect at the next start.
 
 A workspace runs its tools on one engine. The engine is chosen when the workspace is created and
 kept with its record. A new workspace gets the first engine this machine can run: bwrap, then
-microsandbox.
+microsandbox. A machine that can run neither has no default: the console still works, every
+workspace refuses its tools, and `acornd doctor` says what each engine is missing. The unisolated
+`host` engine is reached only by asking for it.
 
 | Engine | What it is | Needs |
 |---|---|---|
@@ -189,6 +191,9 @@ microsandbox.
   and `/dev/net/tun` from the machine, and a workspace can withdraw those with `--no-devices`.
 - A workspace can run a hypervisor inside its sandbox when the machine allows it. `--no-vm-nesting`
   turns that off.
+- `host` is not in the table because it is not a sandbox: it runs commands on the machine itself,
+  with the user's own reach, and nothing selects it on its own (`ACORND_SANDBOX_ENGINE=host`, or
+  `--sandbox host` for one workspace).
 - `acornd doctor` says which engines work here, and why one does not.
 
 ```bash

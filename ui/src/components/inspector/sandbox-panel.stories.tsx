@@ -77,3 +77,20 @@ export const Refused: Story = {
 export const NothingYet: Story = {
 	args: {},
 };
+
+/** A machine that can run no sandbox: no engine to name, and the tools refuse for that reason. */
+export const NoSandbox: Story = {
+	args: {
+		sandbox: {
+			engine: "",
+			version: "",
+			status: "",
+			tools: false,
+			isolated: false,
+			problem:
+				"no sandbox engine can run on this machine: bwrap: bubblewrap is not installed; microsandbox: /dev/kvm is missing; commands and file tools refuse",
+			secrets: [],
+			secretsRestart: false,
+		},
+	},
+};

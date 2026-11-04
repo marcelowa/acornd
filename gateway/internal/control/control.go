@@ -70,10 +70,13 @@ type Options struct {
 	// OnStage reports a step that takes time while a workspace opens: starting the harness,
 	// preparing an image, booting the sandbox. Nil means nobody is listening.
 	OnStage func(step string)
-	// Sandbox is the machine's sandbox tier. Nil means this Control was built without one,
-	// which is what ACORND_NO_SANDBOX asks the gateway for: the workspace still opens and
-	// its tools refuse.
+	// Sandbox is the machine's sandbox tier. Nil means this Control was built without one:
+	// either ACORND_NO_SANDBOX asked the gateway for that, or no engine can run on this
+	// machine, which SandboxProblem says. The workspace still opens and its tools refuse.
 	Sandbox *sandbox.Manager
+	// SandboxProblem is why there is no sandbox, when this machine has none to give: the state
+	// says it rather than a sentence that reads like a choice nobody remembers making.
+	SandboxProblem error
 	// Vault is the install-wide tool-secret store. Nil means this workspace has no vault,
 	// and its sandbox receives no secret rather than failing to open.
 	Vault *vault.Store

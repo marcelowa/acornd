@@ -24,7 +24,12 @@ export function SandboxPanel({ sandbox, workspacePath }: SandboxPanelProps) {
 		<div className="flex flex-col gap-0.5">
 			<Fact
 				label="engine"
-				value={`${sandbox.engine}${sandbox.version === "" ? "" : ` ${sandbox.version}`}`}
+				value={
+					sandbox.engine === ""
+						? "none"
+						: `${sandbox.engine}${sandbox.version === "" ? "" : ` ${sandbox.version}`}`
+				}
+				tone={sandbox.engine === "" ? "danger" : undefined}
 			/>
 			<Fact label="status" value={sandbox.status} />
 			<Fact
@@ -32,11 +37,15 @@ export function SandboxPanel({ sandbox, workspacePath }: SandboxPanelProps) {
 				value={sandbox.tools ? "live" : "refused"}
 				tone={sandbox.tools ? undefined : "danger"}
 			/>
-			<Fact
-				label="isolation"
-				value={sandbox.isolated ? "isolated" : "the host: not isolated"}
-				tone={sandbox.isolated ? undefined : "danger"}
-			/>
+			{/* Only an engine can be isolated or not: a workspace with none would otherwise be
+			 * reported as the host engine, which is the one thing it certainly is not. */}
+			{sandbox.engine === "" ? null : (
+				<Fact
+					label="isolation"
+					value={sandbox.isolated ? "isolated" : "the host: not isolated"}
+					tone={sandbox.isolated ? undefined : "danger"}
+				/>
+			)}
 			{sandbox.problem === undefined ? null : (
 				<Fact label="problem" value={sandbox.problem} tone="danger" />
 			)}

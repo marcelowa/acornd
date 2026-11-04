@@ -63,15 +63,16 @@ func TestHostSaysThereIsNothingToNest(t *testing.T) {
 	}
 }
 
-// Engine is how a run names what it wants. A name nobody implements is refused with the
-// choices: defaulting to the host for a typo would turn a sandboxed run unconfined.
+// Engine is how a run names what it wants. An empty name is a caller that never asked the
+// machine — Tier.Default is the one place that answers it — and a name nobody implements is
+// refused with the choices: defaulting to the host for a typo would turn a sandboxed run
+// unconfined.
 func TestEngineRefusesANameItDoesNotImplement(t *testing.T) {
 	dataDir := t.TempDir()
-	driver, err := Engine(dataDir, "", "")
-	if err != nil || driver.Name() != "microsandbox" {
-		t.Fatalf("the default engine is microsandbox, got %v %v", driver, err)
+	if _, err := Engine(dataDir, "", ""); err == nil {
+		t.Fatal("an empty name is not an engine: which one this machine runs is Tier.Default's answer")
 	}
-	driver, err = Engine(dataDir, "/tmp/somewhere", "microsandbox")
+	driver, err := Engine(dataDir, "/tmp/somewhere", "microsandbox")
 	if err != nil {
 		t.Fatal(err)
 	}

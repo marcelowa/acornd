@@ -17,7 +17,10 @@ import (
 // for. This holds reportManager to naming one, and to reporting the host engine's lack of
 // isolation rather than claiming a sandbox.
 func TestTheDoctorReportNamesAnEngine(t *testing.T) {
-	manager, err := reportManager(t.TempDir(), "")
+	if _, err := reportManager(t.TempDir(), ""); err == nil {
+		t.Fatal("doctor must name the engine it reports: which one a machine runs is Tier.Default's answer")
+	}
+	manager, err := reportManager(t.TempDir(), "microsandbox")
 	if err != nil {
 		t.Fatalf("reportManager: %v", err)
 	}
@@ -39,7 +42,10 @@ func TestTheDoctorReportNamesAnEngine(t *testing.T) {
 // engine that is not installed has nothing to offer, and the host engine has no sandbox to
 // nest. Both answers are the same on every machine, which is what makes them testable.
 func TestDoctorNestingIsRefusedBeforeTheMachineIsChecked(t *testing.T) {
-	manager, err := reportManager(t.TempDir(), "")
+	if _, err := reportManager(t.TempDir(), ""); err == nil {
+		t.Fatal("doctor must name the engine it reports: which one a machine runs is Tier.Default's answer")
+	}
+	manager, err := reportManager(t.TempDir(), "microsandbox")
 	if err != nil {
 		t.Fatalf("reportManager: %v", err)
 	}
@@ -102,9 +108,29 @@ func TestTheDoctorReportSaysWhenAnEngineCannotCarryANetwork(t *testing.T) {
 		printEngines([]engineReport{{
 			Report: sandbox.Report{Engine: "bwrap", Installed: true, Isolated: true},
 			Egress: "pasta cannot start the supervisor it is given: Failed to start command or shell: Permission denied",
-		}}, "host")
+		}}, "host", "")
 	})
 	if !strings.Contains(out, "network no") || !strings.Contains(out, "Failed to start command or shell") {
 		t.Fatalf("the row should say the network cannot run:\n%s", out)
+	}
+}
+
+// A machine that can run no sandbox says so, and says what the tools will do about it: the
+// blank where the default belongs is the one line a person would otherwise have to guess at.
+func TestTheDoctorReportSaysWhenThisMachineHasNoSandbox(t *testing.T) {
+	out := captureStdout(t, func() {
+		printEngines([]engineReport{
+			{Report: sandbox.Report{Engine: "bwrap", Problem: "no user namespace"}},
+			{Report: sandbox.Report{Engine: "microsandbox", Problem: "no /dev/kvm"}},
+		}, "", "no sandbox engine can run on this machine: bwrap: no user namespace; microsandbox: no /dev/kvm")
+	})
+	if !strings.Contains(out, "no sandbox engine can run on this machine") {
+		t.Fatalf("the report should say no engine can run here:\n%s", out)
+	}
+	if !strings.Contains(out, "tools will refuse") {
+		t.Fatalf("the report should say what the tools do about it:\n%s", out)
+	}
+	if strings.Contains(out, "this machine will use") {
+		t.Fatalf("a machine with no sandbox must not name a default:\n%s", out)
 	}
 }

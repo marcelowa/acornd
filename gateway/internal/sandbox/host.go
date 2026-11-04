@@ -82,11 +82,13 @@ func (h *Host) Stop(context.Context, string) error            { return nil }
 func (h *Host) Remove(context.Context, string) error          { return nil }
 
 // Engines are the drivers this build can run, by the name the worker matches with its own
-// client. An unknown name is refused with the list, never silently defaulted: a run that
-// meant microsandbox and got the host would be a security change nobody asked for.
+// client. There is no default here: an empty name is a caller that never asked the machine
+// (Tier.Default is the one place that answers it), and a name nobody implements is refused with
+// the list rather than answered with another engine — a run that meant microsandbox and got the
+// host would be a security change nobody asked for.
 func Engine(dataDir, state, name string) (Driver, error) {
 	switch name {
-	case "", "microsandbox":
+	case "microsandbox":
 		driver := NewMicrosandbox(dataDir)
 		if state != "" {
 			driver = driver.WithStateDir(state)
@@ -101,6 +103,9 @@ func Engine(dataDir, state, name string) (Driver, error) {
 	case "host":
 		return NewHost(), nil
 	default:
+		if strings.TrimSpace(name) == "" {
+			return nil, errors.New("sandbox: no engine named (choose one of " + strings.Join(EngineNames(), ", ") + ")")
+		}
 		return nil, errors.New("sandbox: unknown engine " + name + " (" + strings.Join(EngineNames(), ", ") + ")")
 	}
 }
@@ -108,7 +113,8 @@ func Engine(dataDir, state, name string) (Driver, error) {
 // EngineNames are the engines this build runs, in the order a machine prefers them: bubblewrap
 // first because it needs no hypervisor, no root, and no device — then the microVM, which is the
 // stronger boundary when a machine can give it one — then the host, which isolates nothing and
-// is last for that reason. It is also the order a chooser shows (ADR 0026).
+// is last for that reason. It is also the order a chooser shows (ADR 0026). Only the first two
+// may be a machine's default: see defaultEngines.
 func EngineNames() []string { return []string{"bwrap", "microsandbox", "host"} }
 
 // ValidEngine reports whether a workspace may name an engine. The empty string is valid and

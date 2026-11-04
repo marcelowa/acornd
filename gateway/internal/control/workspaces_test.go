@@ -240,3 +240,25 @@ func TestTheEngineListSaysWhichEnginesSubstitute(t *testing.T) {
 		t.Error("bwrap substitutes: the value stays on the host and a placeholder goes in")
 	}
 }
+
+// A machine with no sandbox records no engine for a workspace made through the console. The
+// old answer here was "host", which made a room somebody created in a browser unconfined
+// without anybody choosing it; empty means the tools refuse (ADR 0015).
+func TestAnInstallWithNoSandboxRecordsNoEngine(t *testing.T) {
+	t.Parallel()
+	none := NewWorkspaces(WorkspacesOptions{WorkspacesDir: t.TempDir()})
+	if engine := none.DefaultEngine(); engine != "" {
+		t.Fatalf("an install with no sandbox recorded %q as its default", engine)
+	}
+	// An install told to run on the host engine still records it: naming it is the decision,
+	// and the record is where that decision has to stay.
+	tier := sandbox.NewTier(t.TempDir(), "", nil)
+	host, err := tier.For("host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	named := NewWorkspaces(WorkspacesOptions{WorkspacesDir: t.TempDir(), Sandbox: host, Sandboxes: tier})
+	if engine := named.DefaultEngine(); engine != "host" {
+		t.Fatalf("an install that named the host engine recorded %q", engine)
+	}
+}

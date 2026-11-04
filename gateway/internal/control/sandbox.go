@@ -191,10 +191,14 @@ func (c *Control) answerSandboxWake(frame protocol.Frame) {
 }
 
 // sandboxRefusal is why there is no sandbox, when there is not one: an engine this build has
-// and cannot use is a different answer from one it was never given.
+// and cannot use is a different answer from a machine that has none to give, and both are a
+// different answer from a run that was told to go without.
 func (c *Control) sandboxRefusal() SandboxState {
 	if problem := c.sandboxProblem(); problem != nil {
 		return SandboxState{Problem: problem.Error()}
+	}
+	if c.opts.SandboxProblem != nil {
+		return SandboxState{Problem: c.opts.SandboxProblem.Error() + "; commands and file tools refuse"}
 	}
 	return SandboxState{Problem: "no sandbox is configured: tool execution is disabled"}
 }

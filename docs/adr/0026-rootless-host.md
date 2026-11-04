@@ -81,9 +81,10 @@ install packages at all, that is a different problem (an image to build), not a 
 three C libraries through our own release pipeline.
 
 **2. An engine a machine cannot run is not the default.** The preference order is `bwrap`,
-`microsandbox`, `host`: bubblewrap first because it needs no hypervisor, no root, and no device;
-the microVM next as the stronger boundary when a machine can give it one; the host last because it
-isolates nothing, so it is what is left rather than what is preferred. A workspace that names no
+then `microsandbox`: bubblewrap first because it needs no hypervisor, no root, and no device;
+the microVM next as the stronger boundary when a machine can give it one. The `host` engine is
+not in that order at all: it isolates nothing, so it is what an operator names, and a machine
+that can run neither sandbox has no default and says so (ADR 0015). A workspace that names no
 engine gets the first one in that order that can run a workspace **with its network on** — the
 driver answers that with `Egress`, separately from `Usable`, because a machine can run a sandbox
 without being able to give it a network. An engine that cannot is not a default.
@@ -119,7 +120,13 @@ not a substitute — the microVM gap is still open (ADR 0025 says so).
 ## Tests
 
 - `TestTierEmptyNameIsWhatTheMachineCanRun` — the default is what this machine can run, network
-  and all, and the preference order is bwrap first, host last.
+  and all, and the preference order is bwrap first.
+- `TestAMachineWithNoSandboxHasNoDefault` — a machine that can run neither sandbox has no
+  default: it names what each engine is missing rather than falling back to the host engine.
+- `TestTheDefaultIsTheFirstEngineThatCanRun` — the order is the policy, and the first engine that
+  can carry a workspace wins it.
+- `TestAnInstallWithNoSandboxRecordsNoEngine` — a workspace made on such a machine through the
+  console records no engine, so its tools refuse instead of running unconfined.
 - `TestBwrapEgressProbeSaysWhatToDo` — pasta missing names the package; a refused namespace is
   passed through with its reason.
 - `TestBwrapRefusesWhenTheMachineWillNotMakeAUserNamespace` — the refusal names the sysctl.

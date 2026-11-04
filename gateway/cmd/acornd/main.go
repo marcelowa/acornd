@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -178,7 +179,7 @@ func serve(argv []string) error {
 	// where it lives now, because a flag on the server is a decision nobody meant to make once
 	// per boot.
 	engineName := os.Getenv("ACORND_SANDBOX_ENGINE")
-	engine, tier, err := sandboxTier(ctx, dir, engineName)
+	sandboxed, err := sandboxTier(ctx, dir, engineName)
 	if err != nil {
 		return err
 	}
@@ -196,15 +197,15 @@ func serve(argv []string) error {
 	// because Cloudflare Access replies before the tunnel ever sees the request (ADR 0033 §5).
 	tunnel := &tunnelReport{}
 	gate.Tunnel = tunnel.get
-	workspaces := newWorkspaces(dir, userHome, *workspacesDir, command, worker, updates, secrets, engine, tier, ownerEmail(gate.People))
+	workspaces := newWorkspaces(dir, userHome, *workspacesDir, command, worker, updates, secrets, sandboxed, ownerEmail(gate.People))
 	if err := workspaces.Open(ctx); err != nil {
 		return err
 	}
 	defer workspaces.Close()
 
-	wireUpdates(updates, workspaces, engine)
+	wireUpdates(updates, workspaces, sandboxed.engine)
 
-	logReadiness(ready.Check(readyInputForBoot(dir, updates, engine)))
+	logReadiness(ready.Check(readyInputForBoot(dir, updates, sandboxed)))
 
 	return serveConsole(ctx, install.host, *port, dir, workspaces, updates, gate, *cloudflaredPath, tunnel)
 }
@@ -248,8 +249,7 @@ func newWorkspaces(
 	command []string, worker string,
 	updates *update.Manager,
 	secrets *vault.Store,
-	engine *sandbox.Manager,
-	tier *sandbox.Tier,
+	sandboxed sandboxes,
 	admin string,
 ) *control.Workspaces {
 	return control.NewWorkspaces(control.WorkspacesOptions{
@@ -268,11 +268,14 @@ func newWorkspaces(
 				RestartRequired: status.RestartRequired,
 			}
 		},
-		Model:      os.Getenv("ACORND_MODEL"),
-		Sandbox:    engine,
-		Sandboxes:  tier,
-		Vault:      secrets,
-		AdminEmail: admin,
+		Model:     os.Getenv("ACORND_MODEL"),
+		Sandbox:   sandboxed.engine,
+		Sandboxes: sandboxed.tier,
+		// Why there is no default engine, when there is none: a workspace's state says it
+		// instead of "no sandbox is configured", which reads like a choice nobody made.
+		SandboxProblem: sandboxed.problem,
+		Vault:          secrets,
+		AdminEmail:     admin,
 	})
 }
 
@@ -426,18 +429,31 @@ func listen(ctx context.Context, host string, port int, handler http.Handler, di
 	return nil
 }
 
-// sandboxTier builds the machine's sandbox tier, or returns nil when this run asks for none.
-// Opening it installs nothing: the engine is fetched on the first workspace that needs it,
-// so starting the gateway stays fast and a machine that cannot sandbox still runs everything
-// else — with tools that refuse.
+// sandboxes is what one boot decided about sandboxes: the install's default engine, the tier a
+// workspace's own engine is resolved through, and — when this machine can run none — why there
+// is no default, because a workspace's state has to say that and not something vaguer.
+type sandboxes struct {
+	engine  *sandbox.Manager
+	tier    *sandbox.Tier
+	problem error
+}
+
+// sandboxTier builds the machine's sandbox tier, or returns it empty when this run asks for none.
+// Opening it installs nothing: the engine is fetched on the first workspace that needs it, so
+// starting the gateway stays fast and a machine that cannot sandbox still runs everything else —
+// with tools that refuse.
 //
-// ACORND_NO_SANDBOX is that refusal on purpose, not a fallback: no engine is configured,
-// nothing is installed or booted, and the worker's tools refuse. Tests use it so one command
-// behaves the same on a machine with /dev/kvm and in CI, which auto-detecting did not.
-func sandboxTier(ctx context.Context, dataDir, engineName string) (*sandbox.Manager, *sandbox.Tier, error) {
+// A machine that can run no sandbox is that refusal by fact, not a fallback: there is no default
+// engine, every workspace that names one still resolves it, and the tools refuse. Choosing the
+// host engine here would make the install unconfined without anybody saying so (ADR 0015).
+//
+// ACORND_NO_SANDBOX is the same refusal on purpose: no engine is configured, nothing is
+// installed or booted, and the worker's tools refuse. Tests use it so one command behaves the
+// same on a machine with /dev/kvm and in CI, which auto-detecting did not.
+func sandboxTier(ctx context.Context, dataDir, engineName string) (sandboxes, error) {
 	if os.Getenv("ACORND_NO_SANDBOX") != "" {
 		log.Printf("sandbox: disabled by ACORND_NO_SANDBOX; commands and file tools will refuse")
-		return nil, nil, nil
+		return sandboxes{}, nil
 	}
 	_ = ctx
 	// Every engine this build has, one manager each, so a workspace can choose its own. The
@@ -445,7 +461,15 @@ func sandboxTier(ctx context.Context, dataDir, engineName string) (*sandbox.Mana
 	tier := sandbox.NewTier(dataDir, "", log.Printf)
 	engine, err := tier.For(engineName)
 	if err != nil {
-		return nil, nil, err
+		// No engine named and none that can run here: the console works, and every workspace that
+		// named an engine still gets it. Anything else — a name nobody implements — is a
+		// configuration mistake and stays an error at boot.
+		if engineName == "" && errors.Is(err, sandbox.ErrNoEngine) {
+			log.Printf("sandbox: %v", err)
+			log.Printf("sandbox: commands and file tools will refuse; acornd doctor says what this machine needs")
+			return sandboxes{tier: tier, problem: err}, nil
+		}
+		return sandboxes{}, err
 	}
 	if engineName == "" {
 		// Not a silent choice: which engine a new workspace gets is a security decision, and the
@@ -465,7 +489,7 @@ func sandboxTier(ctx context.Context, dataDir, engineName string) (*sandbox.Mana
 	if !report.Isolated {
 		log.Printf("sandbox: the host engine is not isolated: commands and file tools run with this user's own reach")
 	}
-	return engine, tier, nil
+	return sandboxes{engine: engine, tier: tier}, nil
 }
 
 // versionCommand prints the running tag: the version file, the build

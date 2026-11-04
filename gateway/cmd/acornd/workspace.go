@@ -98,7 +98,7 @@ func workspaceAdd(argv []string) {
 	if err != nil {
 		log.Fatalf("acornd: %v", err)
 	}
-	chosen = recordWorkspace(dir, registry, addRecord{
+	chosen, err = recordWorkspace(dir, registry, addRecord{
 		name:      name,
 		absolute:  absolute,
 		image:     *image,
@@ -109,6 +109,9 @@ func workspaceAdd(argv []string) {
 		noNesting: *noNesting,
 		noDevices: *noDevices,
 	})
+	if err != nil {
+		log.Fatalf("acornd: %v (run `acornd setup` for what this machine needs, or name one with --sandbox)", err)
+	}
 	fmt.Printf("added %s at %s\n", name, absolute)
 	fmt.Printf("sandbox: %s, engine %s, egress %s\n", imageLabel(*image), engineLabel(chosen), egressLabel(network, private))
 }
@@ -127,7 +130,8 @@ const addUsage = `usage: acornd workspace add <name> [folder] [flags]
   --data-dir DIR     the acornd folder (default: ~/.acornd)
 
 The folder defaults to ./<name>. The engine is recorded here, once: a workspace keeps the
-engine it was created with.
+engine it was created with. A machine that can run neither bwrap nor microsandbox has no
+default to record: acornd setup says what it needs, and acornd doctor explains what is missing.
 `
 
 // addTarget is the name and the folder the name goes with, refused when the folder is not there
@@ -185,11 +189,16 @@ type addRecord struct {
 
 // recordWorkspace appends the workspace and writes the registry, and answers with the engine it
 // recorded. Left blank, an engine would mean "whatever this machine prefers", and an unrecorded
-// choice is one that changes if the workspace moves.
-func recordWorkspace(dir string, registry control.RegistryFile, record addRecord) string {
+// choice is one that changes if the workspace moves — so a blank name is resolved here, and a
+// machine with no sandbox is an error rather than a record that points at nothing.
+func recordWorkspace(dir string, registry control.RegistryFile, record addRecord) (string, error) {
 	chosen := record.engine
 	if chosen == "" {
-		chosen = sandbox.NewTier(dir, "", nil).Default()
+		var err error
+		chosen, err = sandbox.NewTier(dir, "", nil).Default()
+		if err != nil {
+			return "", err
+		}
 	}
 	// A pointer with a false or true value is a decision; nil is "nest when it can".
 	var nesting *bool
@@ -210,9 +219,9 @@ func recordWorkspace(dir string, registry control.RegistryFile, record addRecord
 		Private: record.private, DisableVMNesting: nesting, DisableDevices: devices,
 	})
 	if err := control.SaveRegistryFile(registry); err != nil {
-		log.Fatalf("acornd: %v", err)
+		return "", err
 	}
-	return chosen
+	return chosen, nil
 }
 
 func workspaceList(argv []string) {

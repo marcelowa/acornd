@@ -1,6 +1,8 @@
 package sandbox
 
 import (
+	"errors"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -54,27 +56,100 @@ func TestTierRefusesAnEngineItDoesNotImplement(t *testing.T) {
 func TestTierEmptyNameIsWhatTheMachineCanRun(t *testing.T) {
 	tier := NewTier(t.TempDir(), "", nil)
 	manager, err := tier.For("")
+	if errors.Is(err, ErrNoEngine) {
+		// No sandbox on this machine, so there is nothing here to check: the rule that produces
+		// this refusal, and never the host engine, is a table in TestAMachineWithNoSandboxHasNoDefault.
+		return
+	}
 	if err != nil {
 		t.Fatalf("default: %v", err)
 	}
-	if manager.Driver().Name() != tier.Default() {
-		t.Fatalf("empty name resolved to %q, want %q", manager.Driver().Name(), tier.Default())
+	chosen, err := tier.Default()
+	if err != nil {
+		t.Fatalf("default: %v", err)
+	}
+	if manager.Driver().Name() != chosen {
+		t.Fatalf("empty name resolved to %q, want %q", manager.Driver().Name(), chosen)
 	}
 	// Whatever it chose has to be able to run a workspace here, network and all.
-	driver, err := Engine("", "", tier.Default())
+	driver, err := Engine("", "", chosen)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := driver.Usable(); err != nil {
-		t.Fatalf("%s is the default but cannot run here: %v", tier.Default(), err)
+		t.Fatalf("%s is the default but cannot run here: %v", chosen, err)
 	}
 	if err := driver.Egress(); err != nil {
-		t.Fatalf("%s is the default but cannot carry a network: %v", tier.Default(), err)
+		t.Fatalf("%s is the default but cannot carry a network: %v", chosen, err)
 	}
 	// The order is the policy: bubblewrap first, the unisolated engine last.
 	names := EngineNames()
 	if names[0] != "bwrap" || names[len(names)-1] != "host" {
 		t.Fatalf("preference order is %v, want bwrap first and host last", names)
+	}
+}
+
+// A machine that can run no sandbox has no default, and says what each engine is missing. It
+// does not answer "host": that is how a machine that used to be sandboxed starts running
+// unconfined after an upgrade, with nothing on screen saying so.
+func TestAMachineWithNoSandboxHasNoDefault(t *testing.T) {
+	engine, err := defaultEngine(func(string) error {
+		return errors.New("no user namespace and no hypervisor")
+	})
+	if engine != "" {
+		t.Fatalf("a machine with no sandbox chose %q", engine)
+	}
+	if !errors.Is(err, ErrNoEngine) {
+		t.Fatalf("err = %v, want ErrNoEngine", err)
+	}
+	for _, want := range []string{"bwrap", "microsandbox", "no user namespace"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal should name %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "host") {
+		t.Errorf("the host engine must not even be offered as a default: %v", err)
+	}
+}
+
+// The preference order is the policy: the first engine in it that can run a workspace with its
+// network on is the one a workspace is handed.
+func TestTheDefaultIsTheFirstEngineThatCanRun(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		can  []string
+		want string
+	}{
+		{"both can", []string{"bwrap", "microsandbox"}, "bwrap"},
+		{"only the microVM can", []string{"microsandbox"}, "microsandbox"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine, err := defaultEngine(func(name string) error {
+				if slices.Contains(tc.can, name) {
+					return nil
+				}
+				return errors.New("unavailable")
+			})
+			if err != nil {
+				t.Fatalf("default: %v", err)
+			}
+			if engine != tc.want {
+				t.Fatalf("default = %q, want %q", engine, tc.want)
+			}
+		})
+	}
+}
+
+// The host engine isolates nothing, so no machine may hand one out: it is still an engine a
+// workspace or an install can name, which is the half that has to keep working.
+func TestTheHostEngineIsExplicitOnly(t *testing.T) {
+	for _, name := range defaultEngines() {
+		if name == "host" {
+			t.Fatal("the host engine is in the default list")
+		}
+	}
+	if !slices.Contains(EngineNames(), "host") || !ValidEngine("host") {
+		t.Fatal("the host engine is still an engine a workspace may name")
 	}
 }
 

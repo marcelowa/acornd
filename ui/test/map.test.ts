@@ -688,8 +688,11 @@ describe("which engine a row says", () => {
 		expect(row?.engineLabel).toBe("bwrap");
 	});
 
-	test("an install that reported no engines leaves the row silent", () => {
-		expect(toWorkspaces([wire()], "demo")[0]?.engineLabel).toBeUndefined();
+	test("a workspace with no engine on a machine with no sandbox says so", () => {
+		const [row] = toWorkspaces([wire()], "demo");
+		expect(row?.engine).toBeUndefined();
+		// Not a blank where every other row says what it runs on: no sandbox is an answer.
+		expect(row?.engineLabel).toBe("no sandbox");
 	});
 });
 

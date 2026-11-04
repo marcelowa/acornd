@@ -54,11 +54,16 @@ export function WorkspaceRow({
 						{workspace.path}
 					</Text>
 					{/* Every row says which engine it runs on, the default included: two workspaces
-					 * on different engines are the thing a reader has to be able to tell apart. */}
+					 * on different engines are the thing a reader has to be able to tell apart. A row
+					 * with none says so: a machine that can run no sandbox is a state, not a blank. */}
 					{workspace.engineLabel !== undefined && workspace.engineLabel !== "" ? (
 						<Badge
 							variant="outline"
-							aria-label={`Sandbox engine ${workspace.engineLabel}`}
+							aria-label={
+								workspace.engine === undefined
+									? "No sandbox engine"
+									: `Sandbox engine ${workspace.engineLabel}`
+							}
 						>
 							{workspace.engineLabel}
 						</Badge>

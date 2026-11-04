@@ -223,8 +223,12 @@ type WorkspacesOptions struct {
 	// install's own default, which `acornd model set` writes.
 	Model string
 	// Sandbox is the install's default engine, shared by every workspace that does not name
-	// one of its own.
+	// one of its own. Nil means this install has none: either it was told to run without one
+	// (ACORND_NO_SANDBOX) or no engine can run on this machine, which SandboxProblem says.
 	Sandbox *sandbox.Manager
+	// SandboxProblem is why there is no default engine, when there is none: this machine can
+	// run no sandbox. Nil when there is a manager, and when the run asked for none.
+	SandboxProblem error
 	// Sandboxes holds every engine this install can run, so a workspace that names one gets
 	// that engine rather than the default. Nil means this install has one engine only.
 	Sandboxes *sandbox.Tier
@@ -782,25 +786,26 @@ func (w *Workspaces) controlFor(name string) *Control {
 func (w *Workspaces) open(ctx context.Context, name string, workspace Workspace) (*Control, error) {
 	w.setProgress(name, Progress{Status: StatusOpening, Stage: "starting", Since: time.Now()})
 	control := New(Options{
-		OnStage:       w.stage(name),
-		Progress:      w.Progress,
-		Workspace:     workspace,
-		Credentials:   filepath.Join(w.opts.DataDir, "credentials.json"),
-		Registry:      w.List,
-		WorkspacesDir: w.Dir(),
-		DataDir:       w.opts.DataDir,
-		UserHome:      w.opts.UserHome,
-		StoragePath:   filepath.Join(StatePath(w.opts.DataDir, name), "session.sqlite"),
-		SettingsPath:  filepath.Join(StatePath(w.opts.DataDir, name), "settings.json"),
-		DraftsPath:    filepath.Join(StatePath(w.opts.DataDir, name), "drafts.json"),
-		Sandbox:       w.opts.Sandbox,
-		Sandboxes:     w.opts.Sandboxes,
-		Engines:       w.Engines,
-		Vault:         w.opts.Vault,
-		WorkerCommand: w.opts.WorkerCommand,
-		WorkerDir:     w.opts.WorkerDir,
-		Update:        w.opts.Update,
-		Model:         w.opts.Model,
+		OnStage:        w.stage(name),
+		Progress:       w.Progress,
+		Workspace:      workspace,
+		Credentials:    filepath.Join(w.opts.DataDir, "credentials.json"),
+		Registry:       w.List,
+		WorkspacesDir:  w.Dir(),
+		DataDir:        w.opts.DataDir,
+		UserHome:       w.opts.UserHome,
+		StoragePath:    filepath.Join(StatePath(w.opts.DataDir, name), "session.sqlite"),
+		SettingsPath:   filepath.Join(StatePath(w.opts.DataDir, name), "settings.json"),
+		DraftsPath:     filepath.Join(StatePath(w.opts.DataDir, name), "drafts.json"),
+		Sandbox:        w.opts.Sandbox,
+		Sandboxes:      w.opts.Sandboxes,
+		SandboxProblem: w.opts.SandboxProblem,
+		Engines:        w.Engines,
+		Vault:          w.opts.Vault,
+		WorkerCommand:  w.opts.WorkerCommand,
+		WorkerDir:      w.opts.WorkerDir,
+		Update:         w.opts.Update,
+		Model:          w.opts.Model,
 	})
 	if err := os.MkdirAll(StatePath(w.opts.DataDir, name), 0o700); err != nil {
 		return nil, err
@@ -1622,13 +1627,15 @@ type EngineInfo struct {
 }
 
 // DefaultEngine is the engine a workspace that names none gets: the install's own choice when
-// `--sandbox-engine` named one, otherwise the first engine this machine can actually run. It is
-// what a workspace records at creation, so the choice is made once and stays visible.
+// the environment named one, otherwise the first engine this machine can actually run. It is
+// what a workspace records at creation, so the choice is made once and stays visible. Empty
+// means this machine has no sandbox: the workspace records that and its tools refuse, rather
+// than being handed the host engine, which nothing selects on its own (ADR 0015).
 func (w *Workspaces) DefaultEngine() string {
 	if w.opts.Sandbox != nil && w.opts.Sandbox.Driver() != nil {
 		return w.opts.Sandbox.Driver().Name()
 	}
-	return "host"
+	return ""
 }
 
 // Engines reports every engine this build implements, whether this machine can run it, and

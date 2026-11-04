@@ -79,3 +79,11 @@ with its own rules and no isolation gain over the host engine for the tests.
   the engine selection), and one resource test asserts the state reports it as unisolated.
 - A user on a machine without a hypervisor now has a supported way to run the agent's tools
   anyway — by asking for it, in the full knowledge of what it means.
+- **The guardrail was not true everywhere until issue 28.** `Tier.Default` answered `host` when
+  neither sandbox could run, and the console recorded it as a new workspace's engine, so a
+  machine with no hypervisor and no user namespace started running unconfined without anybody
+  choosing. Both now answer nothing: the tier returns `ErrNoEngine` naming what each engine is
+  missing, and a workspace made on such a machine records no engine, so its tools refuse
+  (`TestAMachineWithNoSandboxHasNoDefault`, `TestAnInstallWithNoSandboxRecordsNoEngine`).
+  `host` is reached only by name — `ACORND_SANDBOX_ENGINE=host`, or `--sandbox host` on a
+  workspace — which is the decision this ADR asked for, and the only two doors to it.

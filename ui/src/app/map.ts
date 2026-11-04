@@ -284,7 +284,9 @@ export function toWorkspaces(
 			image: workspace.image,
 			network: workspace.network,
 			engine: engine === "" ? undefined : engine,
-			engineLabel: engine === "" ? undefined : engineLabel(engine),
+			// A workspace with no engine on a machine with no sandbox says that, rather than showing
+			// nothing where every other row says what it runs on.
+			engineLabel: engine === "" ? "no sandbox" : engineLabel(engine),
 			keepAlive: workspace.keep_alive === true,
 			private: workspace.private === true,
 			status: workspace.status,

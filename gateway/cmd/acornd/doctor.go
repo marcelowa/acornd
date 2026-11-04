@@ -50,18 +50,25 @@ func doctorCommand(argv []string) {
 
 // doctorReport is everything doctor asks before it decides how to say it.
 type doctorReport struct {
-	engines      []engineReport
-	defaultName  string
-	chosen       sandbox.Report
-	health       update.Preflight
-	requirements []ready.Requirement
-	orphans      []string
+	engines []engineReport
+	// defaultName is the engine a workspace that names none gets, empty when this machine has
+	// no sandbox at all; defaultProblem is why, in the engine's own words, for the same case.
+	defaultName    string
+	defaultProblem string
+	chosen         sandbox.Report
+	health         update.Preflight
+	requirements   []ready.Requirement
+	orphans        []string
 }
 
 // gatherDoctor asks every manager doctor already owns. Report-only: doctor changes nothing.
 func gatherDoctor(dataDir string) doctorReport {
-	engines := sandboxReports(dataDir)
-	defaultName := sandbox.NewTier(dataDir, "", nil).Default()
+	defaultName, defaultErr := sandbox.NewTier(dataDir, "", nil).Default()
+	defaultProblem := ""
+	if defaultErr != nil {
+		defaultProblem = defaultErr.Error()
+	}
+	engines := sandboxReports(dataDir, defaultName)
 	var chosen sandbox.Report
 	for _, engine := range engines {
 		if engine.Default {
@@ -78,23 +85,25 @@ func gatherDoctor(dataDir string) doctorReport {
 	defer cancel()
 	health := updater.Preflight(checkCtx)
 	return doctorReport{
-		engines:      engines,
-		defaultName:  defaultName,
-		chosen:       chosen,
-		health:       health,
-		requirements: ready.Check(readyInput(dataDir, updater, health, chosen)),
-		orphans:      workspaceOrphans(dataDir),
+		engines:        engines,
+		defaultName:    defaultName,
+		defaultProblem: defaultProblem,
+		chosen:         chosen,
+		health:         health,
+		requirements:   ready.Check(readyInput(dataDir, updater, health, chosen)),
+		orphans:        workspaceOrphans(dataDir),
 	}
 }
 
 func printDoctorJSON(report doctorReport) {
 	payload, err := json.MarshalIndent(struct {
-		Engines   []engineReport      `json:"engines"`
-		Default   string              `json:"default"`
-		Update    update.Preflight    `json:"update"`
-		Readiness []ready.Requirement `json:"readiness"`
-		Orphans   []string            `json:"orphans"`
-	}{Engines: report.engines, Default: report.defaultName, Update: report.health, Readiness: report.requirements, Orphans: report.orphans}, "", "  ")
+		Engines        []engineReport      `json:"engines"`
+		Default        string              `json:"default"`
+		DefaultProblem string              `json:"defaultProblem,omitempty"`
+		Update         update.Preflight    `json:"update"`
+		Readiness      []ready.Requirement `json:"readiness"`
+		Orphans        []string            `json:"orphans"`
+	}{Engines: report.engines, Default: report.defaultName, DefaultProblem: report.defaultProblem, Update: report.health, Readiness: report.requirements, Orphans: report.orphans}, "", "  ")
 	if err != nil {
 		log.Fatalf("acornd doctor: %v", err)
 	}
@@ -102,7 +111,7 @@ func printDoctorJSON(report doctorReport) {
 }
 
 func printDoctor(report doctorReport) {
-	printEngines(report.engines, report.defaultName)
+	printEngines(report.engines, report.defaultName, report.defaultProblem)
 	printUpdate(report.health)
 	printReadiness(report.requirements)
 	printOrphans(report.orphans)
@@ -167,9 +176,8 @@ func printReadiness(requirements []ready.Requirement) {
 // engineReport is one engine's answer, with the nesting detail that belongs to it.
 type engineReport struct {
 	sandbox.Report
-	Default  bool                   `json:"default,omitempty"`
-	Default_ bool                   `json:"-"`
-	Nesting  sandbox.NestingSupport `json:"nesting"`
+	Default bool                   `json:"default,omitempty"`
+	Nesting sandbox.NestingSupport `json:"nesting"`
 	// Egress is why a workspace with its network on cannot run here, when the engine itself is
 	// otherwise fine. It is separate from Problem because an engine that cannot carry a network
 	// still runs a workspace with it off, and a report that called that "unavailable" would be
@@ -178,10 +186,10 @@ type engineReport struct {
 }
 
 // sandboxReports asks every engine this build knows, in the order a workspace would be given
-// one. Each answer stands alone: an engine that cannot run here says why, and that is the
-// answer, not a failure of the report.
-func sandboxReports(dataDir string) []engineReport {
-	defaultEngine := sandbox.NewTier(dataDir, "", nil).Default()
+// one, marking the one that is this machine's default. Each answer stands alone: an engine that
+// cannot run here says why, and that is the answer, not a failure of the report. An empty
+// default marks none, which is what a machine with no sandbox has.
+func sandboxReports(dataDir, defaultEngine string) []engineReport {
 	reports := make([]engineReport, 0, len(sandbox.EngineNames()))
 	for _, name := range sandbox.EngineNames() {
 		manager, err := reportManager(dataDir, name)
@@ -212,8 +220,9 @@ func sandboxReports(dataDir string) []engineReport {
 }
 
 // printEngines puts the engines in one block with the default marked: the table is the answer
-// to "what can this machine run", and the mark is the answer to "what will it run".
-func printEngines(engines []engineReport, defaultEngine string) {
+// to "what can this machine run", the mark is the answer to "what will it run", and a machine
+// with no answer says why rather than leaving the blank to be guessed at.
+func printEngines(engines []engineReport, defaultEngine, defaultProblem string) {
 	fmt.Println("sandbox engines")
 	for _, engine := range engines {
 		marker := " "
@@ -228,7 +237,12 @@ func printEngines(engines []engineReport, defaultEngine string) {
 		printEngineDetail(engine)
 	}
 	if defaultEngine == "" {
-		fmt.Println("\nno engine can run here: acornd setup says what this machine needs")
+		if defaultProblem != "" {
+			fmt.Printf("\n%s\n", defaultProblem)
+		} else {
+			fmt.Println("\nno engine can run here")
+		}
+		fmt.Println("commands and file tools will refuse until one can: acornd setup says what this machine needs")
 		return
 	}
 	fmt.Printf("\n* this machine will use %s\n", defaultEngine)
@@ -314,8 +328,10 @@ func disabledReason() string {
 }
 
 // readyInputForBoot gathers the boot-time readiness list. The engine may
-// be nil (refused tier): that is a stated answer, not a missing one.
-func readyInputForBoot(dataDir string, updates *update.Manager, engine *sandbox.Manager) ready.Input {
+// be nil (refused tier): that is a stated answer, not a missing one — a
+// machine with no sandbox is "no engine can run here", not "an engine that
+// was not downloaded".
+func readyInputForBoot(dataDir string, updates *update.Manager, sandboxed sandboxes) ready.Input {
 	_, bunOK := updates.BunInstalled()
 	status := updates.Status()
 	hypervisorOK, hypervisorDetail := ready.Hypervisor()
@@ -331,19 +347,18 @@ func readyInputForBoot(dataDir string, updates *update.Manager, engine *sandbox.
 		HypervisorOK:     hypervisorOK,
 		HypervisorDetail: hypervisorDetail,
 	}
-	if engine == nil {
+	if sandboxed.engine == nil {
+		// One of two stated answers: this machine can run no sandbox, or the run was told to go
+		// without one. Neither is an engine that is waiting to be downloaded.
 		input.EngineDisabled = disabledReason()
-		if input.EngineDisabled == "" {
-			input.EngineDisabled = "no engine configured"
-		}
 		return input
 	}
-	report := engine.Report()
+	report := sandboxed.engine.Report()
 	input.EngineName = report.Engine
 	input.EngineVersion = report.Version
 	input.EngineInstalled = report.Installed
 	input.EngineIsolated = report.Isolated
-	if problem := engine.Problem(); problem != nil {
+	if problem := sandboxed.engine.Problem(); problem != nil {
 		input.EngineProblem = problem.Error()
 	}
 	return input
