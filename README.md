@@ -68,24 +68,16 @@ first start.
 ### What the machine needs
 
 - Linux or macOS, on amd64 or arm64.
-- One sandbox engine:
-  - **bwrap** (Linux): `sudo apt install bubblewrap passt`. It needs unprivileged user
-    namespaces: a kernel feature that lets a user make a sandbox.
-  - **microsandbox**: a hypervisor. On Linux that means `/dev/kvm` and your user in the `kvm`
-    group. On macOS it uses the system hypervisor.
 - A provider key, or the dev provider from a source tree.
-- No root for the console itself. Port 7777 is above 1024, and the install folder is yours.
 
-`acornd setup` probes the machine and runs only the missing steps. It asks for your password only
-for a step that needs root. Where it cannot ask, it prints the same steps as commands you can copy.
+`acornd setup` prepares the sandbox engine. On Linux it installs bubblewrap and pasta; on macOS it
+checks the system hypervisor. It asks for your password only for the steps that need root. The
+install script runs it for you.
+
 `acornd doctor` reports what the engines can do here and changes nothing.
 
-A new workspace gets the first engine this machine can run: bwrap, then microsandbox, then host.
-The host engine isolates nothing, and the console says so.
-
-On Ubuntu 26.04 and later, the `passt` package ships an AppArmor profile that lets pasta run only
-`/usr/bin` and `/bin`. acornd's sandbox supervisor lives in its own folder, so disable that
-profile, or every sandbox with a network refuses with
+On Ubuntu 26.04 and later, the `passt` AppArmor profile blocks acornd's sandbox supervisor. Disable
+it, or every sandbox with a network refuses with
 `Failed to start command or shell: Permission denied`:
 
 ```bash
@@ -160,7 +152,8 @@ running, it installs to disk and takes effect at the next start.
 ### Sandboxes
 
 A workspace runs its tools on one engine. The engine is chosen when the workspace is created and
-kept with its record.
+kept with its record. A new workspace gets the first engine this machine can run: bwrap, then
+microsandbox, then host. The host engine isolates nothing, and the console says so.
 
 | Engine | What it is | Needs |
 |---|---|---|
