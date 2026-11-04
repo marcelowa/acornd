@@ -167,32 +167,29 @@ running, it installs to disk and takes effect at the next start.
 
 A workspace runs its tools on one engine. The engine is chosen when the workspace is created and
 kept with its record. A new workspace gets the first engine this machine can run: bwrap, then
-microsandbox, then host. The host engine isolates nothing, and the console says so.
+microsandbox.
 
 | Engine | What it is | Needs |
 |---|---|---|
 | `microsandbox` | One microVM (a small virtual machine) per workspace. The strongest boundary. | A hypervisor: `/dev/kvm` on Linux, the system hypervisor on macOS. It fetches a 72 MB engine on first use. |
 | `bwrap` | The workspace's own image in one long-lived bubblewrap sandbox. Beta. | Linux, a user namespace, and pasta for its network: `apt install bubblewrap passt`. No KVM. |
-| `host` | No sandbox. Tools run on your machine. | Nothing, and no isolation. |
 
 - The workspace folder is mounted read-write at its own path. The global resource folders
   (`~/.agents`, the install's agents, skills, prompts, commands) are read-only at their own paths.
   Nothing else is mounted.
 - The worker stays outside the sandbox, next to the provider key.
-- A workspace that names an engine this machine cannot run refuses its tools. It does not fall
-  back to the host.
+- A workspace that names an engine this machine cannot run refuses its tools. It does not run
+  them unconfined.
 - Network is on by default: a workspace reaches the public internet. This machine's own networks
   (LAN, link-local, tailnet) are refused unless the workspace has a grant: `--egress private`, or
   the dialog's **private networks** toggle.
 - A bwrap workspace gets its own copy of its image, so `apt install` works inside it and the
-  host's tools are never touched. A command costs about 1.1 ms, and a workspace costs about 82 MB
-  of disk.
+  machine's own tools are never touched. A command costs about 1.1 ms, and a workspace costs about
+  82 MB of disk.
 - A bwrap workspace can run another acornd with its own sandbox and network. It needs `/dev/kvm`
   and `/dev/net/tun` from the machine, and a workspace can withdraw those with `--no-devices`.
 - A workspace can run a hypervisor inside its sandbox when the machine allows it. `--no-vm-nesting`
   turns that off.
-- `ACORND_SANDBOX_ENGINE=host` sets one engine for the whole install. It is the fast loop for
-  development, and the tools are not confined.
 - `acornd doctor` says which engines work here, and why one does not.
 
 ```bash
@@ -250,7 +247,6 @@ Tool secrets are values a command needs. They stay out of the transcript and out
 - In a sandbox, the variable holds a placeholder: `$MSB_<NAME>`. The engine swaps in the real value
   only for the secret's allowed hosts and only over HTTPS. A plain HTTP request is not intercepted.
 - `${NAME}` and `{{NAME}}` are not placeholders. They pass through.
-- The host engine puts the real value in the sandbox. `allowEnv: false` keeps it out.
 - Stored 0600 in `~/.acornd/secrets.json`.
 
 ```bash
