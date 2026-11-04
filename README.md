@@ -1,461 +1,217 @@
 # Acornd
 
-A personal assistant platform: a Go gateway and control plane over a pluggable
-agent harness.
+Acornd is a personal assistant that runs on your own machine. You talk to a model in a web
+console. The model can run commands, read and write files, and use skills. It does that inside a
+sandbox, not directly on your machine.
 
-```
-web client ──HTTP+SSE──► gateway (Go) ──► control ──JSONL/stdio──► worker (bun, pi-durable)
-```
+One Go binary serves the console, starts a worker for each workspace, and keeps the workers running.
+The worker is a small TypeScript process, run by bun. Each workspace has its own worker, its own
+storage, and its own sandbox.
 
-The harness is a provider behind the worker protocol. Replacing it means writing
-another worker, not changing the control plane.
+- **Local.** No account and no cloud service. Keys, history, and settings stay in `~/.acornd`.
+- **Sandboxed.** Commands and file access run in a small virtual machine or a bubblewrap sandbox.
+- **Many workspaces.** A workspace is a folder with its own agents, skills, commands, rules, and
+  history.
+- **People and rooms.** Invite people, give each a personal workspace, and share rooms with guests.
+- **Remote access.** An optional Cloudflare tunnel with an email one-time PIN.
+- **Linux and macOS**, on amd64 and arm64.
 
-## Layout
+## Install from a release
 
-| Path | What |
-|---|---|
-| `docs/adr/` | Decisions. Read `0001-concepts.md` first. |
-| `gateway/` | Go: transport edge, control plane, worker supervision, embedded client. |
-| `worker/` | bun: the Harness, its registry (tools, skills), and credentials. |
-| `gateway/web/` | The embedded interface: the built bundle the gateway serves. |
-| `ui/` | The interface itself: React, tokens, Storybook. Built by `make ui-build`. |
-| `tools/` | Browser-driven checks. |
+Releases are one binary per platform, at
+[github.com/marcelowa/acornd/releases](https://github.com/marcelowa/acornd/releases). You do not
+need Go, bun, or build tools.
 
-## Requirements
-
-- Go **1.27.3** — the patch, not just the minor: `gateway/go.mod` pins it, and CI reads the
-  version from that file rather than naming its own
-- bun **1.4.4** — the release runtime pins it in `gateway/internal/update/worker.go`, and the
-  worker's code depends on 1.4 behaviour
-- make, gcc (builds and the `-race` tests)
-- `unzip`, which the bun installer needs, and `procps` for `pgrep`, which two end-to-end tests
-  use to find the worker
-- `git` with an `origin/main` ref: `make test` compares the coverage and mutation floors
-  against it, so a `--single-branch` clone fails the gate until `git fetch origin main`
-- a browser for `make ui` and `make ui-check`, at `CHROME_PATH` (default `/usr/bin/chromium`)
-- room to build: `make tools` compiles six Go tools, so the caches want about 6 GB of disk —
-  and on a machine with 2 GB of RAM, `GOGC=20 GOMAXPROCS=1 make tools`, or the compiler is
-  killed partway through gosec
-- an API key for a supported provider (or the dev provider below)
-- one sandbox engine, and the engine a new workspace gets is the first one this machine can
-  actually run ([ADR 0026](docs/adr/0026-rootless-host.md)):
-  - `bwrap` — `apt install bubblewrap passt`, no root needed beyond that. On Ubuntu 23.10+ it also
-    needs unprivileged user namespaces: `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`
-    (or an AppArmor profile for `/usr/bin/bwrap`, which covers a workspace with no egress). On
-    Ubuntu 26.04+ the `passt` package also ships an AppArmor profile that lets pasta execute only
-    `/usr/bin` and `/bin` binaries, and acornd's supervisor lives in its own install folder — so
-    disable that one too, or every sandbox with egress refuses with
-    `Failed to start command or shell: Permission denied`:
-    `sudo ln -s /etc/apparmor.d/usr.bin.pasta /etc/apparmor.d/disable/ && sudo apparmor_parser -R /etc/apparmor.d/usr.bin.pasta`
-  - `microsandbox` — a hypervisor: `/dev/kvm`, and your user in the `kvm` group
-
-## Setup
-
-No toolchain, and you just want the binary? [Install from a release](#install-from-a-release-one-binary-no-toolchain)
-puts one file on the machine and skips everything below.
-
-With the sources, install what builds it first — `acornd` does not exist yet, and it is what
-probes the machine a step below.
-
-```bash
-# Go: https://go.dev/dl — match the patch version gateway/go.mod pins
-curl -fsSL https://bun.sh/install | bash  # bun, into ~/.bun/bin
-sudo apt install make gcc                  # Debian/Ubuntu build tools
-
-make deps    # bun install in worker/, ui/, tools/
-make tools   # the six Go linters, compiled from source: minutes, not seconds
-make build   # -> ./bin/acornd
-```
-
-`make tools` installs staticcheck, golangci-lint, deadcode, gremlins, govulncheck and gosec,
-and the worker's dependencies with them. Skipping it does not stop `make lint`: the analyzer
-half prints `not installed (make tools)` and passes, so a green gate there proves less than it
-looks.
-
-Then ask the machine what it needs — and let it fix it:
-
-```bash
-./bin/acornd setup   # probes, then asks for your password only for the steps that need root
-```
-
-It names each step before asking (install `bubblewrap passt`, allow user namespaces, make
-`/dev/net/tun` available, add you to `kvm`, keep your services after logout), runs only the
-missing ones through `sudo`, then probes again and tells you what is left — a new group needs a
-new login, and nothing can change that for you. Where a password cannot be asked for (no `sudo`,
-or no terminal), it prints the same steps as copy-pasteable commands instead.
-
-Already root? No password exists, so the plan is what you approve: it shows the steps and asks
-`apply these steps? [y/N]` (`--yes` for a script). Either way it checks the account that runs
-acornd, not the one typing: the owner of the acornd folder, `--for USER` to say otherwise.
-Root can open `/dev/kvm` and make a user namespace whatever the policy says, so a check run as
-root would report a machine that works while the service's workspaces cannot boot.
-
-`bun` must stay on `PATH` for development: with `ACORND_WORKER` pointing at the sources the
-gateway starts workers with system bun, and a worker fails to start without it. Releases
-need no bun and no sources: the gateway downloads a pinned bun once and
-the worker tarball per release, both under the install folder
-(`~/.acornd` by default), and installs dependencies itself. Migrate
-scripts bake into the binary. Nothing lives outside the install folder.
-
-## Run
-
-```bash
-make build                     # go build -> ./bin/acornd
-
-echo "$OPENCODE_API_KEY" | ./bin/acornd provider add opencode-go
-ACORND_WORKER=$(pwd)/worker ./bin/acornd start   # http://<host>:7777
-```
-
-`ACORND_WORKER` is not optional in a source tree. Without it the gateway looks for the worker a
-release would have downloaded into `<data-dir>/worker`, and a `dev` build never fetches one: it
-starts, answers `/healthz`, and then restarts a worker whose directory does not exist, forever.
-`make dev` sets the same variable, and adds the scripted provider.
-
-Every command answers `-h`, and `acornd` with no arguments lists them:
-
-```
-start      run the gateway (foreground; -d detaches and logs to the install folder)
-stop       stop the run recorded in this install folder
-restart    start it again with the arguments it was started with
-status     is it running, where, and since when
-setup      check this machine, and make it able to run sandboxes
-setup-code print, rotate, or remove the code that claims a fresh install
-doctor     report what the sandbox engines can do here; changes nothing
-workspace  list, add, forget, and purge workspaces
-secret     list, add, show, rotate, and remove secrets
-provider   list, add, and remove model provider keys
-model      list or choose the default model
-people     who may use this install, and what they may do
-remote     the tunnel a browser comes through, and who it admits
-token      print the token that proves you own this install
-update     check for a release, and install it
-version    print the running version
-```
-
-`acornd start` stays in the terminal. `-d` detaches it into the install folder: its own session,
-`<data-dir>/acornd.log` for everything it would have printed, and the command returns once the
-console answers. `stop`, `restart`, and `status` read the run recorded in that folder — one run per
-folder, `restart` reuses the arguments it was started with, and nothing restarts it after a crash
-(ADR 0036).
-
-A fresh install prints `http://<host>:7777/setup?code=…` on every start until somebody claims it,
-and `acornd setup-code` prints that code, rotates it (`--rotate`) or removes it (`--disable`) — the
-install token from `acornd token` signs in on the same form, so a rotated or disabled code is never
-a lockout ([ADR 0036](docs/adr/0036-a-console-that-sets-itself-up.md)).
-
-In a browser, a fresh install shows a claim form asking for a name, an email and the setup code. When
-the session is gone — the cookie expired, or the install token was rotated — the console shows a
-sign-in form instead, which takes the setup code or the install token. `acornd start` prints the
-code and `acornd setup-code` prints it again; `acornd token` prints the token.
-
-### Sandbox engines
-
-A workspace runs on one engine, chosen when it is created and kept with its record:
-
-| engine | what it is | needs |
-|---|---|---|
-| `microsandbox` | one microVM per workspace (the default, and the strongest boundary) | `/dev/kvm`, and it fetches a 72 MB engine on first use |
-| `bwrap` | the workspace's own image in one long-lived bubblewrap sandbox per workspace (beta) | a user namespace, one image pull, and pasta for egress: `apt install bubblewrap passt`; no KVM, 1.1 ms per command, 82 MB of disk per workspace |
-| `host` | no sandbox: the tools run on your machine | nothing, and it is not isolated |
-
-```bash
-./bin/acornd workspace add demo ~/work/demo --sandbox bwrap   # or the engine switch on the create form
-./bin/acornd workspace add daemons ~/work/daemons --keep-alive  # a workspace that runs things
-./bin/acornd workspace list                                    # the engine is a column
-ACORND_IMAGE_TEST=1 make test                                  # the bwrap end-to-end tests, which fetch an image
-```
-
-A bwrap workspace gets its own copy of its image, so `apt install` works inside it and the
-machine's own tools are never touched. Its network, when on, is a namespace of its own that
-pasta forwards through the host: egress is the public internet, and the machine's own networks —
-its LAN, link-local addresses, its tailnet — are refused inside the sandbox by route unless that
-workspace was granted them (`--egress private`, or the dialog's *private networks* toggle)
-([ADR 0025](docs/adr/0025-sandbox-egress.md)). The sandbox is one process per workspace with
-acornd itself as its first process inside, so a daemon a command starts keeps running, and
-every engine has the same create / start / stop / remove lifecycle
-([ADR 0024](docs/adr/0024-one-lifecycle.md)). What it gives up today: the copy costs its image's
-size on disk ([ADR 0023](docs/adr/0023-bwrap-engine.md)).
-
-A bwrap workspace also receives the host's `/dev/net/tun` and `/dev/kvm`, and the
-capabilities nested pasta needs, so it can run another acornd with its own bwrap engine
-and network instead of falling back to the host. A workspace can withdraw them with
-`acornd workspace add --no-devices` (or `disable_devices` in the registry and the API);
-the default is on, and a missing device is skipped rather than failing the boot. The inner
-bwrap sandbox reuses the user namespace pasta already made, because a third user namespace
-inside it cannot write its uid map. The outer workspace remains the boundary and its egress
-policy is the ceiling ([ADR 0030](docs/adr/0030-nested-engines.md)). The KVM permission
-inside a bwrap sandbox is proven, and a real microVM boots there with the host's microsandbox
-engine and store; `make test-sandbox` runs that test.
-
-### Install from a release (one binary, no toolchain)
-
-One line:
+### One line
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/marcelowa/acornd/main/scripts/install.sh | sh
 ```
 
-It picks the binary for this machine, checks its checksum, and puts it in `~/.acornd/bin`, on `PATH` —
-a link in `/usr/local/bin` or `~/.local/bin` when one of them is writable, and a marked block in the
-shell's rc file either way, so nobody has to export it by hand. A shell that was already open keeps the
-`PATH` it started with: open a new terminal. Then it
-runs `acornd setup --yes`, which does the steps this machine allows without a password and prints the
-rest, and starts the console detached on `http://<host>:7777` with the line that claims it. A machine
-that cannot be prepared non-interactively gets the plan as commands; the console serves either way.
-`--no-start` stops after the binary is in place, `--no-setup` leaves the machine alone, and
-`--version <tag>` pins a release.
+The script:
 
-By hand, if you would rather see every step:
+- picks the binary for this machine: linux or darwin, amd64 or arm64
+- checks its checksum
+- puts it in `~/.acornd/bin` and on `PATH`
+- runs `acornd setup --yes`, which does the steps this machine allows without a password
+- starts the console in the background and prints the address to open
+
+The address looks like `http://<host>:7777/setup?code=…`. Open it and enter a name and an email.
+The code proves you started the machine. From then on the install is yours. Until somebody claims
+it, the console refuses everything except the setup form. `acornd setup-code` prints the code
+again until the install is claimed.
+
+Flags: `--dir DIR`, `--version TAG`, `--no-start`, `--no-setup`.
+
+The script adds a link in `/usr/local/bin` or `~/.local/bin` when one is writable, and writes a
+marked block in your shell's rc file either way. A shell that was already open keeps its old
+`PATH`, so open a new terminal.
+
+### By hand
 
 ```bash
 mkdir -p ~/.acornd/bin && cd ~/.acornd/bin
-curl -LO https://github.com/marcelowa/acornd/releases/download/v0.31.1/acornd-linux-amd64
-curl -LO https://github.com/marcelowa/acornd/releases/download/v0.31.1/sha256sums.txt
+VERSION=v0.33.10          # the newest tag on the releases page
+curl -LO https://github.com/marcelowa/acornd/releases/download/$VERSION/acornd-linux-amd64
+curl -LO https://github.com/marcelowa/acornd/releases/download/$VERSION/sha256sums.txt
 sha256sum -c sha256sums.txt --ignore-missing   # must say OK
 mv acornd-linux-amd64 acornd && chmod +x acornd
-echo "$OPENCODE_API_KEY" | ./acornd provider add opencode-go
+./acornd setup
 ./acornd start
 ```
 
-Swap `linux-amd64` for `linux-arm64`, `darwin-amd64` or `darwin-arm64` on another machine.
+Swap `linux-amd64` for `linux-arm64`, `darwin-amd64`, or `darwin-arm64`.
 
-First boot downloads a pinned bun once and the worker sources for its
-tag, then installs dependencies — all under `~/.acornd`, nothing on
-the host. After that it self-updates from Settings > Updates: one
-click, it restarts itself. Headless, `acornd update` does the same thing: it checks, shows the
-new tag and its first lines, and asks `install vX? [Y/n]` — `--yes` skips the question, `--check`
-only reports. With no gateway running it installs to disk and takes effect at the next start.
+The release also carries `worker.tar.gz`. You do not need it by hand: the gateway downloads it on
+first start.
 
-### From a fresh machine, in order
+### What the machine needs
 
-Five steps, and the console asks for each of them ([ADR 0036](docs/adr/0036-a-console-that-sets-itself-up.md)):
+- Linux or macOS, on amd64 or arm64.
+- One sandbox engine:
+  - **bwrap** (Linux): `sudo apt install bubblewrap passt`. It needs unprivileged user
+    namespaces: a kernel feature that lets a user make a sandbox.
+  - **microsandbox**: a hypervisor. On Linux that means `/dev/kvm` and your user in the `kvm`
+    group. On macOS it uses the system hypervisor.
+- A provider key, or the dev provider from a source tree.
+- No root for the console itself. Port 7777 is above 1024, and the install folder is yours.
 
-1. **Install.** The one line above puts the binary under `~/.acornd/bin`, prepares the machine as far as
-   it can without a password, and starts the console detached. It prints the address that claims it:
-   `http://<host>:7777/setup?code=…`.
-2. **Claim it.** Open that address and type your name and email. The code proves you started the machine;
-   from then on the install is yours, and this browser holds a signed cookie for a month. Lost the code?
-   `acornd setup-code` prints it again until somebody claims the install.
-3. **Teach it a model.** Settings → Providers: paste a provider key and tick the models this install may
-   spend on it. Then Settings → General → Defaults: choose what a new conversation starts from.
-4. **Give it a door.** Settings → Remote: paste a Cloudflare API token, pick the zone it can see, type a
-   hostname (`console`, or the whole `console.example.com`), press **Apply**, then **Turn on**. Apply
-   creates the tunnel, the `CNAME`, the one-time PIN, the application and the group; Turn on restarts the
-   console so it serves them, and this LAN address stops answering.
-5. **Invite people.** Open `https://<hostname>` and sign in with the code Cloudflare emails you. Settings
-   → People: add an address, then send them the URL yourself. They get in with a code to their email, and
-   nothing else does.
+`acornd setup` probes the machine and runs only the missing steps. It asks for your password only
+for a step that needs root. Where it cannot ask, it prints the same steps as commands you can copy.
+`acornd doctor` reports what the engines can do here and changes nothing.
 
-Settings → General opens with **Getting started**, which shows which of the last four is still open.
+A new workspace gets the first engine this machine can run: bwrap, then microsandbox, then host.
+The host engine isolates nothing, and the console says so.
 
-Useful flags: `--data-dir <dir>` (default `~/.acornd`), `--host` and `--port`
-(default `0.0.0.0:7777`), `--workspaces-dir <dir>` (default `~/acornd/workspaces`),
-`--worker <command>` (a worker other than the ensured one).
-
-The engine's store — images, workspace disks, snapshots — is `<data-dir>/sandboxes`, and a
-sandbox's Unix socket lives in the session's runtime folder (`$XDG_RUNTIME_DIR/acornd`, or a
-folder of this user's under the system temp directory). Sockets are not state and not
-configuration, so neither has a flag; a machine that wants the store elsewhere can symlink it.
-
-The default model is chosen with `acornd model set <provider>/<modelId>` and read from
-`<data-dir>/settings.json`, where the interface writes it too. Provider keys are
-`acornd provider add <provider>` (reads the key from stdin) — or with it in argv, for a
-script that already has it.
-
-The engine is a property of each workspace, recorded when the workspace is created (`acornd
-workspace add --sandbox …`), and a machine's default is what it can actually run. For a
-development loop or a test, `ACORND_SANDBOX_ENGINE` names one for the whole install: `host`
-runs the tools on this machine with no isolation ([ADR 0015](docs/adr/0015-host-engine.md)).
-
-Two environment variables cover what a service manager should not have to pass as flags:
-`ACORND_DATA_DIR` for the install folder and `ACORND_WORKER` for the worker's sources. A flag
-wins over the variable.
-
-### Reaching it from another machine
-
-The gateway listens on every interface, and the console is closed from the first minute: a fresh
-install answers its pages and a sign-in, and refuses every other request until somebody claims it
-([ADR 0036](docs/adr/0036-a-console-that-sets-itself-up.md)).
+On Ubuntu 26.04 and later, the `passt` package ships an AppArmor profile that lets pasta run only
+`/usr/bin` and `/bin`. acornd's sandbox supervisor lives in its own folder, so disable that
+profile, or every sandbox with a network refuses with
+`Failed to start command or shell: Permission denied`:
 
 ```bash
-./bin/acornd start           # binds 0.0.0.0:7777, and prints where to claim it
+sudo ln -s /etc/apparmor.d/usr.bin.pasta /etc/apparmor.d/disable/
+sudo apparmor_parser -R /etc/apparmor.d/usr.bin.pasta
 ```
 
-Open the printed `http://<machine>:7777/setup?code=…` from another device and claim the install
-with your name and address. A script talks to the API with `Authorization: Bearer $(acornd token)`;
-a browser signs in on the same form with that token or the setup code, and holds an HttpOnly session
-cookie for a month. EventSource cannot set a header, which is why the cookie exists. Keep the port on
-a network you trust anyway.
+### First run
 
-With remote access configured ([ADR 0033](docs/adr/0033-remote-access.md)) the console listens on
-loopback by default and is reached only through Cloudflare, or over an SSH tunnel with the install token.
+The console shows a **Getting started** card until these steps are answered:
 
-Settings → Remote is how that gets configured without a terminal ([ADR 0036](docs/adr/0036-a-console-that-sets-itself-up.md) §6):
-the screen takes a Cloudflare API token and shows the zones that token can see, so the zone is a choice;
-the hostname is a label (`console`) or a full name (`console.acornd.app`), a label is completed with the
-zone, and a name in another zone is refused. **Apply** creates what is missing — the tunnel, the `CNAME`,
-the one-time PIN, the application, the group and its policy — and writes the ids down, so a second press
-creates nothing and a run that died halfway resumes. Then **Turn on** restarts the console, because the
-door and the tunnel are read at boot: the console listens on loopback, the tunnel carries the browser, and
-the LAN address stops answering.
+1. Claim the install with the code the start command printed.
+2. **Settings > Providers**: paste a provider key, then tick the models this install may use.
+3. **Settings > General > Defaults**: choose the model a new conversation starts with.
+4. Optional: **Settings > Remote** to put the console behind Cloudflare.
+5. Optional: **Settings > People** to invite others.
 
-To keep it off the network, bind loopback and use an SSH tunnel:
+A new install allows no model until the admin ticks it. The list of allowed models binds
+everyone, the admin included.
+
+### Update
+
+Use **Settings > Updates**, or:
 
 ```bash
-./bin/acornd start --host 127.0.0.1
-ssh -L 7777:127.0.0.1:7777 desktop
-# then browse http://localhost:7777
+acornd update           # check, show the notes, ask to install
+acornd update --check   # report only
 ```
 
-### Secrets
+An update backs up the install first. The new binary stays only if `/healthz` passes for 30
+seconds. On failure it restores the previous binary and names the cause on screen. With no gateway
+running, it installs to disk and takes effect at the next start.
 
-A tool secret is a value a command needs, kept out of the transcript. Global entries are on
-every workspace; a workspace entry with the same name wins. The agent can list names and
-descriptions and ask for one through a card; the value goes to the gateway, never the model.
-On microsandbox the guest environment variable `<NAME>` holds the literal `$MSB_<NAME>`; a
-command sends that value, for example `-H "Authorization: Bearer $GITHUB_TOKEN"`. `$MSB_<NAME>`
-is the placeholder value, not a second variable. The engine substitutes the real value only
-for the allowed hosts, and only over HTTPS; plain HTTP is not intercepted. `${NAME}` and
-`{{NAME}}` are not placeholders and pass through. An environment engine puts
-the real value in the sandbox, and `allowEnv: false` keeps it out. See
-[ADR 0021](docs/adr/0021-a-vault-for-tool-secrets.md).
+## What it can do
 
-A secret added while a conversation runs is stored first. The tool tells the agent to stop;
-when the turn settles, the gateway restarts the sandbox and starts the next turn itself, so
-the agent continues without you resending anything. The restart waits until no run is using
-the workspace. Rotating an existing name is live, and adding a host or a name is what a
-substitute engine cannot do without that brief restart. The value field hides by default and has an eye to reveal what you pasted. It carries the
-common password-manager opt-outs, though Bitwarden on Firefox still prompts
-([issue #100](https://github.com/marcelowa/acornd/issues/100)); it is never inside a
-submitting form. The default image has no `curl`; install one inside the sandbox or use the
-project's own HTTPS client:
+### Conversations
+
+- **Streaming transcript.** Replies, tool calls, and tool output appear as they happen. Each tool
+  card shows the command, its output, and how it ended.
+- **Steering.** Type while a turn runs. The message queues visibly and joins the run after the
+  current tool round. **Stop** ends the run.
+- **Branches.** Fork a conversation before a user turn and edit the message that started the
+  branch.
+- **Hide and restore.** Delete hides a conversation; it does not remove it. The transcript stays and
+  can come back from the rail.
+- **Drafts.** A half-typed message stays in its conversation, across reloads, workspaces, and
+  machines.
+- **Attachments.** Send files and images with a message: 10 MB per file, 20 files and 100 MB per
+  message.
+- **Rich replies.** Markdown with code, tables, callouts, checklists, steps, bar charts,
+  sparklines, matrices, trees, and Mermaid diagrams. A toggle shows the raw text.
+- **A URL per conversation** (`/c/1276`), so tabs, reloads, and links work.
+- **Usage.** Token and cost totals per provider, model, and tool, and spend per conversation and
+  per workspace.
+- **The inspector.** The prompt sections and tool definitions the last request sent, estimated
+  tokens per section, and what changed since the previous request.
+
+### Workspaces
+
+- A workspace is a folder plus its own worker, storage, and history.
+- It reads `AGENTS.md`, agents, skills, commands, and guards from `.agents/` or `.acornd/`. The
+  second wins when both exist. `.agents/` is the ecosystem's name, so a bundle written for another
+  agent tool works here.
+- Create one by name inside `~/acornd/workspaces` from the console. Point at any folder with
+  `acornd workspace add <name> <folder>`.
+- Forget a workspace without deleting its folder or history. `acornd workspace purge` is the only
+  thing that deletes.
+- Defaults chain: the conversation, then its agent definition, then the workspace, then the
+  install, then a last resort. The inspector says which layer won.
+- An idle worker stops after 15 minutes. A busy or watched one keeps running.
+
+### Sandboxes
+
+A workspace runs its tools on one engine. The engine is chosen when the workspace is created and
+kept with its record.
+
+| Engine | What it is | Needs |
+|---|---|---|
+| `microsandbox` | One microVM (a small virtual machine) per workspace. The strongest boundary. | A hypervisor: `/dev/kvm` on Linux, the system hypervisor on macOS. It fetches a 72 MB engine on first use. |
+| `bwrap` | The workspace's own image in one long-lived bubblewrap sandbox. Beta. | Linux, a user namespace, and pasta for its network: `apt install bubblewrap passt`. No KVM. |
+| `host` | No sandbox. Tools run on your machine. | Nothing, and no isolation. |
+
+- The workspace folder is mounted read-write at its own path. The global resource folders
+  (`~/.agents`, the install's agents, skills, prompts, commands) are read-only at their own paths.
+  Nothing else is mounted.
+- The worker stays outside the sandbox, next to the provider key.
+- A workspace that names an engine this machine cannot run refuses its tools. It does not fall
+  back to the host.
+- Network is on by default: a workspace reaches the public internet. This machine's own networks
+  (LAN, link-local, tailnet) are refused unless the workspace has a grant: `--egress private`, or
+  the dialog's **private networks** toggle.
+- A bwrap workspace gets its own copy of its image, so `apt install` works inside it and the
+  host's tools are never touched. A command costs about 1.1 ms, and a workspace costs about 82 MB
+  of disk.
+- A bwrap workspace can run another acornd with its own sandbox and network. It needs `/dev/kvm`
+  and `/dev/net/tun` from the machine, and a workspace can withdraw those with `--no-devices`.
+- A workspace can run a hypervisor inside its sandbox when the machine allows it. `--no-vm-nesting`
+  turns that off.
+- `ACORND_SANDBOX_ENGINE=host` sets one engine for the whole install. It is the fast loop for
+  development, and the tools are not confined.
+- `acornd doctor` says which engines work here, and why one does not.
 
 ```bash
-# inside the sandbox
-apt-get update && apt-get install -y curl
-curl -fsS -H "Authorization: Bearer $GITHUB_TOKEN" https://api.github.com/user
+acornd workspace add demo ~/work/demo --sandbox bwrap
+acornd workspace add daemons ~/work/daemons --keep-alive   # a workspace that runs things
+acornd workspace list                                      # the engine is a column
 ```
 
-Settings > Secrets lists them; the conversation menu has the same page, and an agent that
-needs one shows the card. The headless path reads the value from stdin:
+### Agents, skills, commands, guards
 
-```bash
-acornd secret add GITHUB_TOKEN --global --description "release token" \
-  --hosts api.github.com,github.com < token.txt
-acornd secret list
-acornd secret show GITHUB_TOKEN      # what it is for, and where; never the value
-```
+- **Agent definitions** are Markdown files with front matter: name, description, model, thinking
+  level, allowed and denied tools, and instructions.
+- **They stack in layers.** A workspace definition shadows a global one of the same name. The
+  inspector's explain view shows which file won.
+- **Skills** are offered by name and description only. The model loads the body when it needs it.
+  An agent that names skills gets only those.
+- **Slash commands** come from `commands/` or `prompts/`, in the workspace and in the global
+  folders. They expand on the server, so the transcript records what the model saw. `/compact` and
+  `/clear` are built in.
+- **Guards** block a tool call and tell the model why. A guard can match a command pattern or a
+  path outside the workspace. Guards accumulate across layers.
 
-A workspace secret names its workspace instead of its folder: `--workspace demo`.
-
-### Without an API key
-
-The dev provider answers every turn with one real `bash` call and a scripted
-reply, so the whole path (tools, streaming, steering, usage) runs offline:
-
-```bash
-make dev
-```
-
-## What works
-
-- **People and rooms**: the install's admin names people from the console or with
-  `acornd people`; every person gets a personal workspace and may lead rooms of their
-  own, and a room's owner invites guests. A guest speaks in the room's conversations,
-  compacts them and stops a run, and cannot create, fork, hide, rename, `/clear` or choose
-  a model. Forgetting a room unregisters it; `acornd workspace purge` is the only thing
-  that deletes. Remote access is a Cloudflare tunnel with a one-time PIN; see
-  [ADR 0032](docs/adr/0032-who-may-call-the-console.md) and
-  [ADR 0034](docs/adr/0034-install-roles-and-room-roles.md).
-- **Multiple conversations** per workspace in the left rail, with a real id from the
-  harness. Rename, branch, and delete from the rail; see
-  [ADR 0005](docs/adr/0005-multi-conversation.md) and
-  [ADR 0006](docs/adr/0006-conversation-lifecycle.md). Branches fork *before* a user
-  turn and hand that message back to the composer for editing.
-- **Delete is a tombstone**, not a row delete: storage is append-only, so a deleted
-  conversation keeps its transcript and is restorable from the rail.
-- Streaming transcript with tool cards, live tool output, and a running/idle indicator.
-- **Every pane is timestamped**, and a conversation header says whether it is working,
-  when it last did, and what it has cost.
-- **A conversation lives in the URL** (`/c/1276`), so several browser tabs can show
-  different conversations at once, a reload lands where you were, and links are shareable.
-  See [ADR 0010](docs/adr/0010-per-tab-attachments.md).
-- **Formatted replies**: assistant text renders as Markdown (headings, lists, tables,
-  fenced code, links) with a toggle back to the raw text. Tool output stays monospace
-  with terminal escape codes stripped.
-- **Steering**: type while a turn runs. The message queues visibly, then joins the
-  running work after the current tool round.
-- Abort, model switching, a thinking level populated from what the model actually
-  supports, and per-turn usage.
-- **Defaults** for model, thinking level, and agent, settable from the settings sheet for
-  this workspace or for every one. A conversation that chose keeps its choice, a definition
-  that names a model or level beats both, and below them the install default applies — and
-  when nothing is set anywhere, a preferred model rather than whichever happens to be listed
-  first. See [ADR 0007](docs/adr/0007-model-defaults.md).
-- **Context inspector**: the prompt sections and tool schemas the last request was
-  actually sent, estimated tokens per section, and what changed since the previous
-  request.
-- **Agent definitions** with a global/workspace/agent overlay, and an explain view
-  showing which layer contributed what. See `docs/adr/0004-resource-overlay.md`.
-- **Workspaces**: a folder, its own `AGENTS.md`, config, agents, skills, and commands — under
-  `.agents/` (the ecosystem's name, so a bundle written for another harness works) or
-  `.acornd/`, which wins when a folder has both. Each workspace runs its own
-  worker and storage, started on first use. See `docs/adr/0011-workspaces.md`.
-- **Sandboxed execution**: what the agent *runs* runs in a microVM — one per workspace, the
-  workspace mounted read-write at its own path and the global resource folders (`~/.agents`,
-  the install's agents/skills/prompts/commands) read-only at theirs, nothing else, no network —
-  and so does every file the agent reads or writes. The worker stays outside it, next to the
-  provider key. A skill's script therefore runs where its instructions say it lives, while the
-  install's credentials, token, and state are not paths inside the guest. When the engine
-  or the hypervisor is missing the tools refuse rather than run on the host; `acornd doctor`
-  says which it is. `ACORND_SANDBOX_ENGINE=host` is the explicit alternative for a machine without a
-  hypervisor or a fast development loop: the tools run on the host, unconfined, and the state
-  and doctor say so. A workspace nests virtual machines — runs a hypervisor inside
-  its sandbox — when the engine offers it and the machine can grant it, unless nesting is
-  disabled in the workspace; when it cannot, the sandbox boots without it and doctor and the
-  state say why. See `docs/adr/0012-sandbox.md`,
-  `docs/adr/0014-global-resources-in-the-sandbox.md`, `docs/adr/0015-host-engine.md`, and
-  `docs/adr/0018-disable-vm-nesting.md`.
-- **Slash commands** from `<home>/commands/`, `~/.agents/commands/`, and the workspace's
-  `.agents/` or `.acornd/` — under `commands/` or, since it is the same thing by another
-  name, `prompts/` — expanded server-side so the transcript records what the model saw.
-- **Guards**: declarative rules that block a tool call and say why — a command pattern, or a
-  path outside the workspace — accumulating across layers and visible in the inspector.
-- **Workspaces are managed from the interface**: create by name inside the workspaces folder
-  (`--workspaces-dir`, default `~/acornd/workspaces`), and forget one (which never deletes
-  the folder or the history). Pointing a workspace at a folder elsewhere is
-  `acornd workspace add <name> <folder>`, because the interface stays inside one
-  directory.
-- **Delegation**: `delegate` hands a task to a subagent and waits; `subagent` starts one
-  that keeps working while you answer and reports back when it is done, waking the parent
-  to act on it. `peer: true` creates a *normal* conversation instead — it appears in your
-  rail marked as agent-created, outlives its creator, and can have subagents of its own.
-  Ownership, depth, peer ceilings, reachability, and the wake budget are configurable in
-  the overlay and visible in the inspector's Delegation card. See
-  `docs/adr/0008-delegation.md`.
-- Provider connect/disconnect from the UI, 42 providers, 60+ models each where the key allows.
-- **Recovery**: if the harness process dies the gateway says so ("harness down" with the
-  reason), restarts it with backoff, and resumes every run from its last commit — about
-  two seconds. The stream sends a keepalive and the client reconnects on its own.
-  See [ADR 0009](docs/adr/0009-liveness-and-recovery.md).
-- Credentials live in `~/.acornd/credentials.json` (0600), never in the worker's home.
-- **Self-update**: the gateway checks GitHub releases hourly (plus a Refresh button).
-  A header dot (count 1) leads to Settings > Updates: current tag, new tag, notes,
-  backup note, Update now / Later. Backup (config, state DB, workspace list, last 3)
-  runs first and stops the update on failure; VM disks are not backed up. Keep VMs is
-  the default; Start clean wipes the sandbox root only. A running conversation blocks
-  with a choice: wait for drain, stop runs and update, or cancel. The new binary
-  migrates at boot (`gateway/internal/update/migrate/<tag>.sh`, non-zero stops boot) and `GET /healthz`
-  must pass for 30s; failure restores `acornd.bak` and names the cause on the screen.
-  Pin a tag for no prompts. See [ADR 0019](docs/adr/0019-self-update.md).
-
-## Write an agent
-
-`~/.acornd/agents/<name>.md` (global) or `<workspace>/.agents/agents/<name>.md`
-(workspace, shadows a global definition of the same name). The workspace bundle may also be
-`<workspace>/.acornd/`, and that one wins when both exist: `.agents` is the ecosystem's
-name — a bundle written for another harness works here, and `~/.agents/skills/` is read too —
-while `.acornd` is where you keep what is yours alone:
+A global definition lives in `~/.acornd/agents/<name>.md` or `~/.agents/agents/<name>.md`. A
+workspace definition lives in `<workspace>/.acornd/agents/<name>.md` or
+`<workspace>/.agents/agents/<name>.md`. Ours wins when both exist. Pick the agent in the top bar.
+**Reload files** in the inspector re-reads them without a restart.
 
 ```markdown
 ---
@@ -468,72 +224,281 @@ deny-tools: write, edit
 You are a researcher. Read before you answer, and name the paths you relied on.
 ```
 
-`config.json` in the same two locations carries defaults for every agent in scope:
+### Delegation
 
-```json
-{ "defaults": { "instructions": "…", "denyTools": ["bash"] } }
+- `delegate` hands a task to a subagent and waits for the answer.
+- `subagent` starts one that keeps working while you answer, and wakes the parent when it reports.
+- `peer: true` makes a normal conversation instead. It appears in your rail, records who created
+  it, and outlives its creator.
+- Limits are set in the agent definition: children, depth, peers, wakes, reachability. The
+  inspector's Delegation card shows the policy.
+
+### Secrets
+
+Tool secrets are values a command needs. They stay out of the transcript and out of the model.
+
+- Global or per workspace. A workspace secret with the same name wins.
+- The model sees names and descriptions. It asks for a value through a card, and the value goes to
+  the gateway, never the model.
+- In a sandbox, the variable holds a placeholder: `$MSB_<NAME>`. The engine swaps in the real value
+  only for the secret's allowed hosts and only over HTTPS. A plain HTTP request is not intercepted.
+- `${NAME}` and `{{NAME}}` are not placeholders. They pass through.
+- The host engine puts the real value in the sandbox. `allowEnv: false` keeps it out.
+- Stored 0600 in `~/.acornd/secrets.json`.
+
+```bash
+acornd secret add GITHUB_TOKEN --global --description "release token" \
+  --hosts api.github.com,github.com < token.txt
+acornd secret list
+acornd secret show GITHUB_TOKEN      # what it is for and where, never the value
 ```
 
-Then pick the agent in the top bar. **Reload files** in the inspector re-reads them
-without restarting anything. Resolution rules and their rationale are in
-[ADR 0004](docs/adr/0004-resource-overlay.md).
+A secret added during a run is stored first. The gateway restarts the sandbox when the turn
+settles and continues the run itself, so you do not resend anything. Rotating a value is live.
 
-## What does not exist yet
+The default image has no `curl`. Install one inside the sandbox, or use the project's own HTTPS
+client.
 
-Memory, MCP, codemode, triggers, versioned agent definitions, and the parts of
-the interface that are being rebuilt. `docs/adr/` holds the designs they will land against;
-ADR 0012 lists what the sandbox deliberately does not cover yet.
+### People and rooms
+
+- The first person to claim the install is the admin.
+- The admin invites people by address, sets the models each may use, and says who may lead a room.
+- Each person gets a personal workspace named after their address.
+- A room has one owner and its guests. The owner invites, removes, and forgets. A guest may leave.
+- A guest can prompt, steer, stop, and compact. A guest cannot create, fork, hide, rename, reset,
+  or change the model.
+- The same list is in the terminal: `acornd people`.
+
+### Remote access
+
+**Settings > Remote** puts the console behind Cloudflare Access:
+
+1. Paste a Cloudflare API token. The screen lists the zones the token can see.
+2. Pick a zone and type a hostname. A label (`console`) is completed with the zone. A full name
+   outside the zone is refused.
+3. **Apply** creates what is missing: the tunnel, the DNS record (`CNAME`), the one-time PIN, the
+   Access application, the group, and its policy. A second press creates nothing.
+4. **Turn on** restarts the console. It listens on 127.0.0.1 only, and the tunnel carries the
+   browser.
+
+After that, people sign in with a code sent to their email. The LAN address stops answering.
+
+Without a tunnel, listen on 127.0.0.1 only and use SSH:
+
+```bash
+acornd start --host 127.0.0.1
+ssh -L 7777:127.0.0.1:7777 desktop
+# then browse http://localhost:7777
+```
+
+A script can call the API with `Authorization: Bearer $(acornd token)`. A browser signs in with the
+install token, or with the setup code on a fresh install, and gets a cookie that page scripts cannot
+read, for a month. The token is a 0600 file in the install folder, read per request, so a rotation
+takes effect at once.
+
+### Models and providers
+
+- Add a provider key in **Settings > Providers**, or from stdin:
+  `echo "$OPENCODE_API_KEY" | acornd provider add opencode-go`.
+- The list comes from the model library: over 40 providers, each with its own model list.
+- A new install allows no model until the admin ticks it. The list of allowed models binds
+  everyone, including the admin. A person's own list narrows it further.
+- A conversation, its agent, its workspace, and the install can each set a default model and
+  thinking level. The nearest wins. With nothing set, a preferred model runs, not the first one in
+  the list. `acornd model set <provider>/<modelId>` chooses the install default.
+- A thinking level the model cannot express is clamped. What was asked for is kept and reported.
+
+### Recovery and updates
+
+- If a worker dies, the gateway says why and restarts it after a wait that grows while it keeps
+  failing. Every run resumes from its last commit, in about two seconds. The stream reconnects and
+  catches up on what it missed.
+- The console checks GitHub for a new release every hour, and on the Refresh button.
+- An update backs up config, the state database, and the workspace list, and keeps the last three
+  sets. Secrets and VM disks are not backed up.
+- A running conversation blocks the update with a choice: wait for it to finish, stop the runs, or
+  cancel.
+- The release's migration script runs at boot. A non-zero exit stops the boot. `/healthz` must
+  pass for 30 seconds, or the previous binary comes back with the cause on screen.
+
+### Command line
+
+Every command answers `-h`. `acornd` with no arguments lists them.
+
+| Command | What it does |
+|---|---|
+| `start` | Run the gateway in the foreground. `-d` detaches, logs to `<data-dir>/acornd.log`, and returns. |
+| `stop` | Stop the run recorded in this install folder. |
+| `restart` | Start it again with the arguments it was started with. |
+| `status` | Is it running, where, and since when. |
+| `setup` | Check this machine, and make it able to run sandboxes. |
+| `setup-code` | Print, rotate, or remove the code that claims a fresh install. |
+| `doctor` | Report what the sandbox engines can do here. Changes nothing. |
+| `workspace` | List, add, forget, and purge workspaces. |
+| `secret` | List, add, show, rotate, and remove secrets. |
+| `provider` | List, add, and remove model provider keys. |
+| `model` | List or choose the default model. |
+| `people` | Who may use this install, and what they may do. |
+| `remote` | The tunnel a browser comes through, and who it admits. |
+| `token` | Print the token that proves you own this install. |
+| `update` | Check for a release, and install it. |
+| `version` | Print the running version. |
+
+### Not built yet
+
+Memory, MCP, codemode, triggers, and versioned agent definitions. `docs/adr/` holds the designs
+they will land against.
+
+## How it works
+
+```
+browser ──HTTP+SSE──► gateway (Go) ──► control ──JSONL/stdio──► worker (bun)
+                                                                  │
+                                                                  ▼
+                                                        sandbox (microVM or bwrap)
+```
+
+The gateway and control are packages in one Go binary. The worker is the harness: it owns one
+workspace's storage and runs the agent loop.
+
+| Layer | Does | Does not know |
+|---|---|---|
+| Browser console | Draws state and sends actions. | Workers, storage, providers. |
+| Gateway | HTTP, server-sent events, sign-in, cookies, uploads, slow clients. | What an agent or a workspace is. |
+| Control | Workspaces, models, keys, people, worker lifecycle, usage. | How the agent loop works. |
+| Worker | The agent loop, tools, skills, the sandbox. | The console, the install database. |
+
+Three rules decide the shape:
+
+1. **One workspace = one worker = one storage.** All conversations in a workspace, including
+   subagent conversations, live in one SQLite file. A worker crash affects that workspace, and
+   every run resumes from its last commit.
+2. **The console holds no transcript.** It draws what the worker committed. Nothing reaches the
+   screen before it is stored.
+3. **Stored agent configuration is names, never code.** An upgrade cannot rewrite history.
+
+### Worker protocol
+
+Control and worker talk JSONL over stdin and stdout, one object per line.
+
+| Direction | Messages |
+|---|---|
+| control → worker | `describe`, `open`, `attach`, `detach`, `prompt`, `abort`, `usage`, `shutdown` |
+| worker → control | `response`, `view`, `submission` |
+
+A `view` is the whole committed state of one conversation, not a diff. `seq` is the resume cursor:
+a client that reconnects asks for the newest view and is correct by construction. The protocol is
+written once per language, in `worker/src/protocol.ts` and
+`gateway/internal/protocol/protocol.go`, and documented in
+[docs/adr/0002-layers-and-protocol.md](docs/adr/0002-layers-and-protocol.md).
+
+A second harness (a different worker) only has to speak these commands. Control does not change.
+
+### Where things live
+
+The install folder is `~/.acornd` by default (`--data-dir`, `ACORND_DATA_DIR`). In this table,
+0600 means only your user can read the file.
+
+| Path | What |
+|---|---|
+| `bin/acornd` | The binary, when the install script put it there. |
+| `credentials.json` | Provider keys. 0600. |
+| `secrets.json` | Tool secrets. 0600. |
+| `people.json` | Who may use the install, and what they may do. |
+| `remote.json` | Tunnel and Access state, and the Cloudflare token. 0600. |
+| `settings.json` | Install defaults and the allowed models. |
+| `workspaces.json` | The workspace registry. |
+| `token` | The install token. 0600. |
+| `setup-code` | The claim code, until somebody claims the install. 0600. |
+| `run.json` | The recorded run: pid, arguments, address, start time. |
+| `acornd.log` | Output of a detached run. |
+| `tools/bun-1.4.4/` | The pinned bun. |
+| `worker/` | The worker sources for this release. |
+| `state/<name>/` | One workspace's SQLite storage, settings, and drafts. |
+| `sandboxes/` | Engine images, workspace disks, snapshots. |
+
+Workspace folders are in `~/acornd/workspaces` by default (`--workspaces-dir`).
+
+The gateway serves the console on every interface, port 7777, by default (`--host`, `--port`). Once
+remote access is configured, it listens on 127.0.0.1 only. A flag wins over `ACORND_DATA_DIR` and
+`ACORND_WORKER`.
 
 ## Development
 
+### Requirements
+
+- Go **1.27.3**. The patch matters: `gateway/go.mod` pins it, and CI reads the version from there.
+- bun **1.4.4**. The runtime pins it in `gateway/internal/update/worker.go`.
+- make and gcc.
+- `unzip` for the bun installer, and `procps` for `pgrep`, which two end-to-end tests use.
+- `git` with an `origin/main` ref. `make test` compares the coverage and mutation minimums
+  against it, so a single-branch clone fails until `git fetch origin main`.
+- A browser for `make ui` and `make ui-check`, at `CHROME_PATH` (default `/usr/bin/chromium`).
+- About 6 GB of disk for `make tools`. On a machine with 2 GB of RAM, use
+  `GOGC=20 GOMAXPROCS=1 make tools`, or the compiler is killed partway through gosec.
+- A provider key, or the dev provider.
+
+### Setup
+
 ```bash
-make check         # fast: the bundle, the compiler and the unit tests, no processes
-make lint          # the static rules: gofmt, vet, tsc, oxlint, oxfmt, the architecture test and
-                   # three cross-builds, then golangci-lint and deadcode
-make modernize     # the Go idiom analyzer; a daily workflow prompts with it, the gate does not
-make test          # the default gate: lint, the floors, the unit tests, then the feature suite
-make test-sandbox  # the microVM engine boundary: live driver + SDK + 4 e2e tests (needs /dev/kvm)
-make test-bwrap    # the bubblewrap engine end to end; it fetches an image, so `make test` skips it
-make ui            # drives the real client in headless chromium (needs a running gateway)
-make ui-check      # the browser suite: builds, starts its own gateway, stops it after
-make build         # gateway build
-make dev           # dev provider + gateway, data dir $HOME/.acornd
+# Go: https://go.dev/dl, at the patch gateway/go.mod pins
+curl -fsSL https://bun.sh/install | bash   # bun, into ~/.bun/bin
+sudo apt install make gcc                  # Debian/Ubuntu build tools
+
+make deps     # bun install in worker/, ui/, tools/
+make tools    # the six Go linters, compiled from source
+make build    # -> ./bin/acornd
 ```
 
+`make tools` installs staticcheck, golangci-lint, deadcode, gremlins, govulncheck, and gosec. If
+you skip it, `make lint` prints `not installed (make tools)` and passes that part. A green gate
+then proves less than it looks.
+
+### Run
+
+```bash
+echo "$OPENCODE_API_KEY" | ./bin/acornd provider add opencode-go
+ACORND_WORKER=$(pwd)/worker ./bin/acornd start   # http://<host>:7777
+```
+
+`ACORND_WORKER` is required in a source tree. Without it, the gateway looks for the worker a
+release would have downloaded, and a dev build never fetches one.
+
+`make dev` starts the same thing with a scripted provider. It answers every turn with one real
+`bash` call and a fixed reply, so the whole path runs offline.
+
+### Checks
+
+| Target | What it does |
+|---|---|
+| `make check` | Fast: the bundle, the compiler, and the unit tests. No processes. |
+| `make lint` | gofmt, vet, tsc, oxlint, oxfmt, the architecture test, three cross-builds, golangci-lint, deadcode. |
+| `make test` | The gate: lint, the coverage and mutation minimums, the unit tests, then the feature suite. |
+| `make test-sandbox` | The microVM boundary: live driver, SDK, and four end-to-end tests. Needs `/dev/kvm`. |
+| `make test-bwrap` | The bubblewrap engine end to end. Fetches an image, so `make test` skips it. |
+| `make ui` | Drives the real console in headless Chromium. Needs a running gateway. |
+| `make ui-check` | The browser suite. Builds, starts its own gateway, stops it after. |
+| `make modernize` | The Go idiom analyzer. A daily workflow runs it; the gate does not. |
+| `make mutations` | Mutation testing for one package: `PKG=./internal/control`. |
+
+`make test` runs the end-to-end tests with the sandbox tier forced off, so the tools take the
+refusal path. `make test-sandbox` runs them against real microVMs. The end-to-end tests need bun
+and `make deps`. Without them they skip with a reason.
+
 `docs/engineering/standards.md` is what the code is held to, rule by rule, with the check that
-enforces each and the bug behind the ones that matter. `make tools` installs the linters.
+enforces each one. `docs/features.md` is the inventory: what the platform does, as things you can
+observe, and the test that covers each.
 
-A workstation runs these in seconds to a minute; a two-vCPU container spends minutes in the Go
-test run, which is most of `make check` — that is the one to loop on.
+### Layout
 
-`docs/features.md` is the inventory: what the platform does, stated as things that are
-observable, and the test that covers each one. Read it before changing behaviour, and add to it
-when adding a feature.
-
-The end-to-end tests (`gateway/internal/e2e`) run a real gateway and a real worker against a
-scripted provider, so nothing calls a model and nothing needs a network. They need `bun` and
-`make deps`; without them they skip with a reason. `make test` runs them with the sandbox tier
-forced off, so the tools take the refusal path and the command behaves the same everywhere;
-`make test-sandbox` runs them against real microVMs where there is a hypervisor — the tiers
-are [ADR 0013](docs/adr/0013-test-tiers.md). A feature driven by a tool call — a guard
-blocking one, a subagent being spawned — is driven by `ACORND_DEV_SCRIPT`, a JSON file of
-rules matched against the last user message; see `docs/features.md`.
-
-The Markdown renderer in `ui/src/components/transcript/render-markdown.ts` **escapes the source
-once, up front**, and every later step operates on escaped text. Model output and tool output
-are untrusted — a tool result can contain anything a file or a command produced — so raw HTML
-must never survive, link targets are scheme-checked rather than passed through, and images are
-refused outright: a remote image in a reply is fetched by your browser, which is a way to
-signal information outward. The checks for all of that live in
-`ui/test/render-markdown.test.ts` under jsdom, because the sanitiser needs a DOM — and needs
-one whose parser it can trust.
-
-`make ui` exists because two bugs shipped that curl could not see: an element looked up
-but never declared, and a modal whose visibility an author rule silently overrode. It
-drives the served interface in a real browser: the splitter resizes the rail and the width
-comes back after a reload, transcript items are neither squashed nor clipped, pane
-controls are per pane, the theme toggle persists, and the phone gets a drawer instead of a
-rail eating the transcript. The inspector and settings-sheet checks arrive with #13.
-
-The worker protocol is defined once per language — `worker/src/protocol.ts` and
-`gateway/internal/protocol/protocol.go` — and documented in `docs/adr/0002-layers-and-protocol.md`.
+| Path | What |
+|---|---|
+| `docs/adr/` | Decisions. Start with `0001-concepts.md` and `0002-layers-and-protocol.md`. |
+| `docs/features.md` | What the platform does, and the test for each. |
+| `docs/engineering/standards.md` | The rules the code is held to. |
+| `gateway/` | Go: HTTP server, control, worker supervision, the embedded console. |
+| `gateway/web/` | The built console bundle the gateway serves. |
+| `worker/` | TypeScript: the agent loop, tools, skills, credentials. |
+| `ui/` | The console: React, theme, Storybook. Built by `make ui-build`. |
+| `tools/` | Browser-driven checks. |
+| `scripts/install.sh` | The release installer. |
