@@ -90,14 +90,13 @@ install script runs it for you.
 
 `acornd doctor` reports what the engines can do here and changes nothing.
 
-On Ubuntu 26.04 and later, the `passt` AppArmor profile blocks acornd's sandbox supervisor. Disable
-it, or every sandbox with a network refuses with
-`Failed to start command or shell: Permission denied`:
-
-```bash
-sudo ln -s /etc/apparmor.d/usr.bin.pasta /etc/apparmor.d/disable/
-sudo apparmor_parser -R /etc/apparmor.d/usr.bin.pasta
-```
+On Ubuntu 26.04 and later, the `passt` package ships an AppArmor profile that lets pasta start only a
+program in `/usr/bin` or `/bin`. acornd's supervisor is in neither, so every sandbox with a network
+refuses with `Failed to start command or shell: Permission denied`. `acornd setup` turns that profile
+off the way Ubuntu's own `aa-disable` does — a symlink in `/etc/apparmor.d/disable/`, then
+`apparmor_parser -R` — and says why when it does: it is a distribution security profile, and no
+sandbox with a network can start while it is in force. Machines that ship no such profile, Ubuntu
+24.04 and every other distribution, need no step.
 
 ### First run
 
@@ -172,7 +171,7 @@ microsandbox.
 | Engine | What it is | Needs |
 |---|---|---|
 | `microsandbox` | One microVM (a small virtual machine) per workspace. The strongest boundary. | A hypervisor: `/dev/kvm` on Linux, the system hypervisor on macOS. It fetches a 72 MB engine on first use. |
-| `bwrap` | The workspace's own image in one long-lived bubblewrap sandbox. Beta. | Linux, a user namespace, and pasta for its network: `apt install bubblewrap passt`. No KVM. |
+| `bwrap` | The workspace's own image in one long-lived bubblewrap sandbox. Beta. | Linux, a user namespace, and pasta for its network: `apt install bubblewrap passt`. No KVM. On Ubuntu 26.04 and later, pasta's AppArmor profile has to be off, which `acornd setup` does. |
 
 - The workspace folder is mounted read-write at its own path. The global resource folders
   (`~/.agents`, the install's agents, skills, prompts, commands) are read-only at their own paths.

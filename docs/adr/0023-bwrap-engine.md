@@ -115,7 +115,7 @@ capability because applications reach it through a proxy.
 
 ## What a host has to grant
 
-Two things a sandbox cannot do for itself, both found by the CI tier rather than by reasoning:
+Three things a sandbox cannot do for itself, all found by the CI tier rather than by reasoning:
 
 - **A user namespace, and the one it nests inside.** A sandbox with egress runs inside pasta's
   user namespace and makes one of its own. Ubuntu 24.04 gates unprivileged user namespaces
@@ -135,8 +135,13 @@ Two things a sandbox cannot do for itself, both found by the CI tier rather than
   supervisor in acornd's own install folder, so every sandbox with egress fails with pasta's
   `Failed to start command or shell: Permission denied`; `dmesg` names the profile and the path,
   and `/bin/true` through the same command exits 0, which is what tells this apart from the
-  namespace or the tun device. Found by the CI tier going red on that image, not by reasoning —
-  the host grants it by disabling the profile, the same way the userns switch above is granted.
+  namespace or the tun device. Found by the CI tier going red on that image, not by reasoning.
+  `acornd setup` turns the profile off the way Ubuntu's own `aa-disable` does — a symlink in
+  `/etc/apparmor.d/disable/` that a reboot reads, then `apparmor_parser -R` for the copy in force
+  now — and only where the probe refused and the profile is there: a distribution that ships none,
+  or a kernel that never loaded it, sees no step. The probe runs the supervisor's own path for
+  this reason: `/bin/true` is allowed by the profile, so a probe that ran it answered "the network
+  works" on a machine where every workspace with one then refused to start.
 
 ## What it costs
 

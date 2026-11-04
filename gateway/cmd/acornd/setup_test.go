@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"os/user"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -50,8 +51,13 @@ func TestSetupPlansTheMissingPackage(t *testing.T) {
 		t.Fatalf("the manager should be this distribution's, got %q", plan.Manager)
 	}
 	steps := plan.actions()
-	if len(steps) != 1 || strings.Join(steps[0].Run, " ") != "apt-get install -y passt" {
+	if len(steps) == 0 || strings.Join(steps[0].Run, " ") != "apt-get install -y passt" {
 		t.Fatalf("want `apt-get install -y passt`, got %+v", steps)
+	}
+	// The package may bring Ubuntu 26.04's profile for pasta, so the step that turns it off goes
+	// with it; whether the package did is a question the step answers when it runs.
+	if len(steps) != 2 || !steps[1].PastaProfile {
+		t.Fatalf("the install and the profile it may bring are one plan, got %+v", steps)
 	}
 }
 
@@ -109,6 +115,59 @@ func TestSetupDoesNotProposeASysctlInsideAContainer(t *testing.T) {
 	}
 	if advice := containerAdvice(report); !strings.Contains(advice, "--security-opt seccomp=unconfined") {
 		t.Fatalf("the advice should name the flags: %q", advice)
+	}
+}
+
+// The pasta profile is a host grant like the sysctl: planned only where the probe refused and the
+// distribution ships the profile. Ubuntu 24.04, Debian, and Fedora must see no step at all.
+func TestSetupPlansThePastaProfileOnlyWhereItIsInTheWay(t *testing.T) {
+	report := working()
+	report.PastaProfile = true
+	report.PastaErr = errors.New("sandbox unavailable: pasta cannot start the supervisor it is given: Failed to start command or shell: Permission denied")
+	if plan := planFor(report, "me"); !plan.PastaProfile {
+		t.Fatalf("a refused network on a machine with the profile should be the step: %+v", plan)
+	}
+	// A probe that passed is the machine saying the profile is not in the way: acornd may be under
+	// /usr/bin, or AppArmor may not be enforcing it.
+	report.PastaErr = nil
+	if plan := planFor(report, "me"); plan.PastaProfile {
+		t.Fatalf("a working network should not be given a security change: %+v", plan)
+	}
+	// A machine without the profile is every release before 26.04.
+	report.PastaErr = errors.New("sandbox unavailable: pasta cannot make a network namespace here")
+	report.PastaProfile = false
+	if plan := planFor(report, "me"); plan.PastaProfile {
+		t.Fatalf("no profile means no step: %+v", plan)
+	}
+}
+
+// A fresh 26.04 install has no passt yet, so the plan cannot see the profile the package will
+// bring: the step goes in with the install, and answers when it runs.
+func TestSetupPlansThePastaProfileWithThePackageThatBringsIt(t *testing.T) {
+	report := working()
+	report.PastaPath = ""
+	report.PastaErr = errors.New("sandbox unavailable: a workspace with its network on needs pasta to carry it")
+	plan := planFor(report, "me")
+	if !slices.Contains(plan.Packages, "passt") {
+		t.Fatalf("the package should be planned: %+v", plan)
+	}
+	if !plan.PastaProfile {
+		t.Fatalf("the profile may come with that package, so the step goes with it: %+v", plan)
+	}
+}
+
+// The table says the profile is why the network does not start, because pasta's own sentence does
+// not name the cause.
+func TestSetupShowsThePastaProfileItCannotUse(t *testing.T) {
+	report := working()
+	report.PastaProfile = true
+	report.PastaErr = errors.New("sandbox unavailable: pasta cannot start the supervisor it is given: Failed to start command or shell: Permission denied")
+	text, ok := renderSetup(report)
+	if ok {
+		t.Fatalf("a machine whose network cannot start is not ready:\n%s", text)
+	}
+	if !strings.Contains(text, "pasta profile") {
+		t.Fatalf("the row should name the profile:\n%s", text)
 	}
 }
 
@@ -276,6 +335,7 @@ func TestASetupReportSurvivesTheProcessBoundary(t *testing.T) {
 	before.BwrapErr = errors.New("sandbox unavailable: bubblewrap cannot create a user namespace here")
 	before.KVMErr = errors.New("sandbox unavailable: /dev/kvm is not readable by me")
 	before.Linger = false
+	before.PastaProfile = true
 	after := reportOf(wireOf(before))
 	if after.BwrapErr == nil || after.BwrapErr.Error() != before.BwrapErr.Error() {
 		t.Fatalf("the user-namespace problem came back as %v", after.BwrapErr)
@@ -285,6 +345,9 @@ func TestASetupReportSurvivesTheProcessBoundary(t *testing.T) {
 	}
 	if after.PastaErr != nil || after.TunErr != nil {
 		t.Fatalf("nothing was wrong with pasta or tun, but they came back as %v / %v", after.PastaErr, after.TunErr)
+	}
+	if !after.PastaProfile {
+		t.Fatal("the pasta profile did not survive the process boundary")
 	}
 	if after.BwrapPath != before.BwrapPath || after.LingerKnown != before.LingerKnown {
 		t.Fatalf("the rest of the report changed: %+v", after)

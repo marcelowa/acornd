@@ -5,9 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 )
 
 // Doctor used to build its report manager without an engine, so it always exited with
@@ -88,5 +90,21 @@ func TestDoctorNamesAFolderWithNoRecord(t *testing.T) {
 	}
 	if got := workspaceOrphans(dataDir); len(got) != 1 {
 		t.Errorf("a file in the workspaces folder is not an orphan: %v", got)
+	}
+}
+
+// The engine a machine will use is the first that can carry a network, so an engine that cannot
+// must say so under its own row: that line is the difference between "host, for no stated reason"
+// and "host, because pasta's profile refuses the supervisor". Issue 26 is the second half of this:
+// a probe that ran /bin/true never produced this line at all.
+func TestTheDoctorReportSaysWhenAnEngineCannotCarryANetwork(t *testing.T) {
+	out := captureStdout(t, func() {
+		printEngines([]engineReport{{
+			Report: sandbox.Report{Engine: "bwrap", Installed: true, Isolated: true},
+			Egress: "pasta cannot start the supervisor it is given: Failed to start command or shell: Permission denied",
+		}}, "host")
+	})
+	if !strings.Contains(out, "network no") || !strings.Contains(out, "Failed to start command or shell") {
+		t.Fatalf("the row should say the network cannot run:\n%s", out)
 	}
 }

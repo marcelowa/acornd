@@ -201,6 +201,9 @@ func planFor(report setupReport, who string) rootPlan {
 		// says "install bubblewrap passt with your package manager" instead.
 		plan.Packages = nil
 	}
+	// After the package decision: a plan this command cannot install a package with cannot bring
+	// the profile either.
+	plan.PastaProfile = needsPastaProfile(report, plan.Packages)
 	if report.KVMErr != nil {
 		plan.KVMUser = who
 	}
@@ -215,6 +218,18 @@ func planFor(report setupReport, who string) rootPlan {
 // container the sysctl is not the answer, the container's own profile is.
 func needsUserns(report setupReport) bool {
 	return report.BwrapPath != "" && report.BwrapErr != nil && report.UsernsRestricted && !report.Container
+}
+
+// needsPastaProfile is the grant Ubuntu 26.04 needs and no earlier release does. The passt package
+// ships an AppArmor profile for pasta whose only execute rule is `/{usr/,}bin/** Ux`, so pasta may
+// start a program from those two directories and nothing else — and the first process it starts is
+// acornd's supervisor, in the install folder. A machine whose probe passed is not given the step:
+// the profile is not in the way there, and turning off a distribution's security profile for a
+// problem it does not have is a change nobody asked for. A plan that installs passt carries the
+// step anyway, because the package may bring the profile with it; whether it did is a question the
+// step answers when it runs.
+func needsPastaProfile(report setupReport, packages []string) bool {
+	return (report.PastaProfile && report.PastaErr != nil) || slices.Contains(packages, "passt")
 }
 
 // containerAdvice explains what no command inside can fix. Empty when this is not a container, or
@@ -291,6 +306,10 @@ type setupReport struct {
 	// UsernsRestricted is the AppArmor gate that refuses unprivileged user namespaces on
 	// Ubuntu 23.10 and later: the one machine-wide cause worth naming.
 	UsernsRestricted bool
+	// PastaProfile is whether this distribution ships the AppArmor profile Ubuntu 26.04 added for
+	// pasta. The probe says whether it is in the way; this says whether turning it off is a step
+	// this machine could need.
+	PastaProfile bool
 	// Container is whether this process is in one, which changes who can fix what.
 	Container bool
 	KVMErr    error
@@ -315,6 +334,7 @@ func gatherSetup(dataDir string) setupReport {
 		PastaErr:         bwrap.Egress(),
 		TunErr:           tunDevice(),
 		UsernsRestricted: usernsRestricted(),
+		PastaProfile:     pastaProfilePresent(),
 		Container:        inContainer(),
 		KVMErr:           hypervisor.Usable(),
 	}
@@ -348,6 +368,13 @@ func tunDevice() error {
 func usernsRestricted() bool {
 	payload, err := os.ReadFile("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
 	return err == nil && strings.TrimSpace(string(payload)) == "1"
+}
+
+// pastaProfilePresent reports whether the distribution ships the profile, which is a question about
+// the files and not about whether it works: the probe answers that one.
+func pastaProfilePresent() bool {
+	_, err := os.Stat(pastaAppArmor.profile)
+	return err == nil
 }
 
 // inContainer reports whether this process is in one. It is not an identity check — it is enough
@@ -396,6 +423,9 @@ func renderBwrap(out *strings.Builder, report setupReport) bool {
 	fmt.Fprintf(out, "  %s  user namespaces   %s\n", mark(usable), describe(usable, "a sandbox can boot here", report.BwrapErr))
 	pasta := report.PastaErr == nil
 	fmt.Fprintf(out, "  %s  sandbox network   %s\n", mark(pasta), describe(pasta, describePath(report.PastaPath, ""), pastaProblem(report)))
+	if report.PastaProfile && !pasta {
+		fmt.Fprintf(out, "  %s  pasta profile      %s\n", mark(false), "the passt package's AppArmor profile lets pasta start only /usr/bin and /bin, and acornd's supervisor is in neither")
+	}
 	if report.TunErr != nil && !pasta {
 		fmt.Fprintf(out, "  %s  tun device        %s\n", mark(false), report.TunErr)
 	}
@@ -461,9 +491,15 @@ func printedFixes(report setupReport, userName string) []string {
 			fixes = append(fixes, "sudo "+strings.Join(action.Run, " "))
 		case action.File != "":
 			fixes = append(fixes, fmt.Sprintf("sudo sh -c 'printf %s > %s'", shellQuote(action.Write), action.File))
+		case action.PastaProfile:
+			// Guarded: a distribution that ships no profile needs neither command, and a dangling
+			// symlink is not a fix.
+			fixes = append(fixes, fmt.Sprintf("if [ -f %s ]; then sudo ln -sf %s %s/%s && sudo apparmor_parser -R %s; fi",
+				pastaAppArmor.profile, pastaAppArmor.profile, pastaAppArmor.disable, filepath.Base(pastaAppArmor.profile), pastaAppArmor.profile))
 		}
 	}
-	if len(fixes) == 0 && (report.BwrapPath == "" || report.PastaPath == "") {
+	fixesForPackages := report.BwrapPath == "" || report.PastaPath == ""
+	if len(plan.Packages) == 0 && fixesForPackages {
 		fixes = append(fixes, fmt.Sprintf("install %s with this distribution's package manager", strings.Join(missingPackages(report), " ")))
 	}
 	if report.InstallErr != nil {

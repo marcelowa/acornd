@@ -275,12 +275,12 @@ jobs:
     # switch Ubuntu documents for bubblewrap; without it the engine is unusable there for a
     # reason that has nothing to do with this code.
     #
-    # The image is 26.04, and the two host steps below are why this tier is the one that says
-    # what a machine must grant. The second is new on that release and was found by this job
-    # going red: `passt` now ships `/etc/apparmor.d/usr.bin.pasta`, whose only execute rule is
-    # `/{usr/,}bin/** Ux`, so pasta — the process that starts the sandbox's first one — may not
-    # run a binary outside those two directories. acornd's supervisor is not one of them. The
-    # failure is pasta's own sentence, and dmesg names the profile and the path:
+    # The image is 26.04, and the host steps below are why this tier is the one that says what a
+    # machine must grant. The profile step is new on that release and was found by this job going
+    # red: `passt` now ships `/etc/apparmor.d/usr.bin.pasta`, whose only execute rule is
+    # `/{usr/,}bin/** Ux`, so pasta — the process that starts the sandbox's first one — may not run
+    # a binary outside those two directories. acornd's supervisor is not one of them. The failure is
+    # pasta's own sentence, and dmesg names the profile and the path:
     #
     #   Failed to start command or shell: Permission denied
     #   apparmor="DENIED" operation="exec" class="file" profile="pasta"
@@ -290,6 +290,10 @@ jobs:
     # cause rather than the namespace, the device, or the binary's permissions. Everything else
     # on that image is fine: bubblewrap is 0.11.1, the userns switch applies, and the worker's
     # own bwrap suite passes 61/61.
+    #
+    # The profile step is also the regression test for both halves of issue 26: the probe must see
+    # the profile before setup's plan turns it off, and must not see it after. A probe that ran
+    # `/bin/true` would pass here and then fail in every real sandbox.
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
@@ -301,23 +305,49 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq bubblewrap passt
-      - name: Let pasta run the supervisor it is given
-        # The profile is the distribution's default, not acornd's, and it is unloaded here the way
-        # Ubuntu's own `aa-disable` does it: the symlink is what a reboot reads, and the parser is
-        # what takes the loaded profile away now. A machine that runs acornd for real needs the
-        # same grant; README says so beside the other engine prerequisite.
+      - name: Build the binary the sandbox hands pasta
+        # The probe runs this binary, not /bin/true, so it has to be one that is not under
+        # /usr/bin — which is the same place a real install puts it. This is what makes the check
+        # below able to see the profile at all.
         run: |
-          if [ -f /etc/apparmor.d/usr.bin.pasta ]; then
-            sudo ln -sf /etc/apparmor.d/usr.bin.pasta /etc/apparmor.d/disable/usr.bin.pasta
-            sudo apparmor_parser -R /etc/apparmor.d/usr.bin.pasta
-          fi
+          cd gateway && CGO_ENABLED=0 go build -o "$RUNNER_TEMP/acornd" ./cmd/acornd
       - name: Let bubblewrap make user namespaces
         # Ubuntu 24.04 and later gate unprivileged user namespaces behind AppArmor. A per-binary profile is
         # enough for bubblewrap on its own, and *not* enough for the sandbox this tier runs: the
         # sandbox's user namespace nests inside the one pasta makes, and the second one is refused
         # ("Couldn't write to /proc/self/uid_map"). The switch is the documented host-wide answer,
         # and on a runner that is only running this tier it is the right one.
+        #
+        # It comes before the profile step because disabling pasta's profile makes pasta
+        # unconfined, and an unconfined process cannot make a user namespace on a machine that still
+        # restricts them: the switch and the profile go together, in that order.
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           bwrap --ro-bind / / --unshare-all -- /bin/true && echo "bubblewrap can make a user namespace"
+      - name: Let pasta run the supervisor it is given
+        # The profile is the distribution's default, not acornd's, and it is unloaded by the plan
+        # `acornd setup` applies on a machine that runs acornd for real: the symlink is what a
+        # reboot reads, and the parser is what takes the loaded profile away now. The probe is
+        # asked before and after, because that is the thing issue 26 was actually about.
+        run: |
+          profile=/etc/apparmor.d/usr.bin.pasta
+          data=$RUNNER_TEMP/acornd-setup
+          if [ ! -f "$profile" ]; then
+            echo "this image ships no pasta profile; nothing for the step to turn off"
+            exit 0
+          fi
+          before=$("$RUNNER_TEMP/acornd" setup --probe --data-dir "$data")
+          if ! printf '%s\n' "$before" | grep -q pastaProblem; then
+            echo "::error::the probe says the sandbox network works while pasta's profile refuses a binary outside /usr/bin — the answer /bin/true cannot give: $before"
+            exit 1
+          fi
+          printf '{"pastaProfile":true}\n' > "$RUNNER_TEMP/plan.json"
+          sudo "$RUNNER_TEMP/acornd" setup --privileged --plan "$RUNNER_TEMP/plan.json"
+          after=$("$RUNNER_TEMP/acornd" setup --probe --data-dir "$data")
+          if printf '%s\n' "$after" | grep -q pastaProblem; then
+            echo "::error::the probe still refuses pasta after setup's plan turned the profile off: $after"
+            sudo grep -i pasta /sys/kernel/security/apparmor/profiles || true
+            ls -l /etc/apparmor.d/disable/ || true
+            exit 1
+          fi
       - run: make test-bwrap
