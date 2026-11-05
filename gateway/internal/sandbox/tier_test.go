@@ -10,6 +10,8 @@ import (
 // The tier is what makes a workspace's engine its own: one manager per engine, built once, and
 // an unknown name refused rather than answered with a different engine.
 func TestTierGivesEachEngineItsOwnManager(t *testing.T) {
+	// The host engine is one of this build's engines; a test is what turns it on.
+	t.Setenv(TestHostEnv, "1")
 	dataDir := t.TempDir()
 	tier := NewTier(dataDir, "", nil)
 
@@ -43,11 +45,15 @@ func TestTierRefusesAnEngineItDoesNotImplement(t *testing.T) {
 	if err == nil {
 		t.Fatal("an unknown engine was accepted")
 	}
-	// Named, with the list: never a quiet fallback to another engine.
-	for _, want := range []string{"podman", "microsandbox", "bwrap", "host"} {
+	// Named, with the list: never a quiet fallback to another engine. The host engine is not in
+	// the list because this process was not told to have one.
+	for _, want := range []string{"podman", "microsandbox", "bwrap"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q does not mention %q", err, want)
 		}
+	}
+	if strings.Contains(err.Error(), "host") {
+		t.Fatalf("a normal install must not offer the host engine: %v", err)
 	}
 }
 
@@ -142,21 +148,38 @@ func TestTheDefaultIsTheFirstEngineThatCanRun(t *testing.T) {
 
 // The host engine isolates nothing, so no machine may hand one out: it is still an engine a
 // workspace or an install can name, which is the half that has to keep working.
-func TestTheHostEngineIsExplicitOnly(t *testing.T) {
-	for _, name := range defaultEngines() {
-		if name == "host" {
-			t.Fatal("the host engine is in the default list")
-		}
+// The host engine is off unless a test asks for it: not in a chooser, not a name a workspace may
+// record, and not a driver this process builds. It runs commands with the user's own reach, so a
+// normal install has no way to reach it at all.
+func TestTheHostEngineIsOffUnlessATestAsksForIt(t *testing.T) {
+	if HostEnabled() {
+		t.Fatal("this test is about the gate being off, and something set it")
 	}
-	if !slices.Contains(EngineNames(), "host") || !ValidEngine("host") {
-		t.Fatal("the host engine is still an engine a workspace may name")
+	if slices.Contains(ChoosableEngines(), "host") || ValidEngine("host") {
+		t.Fatal("a normal install offers the host engine")
+	}
+	if _, err := Engine(t.TempDir(), "", "host"); err == nil || !strings.Contains(err.Error(), TestHostEnv) {
+		t.Fatalf("Engine should refuse the host engine and name the switch: %v", err)
+	}
+	// It is still an engine this build has: doctor says what it is, and says it is off.
+	if !slices.Contains(EngineNames(), "host") {
+		t.Fatal("the build lost the host engine instead of switching it off")
+	}
+
+	// The switch is the whole difference, and it is what the test tiers set.
+	t.Setenv(TestHostEnv, "1")
+	if !HostEnabled() || !slices.Contains(ChoosableEngines(), "host") || !ValidEngine("host") {
+		t.Fatal("a process told to have the host engine did not get it")
+	}
+	if _, err := Engine(t.TempDir(), "", "host"); err != nil {
+		t.Fatalf("Engine(host) with the switch on: %v", err)
 	}
 }
 
-// A workspace may name only an engine this build has, which is what keeps a record from
+// A workspace may name only an engine this install offers, which is what keeps a record from
 // pointing at a sandbox nothing can make.
 func TestOnlyImplementedEnginesAreValidForAWorkspace(t *testing.T) {
-	for _, name := range append(EngineNames(), "") {
+	for _, name := range append(ChoosableEngines(), "") {
 		if !ValidEngine(name) {
 			t.Fatalf("%q should be valid", name)
 		}

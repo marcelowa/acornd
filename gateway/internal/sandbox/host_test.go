@@ -68,6 +68,8 @@ func TestHostSaysThereIsNothingToNest(t *testing.T) {
 // refused with the choices: defaulting to the host for a typo would turn a sandboxed run
 // unconfined.
 func TestEngineRefusesANameItDoesNotImplement(t *testing.T) {
+	// A test is what has the host engine; this one asks for it on purpose.
+	t.Setenv(TestHostEnv, "1")
 	dataDir := t.TempDir()
 	if _, err := Engine(dataDir, "", ""); err == nil {
 		t.Fatal("an empty name is not an engine: which one this machine runs is Tier.Default's answer")

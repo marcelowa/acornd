@@ -37,7 +37,7 @@ func TestAWorkspaceBodyRefusesWhatThisBuildDoesNotHave(t *testing.T) {
 		{
 			"an engine this build does not implement",
 			workspaceBody{Engine: text("firecracker")},
-			"sandbox engine is one of bwrap, microsandbox, host",
+			"sandbox engine is one of bwrap, microsandbox",
 		},
 	}
 	for _, test := range cases {
@@ -47,6 +47,11 @@ func TestAWorkspaceBodyRefusesWhatThisBuildDoesNotHave(t *testing.T) {
 				t.Errorf("refusal = %q, want it to say %q", got, test.want)
 			}
 		})
+	}
+	// A normal install does not offer the host engine: it runs commands unconfined, and only a
+	// process told to have it (ACORND_TEST_HOST) may name it.
+	if got := (workspaceBody{Engine: text("host")}).refusal(); got == "" {
+		t.Error("a normal install accepted the host engine")
 	}
 	// The values it does have are not refused, including the empty one: "the install's default"
 	// is a real answer, and so is "off".

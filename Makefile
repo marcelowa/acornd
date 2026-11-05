@@ -373,7 +373,7 @@ ui-check: build ## the browser suite, with a gateway started for it and stopped 
 	@# which is why it was never in CI: the suite is the valuable half, the setup is what made it
 	@# somebody's afternoon. This is the setup, once.
 	rm -rf $(UI_CHECK_DIR) && mkdir -p $(UI_CHECK_DIR)
-	@ACORND_SANDBOX_ENGINE=host ACORND_DEV_PROVIDER=1 ACORND_MODEL=faux/faux-1 \
+	@ACORND_TEST_HOST=1 ACORND_SANDBOX_ENGINE=host ACORND_DEV_PROVIDER=1 ACORND_MODEL=faux/faux-1 \
 		ACORND_WORKER=$(CURDIR)/worker \
 		$(CURDIR)/$(BIN) start --data-dir $(UI_CHECK_DIR) \
 		--workspaces-dir $(UI_CHECK_DIR)/workspaces --host 127.0.0.1 --port $(UI_CHECK_PORT) \

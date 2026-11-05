@@ -122,6 +122,9 @@ func TestDevicesAreOnByDefaultAndTheWorkspaceCanWithdrawThem(t *testing.T) {
 // engine: the default one's manager answers "no such sandbox" and the disk stays — which is what
 // a real install showed, 88 MB per forgotten bwrap workspace.
 func TestAWorkspacesSandboxIsRemovedByItsOwnEngine(t *testing.T) {
+	// The host engine is this test's stand-in for "the install's default": it is off unless a
+	// test asks for it.
+	t.Setenv(sandbox.TestHostEnv, "1")
 	tier := sandbox.NewTier(t.TempDir(), "", nil)
 	bwrap, err := tier.For("bwrap")
 	if err != nil {
@@ -245,13 +248,13 @@ func TestTheEngineListSaysWhichEnginesSubstitute(t *testing.T) {
 // old answer here was "host", which made a room somebody created in a browser unconfined
 // without anybody choosing it; empty means the tools refuse (ADR 0015).
 func TestAnInstallWithNoSandboxRecordsNoEngine(t *testing.T) {
-	t.Parallel()
+	// An install told to run on the host engine still records it: naming it is the decision, and
+	// the record is where that decision has to stay. The switch is the test's own.
+	t.Setenv(sandbox.TestHostEnv, "1")
 	none := NewWorkspaces(WorkspacesOptions{WorkspacesDir: t.TempDir()})
 	if engine := none.DefaultEngine(); engine != "" {
 		t.Fatalf("an install with no sandbox recorded %q as its default", engine)
 	}
-	// An install told to run on the host engine still records it: naming it is the decision,
-	// and the record is where that decision has to stay.
 	tier := sandbox.NewTier(t.TempDir(), "", nil)
 	host, err := tier.For("host")
 	if err != nil {

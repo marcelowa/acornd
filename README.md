@@ -191,10 +191,11 @@ workspace refuses its tools, and `acornd doctor` says what each engine is missin
   and `/dev/net/tun` from the machine, and a workspace can withdraw those with `--no-devices`.
 - A workspace can run a hypervisor inside its sandbox when the machine allows it. `--no-vm-nesting`
   turns that off.
-- `host` is not in the table because it is not a sandbox: it runs commands on the machine itself,
-  with the user's own reach, and nothing selects it on its own (`ACORND_SANDBOX_ENGINE=host`, or
-  `--sandbox host` for one workspace).
-- `acornd doctor` says which engines work here, and why one does not.
+- `host` is not in the table because it is not a sandbox, and no install has it: it runs commands
+  on the machine itself with the user's own reach, and only automated tests turn it on
+  (`ACORND_TEST_HOST=1`). It is not a default, not in the chooser, and not a name `workspace add`
+  accepts.
+- `acornd doctor` says which engines work here, why one does not, and that `host` is off.
 
 ```bash
 acornd workspace add demo ~/work/demo --sandbox bwrap

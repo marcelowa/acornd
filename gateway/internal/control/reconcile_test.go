@@ -16,6 +16,8 @@ import (
 
 func hostControl(t *testing.T) (*Control, *sandbox.Manager) {
 	t.Helper()
+	// This package's tests are the automated tests the host engine exists for.
+	t.Setenv(sandbox.TestHostEnv, "1")
 	tier := sandbox.NewTier(t.TempDir(), "", nil)
 	manager, err := tier.For("host")
 	if err != nil {

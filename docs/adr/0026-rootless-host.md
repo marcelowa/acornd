@@ -26,7 +26,7 @@ What does need root, once, and can never be vendored:
 
 | Step | Why | Cost of not doing it |
 |---|---|---|
-| `kernel.apparmor_restrict_unprivileged_userns=0` (Ubuntu 23.10+) | the kernel refuses unprivileged user namespaces to unconfined binaries | every engine that isolates anything is unavailable; `host` is left |
+| `kernel.apparmor_restrict_unprivileged_userns=0` (Ubuntu 23.10+) | the kernel refuses unprivileged user namespaces to unconfined binaries | every engine that isolates anything is unavailable, and a machine with no sandbox refuses the tools |
 | `/dev/kvm` readable (`kvm` group) | the microVM engine's device | the microVM engine is unavailable; `bwrap` still works |
 | turning off `passt`'s AppArmor profile (Ubuntu 26.04+) | the profile lets pasta start a program only from `/usr/bin` or `/bin`, and the sandbox's first process is acornd's supervisor, in neither | every workspace with its network on refuses to start |
 | `loginctl enable-linger` | a user service that survives logout | the gateway runs only while a session does |
@@ -83,8 +83,8 @@ three C libraries through our own release pipeline.
 **2. An engine a machine cannot run is not the default.** The preference order is `bwrap`,
 then `microsandbox`: bubblewrap first because it needs no hypervisor, no root, and no device;
 the microVM next as the stronger boundary when a machine can give it one. The `host` engine is
-not in that order at all: it isolates nothing, so it is what an operator names, and a machine
-that can run neither sandbox has no default and says so (ADR 0015). A workspace that names no
+not in that order at all: it isolates nothing and exists for automated tests, and a machine that
+can run neither sandbox has no default and says so (ADR 0015). A workspace that names no
 engine gets the first one in that order that can run a workspace **with its network on** — the
 driver answers that with `Egress`, separately from `Usable`, because a machine can run a sandbox
 without being able to give it a network. An engine that cannot is not a default.

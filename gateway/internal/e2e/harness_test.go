@@ -272,6 +272,10 @@ func (s *system) environment(engineEnv string, hostEngine bool, lastResort strin
 		// workspace records its own engine, and this is the test telling the install otherwise.
 		env = append(env, "ACORND_SANDBOX_ENGINE="+engineEnv)
 	}
+	if hostEngine {
+		// The host engine is off in every install: a test is the one thing that asks for it.
+		env = append(env, "ACORND_TEST_HOST=1")
+	}
 	if s.cfg.updateURL != "" {
 		env = append(env, "ACORND_UPDATE_URL="+s.cfg.updateURL)
 	}

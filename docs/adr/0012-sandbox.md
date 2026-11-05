@@ -101,9 +101,9 @@ naming what is missing — and the state frame says so (`sandbox.tools: false`,
 `sandbox.problem`), which the interface shows. The worker starts anyway, because a workspace
 whose tools refuse is still a workspace: its conversations, its history, and its settings are
 all readable. Running unconfined must be a decision somebody made, never a state the system
-drifted into. The decision is a separate engine, the `host` engine, chosen by name (`ACORND_SANDBOX_ENGINE=host` for an install-wide run): it is chosen by name,
-never by a missing hypervisor, and every surface reports that it is not isolated
-([ADR 0015](0015-host-engine.md)).
+drifted into. The one unisolated engine, `host`, is a test's: a process has it only when it was
+told to (`ACORND_TEST_HOST`), no install sets that, and every surface reports that it is not
+isolated ([ADR 0015](0015-host-engine.md)).
 
 `acornd doctor` reports the tier without changing anything: engine, version, install path,
 state path, and the reason it cannot work if it cannot.

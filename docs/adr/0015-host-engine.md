@@ -1,6 +1,6 @@
-# ADR 0015 — The host engine: an explicit, unisolated way to run the tools
+# ADR 0015 — The host engine: an unisolated engine for automated tests
 
-Status: accepted, built
+Status: accepted, built; test-only since issue 28's follow-up
 Date: 2026-10-06
 
 ## Context
@@ -23,20 +23,22 @@ fallback is still open." This is that decision.
 
 ## Decision
 
-**A second engine, `host`, selected explicitly, never a fallback.** `ACORND_SANDBOX_ENGINE=host`
-runs commands and file operations on the host, in the workspace, with the user's own permissions
-and reach. (It was a flag, `--sandbox-engine host`, until ADR 0027 moved install-wide engine
-choices to the environment.) It is never the default: a machine's default is what it can run
-without giving up isolation (ADR 0026), so a run that named no engine gets a real sandbox and,
-without a hypervisor, the tools refuse exactly as before.
+**A second engine, `host`, is a test's engine — never a fallback, never a choice.**
+`ACORND_TEST_HOST=1` is the only thing that gives a process a host engine: without it
+`Engine("host")` refuses, `ValidEngine("host")` is false, the chooser does not list it, and a
+workspace cannot record it. With it, commands and file operations run on the host, in the
+workspace, with the user's own permissions and reach. A normal install never sets it: its
+default is what it can run without giving up isolation (ADR 0026), so a run that named no engine
+gets a real sandbox and, without a hypervisor, the tools refuse exactly as before.
 
 The guardrails are part of the decision, not politeness:
 
-- **Nothing selects it by itself.** A missing hypervisor, a failed install, or an unknown
-  engine name never becomes the host engine. A typo is refused with the list of engines.
+- **Nothing offers it.** A missing hypervisor, a failed install, an unknown engine name, the
+  chooser, `--sandbox host`, or a record made on another machine never becomes the host engine.
+  `ACORND_TEST_HOST` is the switch, and only the test tiers set it.
 - **Every surface says it is not isolated.** `Driver.Isolated()` is false, the state frame
-  carries `"isolated": false`, `acornd doctor` prints it beside the other engines, and the
-  startup log says it in a sentence.
+  carries `"isolated": false`, `acornd doctor` prints it beside the other engines and says it
+  is off, and the startup log says it in a sentence.
 - **The host engine has no mounts.** Global resources are plain host paths, so there is no
   read-only enforcement: under this engine the agent can edit its own instructions. That is
   part of what "unconfined" means, and the reason it is not the default.
@@ -85,5 +87,9 @@ with its own rules and no isolation gain over the host engine for the tests.
   choosing. Both now answer nothing: the tier returns `ErrNoEngine` naming what each engine is
   missing, and a workspace made on such a machine records no engine, so its tools refuse
   (`TestAMachineWithNoSandboxHasNoDefault`, `TestAnInstallWithNoSandboxRecordsNoEngine`).
-  `host` is reached only by name — `ACORND_SANDBOX_ENGINE=host`, or `--sandbox host` on a
-  workspace — which is the decision this ADR asked for, and the only two doors to it.
+- **The engine became test-only in issue 28's follow-up.** Being explicit was not enough: an
+  install could still set `ACORND_SANDBOX_ENGINE=host` or record one workspace on it, and the
+  chooser offered it beside the sandboxes. `ACORND_TEST_HOST` is now the only door
+  (`TestTheHostEngineIsOffUnlessATestAsksForIt`), the engine list a refusal quotes and a chooser
+  shows is `ChoosableEngines`, and doctor says the engine is off rather than leaving its absence
+  to be guessed at.

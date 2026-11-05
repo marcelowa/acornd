@@ -313,9 +313,29 @@ func TestAnUnknownEngineIsRefusedAndNamed(t *testing.T) {
 	if status != http.StatusBadRequest {
 		t.Fatalf("an unknown engine: status %d, want 400; body %s", status, body)
 	}
-	for _, engine := range []string{"bwrap", "microsandbox", "host"} {
+	for _, engine := range []string{"bwrap", "microsandbox"} {
 		if !strings.Contains(body, engine) {
 			t.Errorf("the refusal should name %q so the caller learns the choices, got %q", engine, body)
+		}
+	}
+	// The host engine runs commands unconfined, so a normal install does not offer it at all:
+	// it is off unless a test asks for it (ACORND_TEST_HOST).
+	if strings.Contains(body, "host") {
+		t.Errorf("a normal install offered the host engine, got %q", body)
+	}
+	// The chooser is this list, which is what the interface shows.
+	var listing struct {
+		Engines []struct {
+			Name string `json:"name"`
+		} `json:"engines"`
+	}
+	c.get("/api/workspaces", &listing)
+	if len(listing.Engines) == 0 {
+		t.Fatal("the listing should carry the engines to choose from")
+	}
+	for _, engine := range listing.Engines {
+		if engine.Name == "host" {
+			t.Error("a normal install offered the host engine in the chooser")
 		}
 	}
 	if got := c.state("personal"); len(got.Workspaces) != 1 {

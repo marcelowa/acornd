@@ -161,8 +161,9 @@ func ValidNetwork(value string) bool {
 // how the two drift apart.
 func ValidEngine(name string) bool { return sandbox.ValidEngine(name) }
 
-// EngineNames is the list a refusal quotes, in the order the interface offers the choices.
-func EngineNames() []string { return sandbox.EngineNames() }
+// EngineNames is the list a refusal quotes, in the order the interface offers the choices: the
+// host engine is not in it unless this install was told to have one.
+func EngineNames() []string { return sandbox.ChoosableEngines() }
 
 // ValidKeepAlive is a bool on the wire; nothing to validate. It is here so that a caller reading
 // the create and update handlers sees the same shape for every workspace setting.
@@ -1210,7 +1211,7 @@ func validateWorkspace(workspace Workspace) error {
 		return fmt.Errorf("workspace %q needs a folder", workspace.Name)
 	}
 	if !sandbox.ValidEngine(workspace.Engine) {
-		return fmt.Errorf("workspace %q names an unknown sandbox engine %q (choose one of %s)", workspace.Name, workspace.Engine, strings.Join(sandbox.EngineNames(), ", "))
+		return fmt.Errorf("workspace %q names an unknown sandbox engine %q (choose one of %s)", workspace.Name, workspace.Engine, strings.Join(sandbox.ChoosableEngines(), ", "))
 	}
 	return nil
 }
@@ -1649,8 +1650,8 @@ func (w *Workspaces) Engines() []EngineInfo {
 		return w.engines
 	}
 	def := w.DefaultEngine()
-	infos := make([]EngineInfo, 0, len(sandbox.EngineNames()))
-	for _, name := range sandbox.EngineNames() {
+	infos := make([]EngineInfo, 0, len(sandbox.ChoosableEngines()))
+	for _, name := range sandbox.ChoosableEngines() {
 		infos = append(infos, w.engineInfo(name, name == def))
 	}
 	w.engines = infos

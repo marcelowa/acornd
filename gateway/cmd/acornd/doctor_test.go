@@ -17,6 +17,8 @@ import (
 // for. This holds reportManager to naming one, and to reporting the host engine's lack of
 // isolation rather than claiming a sandbox.
 func TestTheDoctorReportNamesAnEngine(t *testing.T) {
+	// Doctor reports the host engine, so this test is one of the automated tests that has it.
+	t.Setenv(sandbox.TestHostEnv, "1")
 	if _, err := reportManager(t.TempDir(), ""); err == nil {
 		t.Fatal("doctor must name the engine it reports: which one a machine runs is Tier.Default's answer")
 	}
@@ -42,6 +44,7 @@ func TestTheDoctorReportNamesAnEngine(t *testing.T) {
 // engine that is not installed has nothing to offer, and the host engine has no sandbox to
 // nest. Both answers are the same on every machine, which is what makes them testable.
 func TestDoctorNestingIsRefusedBeforeTheMachineIsChecked(t *testing.T) {
+	t.Setenv(sandbox.TestHostEnv, "1")
 	if _, err := reportManager(t.TempDir(), ""); err == nil {
 		t.Fatal("doctor must name the engine it reports: which one a machine runs is Tier.Default's answer")
 	}
@@ -132,5 +135,24 @@ func TestTheDoctorReportSaysWhenThisMachineHasNoSandbox(t *testing.T) {
 	}
 	if strings.Contains(out, "this machine will use") {
 		t.Fatalf("a machine with no sandbox must not name a default:\n%s", out)
+	}
+}
+
+// The host engine is not a row in the table, so its absence has to be said: it runs commands
+// unconfined, and only a process told to have it can use it.
+func TestTheDoctorReportSaysWhetherTheHostEngineIsOn(t *testing.T) {
+	out := captureStdout(t, func() {
+		printEngines([]engineReport{{Report: sandbox.Report{Engine: "bwrap", Installed: true, Isolated: true}}}, "bwrap", "")
+	})
+	if !strings.Contains(out, "host is off") || !strings.Contains(out, sandbox.TestHostEnv) {
+		t.Fatalf("the report should say the host engine is off, and the switch that turns it on:\n%s", out)
+	}
+
+	t.Setenv(sandbox.TestHostEnv, "1")
+	out = captureStdout(t, func() {
+		printEngines([]engineReport{{Report: sandbox.Report{Engine: "host", Installed: true}}}, "host", "")
+	})
+	if !strings.Contains(out, "host is on") {
+		t.Fatalf("with the switch the report should say the host engine is on:\n%s", out)
 	}
 }

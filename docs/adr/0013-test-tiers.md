@@ -53,7 +53,8 @@ honest.**
   `workspaceResources` (the host engine, `make test`), and `notSandbox` (the refusal path,
   `make test`). A test calls one of them, and the sandbox tier skips the other two; the two
   fast-tier kinds are told apart by the harness, which starts a resource test's gateway with
-  `ACORND_SANDBOX_ENGINE=host`.
+  `ACORND_SANDBOX_ENGINE=host` and `ACORND_TEST_HOST=1` — the switch that gives a process the
+  host engine at all (ADR 0015).
 - **"No sandbox" in the fast tier is the refusal path the product ships.** `ACORND_NO_SANDBOX`
   makes the gateway build no sandbox tier at all — the same state as a machine without a
   hypervisor — so the tools refuse and the worker starts anyway. It is never a host-backed

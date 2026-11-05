@@ -62,7 +62,7 @@ func workspaceAdd(argv []string) {
 	dataDir := flags.String("data-dir", "", "the acornd folder")
 	image := flags.String("image", "", "sandbox image for this workspace, e.g. golang:1.24 (default: "+sandbox.DefaultImage+")")
 	egress := flags.String("egress", "", `what the sandbox can reach: "public" (default), "private" (this machine's LAN and tailnet), or "off"`)
-	engine := flags.String("sandbox", "", "sandbox engine: microsandbox, bwrap, or host (default: what this machine can run)")
+	engine := flags.String("sandbox", "", "sandbox engine: microsandbox or bwrap (default: what this machine can run)")
 	keepAlive := flags.Bool("keep-alive", false, "keep this workspace's sandbox running when nobody is watching it (for daemons and cron jobs)")
 	noNesting := flags.Bool("no-vm-nesting", false, "refuse a hypervisor inside this workspace's sandbox")
 	noDevices := flags.Bool("no-devices", false, "withhold /dev/net/tun and /dev/kvm from this bwrap sandbox")
@@ -119,8 +119,8 @@ func workspaceAdd(argv []string) {
 // addUsage is the flags a person may pass, and the one decision this command makes for them.
 const addUsage = `usage: acornd workspace add <name> [folder] [flags]
 
-  --sandbox ENGINE   microsandbox (needs a hypervisor), bwrap (needs user namespaces), or
-                     host (no isolation); default: what this machine can run
+  --sandbox ENGINE   microsandbox (needs a hypervisor) or bwrap (needs user namespaces);
+                     default: what this machine can run
   --image IMAGE      the sandbox image (default: ` + sandbox.DefaultImage + `)
   --egress WHERE     public (default), private (this machine's LAN and tailnet too), or off
   --keep-alive       keep the sandbox running when nobody is watching it
@@ -167,7 +167,7 @@ func addChoices(egress, engine string) (network string, private bool, chosen str
 		return "", false, "", false
 	}
 	if !sandbox.ValidEngine(engine) {
-		fmt.Fprintf(os.Stderr, "acornd: --sandbox is one of %s\n", strings.Join(sandbox.EngineNames(), ", "))
+		fmt.Fprintf(os.Stderr, "acornd: --sandbox is one of %s\n", strings.Join(sandbox.ChoosableEngines(), ", "))
 		return "", false, "", false
 	}
 	return network, private, engine, true

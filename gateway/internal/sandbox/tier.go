@@ -114,8 +114,8 @@ func (t *Tier) canRun(name string) error {
 
 // defaultEngines are the engines a machine may hand to a workspace that named none, in the
 // order it prefers them: EngineNames without the host engine. The host stays in EngineNames
-// because a workspace may still name it — `--sandbox host`, ACORND_SANDBOX_ENGINE=host — and
-// doctor still reports it; it is only never the answer a machine gives on its own (ADR 0015).
+// because a test install can still name it, and doctor still reports what it is; it is never
+// the answer a machine gives on its own (ADR 0015).
 func defaultEngines() []string {
 	names := make([]string, 0, len(EngineNames()))
 	for _, name := range EngineNames() {

@@ -190,8 +190,8 @@ type engineReport struct {
 // cannot run here says why, and that is the answer, not a failure of the report. An empty
 // default marks none, which is what a machine with no sandbox has.
 func sandboxReports(dataDir, defaultEngine string) []engineReport {
-	reports := make([]engineReport, 0, len(sandbox.EngineNames()))
-	for _, name := range sandbox.EngineNames() {
+	reports := make([]engineReport, 0, len(sandbox.ChoosableEngines()))
+	for _, name := range sandbox.ChoosableEngines() {
 		manager, err := reportManager(dataDir, name)
 		if err != nil {
 			reports = append(reports, engineReport{Engine: name, Problem: err.Error(), Default: name == defaultEngine})
@@ -243,9 +243,22 @@ func printEngines(engines []engineReport, defaultEngine, defaultProblem string) 
 			fmt.Println("\nno engine can run here")
 		}
 		fmt.Println("commands and file tools will refuse until one can: acornd setup says what this machine needs")
+		printHostEngineNote()
 		return
 	}
 	fmt.Printf("\n* this machine will use %s\n", defaultEngine)
+	printHostEngineNote()
+}
+
+// printHostEngineNote says the host engine exists and is off, rather than leaving a person to
+// find it in the code: it runs commands unconfined, so an install never has it unless it was
+// told to, and the only thing that tells it is a test.
+func printHostEngineNote() {
+	if sandbox.HostEnabled() {
+		fmt.Printf("\nhost is on: it runs commands on this machine with your own reach (%s)\n", sandbox.TestHostEnv)
+		return
+	}
+	fmt.Printf("\nhost is off: it runs commands unconfined, and only automated tests enable it (%s=1)\n", sandbox.TestHostEnv)
 }
 
 // printEngineDetail is the lines under an engine's row: where it is, whether it can nest, and
