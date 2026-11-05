@@ -558,9 +558,7 @@ func (w *Workspaces) ClaimOwner(email string) error {
 	// come from that copy: the registry alone would let the claim through and refuse the new owner's next press.
 	w.mu.RLock()
 	records := make(map[string]Workspace, len(w.registry))
-	for name, workspace := range w.registry {
-		records[name] = workspace
-	}
+	maps.Copy(records, w.registry)
 	w.mu.RUnlock()
 	for name, workspace := range records {
 		if live := w.controlFor(name); live != nil {

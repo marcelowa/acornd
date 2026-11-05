@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"slices"
 	"strings"
 )
 
@@ -45,12 +46,7 @@ func kvmGroupNeeded() bool {
 	if err != nil {
 		return false
 	}
-	for _, id := range ids {
-		if id == group.Gid {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ids, group.Gid)
 }
 
 // startUnderKVMGroup runs this process again under `sg kvm`, once, and returns its exit status. It is called
@@ -66,8 +62,7 @@ func startUnderKVMGroup(argv []string) error {
 	command.Env = append(os.Environ(), "ACORND_KVM_SG=1")
 	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := command.Run(); err != nil {
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
+		if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 			os.Exit(exit.ExitCode())
 		}
 		return fmt.Errorf("sg kvm: %w", err)

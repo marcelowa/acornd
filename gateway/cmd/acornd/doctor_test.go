@@ -109,7 +109,7 @@ func TestDoctorNamesAFolderWithNoRecord(t *testing.T) {
 func TestTheDoctorReportSaysWhenAnEngineCannotCarryANetwork(t *testing.T) {
 	out := captureStdout(t, func() {
 		printEngines([]engineReport{{
-			Report: sandbox.Report{Engine: "bwrap", Installed: true, Isolated: true},
+			Engine: "bwrap", Installed: true, Isolated: true,
 			Egress: "pasta cannot start the supervisor it is given: Failed to start command or shell: Permission denied",
 		}}, "host", "")
 	})
@@ -123,8 +123,8 @@ func TestTheDoctorReportSaysWhenAnEngineCannotCarryANetwork(t *testing.T) {
 func TestTheDoctorReportSaysWhenThisMachineHasNoSandbox(t *testing.T) {
 	out := captureStdout(t, func() {
 		printEngines([]engineReport{
-			{Report: sandbox.Report{Engine: "bwrap", Problem: "no user namespace"}},
-			{Report: sandbox.Report{Engine: "microsandbox", Problem: "no /dev/kvm"}},
+			{Engine: "bwrap", Problem: "no user namespace"},
+			{Engine: "microsandbox", Problem: "no /dev/kvm"},
 		}, "", "no sandbox engine can run on this machine: bwrap: no user namespace; microsandbox: no /dev/kvm")
 	})
 	if !strings.Contains(out, "no sandbox engine can run on this machine") {
@@ -142,7 +142,7 @@ func TestTheDoctorReportSaysWhenThisMachineHasNoSandbox(t *testing.T) {
 // unconfined, and only a process told to have it can use it.
 func TestTheDoctorReportSaysWhetherTheHostEngineIsOn(t *testing.T) {
 	out := captureStdout(t, func() {
-		printEngines([]engineReport{{Report: sandbox.Report{Engine: "bwrap", Installed: true, Isolated: true}}}, "bwrap", "")
+		printEngines([]engineReport{{Engine: "bwrap", Installed: true, Isolated: true}}, "bwrap", "")
 	})
 	if !strings.Contains(out, "host is off") || !strings.Contains(out, sandbox.TestHostEnv) {
 		t.Fatalf("the report should say the host engine is off, and the switch that turns it on:\n%s", out)
@@ -150,7 +150,7 @@ func TestTheDoctorReportSaysWhetherTheHostEngineIsOn(t *testing.T) {
 
 	t.Setenv(sandbox.TestHostEnv, "1")
 	out = captureStdout(t, func() {
-		printEngines([]engineReport{{Report: sandbox.Report{Engine: "host", Installed: true}}}, "host", "")
+		printEngines([]engineReport{{Engine: "host", Installed: true}}, "host", "")
 	})
 	if !strings.Contains(out, "host is on") {
 		t.Fatalf("with the switch the report should say the host engine is on:\n%s", out)

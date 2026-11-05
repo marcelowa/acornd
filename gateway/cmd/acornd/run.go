@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -413,17 +414,14 @@ func lastLogLine(path string) (string, bool) {
 		return "", false
 	}
 	const window = 8 << 10
-	start := info.Size() - window
-	if start < 0 {
-		start = 0
-	}
+	start := max(info.Size()-window, 0)
 	buf := make([]byte, info.Size()-start)
 	if _, err := file.ReadAt(buf, start); err != nil && !errors.Is(err, io.EOF) {
 		return "", false
 	}
 	lines := strings.Split(strings.TrimRight(string(buf), "\n"), "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		if line := strings.TrimSpace(lines[i]); line != "" {
+	for _, line := range slices.Backward(lines) {
+		if line := strings.TrimSpace(line); line != "" {
 			return line, true
 		}
 	}
