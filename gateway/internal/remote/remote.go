@@ -513,7 +513,7 @@ func pickTunnel(tunnels []Tunnel, id, name string) (Tunnel, bool) {
 // shared and a tunnel holds one route: two installs that both called theirs "acornd" joined one tunnel, and the
 // second hostname fell through to the catch-all. The state's tunnel id keeps an install on the tunnel it made.
 func tunnelNameFor(hostname string) string {
-	label := strings.SplitN(strings.ToLower(strings.TrimSpace(hostname)), ".", 2)[0]
+	label, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(hostname)), ".")
 	var kept strings.Builder
 	for _, r := range label {
 		switch {

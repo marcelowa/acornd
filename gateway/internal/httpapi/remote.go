@@ -341,7 +341,7 @@ func (s *Server) reconcileAfterPeople() {
 	// address back in, until the next boot (ADR 0033 §3).
 	s.peopleReconcile.Lock()
 	defer s.peopleReconcile.Unlock()
-	for attempt := 0; attempt < 3; attempt++ {
+	for range 3 {
 		admitted, err := s.gate.People.Admitted()
 		if err != nil {
 			log.Printf("tunnel: the door did not follow the book: %v", err)

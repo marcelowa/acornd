@@ -343,13 +343,11 @@ func profileLoaded() bool {
 	if err != nil {
 		return false
 	}
-	for _, line := range strings.Split(string(payload), "\n") {
+	for line := range strings.SplitSeq(string(payload), "\n") {
 		// A line is "<name> (<mode>)", so the name is what comes before the first space.
 		name, _, _ := strings.Cut(strings.TrimSpace(line), " ")
-		for _, word := range strings.FieldsFunc(name, func(r rune) bool { return r == '/' || r == '.' }) {
-			if word == "pasta" {
-				return true
-			}
+		if slices.Contains(strings.FieldsFunc(name, func(r rune) bool { return r == '/' || r == '.' }), "pasta") {
+			return true
 		}
 	}
 	return false
