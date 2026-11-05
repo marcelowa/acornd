@@ -1,8 +1,10 @@
 package main
 
 import (
+	"os"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -18,7 +20,7 @@ func TestRootActsForTheAccountTheEvidenceNames(t *testing.T) {
 	// The folder belongs to this account, which is the evidence that survives a container.
 	if owner, err := folderOwner(dir); err != nil {
 		t.Fatalf("folderOwner: %v", err)
-	} else if owner == "" {
+	} else if owner.Name == "" {
 		t.Fatal("a folder always has an owner")
 	}
 
@@ -44,9 +46,9 @@ func TestRootActsForTheAccountTheEvidenceNames(t *testing.T) {
 
 	// Nothing to go on is still an answer: root, with a basis that says why.
 	t.Setenv("SUDO_USER", "")
-	savedLookup := serviceUserLookup
-	serviceUserLookup = func() string { return "" }
-	t.Cleanup(func() { serviceUserLookup = savedLookup })
+	saved := serviceUser
+	serviceUser = func() string { return "" }
+	t.Cleanup(func() { serviceUser = saved })
 	account, err := accountFor("", true, filepath.Join(dir, "missing"))
 	if err != nil {
 		t.Fatal(err)
@@ -59,11 +61,42 @@ func TestRootActsForTheAccountTheEvidenceNames(t *testing.T) {
 	}
 }
 
-// The service unit's account is the machine's own record, and it beats the guess.
-func TestTheServiceAccountIsWhatItSaysItIs(t *testing.T) {
-	saved := serviceUserLookup
-	t.Cleanup(func() { serviceUserLookup = saved })
-	serviceUserLookup = func() string { return currentAccount(t) }
+// The folder's owner is evidence even when this machine has no record of that number: a container
+// image that bakes files as a uid, or an install whose account was deleted. "?" is the name that
+// keeps the answer, and the numbers stay the folder's, so what a folder belongs to is answered the
+// same wherever this runs.
+func TestAFolderOwnedByANumberWithNoAccountNamesTheNumber(t *testing.T) {
+	missing := absentAccountID(t)
+	account := accountForNumbers(missing, missing)
+	if account.Name != unknownAccount {
+		t.Errorf("name = %q, want %q", account.Name, unknownAccount)
+	}
+	if account.UID != missing || account.GID != missing {
+		t.Errorf("numbers = %d:%d, want the owner's %d:%d", account.UID, account.GID, missing, missing)
+	}
+	// The other half of the same function: a number this machine does have keeps its record.
+	self := accountForNumbers(uint32(os.Getuid()), uint32(os.Getgid()))
+	if self.Name != currentAccount(t) || self.DataDir == "" {
+		t.Errorf("this account resolved to %+v, want %q and its home", self, currentAccount(t))
+	}
+}
+
+// A machine with no systemd to ask answers with no account at all: PATH is the only thing that
+// decides what systemctl is, so this is a claim about the lookup rather than about the runner.
+func TestAMachineWithNoSystemdHasNoServiceAccount(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	if name := serviceUser(); name != "" {
+		t.Errorf("no systemd is no service account, got %q", name)
+	}
+}
+
+// The service unit's account is the machine's own record, and it beats the guess. What the machine
+// says is the data this test supplies, so the assertion is about actingFor and not about systemd
+// being installed where it runs.
+func TestTheServiceAccountIsWhatItSaysIsIt(t *testing.T) {
+	saved := serviceUser
+	t.Cleanup(func() { serviceUser = saved })
+	serviceUser = func() string { return currentAccount(t) }
 	// No folder to own and no SUDO_USER: the unit is the only thing left that can say.
 	t.Setenv("SUDO_USER", "")
 	account, found := actingFor(filepath.Join(t.TempDir(), "missing"))
@@ -72,6 +105,23 @@ func TestTheServiceAccountIsWhatItSaysItIs(t *testing.T) {
 	}
 	if account.Basis != "the acornd service runs as "+currentAccount(t) {
 		t.Errorf("basis = %q", account.Basis)
+	}
+}
+
+// A number with no account has no home, no groups and no shell to be checked with, so setup says
+// which number it found and how to name an account instead of checking the machine as root and
+// reporting root's answers for workspaces that run as somebody else.
+func TestSetupWillNotActForANumberWithNoAccount(t *testing.T) {
+	missing := absentAccountID(t)
+	dir := t.TempDir()
+	_, err := probeAs(setupAccount{Name: unknownAccount, UID: missing, GID: missing}, dir)
+	if err == nil {
+		t.Fatal("a number with no account is not an account to check")
+	}
+	for _, want := range []string{strconv.FormatUint(uint64(missing), 10), "--for", dir} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal should carry %q: %v", want, err)
+		}
 	}
 }
 
@@ -92,9 +142,22 @@ func TestAnAccountKnowsItsGroups(t *testing.T) {
 func TestNoServiceAccountWhenThereIsNoService(t *testing.T) {
 	// The machine decides this, not the test: what matters is that the answer is a name or empty,
 	// never a panic or "root".
-	if name := serviceUserLookup(); name == "root" {
+	if name := serviceUser(); name == "root" {
 		t.Error("root is not an answer here: it is the absence of one")
 	}
+}
+
+// absentAccountID is a number this machine has no account for, found rather than assumed: 12345 is
+// absent on nearly every machine, and a test that said so would be asserting the passwd file.
+func absentAccountID(t *testing.T) uint32 {
+	t.Helper()
+	for id := 12345; id < 12445; id++ {
+		if _, err := user.LookupId(strconv.Itoa(id)); err != nil {
+			return uint32(id)
+		}
+	}
+	t.Fatal("this machine has an account for every id in 12345..12444")
+	return 0
 }
 
 func currentAccount(t *testing.T) string {

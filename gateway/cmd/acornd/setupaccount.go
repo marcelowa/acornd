@@ -11,6 +11,12 @@ import (
 	"strings"
 )
 
+// unknownAccount is the name of a number this machine has no record of. A folder can belong to one
+// — a container image that bakes files as a uid, an account deleted after the install — and that
+// number is still the answer to "who does this install belong to", so it is named rather than
+// dropped.
+const unknownAccount = "?"
+
 // setupAccount is the account the question is about. "Can this machine run a workspace" is really
 // "can *this account* run one", and on a machine where root installed acornd the two are not
 // the same: root can open /dev/kvm and make a user namespace whatever the policy says, so probing
@@ -69,11 +75,9 @@ func actingFor(dataDir string) (setupAccount, bool) {
 			return account, true
 		}
 	}
-	if owner, err := folderOwner(dataDir); err == nil && owner != "" {
-		if account, err := lookupAccount(owner); err == nil {
-			account.Basis = "owns " + dataDir
-			return account, true
-		}
+	if owner, err := folderOwner(dataDir); err == nil {
+		owner.Basis = "owns " + dataDir
+		return owner, true
 	}
 	// A machine where acornd is a service says so itself, which is the answer when the folder
 	// root would look in does not exist — the common case when acornd was installed for an
@@ -88,18 +92,11 @@ func actingFor(dataDir string) (setupAccount, bool) {
 }
 
 // serviceUser is the account the acornd system service runs as, or empty when there is no such
-// unit or no systemd to ask. It is the machine's own record of who runs this, which beats the
-// guess "root, because nothing said otherwise".
-func serviceUser() string {
-	if _, err := exec.LookPath("systemctl"); err != nil {
-		return ""
-	}
-	return serviceUserLookup()
-}
-
-// serviceUserLookup is the machine's answer, as a variable: a test can say there is a unit without
-// installing one.
-var serviceUserLookup = func() string {
+// unit or no systemd to ask: systemctl says both by failing, so its failure is the answer and there
+// is nothing extra to probe for first. It is the machine's own record of who runs this, which beats
+// the guess "root, because nothing said otherwise"; and it is a variable so a test can say what
+// this machine says — a unit, or a machine without systemd — without installing either.
+var serviceUser = func() string {
 	out, err := exec.Command("systemctl", "show", "acornd.service", "--property=User", "--value").Output()
 	if err != nil {
 		return ""
@@ -112,37 +109,53 @@ var serviceUserLookup = func() string {
 }
 
 // folderOwner is the account the install folder belongs to: the same account that will run the
-// sandbox, because a sandbox is made in that folder.
-func folderOwner(dataDir string) (string, error) {
+// sandbox, because a sandbox is made in that folder. The owner's number is the evidence, not the
+// name, because the name is the half this machine may not have.
+func folderOwner(dataDir string) (setupAccount, error) {
 	info, err := os.Stat(dataDir)
 	if err != nil {
-		return "", err
+		return setupAccount{}, err
 	}
-	uid := statOwner(info)
-	owner, err := user.LookupId(strconv.Itoa(int(uid)))
-	if err != nil {
-		return "", err
+	uid, gid := statOwner(info)
+	return accountForNumbers(uid, gid), nil
+}
+
+// accountForNumbers is the account a number names here, or "?" when it names none. A folder owned
+// by a number the passwd file does not mention still says who the install belongs to; resolving the
+// name and dropping the number was how root fell through to "nothing says otherwise" and checked
+// the machine as itself.
+func accountForNumbers(uid, gid uint32) setupAccount {
+	if record, err := user.LookupId(strconv.Itoa(int(uid))); err == nil {
+		if account, err := accountOf(record); err == nil {
+			return account
+		}
 	}
-	return owner.Username, nil
+	return setupAccount{Name: unknownAccount, UID: uid, GID: gid}
 }
 
 // lookupAccount resolves a name to the numbers an exec needs, with its groups: the kvm group is
 // the whole point of one of the probes, and a child without it would answer "no" for a machine
 // that is fine.
 func lookupAccount(name string) (setupAccount, error) {
-	account, err := user.Lookup(name)
+	record, err := user.Lookup(name)
 	if err != nil {
 		return setupAccount{}, fmt.Errorf("no account %q here", name)
 	}
-	uid, err := accountID(account.Uid)
+	return accountOf(record)
+}
+
+// accountOf is one record from this machine, in the shape an exec needs: the name, the numbers, and
+// the home the child gets.
+func accountOf(record *user.User) (setupAccount, error) {
+	uid, err := accountID(record.Uid)
 	if err != nil {
 		return setupAccount{}, err
 	}
-	gid, err := accountID(account.Gid)
+	gid, err := accountID(record.Gid)
 	if err != nil {
 		return setupAccount{}, err
 	}
-	return setupAccount{Name: account.Username, UID: uid, GID: gid, DataDir: account.HomeDir}, nil
+	return setupAccount{Name: record.Username, UID: uid, GID: gid, DataDir: record.HomeDir}, nil
 }
 
 // accountID is one of an account's numbers in the width a process is given it. The decimal comes
@@ -156,10 +169,24 @@ func accountID(value string) (uint32, error) {
 	return uint32(id), nil
 }
 
+// cannotCheck says why this account cannot be asked about the machine, or nil when it can. A number
+// with no record has no home, no groups and no shell to be checked with; checking as root instead
+// would report root's kvm and root's namespaces for workspaces that run as somebody else. Say which
+// number it is, and which account to name in its place.
+func cannotCheck(who setupAccount, dataDir string) error {
+	if who.Name != unknownAccount {
+		return nil
+	}
+	return fmt.Errorf("the install folder belongs to uid %d, which has no account here: pass --for, or chown %s to an account this machine has", who.UID, dataDir)
+}
+
 // probeAs answers the probes for one account. For this process's own account that is a direct
 // question; for another one it is the same binary run with that account's credentials, which is
 // how root can ask without sudo, without a password, and without a shell.
 func probeAs(who setupAccount, dataDir string) (setupReport, error) {
+	if err := cannotCheck(who, dataDir); err != nil {
+		return setupReport{}, err
+	}
 	if report, ok := probeInProcess(who, dataDir); ok {
 		return report, nil
 	}
@@ -191,13 +218,19 @@ func probeAs(who setupAccount, dataDir string) (setupReport, error) {
 	}
 	output, err := command.Output()
 	if err != nil {
-		var exit *exec.ExitError
-		if errors.As(err, &exit) && len(exit.Stderr) > 0 {
-			return setupReport{}, fmt.Errorf("checking as %s: %s", who.Name, strings.TrimSpace(string(exit.Stderr)))
-		}
-		return setupReport{}, fmt.Errorf("checking as %s: %w", who.Name, err)
+		return setupReport{}, fmt.Errorf("checking as %s: %w", who.Name, probeFailure(err))
 	}
 	return decodeProbe(output)
+}
+
+// probeFailure is a child that would not answer as itself: the sentence it printed is the whole
+// value, and an exit status without one is the error it was.
+func probeFailure(err error) error {
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && len(exit.Stderr) > 0 {
+		return errors.New(strings.TrimSpace(string(exit.Stderr)))
+	}
+	return err
 }
 
 // probeInProcess answers in this process when the account is this one and the session is not missing a group the

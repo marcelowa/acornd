@@ -310,21 +310,38 @@ func TestSetupChecksTheAccountThatRunsAcornd(t *testing.T) {
 }
 
 // Root without sudo checks the folder's owner, and says where the name came from so a wrong guess
-// is visible in the output rather than discovered later.
+// is visible in the output rather than discovered later. The owner is a number this machine has no
+// account for, which is the case that used to fall through to "nothing says otherwise" — on the
+// very machine whose folder is the evidence about who runs it.
 func TestSetupTakesTheAccountFromTheInstallFolder(t *testing.T) {
 	if os.Geteuid() != 0 {
-		t.Skip("only root can be told which account to act for")
+		// Making a folder belong to another account is the privilege; the decision itself is
+		// covered without it by TestAFolderOwnedByANumberWithNoAccountNamesTheNumber.
+		t.Skip("only root can make a folder belong to another account")
 	}
 	dataDir := t.TempDir()
-	if err := os.Chown(dataDir, 12345, 12345); err != nil {
-		t.Skipf("cannot change the folder's owner here: %v", err)
+	missing := absentAccountID(t)
+	if err := os.Chown(dataDir, int(missing), int(missing)); err != nil {
+		t.Fatalf("cannot change the folder's owner here: %v", err)
 	}
+	// Neither sudo nor a service unit says anything: the folder is the only evidence there is.
+	t.Setenv("SUDO_USER", "")
+	saved := serviceUser
+	serviceUser = func() string { return "" }
+	t.Cleanup(func() { serviceUser = saved })
+
 	account, err := accountFor("", true, dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if account.Name != "?" && !strings.Contains(account.Basis, "owns") {
-		t.Fatalf("the basis should say the folder decided it: %+v", account)
+	if account.Name != unknownAccount {
+		t.Errorf("name = %q, want %q for a number with no account", account.Name, unknownAccount)
+	}
+	if account.UID != missing || account.GID != missing {
+		t.Errorf("numbers = %d:%d, want the folder's %d:%d", account.UID, account.GID, missing, missing)
+	}
+	if want := "owns " + dataDir; account.Basis != want {
+		t.Errorf("basis = %q, want %q", account.Basis, want)
 	}
 }
 
