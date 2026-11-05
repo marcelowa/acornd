@@ -930,24 +930,34 @@ func leafPEM(t *testing.T) []byte {
 
 // The address a caller names is the address it gets: a sandbox's argv carries the port pasta
 // forwards, so a proxy that bound something else would leave a workspace forwarding into nothing.
+//
+// The test holds the taken port itself instead of reading one off a proxy it then stops using. A
+// socket is closed by a finalizer once nothing refers to it (net.fd_posix.go's setAddr), so an
+// address that came from a `first` nobody mentions again can be free by the time it is asked for,
+// and the test would be asserting against the collector's timing rather than against New. Holding
+// it is also the production case this is named for: the address arrives already taken.
 func TestTheProxyBindsTheAddressItIsGiven(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	first, err := New(dir, Config{Addr: "127.0.0.1:0"})
+	held, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("new proxy: %v", err)
+		t.Fatalf("hold an address: %v", err)
 	}
-	addr := first.Addr()
-	second, err := New(dir, Config{Addr: addr})
-	if err == nil {
+	defer func() { _ = held.Close() }()
+	addr := held.Addr().String()
+	if second, err := New(dir, Config{Addr: addr}); err == nil {
 		t.Fatalf("a port already bound should be refused, got %s", second.Addr())
+	} else if !strings.Contains(err.Error(), "binding") {
+		// A refusal for some other reason would let this test pass without ever asking New to
+		// bind a taken port, which is the only thing it is here to check.
+		t.Fatalf("a taken address should be refused by the bind, got %v", err)
 	}
 	third, err := New(dir, Config{Addr: "127.0.0.1:0"})
 	if err != nil {
 		t.Fatalf("a fresh address should be accepted: %v", err)
 	}
 	if third.Addr() == addr {
-		t.Log("the kernel reused the port, which is its business; the assertion above is the one that matters")
+		t.Errorf("a fresh bind reported the port the test is still holding: %s", addr)
 	}
 }
 
