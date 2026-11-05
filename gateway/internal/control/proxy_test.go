@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -117,7 +118,7 @@ func TestClosingTheWorkspaceStopsItsProxy(t *testing.T) {
 	for {
 		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
 		if err != nil {
-			return
+			break
 		}
 		_ = conn.Close()
 		if time.Now().After(deadline) {
@@ -125,6 +126,10 @@ func TestClosingTheWorkspaceStopsItsProxy(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	// The port has to be closed because this workspace closed, not because the collector freed a
+	// listener nothing referred to any more (net/fd_posix.go's setAddr sets that finalizer). Keeping
+	// the proxy reachable to here is what makes the loop above evidence about Close.
+	runtime.KeepAlive(proxy)
 }
 
 // A workspace with its network off has no pasta, and pasta is what carries the proxy. Delivering a
