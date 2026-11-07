@@ -91,7 +91,7 @@ type updateStatus struct {
 }
 
 func runUpdateThroughGateway(dir, address string, checkOnly, assumeYes, stopRuns bool) {
-	status, err := gatewayUpdate(dir, address, "/api/update/check", nil)
+	status, err := gatewayUpdate(dir, address, "/api/update/check", nil, checkTimeout)
 	if err != nil {
 		logFatal(err)
 	}
@@ -127,7 +127,7 @@ func applyUpdate(dir, address, tag string, stopRuns bool) {
 	if stopRuns {
 		drain = "stop"
 	}
-	_, err := gatewayUpdate(dir, address, "/api/update/apply", map[string]string{"tag": tag, "drain": drain})
+	_, err := gatewayUpdate(dir, address, "/api/update/apply", map[string]string{"tag": tag, "drain": drain}, applyTimeout)
 	if err != nil {
 		if errors.Is(err, errRunsActive) && !stopRuns {
 			logFatal(fmt.Errorf("%w (rerun with --stop-runs to stop them)", err))
@@ -140,9 +140,19 @@ func applyUpdate(dir, address, tag string, stopRuns bool) {
 // errRunsActive is the gateway's 409: work is in flight and the default is to wait for it.
 var errRunsActive = errors.New("runs are active")
 
+// checkTimeout is how long the CLI waits for a check: it reaches the network, so it waits longer
+// than a status call would, and no longer than a broken answer deserves.
+const checkTimeout = 60 * time.Second
+
+// applyTimeout is how long an apply may take, on either path: it downloads the release, so the
+// wait is the link's, not an API call's. The update tier bounds each transfer at fifteen minutes;
+// this net covers a binary plus its worker tarball and keeps a wedged apply from hanging a script.
+const applyTimeout = 20 * time.Minute
+
 // gatewayUpdate is one JSON call to the running gateway, with the answer decoded into the same
-// status the interface reads.
-func gatewayUpdate(dir, address, path string, body any) (updateStatus, error) {
+// status the interface reads. The timeout is the call's own: a check reaches the network and is
+// quick, an apply is a download and is not.
+func gatewayUpdate(dir, address, path string, body any, timeout time.Duration) (updateStatus, error) {
 	var payload io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -159,8 +169,7 @@ func gatewayUpdate(dir, address, path string, body any) (updateStatus, error) {
 		request.Header.Set("content-type", "application/json")
 	}
 	prove(request, dir)
-	// A check reaches the network, so it waits longer than a status call would.
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := &http.Client{Timeout: timeout}
 	response, err := client.Do(request)
 	if err != nil {
 		return updateStatus{}, err
@@ -188,9 +197,10 @@ func runUpdateOffline(dir string, checkOnly, assumeYes bool) {
 	if err := manager.Open(); err != nil {
 		logFatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	// The check is metadata: a slow answer is a broken one, and two minutes is generous for it.
+	checkCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if _, err := manager.Check(ctx); err != nil {
+	if _, err := manager.Check(checkCtx); err != nil {
 		logFatal(err)
 	}
 	status := manager.Status()
@@ -212,7 +222,12 @@ func runUpdateOffline(dir string, checkOnly, assumeYes bool) {
 			return
 		}
 	}
-	if err := manager.Apply(ctx, update.ApplyOptions{Tag: status.Latest, Drain: "stop"}); err != nil {
+	// The apply is a 21 MB download that takes as long as the link does, so it does not inherit
+	// the check's deadline: the update tier bounds every transfer itself (fifteen minutes each),
+	// and this outer net is only here so a wedged apply cannot keep a script waiting forever.
+	applyCtx, cancelApply := context.WithTimeout(context.Background(), applyTimeout)
+	defer cancelApply()
+	if err := manager.Apply(applyCtx, update.ApplyOptions{Tag: status.Latest, Drain: "stop"}); err != nil {
 		logFatal(err)
 	}
 	fmt.Printf("installed %s; it takes effect the next time acornd starts\n", status.Latest)

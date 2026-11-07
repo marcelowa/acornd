@@ -108,7 +108,7 @@ func TestAGatewayAnswerBecomesAStatusOrAReason(t *testing.T) {
 				_, _ = w.Write([]byte(test.body))
 			}))
 			defer server.Close()
-			got, err := gatewayUpdate("", strings.TrimPrefix(server.URL, "http://"), "/api/update/check", nil)
+			got, err := gatewayUpdate("", strings.TrimPrefix(server.URL, "http://"), "/api/update/check", nil, checkTimeout)
 			if test.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
 					t.Fatalf("err = %v, want it to say %q", err, test.wantErr)
@@ -143,7 +143,7 @@ func TestAnApplySendsItsBodyAsJSON(t *testing.T) {
 	}))
 	defer server.Close()
 	if _, err := gatewayUpdate("", strings.TrimPrefix(server.URL, "http://"), "/api/update/apply",
-		map[string]string{"tag": "v1.1.0", "drain": "stop"}); err != nil {
+		map[string]string{"tag": "v1.1.0", "drain": "stop"}, applyTimeout); err != nil {
 		t.Fatal(err)
 	}
 	if seen["tag"] != "v1.1.0" || seen["drain"] != "stop" {

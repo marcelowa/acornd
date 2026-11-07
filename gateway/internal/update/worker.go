@@ -137,11 +137,15 @@ func (m *Manager) fetchBun(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 	url := fmt.Sprintf("%s/bun-v%s/%s.zip", m.bunBase(), BunVersion, platform)
+	// The runtime is a 35 MB zip: the same slow-link problem as a release asset, so the same
+	// client and bound, and the body lands on disk before it is unzipped.
+	ctx, cancel := m.boundedTransfer(ctx)
+	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	response, err := m.client.Do(request)
+	response, err := m.assetClient.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("update: cannot download bun %s: %w", BunVersion, err)
 	}
@@ -149,11 +153,20 @@ func (m *Manager) fetchBun(ctx context.Context) ([]byte, error) {
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("update: bun download answered %s", response.Status)
 	}
-	payload, err := io.ReadAll(io.LimitReader(response.Body, 256<<20))
+	temp, err := os.CreateTemp(m.dataDir, ".bun-*.zip")
+	if err != nil {
+		return nil, fmt.Errorf("update: cannot stage the bun download: %w", err)
+	}
+	staged := temp.Name()
+	defer func() { _ = os.Remove(staged) }()
+	written, err := copyAsset("bun", temp, response.Body)
+	if closeErr := temp.Close(); err == nil && closeErr != nil {
+		err = closeErr
+	}
 	if err != nil {
 		return nil, err
 	}
-	return unzipBun(payload)
+	return unzipBun(staged, written)
 }
 
 // installBun writes the runtime atomically, like the binary swaps: a half-written runtime is worse
@@ -187,9 +200,15 @@ func (m *Manager) installBun(binary []byte) error {
 }
 
 // unzipBun pulls the bun binary out of a release zip. The archive holds one
-// top directory with the binary inside; anything else in it is ignored.
-func unzipBun(payload []byte) ([]byte, error) {
-	reader, err := zip.NewReader(bytes.NewReader(payload), int64(len(payload)))
+// top directory with the binary inside; anything else in it is ignored. It
+// reads the archive from disk, so the download never had to be a []byte.
+func unzipBun(path string, size int64) ([]byte, error) {
+	archive, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = archive.Close() }()
+	reader, err := zip.NewReader(archive, size)
 	if err != nil {
 		return nil, fmt.Errorf("update: bun zip unreadable: %w", err)
 	}
@@ -260,18 +279,16 @@ func (m *Manager) stageWorker(ctx context.Context, tag string) error {
 	if asset.URL == "" {
 		return fmt.Errorf("update: release %s has no %s", release.Tag, WorkerTarball)
 	}
-	tarball, err := m.download(ctx, asset)
-	if err != nil {
-		return err
-	}
 	list, err := m.checksumList(ctx, release)
 	if err != nil {
 		return err
 	}
-	if err := verify(list, tarball, release.Tag); err != nil {
+	staged, err := m.verifiedAsset(ctx, asset, list, release.Tag)
+	if err != nil {
 		return err
 	}
-	return writeData(m.workerPending(), tarball)
+	// Staged by rename: the download is already in the install folder and nothing else opens it.
+	return os.Rename(staged, m.workerPending())
 }
 
 // releaseFor fetches one release by tag, reusing the cached latest when

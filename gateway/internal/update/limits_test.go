@@ -1,13 +1,19 @@
 package update
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -257,12 +263,12 @@ func TestADownloadCarriesTheTokenAndTheAcceptHeader(t *testing.T) {
 
 	// An asset with an id is fetched through the API, which is where the Accept header is set.
 	manager.latestURL = server.URL + "/repos/owner/repo/releases/latest"
-	body, err := manager.download(context.Background(), Asset{ID: 7, Name: "acornd"})
-	if err != nil {
+	var body bytes.Buffer
+	if err := manager.download(context.Background(), Asset{ID: 7, Name: "acornd"}, &body); err != nil {
 		t.Fatal(err)
 	}
-	if string(body) != "the file" {
-		t.Errorf("body = %q", body)
+	if body.String() != "the file" {
+		t.Errorf("body = %q", body.String())
 	}
 	if authorization != "Bearer secret-token" {
 		t.Errorf("Authorization = %q", authorization)
@@ -287,5 +293,148 @@ func TestTheReleaseSourceCanBeAMirror(t *testing.T) {
 	t.Setenv("ACORND_UPDATE_URL", "https://mirror.example/whatever")
 	if got := New(t.TempDir(), "").apiBase(); got != defaultAPIBase {
 		t.Errorf("a URL without the release path should not become an API base, got %q", got)
+	}
+}
+
+// A release asset is 21 MB and a link is not always fast: v0.33.17 took 266 s at 81 KB/s. A client
+// that bounds the whole exchange at 30 s turns that into "context deadline exceeded (Client.Timeout
+// or context cancellation while reading body)", which is the bug this test pins. The durations are
+// the shape, not the measurement: the metadata client keeps a 50 ms total deadline and the asset
+// takes about 120 ms to arrive, so splitting the two clients is what decides the outcome. It stays
+// short on purpose: a suite that sleeps is a per-mutant cost in mutation testing.
+func TestASlowDownloadOutlivesTheCheckTimeout(t *testing.T) {
+	manager, _ := testManager(t)
+	binary := []byte(versionScript("v0.9.0"))
+	// Not a real tarball: Apply only stages it, and the new gateway unpacks at boot.
+	tarball := []byte("worker sources, arriving slowly")
+	// The short client is the one metadata uses. A download sent through it fails on any link
+	// slower than this, which is the whole point.
+	manager.client = &http.Client{Timeout: 50 * time.Millisecond}
+
+	trickle := func(w http.ResponseWriter, payload []byte) {
+		w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		piece := len(payload)/6 + 1
+		for start := 0; start < len(payload); start += piece {
+			_, _ = w.Write(payload[start:min(start+piece, len(payload))])
+			if flusher != nil {
+				flusher.Flush()
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	sum := func(payload []byte) string {
+		digest := sha256.Sum256(payload)
+		return hex.EncodeToString(digest[:])
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/gw", func(w http.ResponseWriter, r *http.Request) { trickle(w, binary) })
+	mux.HandleFunc("/worker.tgz", func(w http.ResponseWriter, r *http.Request) { trickle(w, tarball) })
+	mux.HandleFunc("/sums.txt", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(sum(binary) + "  acornd\n" + sum(tarball) + "  " + WorkerTarball + "\n"))
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	manager.mu.Lock()
+	manager.latest = Release{Tag: "v0.9.0", Assets: []Asset{
+		{Name: "acornd-" + runtime.GOOS + "-" + runtime.GOARCH, URL: server.URL + "/gw"},
+		{Name: WorkerTarball, URL: server.URL + "/worker.tgz"},
+		{Name: "sha256sums.txt", URL: server.URL + "/sums.txt"},
+	}}
+	manager.mu.Unlock()
+
+	if err := manager.Apply(context.Background(), ApplyOptions{Drain: "stop"}); err != nil {
+		t.Fatalf("a download slower than the metadata timeout must still install: %v", err)
+	}
+	got, err := os.ReadFile(manager.binPath)
+	if err != nil || !bytes.Equal(got, binary) {
+		t.Fatalf("the binary must arrive byte-exact, got %q (%v)", got, err)
+	}
+	// The tarball takes the same slow path and is verified from the file it landed in.
+	staged, err := os.ReadFile(manager.workerPending())
+	if err != nil || !bytes.Equal(staged, tarball) {
+		t.Fatalf("the worker tarball must arrive byte-exact, got %q (%v)", staged, err)
+	}
+}
+
+// A connection that goes quiet mid-file must fail rather than hang. The transfer bound is the
+// safety net, so the test injects a short one instead of waiting the fifteen minutes a real link
+// gets, and asserts the download ends and does not report a short body as complete.
+//
+// The test carries its own deadline too, and checks which one fired. Losing the bound is a change
+// mutation testing will try, and a test that only ends when the code says so holds the suite for
+// the whole per-mutant allowance: one such mutant turned a three-minute sweep into seventeen.
+func TestADownloadThatStallsGivesUp(t *testing.T) {
+	manager, _ := testManager(t)
+	manager.transferTimeout = 100 * time.Millisecond
+	stalled := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "32")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("the first piece"))
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		select {
+		case <-stalled:
+		case <-r.Context().Done():
+		}
+	}))
+	defer server.Close()
+	defer close(stalled)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var body bytes.Buffer
+	started := time.Now()
+	if err := manager.download(ctx, Asset{Name: "acornd", URL: server.URL}, &body); err == nil {
+		t.Fatal("a download that stops delivering bytes must fail, not hang")
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("the transfer bound should end it in about 100 ms, took %v", elapsed)
+	}
+	if got := body.String(); got != "the first piece" {
+		t.Fatalf("a stalled download should keep only what arrived, got %q", got)
+	}
+}
+
+// The transfer bound is a safety net with a default behind it: a manager built without one (a test,
+// a literal) still downloads, rather than failing every transfer on a zero deadline. Zero is not a
+// bound, it is a missing value.
+func TestAManagerWithoutABoundStillDownloads(t *testing.T) {
+	manager, _ := testManager(t)
+	manager.transferTimeout = 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("the file"))
+	}))
+	defer server.Close()
+	var body bytes.Buffer
+	if err := manager.download(context.Background(), Asset{Name: "acornd", URL: server.URL}, &body); err != nil {
+		t.Fatalf("a missing bound should take the default: %v", err)
+	}
+	if body.String() != "the file" {
+		t.Fatalf("body = %q", body.String())
+	}
+}
+
+// zeroReader is the endless body the cap tests copy: no memory, so the only cost of reaching
+// 256 MB here is the copy itself.
+type zeroReader struct{}
+
+func (zeroReader) Read(payload []byte) (int, error) {
+	clear(payload)
+	return len(payload), nil
+}
+
+// The cap is a wrong-answer guard, so a body that reaches it is refused rather than left as a file
+// that looks complete when it is not. The boundary matters: exactly the cap is already too big. The
+// reader stops at twice the cap, so a change that loses the limit fails here instead of hanging.
+func TestABodyThatReachesTheCapIsRefused(t *testing.T) {
+	if _, err := copyAsset("acornd", io.Discard, io.LimitReader(zeroReader{}, 2*maxAsset)); err == nil {
+		t.Fatal("a body at the cap must be refused, not truncated into a file that looks complete")
+	}
+	if _, err := copyAsset("acornd", io.Discard, io.LimitReader(zeroReader{}, maxAsset-1)); err != nil {
+		t.Fatalf("a body under the cap must pass: %v", err)
 	}
 }
