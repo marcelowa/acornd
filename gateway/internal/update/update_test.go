@@ -846,14 +846,19 @@ func TestEnsureBunDownloads(t *testing.T) {
 	defer server.Close()
 	manager.bunBaseURL = server.URL
 	manager.client = server.Client()
-	path, err := manager.EnsureBun(context.Background())
+	// The test carries its own deadline. A change that loses the base URL falls back to github's
+	// real 35 MB runtime, and without a bound here that fetch outlives the mutation run's allowance:
+	// three seconds of a slow link is enough to say the base URL was not used.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	path, err := manager.EnsureBun(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("bun not installed: %v", err)
 	}
-	if _, err := manager.EnsureBun(context.Background()); err != nil {
+	if _, err := manager.EnsureBun(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if hits != 1 {

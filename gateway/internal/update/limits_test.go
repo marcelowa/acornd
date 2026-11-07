@@ -300,7 +300,8 @@ func TestTheReleaseSourceCanBeAMirror(t *testing.T) {
 // that bounds the whole exchange at 30 s turns that into "context deadline exceeded (Client.Timeout
 // or context cancellation while reading body)", which is the bug this test pins. The durations are
 // the shape, not the measurement: the metadata client keeps a 50 ms total deadline and the asset
-// takes about 200 ms to arrive, so splitting the two clients is what decides the outcome.
+// takes about 120 ms to arrive, so splitting the two clients is what decides the outcome. It stays
+// short on purpose: a suite that sleeps is a per-mutant cost in mutation testing.
 func TestASlowDownloadOutlivesTheCheckTimeout(t *testing.T) {
 	manager, _ := testManager(t)
 	binary := []byte(versionScript("v0.9.0"))
@@ -314,13 +315,13 @@ func TestASlowDownloadOutlivesTheCheckTimeout(t *testing.T) {
 		w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
 		w.WriteHeader(http.StatusOK)
 		flusher, _ := w.(http.Flusher)
-		piece := len(payload)/5 + 1
+		piece := len(payload)/6 + 1
 		for start := 0; start < len(payload); start += piece {
 			_, _ = w.Write(payload[start:min(start+piece, len(payload))])
 			if flusher != nil {
 				flusher.Flush()
 			}
-			time.Sleep(40 * time.Millisecond)
+			time.Sleep(20 * time.Millisecond)
 		}
 	}
 	sum := func(payload []byte) string {
@@ -360,6 +361,10 @@ func TestASlowDownloadOutlivesTheCheckTimeout(t *testing.T) {
 // A connection that goes quiet mid-file must fail rather than hang. The transfer bound is the
 // safety net, so the test injects a short one instead of waiting the fifteen minutes a real link
 // gets, and asserts the download ends and does not report a short body as complete.
+//
+// The test carries its own deadline too, and checks which one fired. Losing the bound is a change
+// mutation testing will try, and a test that only ends when the code says so holds the suite for
+// the whole per-mutant allowance: one such mutant turned a three-minute sweep into seventeen.
 func TestADownloadThatStallsGivesUp(t *testing.T) {
 	manager, _ := testManager(t)
 	manager.transferTimeout = 100 * time.Millisecond
@@ -379,13 +384,15 @@ func TestADownloadThatStallsGivesUp(t *testing.T) {
 	defer server.Close()
 	defer close(stalled)
 
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	var body bytes.Buffer
 	started := time.Now()
-	if err := manager.download(context.Background(), Asset{Name: "acornd", URL: server.URL}, &body); err == nil {
+	if err := manager.download(ctx, Asset{Name: "acornd", URL: server.URL}, &body); err == nil {
 		t.Fatal("a download that stops delivering bytes must fail, not hang")
 	}
-	if elapsed := time.Since(started); elapsed > 5*time.Second {
-		t.Fatalf("the bound should end the transfer, took %v", elapsed)
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("the transfer bound should end it in about 100 ms, took %v", elapsed)
 	}
 	if got := body.String(); got != "the first piece" {
 		t.Fatalf("a stalled download should keep only what arrived, got %q", got)
@@ -421,9 +428,10 @@ func (zeroReader) Read(payload []byte) (int, error) {
 }
 
 // The cap is a wrong-answer guard, so a body that reaches it is refused rather than left as a file
-// that looks complete when it is not. The boundary matters: exactly the cap is already too big.
+// that looks complete when it is not. The boundary matters: exactly the cap is already too big. The
+// reader stops at twice the cap, so a change that loses the limit fails here instead of hanging.
 func TestABodyThatReachesTheCapIsRefused(t *testing.T) {
-	if _, err := copyAsset("acornd", io.Discard, io.LimitReader(zeroReader{}, maxAsset)); err == nil {
+	if _, err := copyAsset("acornd", io.Discard, io.LimitReader(zeroReader{}, 2*maxAsset)); err == nil {
 		t.Fatal("a body at the cap must be refused, not truncated into a file that looks complete")
 	}
 	if _, err := copyAsset("acornd", io.Discard, io.LimitReader(zeroReader{}, maxAsset-1)); err != nil {
