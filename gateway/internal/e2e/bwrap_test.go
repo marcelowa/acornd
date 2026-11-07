@@ -63,6 +63,37 @@ func TestBwrapWorkspaceRunsItsToolsInNamespaces(t *testing.T) {
 	}
 }
 
+// A nested acornd with the network off still makes a working sandbox. The parent it runs in may
+// hold CAP_SYS_ADMIN and no CAP_SETUID — pasta grants exactly that — so a sandbox that asks for
+// another user namespace dies before its command runs. "Off" is an empty network namespace:
+// loopback and nothing else. The uid is not asserted: it is the parent's, and a gateway at the top
+// of the machine has the calling user's, not root.
+func TestABwrapNestedWorkspaceWithNoEgressRunsItsCommands(t *testing.T) {
+	t.Parallel()
+	bwrapEngine(t)
+	s := start(t,
+		withEnv("ACORND_NESTED=1"),
+		withScript(
+			scriptRule{
+				Match: "what can this sandbox see",
+				Tools: []scriptTool{{Name: "bash", Args: map[string]any{
+					"command": `printf 'ifaces:%s' "$(tail -n +3 /proc/net/dev | cut -d: -f1 | tr -d ' ' | tr '\n' ',')"`,
+				}}},
+				Reply: "looked",
+			},
+		),
+	)
+	c := s.client()
+	c.waitForConversation("personal")
+	c.createWorkspaceWith("sealed", map[string]any{"engine": "bwrap", "network": "off"})
+	root := c.waitForConversation("sealed")
+	c.prompt("sealed", root, "what can this sandbox see")
+	output := c.waitForText("sealed", root, "looked").lastToolResult()
+	if want := "ifaces:lo,"; !strings.Contains(output, want) {
+		t.Errorf("the sandbox should show %q, got %q", want, output)
+	}
+}
+
 // The engine is a workspace's own choice, so one install can hold a microVM workspace and a
 // bubblewrap one. This is the field the create form and `workspace add --sandbox` set.
 func TestAWorkspaceKeepsTheEngineItWasCreatedWith(t *testing.T) {

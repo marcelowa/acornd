@@ -1,6 +1,9 @@
 # ADR 0030 — Nested engines: a bwrap workspace can run another acornd
 
 Status: accepted, built
+Amended: 2026-11-07 — decision 2 no longer excepts the network-off case. A nested sandbox
+never asks for a user namespace, because the parent that made one for pasta holds
+`CAP_SYS_ADMIN` and not `CAP_SETUID`; "off" unshares the network instead of sharing pasta's.
 Date: 2026-10-29
 
 ## Context
@@ -42,11 +45,18 @@ pasta already made, not another unshare inside it.
    API, `acornd workspace add --no-devices`, or the same field on an update. Absent means
    on. A missing device is skipped, not a failed boot.
 2. **The nested bwrap reuses pasta's user namespace.** `ACORND_NESTED=1` makes the bwrap
-   engine record `nested: true`. With a network, it runs pasta and then bubblewrap without
-   `--unshare-user` or `--uid/--gid`, with the individual unshare flags for pid, uts, ipc
-   and cgroup, and `--share-net`. The sandbox's user namespace is the one pasta made; the
-   sandbox still has its own network namespace. With the network off it keeps its own user
-   namespace, which is the shape the nested lifecycle tests already used.
+   engine record `nested: true`. It runs bubblewrap without `--unshare-user` or
+   `--uid/--gid`, with the individual unshare flags for pid, uts, ipc and cgroup. The
+   sandbox's user namespace is its parent's; the sandbox still has its own network
+   namespace. With egress, pasta makes that network namespace and bubblewrap shares it
+   (`--share-net`). Without egress, bubblewrap unshares one of its own (`--unshare-net`),
+   which is an empty namespace with loopback and no route: sharing the parent's would leave
+   the policy saying off while the sandbox still had the workspace's egress. The user
+   namespace is the parent's in both cases. Measured inside pasta on Debian 13,
+   bubblewrap 0.12.0: the process is uid 0 with `CAP_SYS_ADMIN`, `CAP_NET_ADMIN` and
+   `CAP_NET_BIND_SERVICE` and no `CAP_SETUID`, so the pid, uts, ipc, cgroup and net
+   namespaces can be unshared while a user namespace of the sandbox's own is refused at
+   `bwrap: setting up uid map: Operation not permitted`.
 3. **A probe must not trust a zero exit when pasta says it failed.** `probePastaWithin`
    refuses output containing `Couldn't configure user mappings` or
    `Couldn't write to /proc/self/uid_map`, because pasta can print those and still run the
@@ -95,6 +105,11 @@ pasta already made, not another unshare inside it.
 
 - `TestBwrapBindsDevicesAndGrantsNestedEnginesTheCaps`
 - `TestBwrapNestedEgressReusesPastaUserNamespace`
+- `TestBwrapNestedWithoutEgressReusesTheUserNamespace`, and
+  `TestANestedSandboxWithNoEgressStartsInsidePasta` (the same argv under pasta, where the
+  capabilities are the ones that refused it)
+- `TestABwrapNestedWorkspaceWithNoEgressRunsItsCommands` (end to end: a nested gateway's
+  sandbox with the network off runs a command and sees only loopback)
 - `TestBwrapConfigRecordsNestedFromTheParent`
 - `TestBwrapClaimsNestingWhenKVMIsBound`, `TestBwrapDoesNotClaimNestingWithoutKVM`
 - `TestAPastaThatCannotMapItsUserNamespaceIsRefused`
