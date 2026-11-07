@@ -70,6 +70,52 @@ func TestStopRefusesAProcessThatIsNotAcornd(t *testing.T) {
 	}
 }
 
+// The window between the fork and the exec is why stop waits: exec.Command.Start returns before the
+// child has a command line, so the first read is empty and the process is not a stranger for it.
+func TestAProcessIsGivenTimeToSayItIsAcornd(t *testing.T) {
+	reads := 0
+	command := func(int) (string, bool) {
+		reads++
+		if reads < 3 {
+			return "", true
+		}
+		return "/usr/local/bin/acornd start", true
+	}
+	if !namesAcorndWithin(os.Getpid(), time.Second, command) {
+		t.Fatal("an empty command line was read as a stranger")
+	}
+	if reads < 3 {
+		t.Fatalf("the name was read %d times, before the process had one", reads)
+	}
+}
+
+// A name that is readable and is not acornd needs no window: the answer is already there.
+func TestAStrangerIsNamedWithoutWaiting(t *testing.T) {
+	started := time.Now()
+	reads := 0
+	command := func(int) (string, bool) { reads++; return "/bin/sleep 30", true }
+	if namesAcorndWithin(os.Getpid(), time.Second, command) {
+		t.Fatal("a process that is not acornd was accepted")
+	}
+	if reads != 1 {
+		t.Fatalf("the name was read %d times; one is enough to answer", reads)
+	}
+	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+		t.Fatalf("a named stranger took %v to refuse", elapsed)
+	}
+}
+
+func TestAProcessThatNeverNamesItselfIsAStrangerWhenTheWindowCloses(t *testing.T) {
+	started := time.Now()
+	command := func(int) (string, bool) { return "", true }
+	if namesAcorndWithin(os.Getpid(), 30*time.Millisecond, command) {
+		t.Fatal("an empty name was accepted")
+	}
+	if elapsed := time.Since(started); elapsed < 30*time.Millisecond {
+		t.Fatalf("the window closed after %v, before it elapsed", elapsed)
+	}
+}
+
 func TestStopStopsTheRecordedRun(t *testing.T) {
 	dir := t.TempDir()
 	// A process whose command line reads `.../acornd`: the guard checks the name, and the name is
