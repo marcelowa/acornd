@@ -255,6 +255,11 @@ func stopRun(dir string) error {
 	}
 	if !processLooksLikeAcornd(pid) {
 		removeRunRecord(dir)
+		if !processAlive(pid) {
+			// It exited while the name was being waited for: the record was stale, not a stranger.
+			fmt.Printf("acornd: not running (pid %d exited)\n", pid)
+			return nil
+		}
 		return fmt.Errorf("pid %d is not acornd: left it alone and removed the stale record", pid)
 	}
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
@@ -572,14 +577,41 @@ func processAlive(pid int) bool {
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
+// stopLookupWindow is how long a process is given to say what it is. exec.Command.Start returns
+// after the fork, before the child's execve: /proc/<pid>/cmdline is empty for that moment, and an
+// empty name is not evidence that the process is a stranger.
+const stopLookupWindow = 2 * time.Second
+
+// stopLookupEvery is the pause between reads of that name. Fast enough that a real acornd is named
+// before a person notices, slow enough not to spin.
+const stopLookupEvery = 10 * time.Millisecond
+
 // processLooksLikeAcornd guards the one destructive thing in this file. A record can outlive its
 // process, and the pid it names can be reused; killing by number alone is how a tool kills a
-// stranger.
+// stranger. A process that has not exec'd yet has no name to read, so it is given the window above
+// to acquire one rather than being called a stranger on the first empty read.
 func processLooksLikeAcornd(pid int) bool {
-	command, ok := processCommand(pid)
-	if !ok {
-		return false
+	return namesAcorndWithin(pid, stopLookupWindow, processCommand)
+}
+
+// namesAcorndWithin reads the command line until it has one or the window closes. A name that is
+// readable and is not acornd answers at once: there is nothing to wait for.
+func namesAcorndWithin(pid int, within time.Duration, command func(int) (string, bool)) bool {
+	deadline := time.Now().Add(within)
+	for {
+		name, ok := command(pid)
+		if ok && name != "" {
+			return namesAcornd(name)
+		}
+		if !processAlive(pid) || !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(stopLookupEvery)
 	}
+}
+
+// namesAcornd is whether a command line names this binary.
+func namesAcornd(command string) bool {
 	first := command
 	if field := strings.Fields(command); len(field) > 0 {
 		first = field[0]
