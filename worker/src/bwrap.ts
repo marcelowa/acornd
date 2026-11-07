@@ -51,6 +51,12 @@ export interface BwrapConfig {
 	image: string;
 	/** How a command reaches the network, recorded for the person reading the file. */
 	network: { mode: "off" | "pasta"; address?: string; gateway?: string };
+	/**
+	 * Whether this sandbox was made inside another bwrap workspace. A command here is inside
+	 * that user namespace too, so an acornd it starts has to reuse it rather than ask for a
+	 * third one inside it (ADR 0030, ADR 0038).
+	 */
+	nested?: boolean;
 	/** The workspace's own unpacked image, bound as `/`. */
 	rootfs?: string;
 	/** The private home, where a toolchain installed by one command is found by the next. */
@@ -171,6 +177,12 @@ class BwrapClient extends WorkspaceFiles implements SandboxClient {
 				const value = process.env[key];
 				if (typeof value === "string") env[key] = value;
 			}
+		}
+		if (this.config.nested === true) {
+			// Where the sandbox is, not what the caller inherited: a command's children — an acornd a
+			// tool starts — must reuse the namespace instead of asking for a third one. The caller's
+			// own variables are applied below, so a test can state the other answer.
+			env["ACORND_NESTED"] = "1";
 		}
 		// The value is not here and never will be: the command holds the placeholder and the proxy
 		// swaps it for the host the secret names. Set first, so a caller that passes a name

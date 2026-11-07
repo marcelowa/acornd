@@ -61,9 +61,9 @@ type hostDevices struct {
 	kvm string
 }
 
-// nestedEnv marks a process that is already inside a sandbox. The outer bwrap sets it for
-// the workspace's processes; a bwrap engine that finds it reuses the user namespace pasta
-// made instead of creating a third one inside it.
+// nestedEnv marks a process that is already inside a sandbox: the outer bwrap sets it for the
+// workspace's processes, and the worker sets it for a sandbox whose config says nested. Absent,
+// the engine asks the user namespace; present, it overrules the answer in either direction.
 const nestedEnv = "ACORND_NESTED"
 
 // NewBwrap builds the driver. Unlike the microVM engine it installs nothing: bubblewrap is a
@@ -636,7 +636,7 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 		IdleTimeout: idleTimeoutOrDefault(policy.IdleTimeout),
 		SecretProxy: secretProxy,
 		Devices:     policy.Devices,
-		Nested:      os.Getenv(nestedEnv) == "1",
+		Nested:      nestedFromProcess(),
 		Beta:        "one sandbox per workspace, held by this binary as its first process",
 	}
 	data, err := json.MarshalIndent(config, "", "  ")

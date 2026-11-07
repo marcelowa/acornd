@@ -35,7 +35,11 @@ interface Opened {
 /** A workspace, its config, and a supervisor to talk to. */
 async function open(
 	network: "pasta" | "off" = "off",
-	options: { ignoreKill?: boolean; secretProxy?: { url: string; bundle: string } } = {},
+	options: {
+		ignoreKill?: boolean;
+		secretProxy?: { url: string; bundle: string };
+		nested?: boolean;
+	} = {},
 ): Promise<Opened> {
 	const root = await realpath(await mkdtemp(join(tmpdir(), "acornd-bwrap-")));
 	opened.push(root);
@@ -59,6 +63,7 @@ async function open(
 			hidden: join(root, "hidden"),
 			readOnly: [],
 			socket: fake.socket,
+			...(options.nested === true ? { nested: true } : {}),
 			...(options.secretProxy === undefined ? {} : { secretProxy: options.secretProxy }),
 		}),
 	);
@@ -259,6 +264,32 @@ test("a command does not inherit the gateway's environment", async () => {
 		delete process.env.ACORND_AMBIENT_TOKEN;
 		if (before === undefined) delete process.env.TERM;
 		else process.env.TERM = before;
+		await fake.close();
+	}
+});
+
+test("a command in a nested sandbox is told, and the caller can overrule it", async () => {
+	const { client, fake } = await open("off", { nested: true });
+	try {
+		await client.exec("true", {});
+		expect(fake.captured.at(-1)?.env["ACORND_NESTED"]).toBe("1");
+		// clearEnv means "nothing but what I pass", and that is about the gateway's environment.
+		// Where the sandbox sits is a fact about the sandbox, so it stays.
+		await client.exec("true", { clearEnv: true });
+		expect(fake.captured.at(-1)?.env["ACORND_NESTED"]).toBe("1");
+		await client.exec("true", { env: { ACORND_NESTED: "0" } });
+		expect(fake.captured.at(-1)?.env["ACORND_NESTED"]).toBe("0");
+	} finally {
+		await fake.close();
+	}
+});
+
+test("a sandbox at the top of the machine says nothing about nesting", async () => {
+	const { client, fake } = await open();
+	try {
+		await client.exec("true", {});
+		expect(fake.captured.at(-1)?.env["ACORND_NESTED"]).toBeUndefined();
+	} finally {
 		await fake.close();
 	}
 });
