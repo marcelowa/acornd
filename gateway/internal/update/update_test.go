@@ -1024,21 +1024,21 @@ func TestCleanSandboxesMissingStateIsClean(t *testing.T) {
 }
 
 func TestCheckExecRunsStagedBinary(t *testing.T) {
-	script := filepath.Join(t.TempDir(), "fakebin")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho v0.9.0\n"), 0o755); err != nil {
+	staged := filepath.Join(t.TempDir(), "fakebin")
+	if err := os.WriteFile(staged, []byte(versionScript("v0.9.0")), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := os.ReadFile(script)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := checkExec(context.Background(), payload, "v0.9.0"); err != nil {
+	if err := checkExec(context.Background(), staged, "v0.9.0"); err != nil {
 		t.Fatalf("runnable staged binary must pass: %v", err)
 	}
-	if err := checkExec(context.Background(), payload, "v9.9.9"); err == nil {
+	if err := checkExec(context.Background(), staged, "v9.9.9"); err == nil {
 		t.Fatal("wrong tag must fail")
 	}
-	if err := checkExec(context.Background(), []byte("not-a-binary"), "v0.9.0"); err == nil {
+	garbage := filepath.Join(t.TempDir(), "garbage")
+	if err := os.WriteFile(garbage, []byte("not-a-binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkExec(context.Background(), garbage, "v0.9.0"); err == nil {
 		t.Fatal("garbage must fail")
 	}
 }
@@ -1226,7 +1226,7 @@ func TestTheVersionGateSpeaksEveryFolderName(t *testing.T) {
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := checkExec(context.Background(), []byte(body), "v9.9.9"); err != nil {
+	if err := checkExec(context.Background(), script, "v9.9.9"); err != nil {
 		t.Fatalf("the gate should accept the tag the staged build printed: %v", err)
 	}
 	payload, err := os.ReadFile(seen)

@@ -156,6 +156,22 @@ covers the common case; clean covers format changes.
 - Swap and rollback rename instead of overwrite: a running binary answers
   ETXTBSY to a write but renames aside fine (Linux, macOS).
 
+## Live drill (v0.33.17, 2026-11-07)
+
+- A download is not an API call and does not share its client. The 21 MB
+  linux/amd64 binary took 266 s on an 81 KB/s link, and the 30 s total
+  deadline meant for `releases/latest` cut it off mid-body with
+  `context deadline exceeded`: every update below ~700 KB/s failed, since
+  the original self-update. Assets now get 30 s for the response headers
+  and a 15 min outer bound, stream to a temp file under the install
+  folder, and the checksum is verified from that file. The API and
+  checksum reads keep the short client. A connection that goes quiet
+  still ends at the bound rather than hanging the update screen.
+- Both CLI paths had the same mistake: a two-minute context around check
+  and apply, and a 60 s client for the apply call, which cancels the
+  request — and with it the gateway's download. The check keeps its
+  short deadline; the apply gets a 20 min net instead.
+
 ## Self-contained releases
 
 - The worker ships as sources (`worker.tar.gz`: package.json, bun.lock,

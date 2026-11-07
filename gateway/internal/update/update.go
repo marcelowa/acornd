@@ -197,7 +197,16 @@ type Manager struct {
 	migrateDir string
 	latestURL  string
 	bunBaseURL string
-	client     *http.Client
+	// client answers the metadata calls: the reply is small and a slow one is a broken one, so
+	// it keeps a short total deadline.
+	client *http.Client
+	// assetClient moves release assets, which are tens of megabytes on links that are not fast.
+	// It bounds the wait for the first byte and never the whole transfer: a total deadline here
+	// is what made every update below ~700 KB/s time out with "context deadline exceeded".
+	assetClient *http.Client
+	// transferTimeout is the outer bound on one asset transfer. It is a safety net for a
+	// connection that dies mid-file, not a speed limit.
+	transferTimeout time.Duration
 
 	mu       sync.Mutex
 	settings Settings
@@ -264,13 +273,32 @@ func New(dataDir, binPath string) *Manager {
 	// reason — a private mirror or a rate-limited API — and it is what lets the update screen be
 	// tested against a server instead of against github.
 	return &Manager{
-		dataDir:   dataDir,
-		binPath:   binPath,
-		latestURL: envOr("ACORND_UPDATE_URL", LatestURL),
-		client:    &http.Client{Timeout: 30 * time.Second},
-		settings:  DefaultSettings(),
-		IsAdmin:   func(*http.Request) bool { return true },
+		dataDir:         dataDir,
+		binPath:         binPath,
+		latestURL:       envOr("ACORND_UPDATE_URL", LatestURL),
+		client:          &http.Client{Timeout: 30 * time.Second},
+		assetClient:     newAssetClient(),
+		transferTimeout: defaultTransferTimeout,
+		settings:        DefaultSettings(),
+		IsAdmin:         func(*http.Request) bool { return true },
 	}
+}
+
+// defaultTransferTimeout bounds one asset transfer. The linux/amd64 binary is 21 MB and took 266 s
+// on an 81 KB/s link; fifteen minutes leaves room for a link far slower than that and still ends a
+// connection that stops delivering bytes.
+const defaultTransferTimeout = 15 * time.Minute
+
+// assetHeaderTimeout is how long an asset request waits for the response headers before giving up: a
+// server that never answers is not a slow download.
+const assetHeaderTimeout = 30 * time.Second
+
+// newAssetClient is the client for release assets: the same transport as the rest of the process
+// (proxy, TLS, HTTP/2) with the total deadline taken off and the header wait bounded instead.
+func newAssetClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = assetHeaderTimeout
+	return &http.Client{Transport: transport}
 }
 
 func (m *Manager) versionPath() string       { return filepath.Join(m.dataDir, "version") }
@@ -281,39 +309,24 @@ func (m *Manager) failedPath() string        { return filepath.Join(m.dataDir, "
 func (m *Manager) backupBinPath() string     { return m.binPath + ".bak" }
 func (m *Manager) backupVersionPath() string { return m.binPath + ".bak.version" }
 
-// writeData publishes a data file (never executed): temp plus rename,
-// so a reader never sees a half-written one.
-func writeData(path string, payload []byte) error {
-	temp, err := os.CreateTemp(filepath.Dir(path), ".data-*")
-	if err != nil {
-		return fmt.Errorf("update: cannot stage %s: %w", path, err)
-	}
-	tempPath := temp.Name()
-	defer func() { _ = os.Remove(tempPath) }()
-	if _, err := temp.Write(payload); err != nil {
-		_ = temp.Close()
-		return fmt.Errorf("update: cannot write %s: %w", path, err)
-	}
-	if err := temp.Close(); err != nil {
-		return fmt.Errorf("update: cannot write %s: %w", path, err)
-	}
-	if err := os.Chmod(tempPath, 0o600); err != nil {
-		return fmt.Errorf("update: cannot write %s: %w", path, err)
-	}
-	return os.Rename(tempPath, path)
-}
-
-// writeAtomic publishes payload at path through a temp file and a rename:
+// writeAtomic publishes the file at source at path through a temp file and a rename:
 // a worker restarting mid-swap execs the old file or the new one, never a
-// half-written one.
-func writeAtomic(path string, payload []byte) error {
+// half-written one. The copy happens beside the destination, so a source on
+// another file system (a data folder under /var, a binary in ~/bin) still
+// publishes with one rename.
+func writeAtomic(path, source string) error {
+	payload, err := os.Open(source)
+	if err != nil {
+		return fmt.Errorf("update: cannot read the download: %w", err)
+	}
+	defer func() { _ = payload.Close() }()
 	temp, err := os.CreateTemp(filepath.Dir(path), ".new-*")
 	if err != nil {
 		return fmt.Errorf("update: cannot stage %s: %w", path, err)
 	}
 	tempPath := temp.Name()
 	defer func() { _ = os.Remove(tempPath) }()
-	if _, err := temp.Write(payload); err != nil {
+	if _, err := io.Copy(temp, payload); err != nil {
 		_ = temp.Close()
 		return fmt.Errorf("update: cannot write %s: %w", path, err)
 	}
@@ -1065,17 +1078,20 @@ func (m *Manager) Apply(ctx context.Context, options ApplyOptions) error {
 	if err != nil {
 		return err
 	}
-	payload, err := m.stage(ctx, release)
+	staged, err := m.stage(ctx, release)
 	if err != nil {
 		return err
 	}
+	// The staged file is a copy source from here on: swap writes its own file beside the binary
+	// and renames it, so the download is dropped either way.
+	defer func() { _ = os.Remove(staged) }()
 	if err := m.drainRuns(ctx, options); err != nil {
 		return err
 	}
 	if err := m.cleanVMs(ctx, options); err != nil {
 		return err
 	}
-	return m.swap(payload, release.Tag)
+	return m.swap(staged, release.Tag)
 }
 
 // applyGate refuses an update that cannot start: runs in flight it has not been told to stop, a
@@ -1116,35 +1132,37 @@ func (m *Manager) pickRelease(ctx context.Context, options ApplyOptions) (Releas
 
 // stage downloads and proves the new build, and stages the worker's tarball beside it. Nothing is
 // moved: every failure in here leaves the running gateway and its backup exactly as they were.
-func (m *Manager) stage(ctx context.Context, release Release) ([]byte, error) {
+// What it returns is the verified binary on disk, which swap copies into place.
+func (m *Manager) stage(ctx context.Context, release Release) (string, error) {
 	asset := AssetFor(release)
 	if asset.URL == "" {
-		return nil, fmt.Errorf("releases: no binary for %s/%s in %s", runtime.GOOS, runtime.GOARCH, release.Tag)
+		return "", fmt.Errorf("releases: no binary for %s/%s in %s", runtime.GOOS, runtime.GOARCH, release.Tag)
 	}
 	worker := WorkerTarballAsset(release)
 	if _, err := m.Backup(); err != nil {
-		return nil, fmt.Errorf("backup failed, update stopped: %w", err)
+		return "", fmt.Errorf("backup failed, update stopped: %w", err)
 	}
-	payload, err := m.download(ctx, asset)
-	if err != nil {
-		return nil, err
-	}
+	// The checksum list comes first: a release this build cannot verify should cost no bytes.
+	// One fetch covers every file, so the worker tarball reuses it.
 	list, err := m.checksumList(ctx, release)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	if err := verify(list, payload, release.Tag); err != nil {
-		return nil, err
+	staged, err := m.verifiedAsset(ctx, asset, list, release.Tag)
+	if err != nil {
+		return "", err
 	}
 	// The staged binary must execute and name its tag before it may replace the running one:
 	// checksums prove intact, execution proves runnable.
-	if err := checkExec(ctx, payload, release.Tag); err != nil {
-		return nil, err
+	if err := checkExec(ctx, staged, release.Tag); err != nil {
+		_ = os.Remove(staged)
+		return "", err
 	}
 	if err := m.stageWorkerTarball(ctx, release, worker, list); err != nil {
-		return nil, err
+		_ = os.Remove(staged)
+		return "", err
 	}
-	return payload, nil
+	return staged, nil
 }
 
 // stageWorkerTarball downloads and verifies the worker's tarball. It stages rather than activates: the new
@@ -1154,14 +1172,13 @@ func (m *Manager) stageWorkerTarball(ctx context.Context, release Release, worke
 	if worker.URL == "" {
 		return nil
 	}
-	tarball, err := m.download(ctx, worker)
+	staged, err := m.verifiedAsset(ctx, worker, list, release.Tag)
 	if err != nil {
 		return err
 	}
-	if err := verify(list, tarball, release.Tag); err != nil {
-		return err
-	}
-	return writeData(m.workerPending(), tarball)
+	// The download already sits in the install folder, so staging is a rename, and the pending
+	// tarball a reader could open is never half-written.
+	return os.Rename(staged, m.workerPending())
 }
 
 // drainRuns stops what is running, at the moment it matters rather than when Apply was asked: a
@@ -1203,24 +1220,11 @@ func (m *Manager) cleanVMs(ctx context.Context, options ApplyOptions) error {
 
 // checkExec proves a staged binary runs and names its tag: `version` is
 // pure Go with no flags, so this works on every platform the binary does.
-// It runs from a temp copy under an empty data folder, never the live path: the
-// version file would answer for the binary, and a failure must leave the
-// running build and its backup exactly alone.
-func checkExec(ctx context.Context, payload []byte, tag string) error {
-	temp, err := os.CreateTemp("", "acornd-check-*")
-	if err != nil {
-		return err
-	}
-	tempPath := temp.Name()
-	defer func() { _ = os.Remove(tempPath) }()
-	if _, err := temp.Write(payload); err != nil {
-		_ = temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tempPath, 0o755); err != nil {
+// It runs the staged download under an empty data folder, never the live
+// path: the version file would answer for the binary, and a failure must
+// leave the running build and its backup exactly alone.
+func checkExec(ctx context.Context, staged, tag string) error {
+	if err := os.Chmod(staged, 0o755); err != nil {
 		return err
 	}
 	emptyDataDir, err := os.MkdirTemp("", "acornd-check-data-*")
@@ -1230,7 +1234,7 @@ func checkExec(ctx context.Context, payload []byte, tag string) error {
 	defer func() { _ = os.RemoveAll(emptyDataDir) }()
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, tempPath, "version")
+	command := exec.CommandContext(ctx, staged, "version")
 	// Every name the folder has had, because the staged binary may be older or newer than this
 	// one: the check exists to learn what the *staged* build is, so it must speak its dialect.
 	command.Env = append(os.Environ(),
@@ -1288,16 +1292,26 @@ func (m *Manager) apiBase() string {
 	return defaultAPIBase
 }
 
-func (m *Manager) download(ctx context.Context, asset Asset) ([]byte, error) {
+// download streams the asset into dest instead of returning its bytes: the binary is 21 MB and
+// the worker tarball a few hundred KB, and on a link slow enough to matter neither belongs in
+// memory while it arrives. It is the request the metadata calls make, sent on the client that
+// bounds the wait for headers and the transfer rather than the whole exchange.
+func (m *Manager) download(ctx context.Context, asset Asset, dest io.Writer) error {
 	url := asset.URL
 	accept := ""
 	if asset.ID != 0 {
 		url = m.apiBase() + fmt.Sprintf("/releases/assets/%d", asset.ID)
 		accept = "application/octet-stream"
 	}
+	// The transfer gets its own bound, generous and not per-read: the asset is 21 MB and a link
+	// that needs minutes for it is slow, not broken. One that stops delivering bytes still ends
+	// here instead of holding the update screen in "downloading" forever. It goes on the request
+	// itself: a context derived after the request would leave the body read with no deadline.
+	ctx, cancel := m.boundedTransfer(ctx)
+	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if accept != "" {
 		request.Header.Set("Accept", accept)
@@ -1305,15 +1319,85 @@ func (m *Manager) download(ctx context.Context, asset Asset) ([]byte, error) {
 	if token := os.Getenv("ACORND_GITHUB_TOKEN"); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
-	response, err := m.client.Do(request)
+	response, err := m.assetClient.Do(request)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("releases: download answered %s", response.Status)
+		return fmt.Errorf("releases: download answered %s", response.Status)
 	}
-	return io.ReadAll(io.LimitReader(response.Body, 256<<20))
+	// Streamed, never buffered whole: the body goes to the caller's file one piece at a time, so
+	// a slow link costs patience instead of memory. One that starts and stops is caught by the
+	// bound, and one that never ends with bytes still missing by the checksum.
+	_, err = copyAsset(asset.Name, dest, response.Body)
+	return err
+}
+
+// maxAsset caps one release asset. The binary is 21 MB; 256 MB is eight times a generous future
+// one and small enough that a misdirected download cannot fill the disk.
+const maxAsset = 256 << 20
+
+// boundedTransfer is the context for one asset transfer: the caller's, plus the outer bound that
+// ends a connection which goes quiet mid-file.
+func (m *Manager) boundedTransfer(ctx context.Context) (context.Context, context.CancelFunc) {
+	timeout := m.transferTimeout
+	if timeout <= 0 {
+		timeout = defaultTransferTimeout
+	}
+	return context.WithTimeout(ctx, timeout)
+}
+
+// copyAsset streams a response body into dest one piece at a time, capped at maxAsset, and names a
+// body that hits the cap instead of returning a truncated file that looks complete.
+func copyAsset(name string, dest io.Writer, body io.Reader) (int64, error) {
+	written, err := io.Copy(dest, io.LimitReader(body, maxAsset))
+	if err != nil {
+		return written, err
+	}
+	if written >= maxAsset {
+		return written, fmt.Errorf("releases: %s is larger than %d bytes", name, int64(maxAsset))
+	}
+	return written, nil
+}
+
+// downloadFile is download into a temp file in the install folder, for a payload the caller either
+// renames into place (the worker tarball) or copies through a rename (the binary). The file is on
+// disk so the checksum verifies it from there, and so a 256 MB cap no longer means 256 MB of RAM.
+func (m *Manager) downloadFile(ctx context.Context, asset Asset) (string, error) {
+	if err := os.MkdirAll(m.dataDir, 0o755); err != nil {
+		return "", fmt.Errorf("update: cannot stage the download: %w", err)
+	}
+	temp, err := os.CreateTemp(m.dataDir, ".asset-*")
+	if err != nil {
+		return "", fmt.Errorf("update: cannot stage the download: %w", err)
+	}
+	path := temp.Name()
+	if err := m.download(ctx, asset, temp); err != nil {
+		_ = temp.Close()
+		_ = os.Remove(path)
+		return "", err
+	}
+	if err := temp.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", fmt.Errorf("update: cannot write the download: %w", err)
+	}
+	return path, nil
+}
+
+// verifiedAsset downloads one asset and checks it against the release's checksum list, returning
+// the path of the file on disk. It drops the file when either step fails: a refused download leaves
+// no bytes behind.
+func (m *Manager) verifiedAsset(ctx context.Context, asset Asset, list, tag string) (string, error) {
+	path, err := m.downloadFile(ctx, asset)
+	if err != nil {
+		return "", err
+	}
+	if err := verifyFile(list, path, tag); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
 }
 
 // checksumList fetches the release's checksum file (sha256sums.txt or
@@ -1375,18 +1459,26 @@ func (m *Manager) checksumSource(checksum Asset) (address, accept string) {
 	return m.apiBase() + fmt.Sprintf("/releases/assets/%d", checksum.ID), "application/octet-stream"
 }
 
-// verify checks one payload against a fetched checksum list. An empty list
-// passes: no checksum file, TLS only.
-func verify(list string, payload []byte, tag string) error {
+// verifyFile checks one payload against a fetched checksum list. An empty list
+// passes: no checksum file, TLS only. The payload is hashed from disk, so a
+// verified download never had to be held in memory to be checked.
+func verifyFile(list, path, tag string) error {
 	if list == "" {
 		return nil
 	}
-	return matchChecksum(payload, list, tag)
+	payload, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = payload.Close() }()
+	sum := sha256.New()
+	if _, err := io.Copy(sum, payload); err != nil {
+		return err
+	}
+	return matchChecksum(hex.EncodeToString(sum.Sum(nil)), list, tag)
 }
 
-func matchChecksum(payload []byte, list, tag string) error {
-	sum := sha256.Sum256(payload)
-	want := hex.EncodeToString(sum[:])
+func matchChecksum(want, list, tag string) error {
 	for line := range strings.SplitSeq(list, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) >= 2 && fields[0] == want {
@@ -1419,14 +1511,14 @@ func (m *Manager) checkInstallFolder() error {
 // be renamed aside — the process keeps its inode — and the new file takes
 // its path. Linux and macOS allow this; Windows does not, and this product
 // does not run there.
-func (m *Manager) swap(payload []byte, tag string) error {
+func (m *Manager) swap(staged, tag string) error {
 	if m.binPath == "" {
 		return fmt.Errorf("update: no binary path")
 	}
 	if err := os.Rename(m.binPath, m.backupBinPath()); err != nil {
 		return fmt.Errorf("update: cannot move running binary aside: %w", err)
 	}
-	if err := writeAtomic(m.binPath, payload); err != nil {
+	if err := writeAtomic(m.binPath, staged); err != nil {
 		// The new file failed: put the old one back, so the path still runs.
 		_ = os.Rename(m.backupBinPath(), m.binPath)
 		return err
