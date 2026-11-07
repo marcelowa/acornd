@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -388,5 +389,44 @@ func TestADownloadThatStallsGivesUp(t *testing.T) {
 	}
 	if got := body.String(); got != "the first piece" {
 		t.Fatalf("a stalled download should keep only what arrived, got %q", got)
+	}
+}
+
+// The transfer bound is a safety net with a default behind it: a manager built without one (a test,
+// a literal) still downloads, rather than failing every transfer on a zero deadline. Zero is not a
+// bound, it is a missing value.
+func TestAManagerWithoutABoundStillDownloads(t *testing.T) {
+	manager, _ := testManager(t)
+	manager.transferTimeout = 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("the file"))
+	}))
+	defer server.Close()
+	var body bytes.Buffer
+	if err := manager.download(context.Background(), Asset{Name: "acornd", URL: server.URL}, &body); err != nil {
+		t.Fatalf("a missing bound should take the default: %v", err)
+	}
+	if body.String() != "the file" {
+		t.Fatalf("body = %q", body.String())
+	}
+}
+
+// zeroReader is the endless body the cap tests copy: no memory, so the only cost of reaching
+// 256 MB here is the copy itself.
+type zeroReader struct{}
+
+func (zeroReader) Read(payload []byte) (int, error) {
+	clear(payload)
+	return len(payload), nil
+}
+
+// The cap is a wrong-answer guard, so a body that reaches it is refused rather than left as a file
+// that looks complete when it is not. The boundary matters: exactly the cap is already too big.
+func TestABodyThatReachesTheCapIsRefused(t *testing.T) {
+	if _, err := copyAsset("acornd", io.Discard, io.LimitReader(zeroReader{}, maxAsset)); err == nil {
+		t.Fatal("a body at the cap must be refused, not truncated into a file that looks complete")
+	}
+	if _, err := copyAsset("acornd", io.Discard, io.LimitReader(zeroReader{}, maxAsset-1)); err != nil {
+		t.Fatalf("a body under the cap must pass: %v", err)
 	}
 }
