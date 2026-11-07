@@ -1,7 +1,11 @@
 # ADR 0038 — A nested acornd can tell, or it cannot nest
 
-Status: proposed
+Status: accepted, not built
 Date: 2026-11-05
+Amended: 2026-11-06 — decision 3 re-specified: the worker states nesting from the config it
+already reads, because `inheritedEnv` cannot carry a marker the worker never sees. Decision 4
+was already built (`withEnv` exists), and the depth measurement gains the capability that
+makes it true.
 
 ## Context
 
@@ -38,9 +42,10 @@ tool starts — which is every acornd an agent builds, runs, or tests inside a w
 believes it is at the top of the machine. It then does the one thing ADR 0030 proved does
 not work.
 
-The test harness closes the same door from the other side: `internal/e2e/harness_test.go:258`
-builds a whitelist environment (`PATH`, `HOME`, `ACORND_DATA_DIR`, `ACORND_WORKER`), so a
-test cannot state that its gateway is nested either.
+The test harness is not the problem it looks like: `internal/e2e/harness_test.go:258` builds a
+curated environment (`PATH`, `HOME`, `ACORND_DATA_DIR`, `ACORND_WORKER`), but `withEnv` at
+`:195` appends to it, so a test can state that its gateway is nested. No test does, and none
+needs to once the probe lands.
 
 The consequence is that the bwrap tier cannot run where acornd is developed. `make test-bwrap`
 inside a bwrap workspace fails on every test that starts a sandbox, with exactly the error
@@ -58,6 +63,13 @@ The read-only `/proc` from `--ro-bind / /` is what failed, not the third namespa
 already mounts `--proc /proc` unconditionally (`bwrap.go:1192`), so it is correct today; the
 row is recorded because the constraint is now load-bearing and nothing says so.
 
+Those rows hold while the process making the next namespace still has `CAP_SETUID` in the one
+it is in. Measured in the same workspace on 2026-11-06: a further `bwrap --unshare-all` from
+a shell there succeeds (`user:[4026535837]` → `user:[4026535843]`), because the workspace is
+created with `--cap-add ALL`; the same call under an outer `--cap-drop ALL` prints the ADR's
+error. The namespace count is not what fails `make test-bwrap`; the capabilities at that
+point in the chain are.
+
 ## Decision
 
 1. **Nesting is observed, not declared.** An acornd reads `/proc/self/uid_map` at startup.
@@ -69,14 +81,18 @@ row is recorded because the constraint is now load-bearing and nothing says so.
    `ACORND_NESTED=0` forces top-of-machine, for tests and for a machine that knows better
    than the probe. The environment can overrule the observation in both directions; it can
    no longer *fail* to reach a process and silently change the answer.
-3. **The marker is passed to descendants too.** `ACORND_NESTED` joins `inheritedEnv` in
-   `worker/src/bwrap.ts`, so a tool's children agree with the probe instead of disagreeing
-   with it. This is belt and braces: on its own it would be another layer that has to
-   remember, which is the defect being fixed.
-4. **The harness gains the switch.** Either the probe makes it unnecessary — a gateway
-   started inside a test that runs inside a sandbox now detects it — or an explicit
-   `withEnv` covers the case. The whitelist must not be able to make a nested gateway look
-   top-of-machine.
+3. **The worker states it from the config.** Control already writes `nested` into the
+   workspace's config (`bwrap.go:334`), and the worker reads that file; it does not declare
+   the field (`bwrap.ts:48-69`) and never sets it in the environment it builds. It sets
+   `ACORND_NESTED=1` when the config says nested, before the caller's own variables, so a
+   caller that wants the other answer still gets what it asked for. This is a fact the worker
+   holds, not a value inherited through layers: the worker is a process beside the sandbox,
+   not inside it, so `inheritedEnv` copies the gateway's environment and never the marker the
+   sandbox's first process was given.
+4. **The harness already has the switch.** `withEnv` (`harness_test.go:195`) appends to the
+   curated environment. The probe makes it unnecessary — a gateway started inside a test that
+   itself runs inside a sandbox now detects it — but a test that wants the other answer can
+   still state it.
 5. **A sandbox that may nest mounts a writable proc.** `--proc /proc`, never a read-only
    bind of the host's. Recorded as a constraint on the argv, because the failure it prevents
    is `EROFS` at the first nested start and reads like a kernel refusal.
@@ -110,10 +126,11 @@ row is recorded because the constraint is now load-bearing and nothing says so.
 ## Tests
 
 - `TestBwrapObservesNestingFromItsUserNamespace` — a narrow `uid_map` reads as nested.
-- `TestBwrapObservesTheTopOfTheMachine` — the full range reads as top.
+- `TestBwrapObservesTheTopOfTheMachine` — the full range reads as top, and a published
+  `setgroups` reading `deny` corroborates a namespace.
 - `TestTheMarkerOverrulesTheObservation` — both directions.
-- `TestACuratedToolEnvStillCarriesTheMarker` — `inheritedEnv` includes it.
-- `TestTheHarnessCanStateThatItsGatewayIsNested` — the whitelist cannot hide it.
+- `TestANestedSandboxTellsItsCommands` — the worker sets the marker from the config, a
+  caller can overrule it, and `clearEnv` does not remove it.
 - `TestABwrapThatMayNestMountsAWritableProc` — the argv carries `--proc /proc`.
 
 The evidence behind the tables is three commands run inside a bwrap workspace on 2026-11-05;
