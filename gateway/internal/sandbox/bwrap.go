@@ -1209,20 +1209,25 @@ func (b *Bwrap) mountArgs(config bwrapConfig) []string {
 		"--ro-bind", config.Supervisor, guestSupervisor)
 }
 
-// isolationArgs is what the sandbox is separated from. A nested sandbox with a network shares
-// the user namespace pasta already made: asking bubblewrap for a third one inside it cannot
-// write its uid map, even when the process is root. The namespaces that still separate the
-// command (pid, uts, ipc, cgroup) are unshared one by one; the user namespace is pasta's. A
-// sandbox without a network, or outside a parent, keeps a user namespace of its own.
+// isolationArgs is what the sandbox is separated from. A nested sandbox shares the user
+// namespace it was made in, because asking bubblewrap for a third one inside it cannot write its
+// uid map: a parent that made a namespace for pasta holds CAP_SYS_ADMIN, CAP_NET_ADMIN and
+// CAP_NET_BIND_SERVICE and no CAP_SETUID, so the uid map write is refused while the namespaces
+// that still separate the command work. That is true with and without a network, so the nested
+// case never asks for a user namespace; "off" unshares the network, which is an empty namespace
+// rather than the parent's egress. A sandbox outside a parent keeps a user namespace of its own.
 func isolationArgs(config bwrapConfig) []string {
-	nestedNetwork := config.Nested && config.Network.Mode != NetworkOffName
+	if config.Nested {
+		argv := []string{"--unshare-pid", "--unshare-uts", "--unshare-ipc", "--unshare-cgroup"}
+		if config.Network.Mode == NetworkOffName {
+			return append(argv, "--unshare-net")
+		}
+		return append(argv, "--share-net")
+	}
 	var argv []string
-	if config.Rootfs != "" && !nestedNetwork {
+	if config.Rootfs != "" {
 		// Root inside a single mapping, so files written by root land owned by the user.
 		argv = append(argv, "--uid", "0", "--gid", "0")
-	}
-	if nestedNetwork {
-		return append(argv, "--unshare-pid", "--unshare-uts", "--unshare-ipc", "--unshare-cgroup", "--share-net")
 	}
 	// A user namespace of the sandbox's own, with the single mapping that makes root inside the
 	// user outside. It nests inside the one pasta makes when there is egress, which is worth

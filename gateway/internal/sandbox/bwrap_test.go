@@ -885,6 +885,88 @@ func TestBwrapNestedEgressReusesPastaUserNamespace(t *testing.T) {
 	}
 }
 
+// The same question as above, with the network off: a nested sandbox still runs in the user
+// namespace its parent made, because asking for one of its own is refused at the uid map when the
+// parent holds CAP_SYS_ADMIN and no CAP_SETUID. "Off" is an empty network namespace, not the
+// parent's, or the policy would say off and the sandbox would still have the workspace's egress.
+func TestBwrapNestedWithoutEgressReusesTheUserNamespace(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	config := bwrapConfig{
+		Bwrap:       "/usr/bin/bwrap",
+		Rootfs:      "/rootfs",
+		Network:     bwrapNetwork{Mode: NetworkOffName},
+		Nested:      true,
+		DataDir:     "/home",
+		Workspace:   "/work",
+		Run:         "/run",
+		GuestRun:    guestRunDir,
+		Supervisor:  "/usr/local/bin/acornd",
+		GuestSocket: guestSocketPath,
+	}
+	argv, err := driver.sandboxArgv(config)
+	if err != nil {
+		t.Fatalf("argv: %v", err)
+	}
+	joined := strings.Join(argv, " ")
+	if strings.Contains(joined, "--unshare-all") {
+		t.Error("a nested sandbox must not unshare a user namespace of its own")
+	}
+	if strings.Contains(joined, "--uid 0") || strings.Contains(joined, "--gid 0") {
+		t.Error("a nested sandbox runs in its parent's root, so it must not remap the uid")
+	}
+	for _, want := range []string{"--unshare-pid", "--unshare-uts", "--unshare-ipc", "--unshare-cgroup", "--unshare-net"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("argv does not contain %q: %v", want, argv)
+		}
+	}
+	if strings.Contains(joined, "--share-net") {
+		t.Error("a sandbox with no egress must not share its parent's network")
+	}
+}
+
+// The unit test above pins the argv; this runs it against the parent a nested acornd actually has.
+// Measured inside pasta on Debian 13, bubblewrap 0.12.0: the process is uid 0 with CAP_SYS_ADMIN,
+// CAP_NET_ADMIN and CAP_NET_BIND_SERVICE and no CAP_SETUID. `--unshare-all --uid 0` therefore dies
+// with "setting up uid map: Operation not permitted", while the reuse path starts and leaves the
+// sandbox a network namespace with nothing in it but loopback.
+func TestANestedSandboxWithNoEgressStartsInsidePasta(t *testing.T) {
+	if os.Getenv("ACORND_BWRAP_ONLY") == "" {
+		// Not a capability of this package's suite: pasta nests one user namespace inside another,
+		// which a machine that restricts unprivileged user namespaces refuses, so this runs where
+		// the bwrap tier has set the host up for it (make test-bwrap).
+		t.Skip("the bwrap tier runs this: it needs the machine's user-namespace switch")
+	}
+	bwrap, err := exec.LookPath("bwrap")
+	if err != nil {
+		t.Skip("no bubblewrap on this machine")
+	}
+	pasta, err := exec.LookPath("pasta")
+	if err != nil {
+		t.Skip("no pasta on this machine")
+	}
+	if _, err := os.Stat("/dev/net/tun"); err != nil {
+		t.Skip("no /dev/net/tun to hand pasta")
+	}
+	if err := NewBwrap(t.TempDir()).Usable(); err != nil {
+		t.Skipf("this machine will not make a user namespace: %v", err)
+	}
+
+	config := bwrapConfig{Nested: true, Network: bwrapNetwork{Mode: NetworkOffName}}
+	inner := append([]string{bwrap, "--ro-bind", "/", "/", "--proc", "/proc"}, isolationArgs(config)...)
+	inner = append(inner, "--", "/bin/sh", "-c",
+		`test "$(tail -n +3 /proc/net/dev | cut -d: -f1 | tr -d ' ')" = lo`)
+
+	// pasta is the parent the fix is about: it makes the user namespace a nested acornd lives in,
+	// and its sandbox holds the capabilities named above. Running it directly is also what a
+	// gateway does, so this needs no outer bubblewrap of its own.
+	argv := append([]string{
+		"-q", "-t", "none", "-u", "none", "-T", "none", "-U", "none", "--no-map-gw", "--",
+	}, inner...)
+	if output, err := exec.Command(pasta, argv...).CombinedOutput(); err != nil {
+		t.Fatalf("a nested sandbox with no egress did not start: %v\n%s\nargv: %q", err, output, argv)
+	}
+}
+
 func TestAPastaThatCannotMapItsUserNamespaceIsRefused(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "pasta")
 	body := "#!/bin/sh\necho \"Couldn't configure user mappings\" >&2\nexit 0\n"
