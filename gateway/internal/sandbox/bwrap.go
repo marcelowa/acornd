@@ -332,6 +332,11 @@ type bwrapConfig struct {
 	// Nested is whether this sandbox was created inside another bwrap workspace. A nested
 	// sandbox reuses pasta's user namespace instead of trying to make one more inside it.
 	Nested bool `json:"nested,omitempty"`
+	// DisableNesting is whether this sandbox must not nest at all. A sandbox with a user
+	// namespace of its own is told to refuse another one inside it, which is what the policy
+	// that disables nesting means. A nested sandbox cannot carry it: it has no user namespace
+	// of its own to disable, and its parent's policy is the one that decided.
+	DisableNesting bool `json:"disableNesting,omitempty"`
 	// Beta notes what this shape does not do yet, so the file does not read as a promise.
 	Beta string `json:"beta"`
 }
@@ -637,7 +642,10 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 		SecretProxy: secretProxy,
 		Devices:     policy.Devices,
 		Nested:      nestedFromProcess(),
-		Beta:        "one sandbox per workspace, held by this binary as its first process",
+		// A workspace that disables VM nesting means a leaf: no hypervisor, no container, no
+		// user namespace. The argv enforces it where the sandbox has a namespace of its own.
+		DisableNesting: policy.DisableVMNesting,
+		Beta:           "one sandbox per workspace, held by this binary as its first process",
 	}
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
@@ -1234,6 +1242,14 @@ func isolationArgs(config bwrapConfig) []string {
 	// knowing: on a host that restricts unprivileged user namespaces (Ubuntu 24.04 and its
 	// AppArmor gate) that second one is what gets refused. See the note in ADR 0023.
 	argv = append(argv, "--unshare-all")
+	if config.DisableNesting {
+		// --disable-userns is refused without an explicit --unshare-user: it checks the flag,
+		// not the --unshare-all bundle. --assert-userns-disabled turns a kernel that cannot
+		// install the filter into a failed boot, so the promise is kept or the sandbox does
+		// not exist. A nested sandbox is not given these: it has no namespace of its own, and
+		// bubblewrap refuses the flag without one.
+		argv = append(argv, "--unshare-user", "--disable-userns", "--assert-userns-disabled")
+	}
 	if config.Network.Mode != NetworkOffName {
 		// Share the network namespace of whoever started bubblewrap: pasta, when there is one.
 		argv = append(argv, "--share-net")

@@ -75,10 +75,11 @@ type Workspace struct {
 	// Empty means the install's default, from --sandbox-engine. Like Image, it takes effect
 	// at the next sandbox, because a running sandbox is where the dependencies live.
 	Engine string `json:"engine,omitempty"`
-	// DisableVMNesting is whether this workspace's sandbox must not nest virtual machines:
-	// run a hypervisor inside it. Nil means "not set", which follows the install's
-	// --disable-vm-nesting; a pointer because true is a choice and absent is not. Like Image,
-	// it takes effect at the next sandbox, because nesting is decided when one is created.
+	// DisableVMNesting is whether this workspace's sandbox must not nest at all: run a
+	// hypervisor, a container, or another user namespace inside it. Nil means "not set",
+	// which follows the install's --disable-vm-nesting; a pointer because true is a choice and
+	// absent is not. Like Image, it takes effect at the next sandbox, because nesting is
+	// decided when one is created.
 	DisableVMNesting *bool `json:"disable_vm_nesting,omitempty"`
 	// DisableDevices is whether this bwrap workspace must not receive the host's
 	// /dev/net/tun and /dev/kvm. Nil means the default: devices are granted, so a

@@ -744,6 +744,17 @@ func TestBwrapConfigRecordsNestedFromTheParent(t *testing.T) {
 	}
 }
 
+func TestBwrapConfigRecordsAWorkspaceThatMustNotNest(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	config, err := driver.writeConfig(Policy{Workspace: t.TempDir(), DisableVMNesting: true}, t.TempDir())
+	if err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if !config.DisableNesting {
+		t.Fatal("a workspace that disables nesting wrote a config that allows it")
+	}
+}
+
 func TestBwrapClaimsNestingWhenKVMIsBound(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
 	kvm := filepath.Join(t.TempDir(), "kvm")
@@ -964,6 +975,100 @@ func TestANestedSandboxWithNoEgressStartsInsidePasta(t *testing.T) {
 	}, inner...)
 	if output, err := exec.Command(pasta, argv...).CombinedOutput(); err != nil {
 		t.Fatalf("a nested sandbox with no egress did not start: %v\n%s\nargv: %q", err, output, argv)
+	}
+}
+
+// A workspace that disables nesting is a leaf: its sandbox has a user namespace of its own, and the
+// kernel is told to refuse another one inside it. --disable-userns is refused without an explicit
+// --unshare-user — it checks the flag, not the --unshare-all bundle — and
+// --assert-userns-disabled makes a kernel that cannot install the filter fail the boot.
+func TestBwrapLeafSandboxRefusesAnotherUserNamespace(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	config := bwrapConfig{
+		Bwrap:          "/usr/bin/bwrap",
+		Rootfs:         "/rootfs",
+		Network:        bwrapNetwork{Mode: NetworkOffName},
+		DisableNesting: true,
+		DataDir:        "/home",
+		Workspace:      "/work",
+		Run:            "/run",
+		GuestRun:       guestRunDir,
+		Supervisor:     "/usr/local/bin/acornd",
+		GuestSocket:    guestSocketPath,
+	}
+	argv, err := driver.sandboxArgv(config)
+	if err != nil {
+		t.Fatalf("argv: %v", err)
+	}
+	joined := strings.Join(argv, " ")
+	for _, want := range []string{
+		"--unshare-all",
+		"--unshare-user", "--disable-userns", "--assert-userns-disabled",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("argv does not contain %q: %v", want, argv)
+		}
+	}
+}
+
+// A nested sandbox cannot carry the flag: bubblewrap refuses --disable-userns without
+// --unshare-user, and a nested sandbox must not unshare one (ADR 0030). Its parent's policy
+// decided, and a parent that is a leaf never starts a nested sandbox at all.
+func TestBwrapNestedSandboxIsNotToldToDisableUserns(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	config := bwrapConfig{
+		Bwrap:          "/usr/bin/bwrap",
+		Rootfs:         "/rootfs",
+		Network:        bwrapNetwork{Mode: "pasta"},
+		Nested:         true,
+		DisableNesting: true,
+		DataDir:        "/home",
+		Workspace:      "/work",
+		Run:            "/run",
+		GuestRun:       guestRunDir,
+		Supervisor:     "/usr/local/bin/acornd",
+		GuestSocket:    guestSocketPath,
+	}
+	argv, err := driver.sandboxArgv(config)
+	if err != nil {
+		t.Fatalf("argv: %v", err)
+	}
+	joined := strings.Join(argv, " ")
+	for _, unwanted := range []string{"--unshare-user", "--disable-userns", "--assert-userns-disabled"} {
+		if strings.Contains(joined, unwanted) {
+			t.Errorf("a nested sandbox was given %q: %v", unwanted, argv)
+		}
+	}
+}
+
+// The unit tests above pin the argv; this checks the kernel agrees. The control is the same
+// sandbox without the flag: where that one already refuses a nested namespace, the machine has
+// nothing to prove and the test skips.
+func TestALeafSandboxRefusesAUserNamespaceInsideIt(t *testing.T) {
+	if os.Getenv("ACORND_BWRAP_ONLY") == "" {
+		t.Skip("the bwrap tier runs this: it needs the machine's user-namespace switch")
+	}
+	bwrap, err := exec.LookPath("bwrap")
+	if err != nil {
+		t.Skip("no bubblewrap on this machine")
+	}
+	if _, err := exec.LookPath("unshare"); err != nil {
+		t.Skip("no unshare on this machine")
+	}
+	if err := NewBwrap(t.TempDir()).Usable(); err != nil {
+		t.Skipf("this machine will not make a user namespace: %v", err)
+	}
+	run := func(disable bool) ([]byte, error) {
+		config := bwrapConfig{DisableNesting: disable, Network: bwrapNetwork{Mode: NetworkOffName}}
+		argv := append([]string{"--ro-bind", "/", "/", "--proc", "/proc"}, isolationArgs(config)...)
+		argv = append(argv, "--", "/bin/sh", "-c", "unshare -Ur true")
+		return exec.Command(bwrap, argv...).CombinedOutput()
+	}
+	if output, err := run(false); err != nil {
+		t.Skipf("this machine will not make a nested user namespace anyway: %v\n%s", err, output)
+	}
+	if output, err := run(true); err == nil {
+		t.Fatalf("a leaf sandbox let a user namespace in: %s", output)
 	}
 }
 
