@@ -367,7 +367,13 @@ export interface Platform {
 	 * in view, and its menu is where a sandbox is changed. */
 	setWorkspaceSandbox: (
 		name: string,
-		change: { image: string; network: string; keepAlive?: boolean; private?: boolean },
+		change: {
+			image: string;
+			network: string;
+			keepAlive?: boolean;
+			private?: boolean;
+			disableDevices?: boolean;
+		},
 	) => void;
 	/** A new workspace, on the engine chosen for it. */
 	createWorkspace: (name: string, engine?: string) => void;
@@ -1242,7 +1248,13 @@ export function usePlatform(): Platform {
 	const setWorkspaceSandbox = useCallback(
 		(
 			name: string,
-			change: { image: string; network: string; keepAlive?: boolean; private?: boolean },
+			change: {
+				image: string;
+				network: string;
+				keepAlive?: boolean;
+				private?: boolean;
+				disableDevices?: boolean;
+			},
 		) => {
 			act(updateWorkspace(name, change), () => void reload());
 		},

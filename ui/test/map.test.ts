@@ -376,6 +376,31 @@ describe("the wire mapping", () => {
 		expect(workspaces.map((workspace) => workspace.private)).toEqual([false, true]);
 	});
 
+	test("a withheld device grant reaches the row", () => {
+		const workspaces = toWorkspaces(
+			[
+				{
+					name: "general",
+					title: "acornd",
+					path: "/acornd",
+					personal: true,
+					running: true,
+				},
+				{
+					name: "lab",
+					title: "Lab",
+					path: "/tmp/ws-lab",
+					personal: false,
+					running: true,
+					disable_devices: true,
+				},
+			],
+			"general",
+		);
+		// The dialog shows the grant, not the flag: absent means granted, which is the default.
+		expect(workspaces.map((workspace) => workspace.disableDevices)).toEqual([false, true]);
+	});
+
 	test("a scope's defaults map to picker values, and an empty layer stays empty", () => {
 		expect(
 			toScopeDefaults({

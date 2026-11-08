@@ -28,7 +28,13 @@ export interface WorkspacesPanelProps {
 	/** A row's sandbox, changed from the row's own menu. */
 	onUpdateSandbox: (
 		name: string,
-		change: { image: string; network: string; keepAlive: boolean; private: boolean },
+		change: {
+			image: string;
+			network: string;
+			keepAlive: boolean;
+			private: boolean;
+			disableDevices: boolean;
+		},
 	) => void;
 	/**
 	 * The room in view, when it can be shared: who is in it and whether this caller runs it. Absent on a

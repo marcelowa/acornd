@@ -47,6 +47,8 @@ export interface WireWorkspace {
 	keep_alive?: boolean | undefined;
 	/** May reach private networks as this machine: its LAN and its tailnet. Off unless asked. */
 	private?: boolean | undefined;
+	/** Withholds the host's /dev/net/tun and /dev/kvm from this workspace's bwrap sandbox. */
+	disable_devices?: boolean | undefined;
 	running: boolean;
 	/** Where this workspace is between "asked for" and "usable": stopped, opening, ready, or
 	 * failed. `running` is only the harness being up; a workspace that is opening has no harness

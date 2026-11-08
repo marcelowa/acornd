@@ -42,8 +42,9 @@ pasta already made, not another unshare inside it.
    `/dev/kvm` when they exist, and adds `--cap-add ALL` and `--setenv ACORND_NESTED=1`.
    The caps are what nested pasta needs; the marker is how the inner acornd knows it is
    inside a sandbox. A workspace can withdraw them: `disable_devices` in the registry, the
-   API, `acornd workspace add --no-devices`, or the same field on an update. Absent means
-   on. A missing device is skipped, not a failed boot.
+   API, `acornd workspace add --no-devices`, the sandbox dialog's devices switch, or the
+   same field on an update. Absent means on. A missing device is skipped, not a failed
+   boot.
 2. **The nested bwrap reuses pasta's user namespace.** `ACORND_NESTED=1` makes the bwrap
    engine record `nested: true`. It runs bubblewrap without `--unshare-user` or
    `--uid/--gid`, with the individual unshare flags for pid, uts, ipc and cgroup. The
@@ -99,7 +100,8 @@ pasta already made, not another unshare inside it.
   it does not have.
 - Nested rootfs copies still cost disk; the bwrap image copy remains the largest gap
   (ADR 0023).
-- The UI does not expose `disable_devices` yet; the CLI, API, and registry do.
+- `disable_devices` is set from the sandbox dialog (withheld/granted), the CLI, the API,
+  and the registry: every surface that can choose a workspace can choose what it is given.
 
 ## Tests
 

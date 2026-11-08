@@ -687,12 +687,19 @@ export interface WorkspaceChange {
 	keepAlive?: boolean;
 	/** May reach private networks as this machine; absent leaves the workspace's setting alone. */
 	private?: boolean;
+	/** Withhold the host's /dev/net/tun and /dev/kvm; absent leaves the workspace's setting alone. */
+	disableDevices?: boolean;
 }
 
 export function updateWorkspace(workspace: string, change: WorkspaceChange): Promise<void> {
-	// The wire says keep_alive, the interface says keepAlive: one conversion, here.
-	const { keepAlive, ...rest } = change;
-	const body = keepAlive === undefined ? rest : { ...rest, keep_alive: keepAlive };
+	// The wire says keep_alive and disable_devices, the interface says keepAlive and disableDevices:
+	// one conversion, here.
+	const { keepAlive, disableDevices, ...rest } = change;
+	const body = {
+		...rest,
+		...(keepAlive === undefined ? {} : { keep_alive: keepAlive }),
+		...(disableDevices === undefined ? {} : { disable_devices: disableDevices }),
+	};
 	return post(workspacePath(workspace, "/update"), body);
 }
 

@@ -53,3 +53,12 @@ export const NoImageYet: Story = {
 		onClose: noop,
 	},
 };
+
+/** A bwrap workspace that withheld the host's devices: no nested acornd, no hypervisor inside. */
+export const WithoutDevices: Story = {
+	args: {
+		workspace: { ...workspace, disableDevices: true },
+		onSave: noop,
+		onClose: noop,
+	},
+};
