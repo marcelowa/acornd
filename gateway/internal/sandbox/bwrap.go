@@ -299,14 +299,10 @@ type bwrapConfig struct {
 	Image     string `json:"image"`
 	// Network is how a command reaches the network: a namespace with no interfaces, or one whose
 	// traffic pasta forwards through the host. See bwrapNetwork.
-	Network bwrapNetwork `json:"network"`
-	// Rootfs is the workspace's own unpacked copy of its image, bound as `/`. It is where an
-	// install inside the sandbox lands and stays: the host never sees it, and removing the
-	// sandbox removes it.
-	Rootfs   string   `json:"rootfs,omitempty"`
-	DataDir  string   `json:"home"`
-	Hidden   string   `json:"hidden"`
-	ReadOnly []string `json:"readOnly,omitempty"`
+	Network  bwrapNetwork `json:"network"`
+	DataDir  string       `json:"home"`
+	Hidden   string       `json:"hidden"`
+	ReadOnly []string     `json:"readOnly,omitempty"`
 	// ResolvConf is the file bound at /etc/resolv.conf: the machine's own, or a copy of its
 	// upstreams when the machine's points at a loopback resolver the sandbox cannot reach.
 	ResolvConf string `json:"resolvConf,omitempty"`
@@ -327,6 +323,11 @@ type bwrapConfig struct {
 	// HTTPS_PROXY, the trust bundle, and the port pasta forwards. Absent when the workspace has
 	// no secrets, and then the argv forwards nothing.
 	SecretProxy *bwrapSecretProxy `json:"secretProxy,omitempty"`
+	// Rootfs is the workspace's own copy of its image, when this machine cannot mount an overlay
+	// inside the sandbox's user namespace. Absent when Overlay names the root instead.
+	Rootfs string `json:"rootfs,omitempty"`
+	// Overlay is the shared image base and this workspace's delta, when the machine can overlay.
+	Overlay *bwrapOverlay `json:"overlay,omitempty"`
 	// Devices is whether this sandbox received the host's /dev/net/tun and /dev/kvm.
 	Devices bool `json:"devices,omitempty"`
 	// Nested is whether this sandbox was created inside another bwrap workspace. A nested
@@ -407,6 +408,15 @@ type bwrapNetwork struct {
 	Address string `json:"address,omitempty"`
 	Gateway string `json:"gateway,omitempty"`
 	Pasta   string `json:"pasta,omitempty"`
+}
+
+// bwrapOverlay is a sandbox's root when the image is shared: the unpacked base as a read-only
+// lower, and this workspace's own upper and work directories. Writes land in the upper, and the
+// base is paid once for every workspace on that image. See docs/adr/0039-an-overlay-root-not-a-copy.md.
+type bwrapOverlay struct {
+	Base  string `json:"base"`
+	Upper string `json:"upper"`
+	Work  string `json:"work"`
 }
 
 // The sandbox's network, when it has one. It is the address space QEMU's user-mode network has
@@ -606,7 +616,7 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 	if err != nil {
 		return bwrapConfig{}, err
 	}
-	rootfs, err := b.workspaceRootfs(policy, Name(policy.Workspace), image)
+	rootfs, overlay, err := b.workspaceRoot(policy, Name(policy.Workspace), image)
 	if err != nil {
 		return bwrapConfig{}, err
 	}
@@ -618,7 +628,9 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 	if err != nil {
 		return bwrapConfig{}, err
 	}
-	secretProxy, err := b.secretProxyFor(policy, Name(policy.Workspace), rootfs)
+	// The image's own trust roots come from the tree the image was unpacked into, whether this
+	// workspace shares it or copied it.
+	secretProxy, err := b.secretProxyFor(policy, Name(policy.Workspace), imageTree(rootfs, overlay))
 	if err != nil {
 		return bwrapConfig{}, err
 	}
@@ -628,6 +640,7 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 		Image:       image,
 		Network:     network,
 		Rootfs:      rootfs,
+		Overlay:     overlay,
 		DataDir:     dataDir,
 		Hidden:      b.dataDir,
 		ReadOnly:    readonlyGlobals(policy),
@@ -814,38 +827,127 @@ func (b *Bwrap) Remove(ctx context.Context, name string) error {
 	return os.RemoveAll(b.workspaceDir(name))
 }
 
-// workspaceRootfs returns the workspace's own copy of its image, making it on first use. A
-// copy rather than a shared read-only tree with a layer on top: an install inside the sandbox
-// is then an ordinary write to an ordinary directory, which needs no privileged mount, no
-// overlay, and no cleanup beyond removing the folder.
-func (b *Bwrap) workspaceRootfs(policy Policy, name, image string) (string, error) {
-	rootfs := filepath.Join(b.workspaceDir(name), "rootfs")
-	if info, err := os.Stat(filepath.Join(rootfs, ".acornd-rootfs")); err == nil && !info.IsDir() {
-		return rootfs, nil
+// workspaceRoot is what the workspace's commands see as `/`: the shared image base with this
+// workspace's upper on top where the machine can overlay, or a copy of it where it cannot. Either
+// way the two files a workspace owns before its first command — the root marker and apt's line —
+// are written as it is prepared. See docs/adr/0039-an-overlay-root-not-a-copy.md.
+func (b *Bwrap) workspaceRoot(policy Policy, name, image string) (string, *bwrapOverlay, error) {
+	dir := b.workspaceDir(name)
+	// A workspace built before the overlay keeps the copy it already has.
+	copyRoot := filepath.Join(dir, "rootfs")
+	if finishedRoot(copyRoot) {
+		return copyRoot, nil, nil
 	}
-	// The workspace's own copy is the slow part of a first start — 84 MB of image, more after the
-	// project's tools — so the two steps that take the time are named as they happen.
+	// A workspace built with an overlay keeps the base it was built on: the marker in its upper
+	// names the tree, so changing the image field cannot re-point a delta at another one.
+	upper := filepath.Join(dir, "upper")
+	work := filepath.Join(dir, "work")
+	if base, ok := overlayBase(upper); ok {
+		return "", &bwrapOverlay{Base: base, Upper: upper, Work: work}, nil
+	}
+	// Preparing a new workspace is the slow part of a first start, so the steps are named.
 	policy.Stage("preparing the image")
 	base, err := b.imageBase(image)
 	if err != nil {
-		return "", err
+		return "", nil, err
+	}
+	if b.canOverlay(base) && !policy.DisableVMNesting && !policy.Egress {
+		// Only a sandbox with no pasta in front can carry an overlay: pasta makes the user
+		// namespace the sandbox lives in, and the kernel refuses an overlay mount inside it
+		// (measured: EPERM with the base and a writable upper). A workspace that disables
+		// nesting keeps the copy too, because the kernel-enforced leaf needs an explicit
+		// --unshare-user, and an overlay mount is refused inside one. Egress and hardening both
+		// win over the disk the copy costs.
+		overlay, err := prepareOverlay(upper, work, base)
+		if err != nil {
+			return "", nil, err
+		}
+		return "", overlay, nil
 	}
 	// Replaced whole, so a half-copied tree cannot be mistaken for a finished one.
 	policy.Stage("copying the image")
-	_ = os.RemoveAll(rootfs)
-	if err := copyTree(base, rootfs); err != nil {
-		return "", fmt.Errorf("sandbox: copying the image for this workspace: %w", err)
+	_ = os.RemoveAll(copyRoot)
+	if err := copyTree(base, copyRoot); err != nil {
+		return "", nil, fmt.Errorf("sandbox: copying the image for this workspace: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(rootfs, ".acornd-rootfs"), []byte(image+"\n"), 0o644); err != nil {
-		return "", err
+	if err := ownRoot(copyRoot, image); err != nil {
+		return "", nil, err
 	}
-	// apt's own sandbox drops to _apt with setgroups, which a single-mapping user namespace
-	// denies; as root inside a root that is the workspace's own, dropping is not needed.
-	aptDir := filepath.Join(rootfs, "etc", "apt", "apt.conf.d")
+	return copyRoot, nil, nil
+}
+
+// imageTree is the tree the image's own files are read from: the copy when the workspace has one,
+// the shared base otherwise.
+func imageTree(rootfs string, overlay *bwrapOverlay) string {
+	if overlay != nil {
+		return overlay.Base
+	}
+	return rootfs
+}
+
+// prepareOverlay makes a workspace's upper and work dirs and writes what it owns into the upper.
+func prepareOverlay(upper, work, base string) (*bwrapOverlay, error) {
+	_ = os.RemoveAll(upper)
+	_ = os.RemoveAll(work)
+	for _, path := range []string{upper, work} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			return nil, err
+		}
+	}
+	if err := ownRoot(upper, base); err != nil {
+		return nil, err
+	}
+	return &bwrapOverlay{Base: base, Upper: upper, Work: work}, nil
+}
+
+// finishedRoot is whether the tree at root carries the marker a finished preparation leaves.
+func finishedRoot(root string) bool {
+	info, err := os.Stat(filepath.Join(root, ".acornd-rootfs"))
+	return err == nil && !info.IsDir()
+}
+
+// overlayBase is the base a workspace's upper was prepared against, when it has one.
+func overlayBase(upper string) (string, bool) {
+	raw, err := os.ReadFile(filepath.Join(upper, ".acornd-rootfs"))
+	if err != nil {
+		return "", false
+	}
+	base := strings.TrimSpace(string(raw))
+	return base, base != ""
+}
+
+// ownRoot writes what a workspace owns before its first command: the marker naming the tree its
+// root was made from, and apt's line. apt's own sandbox drops to _apt with setgroups, which a
+// single-mapping user namespace denies; as root inside a root that is the workspace's own,
+// dropping is not needed.
+func ownRoot(root, marker string) error {
+	if err := os.WriteFile(filepath.Join(root, ".acornd-rootfs"), []byte(marker+"\n"), 0o644); err != nil {
+		return err
+	}
+	aptDir := filepath.Join(root, "etc", "apt", "apt.conf.d")
 	if err := os.MkdirAll(aptDir, 0o755); err == nil {
 		_ = os.WriteFile(filepath.Join(aptDir, "99-acornd"), []byte("APT::Sandbox::User \"root\";\n"), 0o644)
 	}
-	return rootfs, nil
+	return nil
+}
+
+// canOverlay is whether bubblewrap can mount an overlay inside the user namespace it makes, with
+// the image this sandbox will use as the lower. Overlayfs in a user namespace needs Linux 5.11,
+// and the probe is the real mount, so a kernel that refuses it is known before a workspace is
+// built on it. An image with no /bin/true falls back to a copy, which is slower and still right.
+func (b *Bwrap) canOverlay(base string) bool {
+	probe, err := os.MkdirTemp(b.StateDir(), "overlay-probe-")
+	if err != nil {
+		return false
+	}
+	defer func() { _ = os.RemoveAll(probe) }()
+	upper := filepath.Join(probe, "upper")
+	work := filepath.Join(probe, "work")
+	if os.MkdirAll(upper, 0o755) != nil || os.MkdirAll(work, 0o755) != nil {
+		return false
+	}
+	_, err = b.run(context.Background(), "--overlay-src", base, "--overlay", upper, work, "/", "--", "/bin/true")
+	return err == nil
 }
 
 // imageBase is the shared unpacked image, fetched once per digest and reused by every
@@ -1190,11 +1292,19 @@ func (b *Bwrap) sandboxArgv(config bwrapConfig) ([]string, error) {
 // workspace, its private home, the resource folders, and the supervisor.
 func (b *Bwrap) mountArgs(config bwrapConfig) []string {
 	var argv []string
-	if config.Rootfs != "" {
+	switch {
+	case config.Overlay != nil:
+		// The shared image as a read-only lower, this workspace's writes in its upper. The
+		// resolver is bound over it, as it is over a copy.
+		argv = append(argv,
+			"--overlay-src", config.Overlay.Base,
+			"--overlay", config.Overlay.Upper, config.Overlay.Work, "/",
+			"--ro-bind", resolverOrHost(config), "/etc/resolv.conf")
+	case config.Rootfs != "":
 		argv = append(argv, "--bind", config.Rootfs, "/",
 			// A root of its own still needs the machine's resolver, or its upstreams.
 			"--ro-bind", resolverOrHost(config), "/etc/resolv.conf")
-	} else {
+	default:
 		argv = append(argv, "--ro-bind", "/", "/", "--tmpfs", config.Hidden)
 	}
 	argv = append(argv, "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp")
@@ -1232,8 +1342,19 @@ func isolationArgs(config bwrapConfig) []string {
 		}
 		return append(argv, "--share-net")
 	}
+	if config.Overlay != nil {
+		// bubblewrap's implicit user namespace is the only one an overlay mount can live in:
+		// with an explicit --unshare-user the kernel refuses the mount (EINVAL), measured. The
+		// namespaces that still separate the command are asked for one by one, and the user
+		// namespace is the one bubblewrap makes for itself.
+		argv := []string{"--unshare-pid", "--unshare-uts", "--unshare-ipc", "--unshare-cgroup"}
+		if config.Network.Mode == NetworkOffName {
+			return append(argv, "--unshare-net")
+		}
+		return append(argv, "--share-net")
+	}
 	var argv []string
-	if config.Rootfs != "" {
+	if hasOwnRoot(config) {
 		// Root inside a single mapping, so files written by root land owned by the user.
 		argv = append(argv, "--uid", "0", "--gid", "0")
 	}
@@ -1260,10 +1381,16 @@ func isolationArgs(config bwrapConfig) []string {
 // guestHome is where the private home appears inside the sandbox: the root's own home when there
 // is an image, and its real path when the machine's root is the root.
 func guestHome(config bwrapConfig) string {
-	if config.Rootfs == "" {
+	if !hasOwnRoot(config) {
 		return config.DataDir
 	}
 	return "/root"
+}
+
+// hasOwnRoot is whether the sandbox brings a root of its own: a copy, or the shared image with its
+// upper on top. The machine's root, bound read-only, is not its own.
+func hasOwnRoot(config bwrapConfig) bool {
+	return config.Rootfs != "" || config.Overlay != nil
 }
 
 // pidPath is where the sandbox's process is recorded, so a gateway that restarts can tell a live

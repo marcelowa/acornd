@@ -35,11 +35,13 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// fakeBwrap answers the two calls the driver makes — the version and the probe — so the suite
-// runs the same on a machine with bubblewrap and one without.
+// fakeBwrap answers the calls the driver makes — the version, the user-namespace probe, and the
+// overlay probe — so the suite runs the same on a machine with bubblewrap and one without.
 type fakeBwrap struct {
 	version string
 	probe   error
+	// overlay, when set, is what an overlay mount answers: the machine cannot share an image.
+	overlay error
 	calls   [][]string
 }
 
@@ -47,6 +49,9 @@ func (f *fakeBwrap) Run(_ context.Context, args ...string) (string, error) {
 	f.calls = append(f.calls, args)
 	if len(args) == 1 && args[0] == "--version" {
 		return f.version, nil
+	}
+	if f.overlay != nil && slices.Contains(args, "--overlay-src") {
+		return "bwrap: setting up overlay: Operation not permitted", f.overlay
 	}
 	if f.probe != nil {
 		return "bwrap: setting up uid map: Permission denied", f.probe
@@ -163,7 +168,9 @@ func TestBwrapCreateWritesWhatTheWorkspaceRunsUnder(t *testing.T) {
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	driver, _ := testBwrap(t, dataDir)
+	driver, runner := testBwrap(t, dataDir)
+	// A machine that cannot overlay: this is the copy path, unchanged from before ADR 0039.
+	runner.overlay = errors.New("bwrap: setting up overlay: Operation not permitted")
 	policy := Policy{
 		Workspace: workspace,
 		Image:     "debian:stable-slim",
@@ -203,6 +210,9 @@ func TestBwrapCreateWritesWhatTheWorkspaceRunsUnder(t *testing.T) {
 	}
 	// The workspace's own copy of its image, and the apt line that makes a container root
 	// usable under a single-mapping user namespace.
+	if config.Overlay != nil {
+		t.Fatal("a machine that cannot overlay was given one")
+	}
 	if _, err := os.Stat(filepath.Join(config.Rootfs, "etc", "os-release")); err != nil {
 		t.Fatalf("the rootfs was not copied from the image: %v", err)
 	}
@@ -212,6 +222,168 @@ func TestBwrapCreateWritesWhatTheWorkspaceRunsUnder(t *testing.T) {
 	info, err := os.Stat(config.DataDir)
 	if err != nil || !info.IsDir() {
 		t.Fatalf("home was not created: %v", err)
+	}
+}
+
+// A machine that can overlay shares the image: the base is the lower, the workspace's only files
+// are its own, and the argv mounts the two together. No copy is made — that is the whole point.
+func TestBwrapSharesTheImageBaseWithAnOverlay(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	workspace := filepath.Join(t.TempDir(), "work")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config, err := driver.writeConfig(Policy{Workspace: workspace, Image: "debian:stable-slim"}, t.TempDir())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if config.Overlay == nil {
+		t.Fatal("an overlay-capable machine prepared no overlay")
+	}
+	if config.Rootfs != "" {
+		t.Fatalf("the image was copied to %q as well", config.Rootfs)
+	}
+	// The base is the image; the upper holds the two files the workspace owns and nothing else.
+	if _, err := os.Stat(filepath.Join(config.Overlay.Base, "etc", "os-release")); err != nil {
+		t.Fatalf("the base is not the unpacked image: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(config.Overlay.Upper, "etc", "os-release")); err == nil {
+		t.Error("the image was copied into the upper")
+	}
+	for _, path := range []string{
+		filepath.Join(config.Overlay.Upper, ".acornd-rootfs"),
+		filepath.Join(config.Overlay.Upper, "etc", "apt", "apt.conf.d", "99-acornd"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("a file the workspace owns is missing: %v", err)
+		}
+	}
+	argv, err := driver.sandboxArgv(config)
+	if err != nil {
+		t.Fatalf("argv: %v", err)
+	}
+	joined := strings.Join(argv, " ")
+	want := "--overlay-src " + config.Overlay.Base + " --overlay " + config.Overlay.Upper + " " + config.Overlay.Work + " /"
+	if !strings.Contains(joined, want) {
+		t.Errorf("argv should contain %q:\n%s", want, joined)
+	}
+	if strings.Contains(joined, "--bind "+config.Overlay.Base+" /") {
+		t.Errorf("the shared base was bound writable:\n%s", joined)
+	}
+	// The overlay only mounts inside bubblewrap's implicit user namespace: naming it explicitly
+	// is what the kernel refuses, so the argv may not ask for one.
+	for _, unwanted := range []string{"--unshare-all", "--unshare-user"} {
+		if strings.Contains(joined, unwanted) {
+			t.Errorf("argv contains %q, which refuses the overlay mount: %s", unwanted, joined)
+		}
+	}
+	for _, want := range []string{"--unshare-pid", "--unshare-uts", "--unshare-ipc", "--unshare-cgroup"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("argv does not contain %q: %s", want, joined)
+		}
+	}
+}
+
+// A sandbox with egress runs pasta in front of bubblewrap, and pasta is what makes the user
+// namespace it lives in: the kernel refuses an overlay mount inside that one, so an egress
+// workspace keeps the copy.
+func TestBwrapCopiesTheImageWhenTheSandboxHasEgress(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	workspace := filepath.Join(t.TempDir(), "work")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config, err := driver.writeConfig(Policy{Workspace: workspace, Egress: true}, t.TempDir())
+	if err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if config.Overlay != nil {
+		t.Fatalf("an egress sandbox was given an overlay (%+v); pasta's namespace refuses it", config.Overlay)
+	}
+	if config.Rootfs == "" {
+		t.Fatal("an egress sandbox got no root")
+	}
+}
+
+// A workspace that disables nesting keeps the copy: the kernel-enforced leaf needs an explicit
+// user namespace, and an overlay mount is refused inside one. The hardening wins over the disk.
+func TestBwrapLeafKeepsTheCopyForItsUserns(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	workspace := filepath.Join(t.TempDir(), "work")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The leaf is a decision about a sandbox at the top of the machine; this suite runs inside a
+	// workspace, so the probe is told what that run is.
+	t.Setenv(nestedEnv, "0")
+	config, err := driver.writeConfig(Policy{Workspace: workspace, DisableVMNesting: true}, t.TempDir())
+	if err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if config.Overlay != nil {
+		t.Fatalf("a leaf sandbox was given an overlay (%+v), which its user namespace refuses", config.Overlay)
+	}
+	if config.Rootfs == "" {
+		t.Fatal("a leaf sandbox got no root")
+	}
+	argv, err := driver.sandboxArgv(config)
+	if err != nil {
+		t.Fatalf("argv: %v", err)
+	}
+	joined := strings.Join(argv, " ")
+	for _, want := range []string{"--unshare-all", "--unshare-user", "--disable-userns", "--assert-userns-disabled"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("a leaf sandbox argv should contain %q:\n%s", want, joined)
+		}
+	}
+}
+
+// A workspace prepared before ADR 0039 keeps the copy it has. Its marker is in the copy, so no
+// upper is invented for it and no install is moved.
+func TestBwrapKeepsTheCopyAWorkspaceAlreadyHas(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	workspace := filepath.Join(t.TempDir(), "work")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rootfs := filepath.Join(driver.workspaceDir(Name(workspace)), "rootfs")
+	if err := os.MkdirAll(rootfs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rootfs, ".acornd-rootfs"), []byte("debian:stable-slim\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config, err := driver.writeConfig(Policy{Workspace: workspace, Image: "debian:12-slim"}, t.TempDir())
+	if err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if config.Rootfs != rootfs || config.Overlay != nil {
+		t.Fatalf("the existing copy was replaced: rootfs %q, overlay %+v", config.Rootfs, config.Overlay)
+	}
+}
+
+// The base is a decision made when a workspace is prepared. Changing the image field afterwards
+// does not re-point a delta at another tree: the marker in the upper names the base it was built
+// on, and that is the one it keeps.
+func TestBwrapKeepsTheBaseAWorkspaceWasBuiltOn(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	workspace := filepath.Join(t.TempDir(), "work")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	first, err := driver.writeConfig(Policy{Workspace: workspace, Image: "debian:stable-slim"}, t.TempDir())
+	if err != nil {
+		t.Fatalf("first config: %v", err)
+	}
+	if first.Overlay == nil {
+		t.Fatal("the machine cannot overlay, so this test has nothing to say")
+	}
+	second, err := driver.writeConfig(Policy{Workspace: workspace, Image: "alpine:3"}, t.TempDir())
+	if err != nil {
+		t.Fatalf("second config: %v", err)
+	}
+	if second.Overlay == nil || second.Overlay.Base != first.Overlay.Base {
+		t.Fatalf("the base moved under the workspace's delta: %q then %+v", first.Overlay.Base, second.Overlay)
 	}
 }
 
