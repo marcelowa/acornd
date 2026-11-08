@@ -2,6 +2,10 @@
 
 Status: accepted, built — armed by the 0.7.13 pin (2026-11-03): the switch is a flag, and
 nesting is on unless the workspace opts out. The engine is told either way
+Amended: 2026-11-07 — on bwrap the refusal is enforced by the kernel: a workspace that
+disables nesting is built with `--disable-userns --assert-userns-disabled`, so it loses
+containers and nested bubblewrap too, not only a hypervisor. Two switches meaning "do not
+nest" was rejected; this one is the leaf.
 Date: 2026-10-09
 
 ## Context
@@ -51,6 +55,14 @@ Nesting is allowed unless refused, and the refusal behaves in three ways:
   (`nested`) or why it will not (`nestedReason`). A workspace that allows nesting and does
   not get it is a sentence, not a surprise. A workspace that disables nesting carries
   neither: its own setting, visible beside the state, is the reason.
+- **Enforced by the kernel where the engine can.** On bwrap, a workspace that disables
+  nesting is built with `--disable-userns --assert-userns-disabled`, so a user namespace
+  inside its sandbox is refused rather than merely not asked for. `--unshare-all` is not
+  enough for bubblewrap's check — `--disable-userns` is refused unless `--unshare-user` is
+  named — and `--assert-userns-disabled` turns a kernel that cannot install the filter into
+  a failed boot instead of a promise kept silently. It applies where the sandbox has a user
+  namespace of its own: a nested sandbox reuses its parent's and cannot carry the flag, and
+  a parent that refuses namespaces never starts one.
 
 Nesting is decided when a sandbox is created; changing the setting applies to the next
 sandbox, exactly like the image, because the running sandbox is where dependencies live.
@@ -67,6 +79,11 @@ The projects that want nesting are the ones this product is for — developing a
 itself, emulators, container-in-sandbox work — a wrong guess is cheap by construction (the
 sandbox boots, the surfaces say why not), and the machine-level answer is one word to
 change. The engine's own default is off because it cannot know the host; acornd can look.
+
+**A second switch for user namespaces.** Rejected: `disable_vm_nesting` already promises a
+leaf, and a field beside it that also meant "do not nest" would leave the first one
+half-enforced and the two ambiguous. A workspace that wants containers inside its sandbox
+leaves nesting on.
 
 **Deeper checks than we do.** Deferred: the host checks are deliberately conservative (a
 kernel parameter, a chip generation) and answer "no" when they are unsure, which is the safe

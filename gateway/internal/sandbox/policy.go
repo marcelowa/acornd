@@ -30,11 +30,11 @@ type Policy struct {
 	// CPUs and Memory bound the sandbox. Zero values take the defaults.
 	CPUs   int
 	Memory string
-	// DisableVMNesting is whether this workspace must not nest virtual machines inside its
-	// sandbox. False (the default) allows nesting wherever the engine offers it and this
-	// machine can grant it; true refuses it, and the engine is told so explicitly where
-	// it has the switch. A sandbox on a machine that cannot nest still boots. See
-	// docs/adr/0018-disable-vm-nesting.md.
+	// DisableVMNesting is whether this workspace must not nest at all: no hypervisor, no
+	// container, no user namespace inside its sandbox. False (the default) allows nesting
+	// wherever the engine offers it and this machine can grant it; true refuses it, and the
+	// engine is told so explicitly where it has the switch. A sandbox on a machine that cannot
+	// nest still boots. See docs/adr/0018-disable-vm-nesting.md.
 	DisableVMNesting bool
 	// Devices grants a bwrap sandbox the host's /dev/net/tun and /dev/kvm, and the
 	// capabilities nested pasta needs. It is what lets a workspace run another acornd

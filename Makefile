@@ -341,7 +341,7 @@ test-bwrap: ## the bubblewrap engine end to end: it fetches an image, so it is n
 	cd gateway && env -u ACORND_NO_SANDBOX ACORND_BWRAP_ONLY=1 ACORND_IMAGE_TEST=1 go test -count=1 -shuffle=on ./internal/e2e/ -run 'Bwrap|TwoEngines|KeepsTheEngine'
 	# The one driver test that needs the host set up: a nested sandbox under pasta, where the
 	# parent holds CAP_SYS_ADMIN and no CAP_SETUID. The fast tier skips it.
-	cd gateway && env -u ACORND_NO_SANDBOX ACORND_BWRAP_ONLY=1 go test -count=1 ./internal/sandbox/ -run 'TestANestedSandboxWithNoEgressStartsInsidePasta'
+	cd gateway && env -u ACORND_NO_SANDBOX ACORND_BWRAP_ONLY=1 go test -count=1 ./internal/sandbox/ -run 'TestANestedSandboxWithNoEgressStartsInsidePasta|TestALeafSandboxRefusesAUserNamespaceInsideIt'
 
 test-sandbox: sandbox-preflight ## the engine boundary: live driver, SDK client, and its e2e tests
 	# env -u so a shell that exported the fast tier's switch cannot silently turn this into a

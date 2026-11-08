@@ -116,8 +116,8 @@ type WorkspaceState struct {
 	// Engine is which sandbox engine this workspace runs on; empty means the install default.
 	Engine string `json:"engine,omitempty"`
 	// DisableVMNesting is nil when this workspace nests whenever it can,
-	// and a choice of its own otherwise. True refuses nesting; absent or false allows it
-	// wherever the engine and the machine can.
+	// and a choice of its own otherwise. True refuses nesting — a hypervisor, a container, or
+	// another user namespace — wherever the engine and the machine can.
 	DisableVMNesting *bool `json:"disable_vm_nesting,omitempty"`
 	// DisableDevices is nil when this bwrap workspace receives /dev/net/tun and /dev/kvm,
 	// which is the default, and a choice of its own otherwise. True withholds them.

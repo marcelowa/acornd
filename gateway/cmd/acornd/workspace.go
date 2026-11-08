@@ -64,7 +64,7 @@ func workspaceAdd(argv []string) {
 	egress := flags.String("egress", "", `what the sandbox can reach: "public" (default), "private" (this machine's LAN and tailnet), or "off"`)
 	engine := flags.String("sandbox", "", "sandbox engine: microsandbox or bwrap (default: what this machine can run)")
 	keepAlive := flags.Bool("keep-alive", false, "keep this workspace's sandbox running when nobody is watching it (for daemons and cron jobs)")
-	noNesting := flags.Bool("no-vm-nesting", false, "refuse a hypervisor inside this workspace's sandbox")
+	noNesting := flags.Bool("no-vm-nesting", false, "refuse nesting inside this workspace's sandbox: no hypervisor, container, or user namespace")
 	noDevices := flags.Bool("no-devices", false, "withhold /dev/net/tun and /dev/kvm from this bwrap sandbox")
 	flags.Usage = func() { fmt.Fprint(os.Stderr, addUsage) }
 	// Flags after the name and the folder are documented above, and the standard flag package
@@ -124,7 +124,7 @@ const addUsage = `usage: acornd workspace add <name> [folder] [flags]
   --image IMAGE      the sandbox image (default: ` + sandbox.DefaultImage + `)
   --egress WHERE     public (default), private (this machine's LAN and tailnet too), or off
   --keep-alive       keep the sandbox running when nobody is watching it
-  --no-vm-nesting    refuse a hypervisor inside the sandbox
+  --no-vm-nesting    refuse nesting inside the sandbox: no hypervisor, container, or user namespace
   --no-devices       withhold /dev/net/tun and /dev/kvm from a bwrap sandbox; the
                      default grants them so a workspace can run another acornd
   --data-dir DIR     the acornd folder (default: ~/.acornd)
