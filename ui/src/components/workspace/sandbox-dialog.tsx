@@ -57,6 +57,7 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 		setImage(workspace?.image ?? "");
 		setNetwork(workspace?.network ?? "on");
 		setKeepAlive(workspace?.keepAlive === true);
+		setPrivateNetworks(workspace?.private === true);
 		setDevices(workspace?.disableDevices !== true);
 		setAttempt(undefined);
 	}, [
