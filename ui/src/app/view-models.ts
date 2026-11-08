@@ -73,6 +73,8 @@ export interface WorkspaceSummary {
 	keepAlive?: boolean | undefined;
 	/** Its sandbox may reach private networks as this machine: its LAN and its tailnet. */
 	private?: boolean | undefined;
+	/** The host's /dev/net/tun and /dev/kvm are withheld from this workspace's bwrap sandbox. */
+	disableDevices?: boolean | undefined;
 	/** stopped, opening, ready, or failed: where it is between being asked for and usable. */
 	status?: string | undefined;
 	/** The step an opening workspace is on, in the server's words. */

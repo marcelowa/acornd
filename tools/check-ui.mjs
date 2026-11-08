@@ -438,6 +438,37 @@ try {
 					"the sandbox dialog sets an image and a network",
 					dialogText.includes("image") && dialogText.includes("network"),
 				);
+				check(
+					"the sandbox dialog grants or withholds the host's devices",
+					dialogText.includes("devices") && dialogText.includes("while idle"),
+				);
+				// The switch is only worth a field if it sends something: withhold the devices and
+				// read the workspace back from the gateway, not from the dialog.
+				const clicked = await page.evaluate(() => {
+					const button = [...document.querySelectorAll("[role=dialog] button")].find(
+						(one) => one.textContent?.trim() === "withheld",
+					);
+					button?.click();
+					return button !== undefined;
+				});
+				check("the devices switch can be turned to withheld", clicked);
+				const withheld = await page.evaluate(async (path) => {
+					let last = null;
+					for (let attempt = 0; attempt < 50; attempt++) {
+						const state = await (await fetch("/api/state")).json();
+						// The dialog reads a workspace's settings from the list: `state.workspace`
+						// is the room in view, which carries only what the room is.
+						last = (state.workspaces ?? []).find((one) => one.path === path) ?? null;
+						if (last?.disable_devices === true) return { stored: true, workspace: last };
+						await new Promise((resolve) => setTimeout(resolve, 100));
+					}
+					return { stored: false, workspace: last };
+				}, activePath);
+				check(
+					"a withheld device grant reaches the gateway",
+					withheld.stored,
+					JSON.stringify({ path: activePath, disable_devices: withheld.workspace?.disable_devices }).slice(0, 240),
+				);
 				await page.keyboard.press("Escape");
 			}
 		}

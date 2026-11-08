@@ -289,6 +289,7 @@ export function toWorkspaces(
 			engineLabel: engine === "" ? "no sandbox" : engineLabel(engine),
 			keepAlive: workspace.keep_alive === true,
 			private: workspace.private === true,
+			disableDevices: workspace.disable_devices === true,
 			status: workspace.status,
 			stage: workspace.stage,
 			error: workspace.error,

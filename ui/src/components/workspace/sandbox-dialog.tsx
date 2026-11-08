@@ -22,7 +22,13 @@ export interface SandboxDialogProps {
 	failure?: string | undefined;
 	onSave: (
 		name: string,
-		change: { image: string; network: string; keepAlive: boolean; private: boolean },
+		change: {
+			image: string;
+			network: string;
+			keepAlive: boolean;
+			private: boolean;
+			disableDevices: boolean;
+		},
 	) => void;
 	onClose: () => void;
 }
@@ -41,6 +47,8 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 	const [network, setNetwork] = useState(workspace?.network ?? "on");
 	const [keepAlive, setKeepAlive] = useState(workspace?.keepAlive === true);
 	const [privateNetworks, setPrivateNetworks] = useState(workspace?.private === true);
+	/** The host's /dev/net/tun and /dev/kvm: granted unless the workspace withheld them. */
+	const [devices, setDevices] = useState(workspace?.disableDevices !== true);
 	/** The value the field last sent, so the outcome belongs to this field's own commit. */
 	const [attempt, setAttempt] = useState<string | undefined>(undefined);
 
@@ -49,6 +57,7 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 		setImage(workspace?.image ?? "");
 		setNetwork(workspace?.network ?? "on");
 		setKeepAlive(workspace?.keepAlive === true);
+		setDevices(workspace?.disableDevices !== true);
 		setAttempt(undefined);
 	}, [
 		workspace?.name,
@@ -56,6 +65,7 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 		workspace?.network,
 		workspace?.keepAlive,
 		workspace?.private,
+		workspace?.disableDevices,
 	]);
 
 	const committedImage = workspace?.image ?? "";
@@ -108,6 +118,7 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 										network,
 										keepAlive,
 										private: privateNetworks,
+										disableDevices: !devices,
 									});
 								}}
 							>
@@ -129,6 +140,7 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 									network: next,
 									keepAlive,
 									private: privateNetworks,
+									disableDevices: !devices,
 								});
 							}}
 							variant="outline"
@@ -163,6 +175,7 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 										network,
 										keepAlive,
 										private: allow,
+										disableDevices: !devices,
 									});
 								}}
 								variant="outline"
@@ -180,6 +193,40 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 							</Text>
 						</SettingsField>
 					)}
+					<SettingsField label="devices">
+						<ToggleGroup
+							type="single"
+							value={devices ? "on" : "off"}
+							onValueChange={(next) => {
+								if (next !== "on" && next !== "off") return;
+								if (workspace === undefined) return;
+								const granted = next === "on";
+								setDevices(granted);
+								onSave(workspace.name, {
+									image,
+									network,
+									keepAlive,
+									private: privateNetworks,
+									disableDevices: !granted,
+								});
+							}}
+							variant="outline"
+							size="sm"
+							spacing={0}
+							aria-label="Grant this sandbox the host's devices"
+						>
+							<ToggleGroupItem value="off">withheld</ToggleGroupItem>
+							<ToggleGroupItem value="on">granted</ToggleGroupItem>
+						</ToggleGroup>
+						<Text size="2xs" tone="muted">
+							{devices
+								? "binds /dev/net/tun and /dev/kvm, so a bubblewrap sandbox can run another acornd or a hypervisor inside itself"
+								: "no /dev/net/tun or /dev/kvm: nothing nested starts in this sandbox"}
+						</Text>
+						<Text size="2xs" tone="muted">
+							Changing this rebuilds the sandbox, so anything running in it stops.
+						</Text>
+					</SettingsField>
 					<SettingsField label="while idle">
 						<ToggleGroup
 							type="single"
@@ -194,6 +241,7 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 									network,
 									keepAlive: keep,
 									private: privateNetworks,
+									disableDevices: !devices,
 								});
 							}}
 							variant="outline"
@@ -210,8 +258,8 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 						</Text>
 					</SettingsField>
 					<Text size="2xs" tone="muted">
-						Applies as chosen; the image on Apply. Either way it takes effect at the
-						next sandbox.
+						Applies as chosen; the image on Apply. Everything takes effect at the next
+						sandbox, and a device change rebuilds it.
 					</Text>
 				</div>
 				<DialogFooter>
