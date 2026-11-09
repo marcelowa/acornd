@@ -494,6 +494,11 @@ func TestBwrapRefusesASocketPathThatIsTooLong(t *testing.T) {
 // running", so Create boots it and the engine reports it. A stopped one is listed as stopped, so
 // the next attempt starts it instead of remaking it.
 func TestBwrapHasALifecycleLikeEveryOtherEngine(t *testing.T) {
+	// The bwrap tier runs this: it boots a real sandbox, and the mutation sweep runs the
+	// package's tests once per mutant. A boot there is a job measured in minutes.
+	if os.Getenv("ACORND_BWRAP_ONLY") == "" {
+		t.Skip("the bwrap tier runs this: it boots a real sandbox")
+	}
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		t.Skip("no bubblewrap on this machine")
 	}

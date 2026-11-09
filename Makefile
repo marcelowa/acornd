@@ -341,7 +341,7 @@ test-bwrap: ## the bubblewrap engine end to end: it fetches an image, so it is n
 	cd gateway && env -u ACORND_NO_SANDBOX ACORND_BWRAP_ONLY=1 ACORND_IMAGE_TEST=1 go test -count=1 -shuffle=on ./internal/e2e/ -run 'Bwrap|TwoEngines|KeepsTheEngine'
 	# The one driver test that needs the host set up: a nested sandbox under pasta, where the
 	# parent holds CAP_SYS_ADMIN and no CAP_SETUID. The fast tier skips it.
-	cd gateway && env -u ACORND_NO_SANDBOX ACORND_BWRAP_ONLY=1 go test -count=1 ./internal/sandbox/ -run 'TestANestedSandboxWithNoEgressStartsInsidePasta|TestALeafSandboxRefusesAUserNamespaceInsideIt'
+	cd gateway && env -u ACORND_NO_SANDBOX ACORND_BWRAP_ONLY=1 go test -count=1 ./internal/sandbox/ -run 'TestANestedSandboxWithNoEgressStartsInsidePasta|TestALeafSandboxRefusesAUserNamespaceInsideIt|TestBwrapHasALifecycleLikeEveryOtherEngine'
 
 test-youki: ## the youki engine end to end: it fetches the runtime and an image
 	# The live driver test boots a real container whose first process is the supervisor, and the
