@@ -18,7 +18,7 @@ func TestTheSocketLivesInTheRuntimeFolderNotTheStore(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(t.TempDir(), "run"))
 	store := t.TempDir()
 	driver := NewBwrap(store)
-	first, err := driver.socketDir("/work/one")
+	first, err := socketDirFor(driver.dataDir, "/work/one")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestTheSocketLivesInTheRuntimeFolderNotTheStore(t *testing.T) {
 		t.Fatalf("the socket folder should not be in the store, got %s", first)
 	}
 	// Two workspaces do not share a socket; two installs do not either.
-	second, err := driver.socketDir("/work/two")
+	second, err := socketDirFor(driver.dataDir, "/work/two")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestTheSocketLivesInTheRuntimeFolderNotTheStore(t *testing.T) {
 		t.Fatal("two workspaces got the same socket folder")
 	}
 	other := NewBwrap(t.TempDir())
-	again, err := other.socketDir("/work/one")
+	again, err := socketDirFor(other.dataDir, "/work/one")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestTwoPullsOfOneImageDoNotInterleave(t *testing.T) {
 		wg.Add(1)
 		go func(driver *Bwrap) {
 			defer wg.Done()
-			base, err := driver.imageBase(image)
+			base, err := imageBase(driver.StateDir(), image, driver.pull)
 			if err == nil {
 				entries, readErr := os.ReadDir(filepath.Join(base, "usr", "lib"))
 				if readErr != nil {

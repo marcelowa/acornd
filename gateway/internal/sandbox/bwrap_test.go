@@ -368,7 +368,7 @@ func TestBwrapSandboxArgvIsOneSandboxPerWorkspace(t *testing.T) {
 		Run:         "/state/ws/run",
 		GuestRun:    guestRunDir,
 		GuestSocket: guestSocketPath,
-		Network:     bwrapNetwork{Mode: "off"},
+		Network:     sandboxNetwork{Mode: "off"},
 		IdleTimeout: DefaultIdleTimeout,
 	}
 	argv, err := driver.sandboxArgv(config)
@@ -420,7 +420,7 @@ func TestBwrapSandboxArgvSharesPastaForEgress(t *testing.T) {
 		Run:         "/state/ws/run",
 		GuestRun:    guestRunDir,
 		GuestSocket: guestSocketPath,
-		Network: bwrapNetwork{
+		Network: sandboxNetwork{
 			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
 			Pasta: "/usr/bin/pasta",
 		},
@@ -564,14 +564,14 @@ func TestABwrapWorkspaceWithASecretsProxyCarriesOnePortAndItsCA(t *testing.T) {
 		Run:         "/state/ws/run",
 		GuestRun:    guestRunDir,
 		GuestSocket: guestSocketPath,
-		Network: bwrapNetwork{
+		Network: sandboxNetwork{
 			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
 			Pasta: "/usr/bin/pasta",
 		},
 	}
 
 	withProxy := base
-	withProxy.SecretProxy = &bwrapSecretProxy{
+	withProxy.SecretProxy = &sandboxSecretProxy{
 		URL: "http://acornd:a-token@127.0.0.1:41234", BundleFile: "/state/ws/ca-bundle.pem",
 		Bundle: guestCABundle, Port: 41234,
 	}
@@ -789,7 +789,7 @@ func TestBwrapRestartsOnlyWhenTheProxyForwardChanges(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
 	workspace := t.TempDir()
 	name := Name(workspace)
-	write := func(proxy *bwrapSecretProxy) {
+	write := func(proxy *sandboxSecretProxy) {
 		t.Helper()
 		raw, err := json.Marshal(bwrapConfig{Workspace: workspace, SecretProxy: proxy})
 		if err != nil {
@@ -817,7 +817,7 @@ func TestBwrapRestartsOnlyWhenTheProxyForwardChanges(t *testing.T) {
 		t.Fatalf("the first proxy needs the sandbox started again: %v, %v", restart, err)
 	}
 
-	write(&bwrapSecretProxy{Port: 21606})
+	write(&sandboxSecretProxy{Port: 21606})
 	if restart, err := driver.RestartRequired(context.Background(), policy(21606)); err != nil || restart {
 		t.Fatalf("the same forward is a live rotation: %v, %v", restart, err)
 	}
@@ -869,7 +869,7 @@ func TestBwrapNestedEgressReusesPastaUserNamespace(t *testing.T) {
 	config := bwrapConfig{
 		Bwrap:       "/usr/bin/bwrap",
 		Rootfs:      "/rootfs",
-		Network:     bwrapNetwork{Mode: "pasta", Address: sandboxAddress, Gateway: sandboxGateway, Pasta: "/usr/bin/pasta"},
+		Network:     sandboxNetwork{Mode: "pasta", Address: sandboxAddress, Gateway: sandboxGateway, Pasta: "/usr/bin/pasta"},
 		Nested:      true,
 		DataDir:     "/home",
 		Workspace:   "/work",
@@ -905,7 +905,7 @@ func TestBwrapNestedWithoutEgressReusesTheUserNamespace(t *testing.T) {
 	config := bwrapConfig{
 		Bwrap:       "/usr/bin/bwrap",
 		Rootfs:      "/rootfs",
-		Network:     bwrapNetwork{Mode: NetworkOffName},
+		Network:     sandboxNetwork{Mode: NetworkOffName},
 		Nested:      true,
 		DataDir:     "/home",
 		Workspace:   "/work",
@@ -962,7 +962,7 @@ func TestANestedSandboxWithNoEgressStartsInsidePasta(t *testing.T) {
 		t.Skipf("this machine will not make a user namespace: %v", err)
 	}
 
-	config := bwrapConfig{Nested: true, Network: bwrapNetwork{Mode: NetworkOffName}}
+	config := bwrapConfig{Nested: true, Network: sandboxNetwork{Mode: NetworkOffName}}
 	inner := append([]string{bwrap, "--ro-bind", "/", "/", "--proc", "/proc"}, isolationArgs(config)...)
 	inner = append(inner, "--", "/bin/sh", "-c",
 		`test "$(tail -n +3 /proc/net/dev | cut -d: -f1 | tr -d ' ')" = lo`)
@@ -987,7 +987,7 @@ func TestBwrapLeafSandboxRefusesAnotherUserNamespace(t *testing.T) {
 	config := bwrapConfig{
 		Bwrap:          "/usr/bin/bwrap",
 		Rootfs:         "/rootfs",
-		Network:        bwrapNetwork{Mode: NetworkOffName},
+		Network:        sandboxNetwork{Mode: NetworkOffName},
 		DisableNesting: true,
 		DataDir:        "/home",
 		Workspace:      "/work",
@@ -1019,7 +1019,7 @@ func TestBwrapNestedSandboxIsNotToldToDisableUserns(t *testing.T) {
 	config := bwrapConfig{
 		Bwrap:          "/usr/bin/bwrap",
 		Rootfs:         "/rootfs",
-		Network:        bwrapNetwork{Mode: "pasta"},
+		Network:        sandboxNetwork{Mode: "pasta"},
 		Nested:         true,
 		DisableNesting: true,
 		DataDir:        "/home",
@@ -1059,7 +1059,7 @@ func TestALeafSandboxRefusesAUserNamespaceInsideIt(t *testing.T) {
 		t.Skipf("this machine will not make a user namespace: %v", err)
 	}
 	run := func(disable bool) ([]byte, error) {
-		config := bwrapConfig{DisableNesting: disable, Network: bwrapNetwork{Mode: NetworkOffName}}
+		config := bwrapConfig{DisableNesting: disable, Network: sandboxNetwork{Mode: NetworkOffName}}
 		argv := append([]string{"--ro-bind", "/", "/", "--proc", "/proc"}, isolationArgs(config)...)
 		argv = append(argv, "--", "/bin/sh", "-c", "unshare -Ur true")
 		return exec.Command(bwrap, argv...).CombinedOutput()
@@ -1188,7 +1188,7 @@ func TestBwrapBindsUpstreamResolversWhenTheMachineUsesALoopbackOne(t *testing.T)
 	driver := NewBwrap(t.TempDir())
 	driver.resolver = resolverFiles{Host: host, Upstream: upstream}
 	workspace := filepath.Join(dir, "state", "acornd-test")
-	got, err := driver.resolverFile(workspace)
+	got, err := resolverFileFor(driver.resolver, workspace)
 	if err != nil {
 		t.Fatalf("resolver: %v", err)
 	}
@@ -1212,7 +1212,7 @@ func TestBwrapBindsTheMachinesOwnResolverWhenItIsUsable(t *testing.T) {
 	}
 	driver := NewBwrap(t.TempDir())
 	driver.resolver = resolverFiles{Host: host, Upstream: filepath.Join(dir, "absent")}
-	got, err := driver.resolverFile(filepath.Join(dir, "state", "acornd-test"))
+	got, err := resolverFileFor(driver.resolver, filepath.Join(dir, "state", "acornd-test"))
 	if err != nil {
 		t.Fatalf("resolver: %v", err)
 	}
@@ -1250,7 +1250,7 @@ func TestBwrapRefusesPrivateNetworksWithoutAGrant(t *testing.T) {
 		Workspace: "/work/ws", Rootfs: "/state/ws/rootfs", DataDir: "/state/ws/home",
 		Bwrap: "/usr/bin/bwrap", Supervisor: "/install/acornd",
 		Run: "/state/ws/run", GuestRun: guestRunDir, GuestSocket: guestSocketPath,
-		Network: bwrapNetwork{
+		Network: sandboxNetwork{
 			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
 			Pasta: "/usr/bin/pasta",
 		},
@@ -1280,7 +1280,7 @@ func TestBwrapAGrantReachesPrivateNetworks(t *testing.T) {
 		Workspace: "/work/ws", Rootfs: "/state/ws/rootfs", DataDir: "/state/ws/home",
 		Bwrap: "/usr/bin/bwrap", Supervisor: "/install/acornd",
 		Run: "/state/ws/run", GuestRun: guestRunDir, GuestSocket: guestSocketPath,
-		Network: bwrapNetwork{
+		Network: sandboxNetwork{
 			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
 			Pasta: "/usr/bin/pasta", Private: true,
 		},
@@ -1304,7 +1304,7 @@ func TestBwrapWritesTheResolverItsNetworkCanReach(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
 	workspace := t.TempDir()
 	name := Name(workspace)
-	path, err := driver.resolveResolv(name, bwrapNetwork{Mode: "pasta"})
+	path, err := resolveResolvFor(driver.workspaceDir(name), driver.resolver, "pasta", false)
 	if err != nil {
 		t.Fatalf("resolver: %v", err)
 	}

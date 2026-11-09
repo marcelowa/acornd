@@ -100,7 +100,7 @@ func TestStartingASandboxThatAnswersIsANoOp(t *testing.T) {
 	// A config that names a socket this test is listening on: the engine dials it, hears an answer,
 	// and stops before booting anything.
 	socket := answerPings(t)
-	config := bwrapConfig{Socket: socket, Network: bwrapNetwork{Mode: "off"}}
+	config := bwrapConfig{Socket: socket, Network: sandboxNetwork{Mode: "off"}}
 	payload, err := json.Marshal(config)
 	if err != nil {
 		t.Fatal(err)

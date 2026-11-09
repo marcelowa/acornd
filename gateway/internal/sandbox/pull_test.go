@@ -24,13 +24,13 @@ func TestAnImageThatIsAlreadyThereIsNotFetchedAgain(t *testing.T) {
 	base := filepath.Join(dir, "base")
 	complete := filepath.Join(dir, "complete")
 
-	if err := engine.pullToDir(dir, base, complete, "debian:stable-slim"); err != nil {
+	if err := pullToDir(dir, base, complete, "debian:stable-slim", engine.pull); err != nil {
 		t.Fatal(err)
 	}
 	if pulls != 1 {
 		t.Fatalf("the first pull should fetch once, got %d", pulls)
 	}
-	if err := engine.pullToDir(dir, base, complete, "debian:stable-slim"); err != nil {
+	if err := pullToDir(dir, base, complete, "debian:stable-slim", engine.pull); err != nil {
 		t.Fatal(err)
 	}
 	if pulls != 1 {
@@ -61,7 +61,7 @@ func TestAFailedPullLeavesNoMarker(t *testing.T) {
 	base := filepath.Join(dir, "base")
 	complete := filepath.Join(dir, "complete")
 
-	err := engine.pullToDir(dir, base, complete, "debian:stable-slim")
+	err := pullToDir(dir, base, complete, "debian:stable-slim", engine.pull)
 	if err == nil {
 		t.Fatal("a failed pull should be reported")
 	}
@@ -86,12 +86,10 @@ func TestAFailedPullLeavesNoMarker(t *testing.T) {
 // With no image source configured there is nothing to pull, and saying so is better than an empty
 // base folder that a workspace then copies.
 func TestWithNoImageSourceAPullSaysSo(t *testing.T) {
-	engine := NewBwrap(t.TempDir())
 	// A build with no source configured: the default puller is what NewBwrap installs, and taking it
 	// away is the state the branch exists for — never reaching for the network in a test.
-	engine.pull = nil
 	dir := t.TempDir()
-	err := engine.pullToDir(dir, filepath.Join(dir, "base"), filepath.Join(dir, "complete"), "debian:stable-slim")
+	err := pullToDir(dir, filepath.Join(dir, "base"), filepath.Join(dir, "complete"), "debian:stable-slim", nil)
 	if err == nil {
 		t.Fatal("no source should be an error")
 	}
@@ -105,18 +103,18 @@ func TestWithNoImageSourceAPullSaysSo(t *testing.T) {
 func TestAnImageIsNamedByItsReference(t *testing.T) {
 	engine := NewBwrap(t.TempDir())
 	engine.pull = func(context.Context, string, string, func(string, ...any)) error { return nil }
-	first, err := engine.imageBase("debian:stable-slim")
+	first, err := imageBase(engine.StateDir(), "debian:stable-slim", engine.pull)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := engine.imageBase("golang:1.24")
+	second, err := imageBase(engine.StateDir(), "golang:1.24", engine.pull)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first == second {
 		t.Errorf("two images share the folder %q", first)
 	}
-	if _, err := engine.imageBase("::not a reference::"); err == nil {
+	if _, err := imageBase(engine.StateDir(), "::not a reference::", engine.pull); err == nil {
 		t.Error("a reference this build cannot read should be refused")
 	}
 }
