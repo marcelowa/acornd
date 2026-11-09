@@ -87,6 +87,8 @@ func testYouki(t *testing.T, dataDir string) (*Youki, *fakeYouki) {
 		WithDevicePaths("", "").
 		WithLookPath(func(name string) (string, error) { return "/usr/bin/" + name, nil })
 	driver.pasta = func(string) error { return nil }
+	// The cgroup probe is the machine's, and a unit test of the argv must not create one.
+	driver.cgroup = func() error { return nil }
 	installFakeYouki(t, driver)
 	return driver, runner
 }
@@ -209,6 +211,9 @@ func TestYoukiPrepareWritesTheRecordAndTheOCIConfiguration(t *testing.T) {
 	}
 	if spec.Linux.Resources == nil || spec.Linux.Resources.Memory == nil || spec.Linux.Resources.Memory.Limit != 536870912 {
 		t.Errorf("memory limit should be 512M in bytes: %+v", spec.Linux.Resources)
+	}
+	if !filepath.IsAbs(record.CgroupPath) || spec.Linux.CgroupsPath != record.CgroupPath {
+		t.Errorf("cgroup path: record %q, spec %q", record.CgroupPath, spec.Linux.CgroupsPath)
 	}
 	if spec.Linux.Resources.CPU == nil || spec.Linux.Resources.CPU.Quota != 400000 {
 		t.Errorf("4 CPUs should be 400000/100000: %+v", spec.Linux.Resources.CPU)
@@ -432,6 +437,14 @@ func TestYoukiProbesNameWhatIsMissing(t *testing.T) {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("the refusal should mention %q: %v", want, err)
 			}
+		}
+	})
+	t.Run("no cgroup", func(t *testing.T) {
+		driver, _ := testYouki(t, t.TempDir())
+		driver.cgroup = func() error { return errors.New("this machine has no cgroup v2 mount") }
+		err := driver.Usable()
+		if err == nil || !errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "cgroup") {
+			t.Fatalf("Usable should refuse a machine without a cgroup, and name it: %v", err)
 		}
 	})
 	t.Run("no pasta", func(t *testing.T) {

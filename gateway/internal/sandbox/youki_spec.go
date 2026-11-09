@@ -30,12 +30,6 @@ const (
 	// fields this file uses.
 	youkiOCIVersion = "1.1.0"
 
-	// youkiCgroupRoot is the absolute prefix every sandbox's cgroupsPath carries. An absolute
-	// path selects youki's cgroupfs manager; a relative one selects systemd whenever the spec
-	// has a user namespace, and a sandbox has no session bus. ADR 0022 §2 rule 3 measured the
-	// failure: "session bus address /run/user/0/bus does not exist".
-	youkiCgroupRoot = "/acornd.slice"
-
 	// youkiCPUPeriod is one CPU's accounting window. Quota is CPUs × period, which is what
 	// "2 CPUs" means to the kernel.
 	youkiCPUPeriod = 100000
@@ -218,7 +212,7 @@ func youkiSpec(config youkiConfig, name string) (ociSpec, error) {
 		},
 		Mounts: youkiMounts(config),
 		Linux: ociLinux{
-			CgroupsPath:   youkiCgroupPath(name),
+			CgroupsPath:   config.CgroupPath,
 			UIDMappings:   []ociIDMapping{{ContainerID: 0, HostID: uint32(uid), Size: 1}},
 			GIDMappings:   []ociIDMapping{{ContainerID: 0, HostID: uint32(gid), Size: 1}},
 			Namespaces:    namespaces,
@@ -249,6 +243,7 @@ func validateYoukiRecord(config youkiConfig, name string) error {
 		{config.GuestSocket == "", errors.New("sandbox: the youki record has no guest socket for the supervisor")},
 		{config.Youki == "" || !filepath.IsAbs(config.Youki), fmt.Errorf("sandbox: the youki record's runtime %q is not an absolute path", config.Youki)},
 		{config.Supervisor == "" || !filepath.IsAbs(config.Supervisor), fmt.Errorf("sandbox: the youki record's supervisor %q is not an absolute path", config.Supervisor)},
+		{config.CgroupPath == "" || !filepath.IsAbs(config.CgroupPath), fmt.Errorf("sandbox: the youki record's cgroup path %q is not an absolute path", config.CgroupPath)},
 	} {
 		if check.bad {
 			return check.err
@@ -458,10 +453,4 @@ func memoryMultiplier(unit string) (int64, bool) {
 
 func badMemorySize(value string) error {
 	return fmt.Errorf("sandbox: memory %q is not a size (use 256M, 2G, or bytes)", value)
-}
-
-// youkiCgroupPath is the absolute cgroupfs path the runtime creates. The name is the engine's
-// own, and validateYoukiRecord refuses one that could escape the slice.
-func youkiCgroupPath(name string) string {
-	return youkiCgroupRoot + "/" + name
 }

@@ -51,6 +51,9 @@ type Youki struct {
 	// devices are the host paths a sandbox may be given, so a test can answer for a machine
 	// that has neither without making the suite depend on this one.
 	devices hostDevices
+	// cgroup answers whether this machine lets a sandbox have a budget. It is a field so a test
+	// can answer for a machine that is not this one.
+	cgroup func() error
 }
 
 // youkiVersion is the release this build runs. A newer runtime is a new measurement, not a bump:
@@ -104,6 +107,7 @@ func NewYouki(dataDir string) *Youki {
 		pull:     pullImage,
 		resolver: resolverFiles{Host: "/etc/resolv.conf", Upstream: "/run/systemd/resolve/resolv.conf"},
 		devices:  hostDevices{tun: "/dev/net/tun", kvm: "/dev/kvm"},
+		cgroup:   probeCgroup,
 	}
 }
 
@@ -300,6 +304,9 @@ func (y *Youki) Usable() error {
 		}
 		return fmt.Errorf("%w: youki cannot make a rootless configuration here, which is what a user namespace needs: %s (Ubuntu 23.10 and later restrict them with AppArmor; fix: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0)", ErrUnavailable, lastLine(detail))
 	}
+	if err := y.cgroup(); err != nil {
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
 	return nil
 }
 
@@ -425,7 +432,11 @@ type youkiConfig struct {
 	Supervisor string `json:"supervisor"`
 	// Spec is the generated OCI configuration. The bundle is the folder it sits in, and the
 	// record is the file beside it.
-	Spec        string `json:"spec"`
+	Spec string `json:"spec"`
+	// CgroupPath is the absolute cgroup the runtime creates: /acornd.slice plus this sandbox's
+	// name. An absolute path is what selects youki's cgroupfs manager; a relative one would
+	// select systemd and need a session bus a sandbox lacks.
+	CgroupPath  string `json:"cgroupPath,omitempty"`
 	Socket      string `json:"socket"`
 	GuestSocket string `json:"guestSocket"`
 	Run         string `json:"run"`
@@ -484,35 +495,55 @@ func (y *Youki) Start(ctx context.Context, name string, _ []Secret) error {
 	if err != nil {
 		return err
 	}
-	if y.runtimeState(ctx, name) == "running" {
-		// A gateway that restarted finds the container it started before. The runtime says the
-		// init exists; the socket says it is still the supervisor that answers. The fake runner
-		// has no socket, so a unit test of the argv trusts the state.
-		if y.runner != nil {
-			return nil
-		}
-		if err := supervise.WaitForReady(ctx, config.Socket, 2*time.Second); err == nil {
-			return nil
-		}
+	if y.adopt(ctx, name, config) {
+		return nil
 	}
+	return y.boot(ctx, name, config)
+}
+
+// adopt reports whether the runtime's container is still the sandbox this record names: the
+// runtime says running and, for a real driver, the supervisor's socket answers. The fake runner
+// has no socket, so a unit test of the argv trusts the state.
+func (y *Youki) adopt(ctx context.Context, name string, config youkiConfig) bool {
+	if y.runtimeState(ctx, name) != "running" {
+		return false
+	}
+	if y.runner != nil {
+		return true
+	}
+	return supervise.WaitForReady(ctx, config.Socket, 2*time.Second) == nil
+}
+
+// boot deletes a container that is not the one this record names — created but never started,
+// or left by a start that failed — then creates, bounds and starts one, and waits for the
+// supervisor. The budget is written between create and start, so the first command is already
+// bounded.
+func (y *Youki) boot(ctx context.Context, name string, config youkiConfig) error {
 	// Best effort: there is no container in the common case, and a delete that finds nothing
 	// says so with an error this path does not need.
 	_ = y.delete(ctx, name)
 	if err := y.create(ctx, name); err != nil {
 		return err
 	}
+	if y.runner == nil {
+		if err := y.enforceBudget(config.CgroupPath); err != nil {
+			_ = y.Stop(context.Background(), name)
+			return fmt.Errorf("%w: %w", ErrUnavailable, err)
+		}
+	}
 	if err := y.start(ctx, name); err != nil {
 		return err
 	}
-	if y.runner == nil {
-		if err := supervise.WaitForReady(ctx, config.Socket, 15*time.Second); err != nil {
-			detail := y.logTail(y.logPath(name))
-			_ = y.Stop(context.Background(), name)
-			if detail != "" {
-				return fmt.Errorf("%w: %w: %s", ErrUnavailable, err, detail)
-			}
-			return fmt.Errorf("%w: %w", ErrUnavailable, err)
+	if y.runner != nil {
+		return nil
+	}
+	if err := supervise.WaitForReady(ctx, config.Socket, 15*time.Second); err != nil {
+		detail := y.logTail(y.logPath(name))
+		_ = y.Stop(context.Background(), name)
+		if detail != "" {
+			return fmt.Errorf("%w: %w: %s", ErrUnavailable, err, detail)
 		}
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	return nil
 }
@@ -527,7 +558,11 @@ func (y *Youki) Stop(ctx context.Context, name string) error {
 	if err := y.delete(ctx, name); err != nil && y.Installed() {
 		return err
 	}
-	y.removeCgroup(name)
+	cgroupPath := ""
+	if config, err := y.readConfig(name); err == nil {
+		cgroupPath = config.CgroupPath
+	}
+	y.removeCgroup(cgroupPath)
 	_ = os.Remove(y.pidPath(name))
 	return nil
 }
@@ -598,6 +633,19 @@ func (y *Youki) create(ctx context.Context, name string) error {
 	return nil
 }
 
+// enforceBudget writes the one limit the runtime did not: youki 0.7.0 left memory.swap.max at
+// "max" in the measured run, and with swap available a 400 MB allocation in a 256 M workspace
+// survived by swapping. memory.max and cpu.max are the runtime's; this is the belt that makes
+// memory.max bind. It runs after create and before start, so the first command is already
+// bounded.
+func (y *Youki) enforceBudget(cgroupPath string) error {
+	path := filepath.Join(cgroupDir(cgroupPath), "memory.swap.max")
+	if err := os.WriteFile(path, []byte("0"), 0o644); err != nil {
+		return fmt.Errorf("the sandbox's swap limit at %s: %w", path, err)
+	}
+	return nil
+}
+
 // start is the runtime's start: the init was created by create, and this tells it to go.
 func (y *Youki) start(ctx context.Context, name string) error {
 	if err := y.runLogged(ctx, y.logPath(name), "start", name); err != nil {
@@ -642,11 +690,14 @@ func (y *Youki) runLogged(ctx context.Context, logPath string, args ...string) e
 	return nil
 }
 
-// removeCgroup removes the leaf the runtime created. It is best effort: a systemd host keeps the
-// cgroup somewhere step 4's delegation decides, and a cgroup that is not there is the wanted
-// state. Remove, not RemoveAll: a cgroup with a live process in it is not ours to delete.
-func (y *Youki) removeCgroup(name string) {
-	_ = os.Remove(filepath.Join("/sys/fs/cgroup", strings.TrimPrefix(youkiCgroupPath(name), "/")))
+// removeCgroup removes the leaf the runtime created, at the absolute path the record names. It
+// is best effort: a cgroup that is not there is the wanted state, and Remove, not RemoveAll,
+// keeps a cgroup with a live process in it.
+func (y *Youki) removeCgroup(cgroupPath string) {
+	if cgroupPath == "" {
+		return
+	}
+	_ = os.Remove(cgroupDir(cgroupPath))
 }
 
 // logPath is the runtime's own output for one workspace, beside the bundle.
@@ -778,6 +829,7 @@ func (y *Youki) record(policy Policy) (youkiConfig, string, error) {
 		Youki:          y.binary(),
 		Supervisor:     supervisor,
 		Spec:           filepath.Join(workspaceDir, "config.json"),
+		CgroupPath:     cgroupPathFor(name),
 		Socket:         socket,
 		GuestSocket:    guestSocketPath,
 		Run:            run,

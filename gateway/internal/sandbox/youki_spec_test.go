@@ -29,6 +29,7 @@ func testYoukiConfig() youkiConfig {
 		Youki:       "/install/tools/youki/youki",
 		Supervisor:  "/install/acornd",
 		Spec:        "/state/ws/config.json",
+		CgroupPath:  "/acornd.slice/acornd-ws-12345678",
 		Socket:      "/run/acornd/abc/s.sock",
 		GuestSocket: guestSocketPath,
 		Run:         "/run/acornd/abc",
@@ -113,12 +114,13 @@ func TestYoukiSpecKeepsProcMasksWhenNestingIsRefused(t *testing.T) {
 }
 
 func TestYoukiSpecCgroupsPathIsAbsolute(t *testing.T) {
-	spec := mustYoukiSpec(t, testYoukiConfig())
+	config := testYoukiConfig()
+	spec := mustYoukiSpec(t, config)
 	if !filepath.IsAbs(spec.Linux.CgroupsPath) {
 		t.Fatalf("a relative cgroupsPath selects youki's systemd manager, which needs a session bus: %q", spec.Linux.CgroupsPath)
 	}
-	if !strings.HasPrefix(spec.Linux.CgroupsPath, youkiCgroupRoot+"/") {
-		t.Errorf("cgroupsPath %q is not under %q", spec.Linux.CgroupsPath, youkiCgroupRoot)
+	if spec.Linux.CgroupsPath != config.CgroupPath {
+		t.Errorf("cgroupsPath = %q, want the record's %q", spec.Linux.CgroupsPath, config.CgroupPath)
 	}
 	if !strings.Contains(spec.Linux.CgroupsPath, "acornd-ws-12345678") {
 		t.Errorf("cgroupsPath %q does not name the sandbox", spec.Linux.CgroupsPath)
@@ -293,6 +295,7 @@ func TestYoukiSpecRefusesARecordThatCannotBeASandbox(t *testing.T) {
 		{"no socket", func(c *youkiConfig) { c.GuestSocket = "" }, "guest socket"},
 		{"no runtime", func(c *youkiConfig) { c.Youki = "" }, "runtime"},
 		{"no supervisor", func(c *youkiConfig) { c.Supervisor = "" }, "supervisor"},
+		{"no cgroup path", func(c *youkiConfig) { c.CgroupPath = "" }, "cgroup path"},
 	} {
 		t.Run(one.why, func(t *testing.T) {
 			config := testYoukiConfig()
