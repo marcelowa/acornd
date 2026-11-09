@@ -352,7 +352,7 @@ test-youki: ## the youki engine end to end: it fetches the runtime and an image
 	# ACORND_YOUKI_ONLY is the switch the spec gives this tier. -v is on purpose: a machine
 	# without a delegated cgroup skips with its reason, and a skip nobody sees is a green run
 	# that booted nothing.
-	cd gateway && env -u ACORND_NO_SANDBOX ACORND_YOUKI_ONLY=1 ACORND_IMAGE_TEST=1 go test -count=1 -v ./internal/sandbox/ -run 'TestYoukiLifecycle|TestYoukiBudgets|TestYoukiSandboxCannotReach'
+	cd gateway && env -u ACORND_NO_SANDBOX ACORND_YOUKI_ONLY=1 ACORND_IMAGE_TEST=1 go test -count=1 -v ./internal/sandbox/ -run 'TestYouki'
 	cd gateway && env -u ACORND_NO_SANDBOX ACORND_YOUKI_ONLY=1 ACORND_IMAGE_TEST=1 go test -count=1 -shuffle=on ./internal/e2e/ -run 'Youki'
 
 test-sandbox: sandbox-preflight ## the engine boundary: live driver, SDK client, and its e2e tests
