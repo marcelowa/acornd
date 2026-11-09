@@ -25,6 +25,7 @@ export const Steering: Story = {
 			id: "pending-1",
 			text: "wait, check the lock order first",
 			action: "steer",
+			waiting: false,
 		},
 	},
 };
@@ -37,6 +38,20 @@ export const Queued: Story = {
 			id: "pending-2",
 			text: "then update the changelog",
 			action: "followUp",
+			waiting: false,
+		},
+	},
+};
+
+/** A failed turn kept it, and nothing is running: it will go with the next turn, not this one. */
+export const Waiting: Story = {
+	args: {
+		entry: {
+			kind: "pending",
+			id: "pending-3",
+			text: "what happened?",
+			action: "steer",
+			waiting: true,
 		},
 	},
 };

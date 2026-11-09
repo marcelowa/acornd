@@ -18,9 +18,10 @@ export function useNow(intervalMs = 60_000): Date {
 }
 
 /**
- * How long a run may go quiet before the interface stops claiming it is live. The gateway's own
- * busy window is half an hour, which is long enough for a run that died to keep a lit dot; a
- * shorter window here would dim a genuinely slow tool call.
+ * How long a run may go quiet before the interface stops pulsing its dot. The gateway reports the
+ * worker's record as it is: a quiet run is still a run, and Stop must stay offered while it is
+ * live. This window is only about the dot — a shorter one would dim a genuinely slow tool call,
+ * and a lit dot on a run nobody has heard from promises life the run cannot show.
  */
 export const STALE_AFTER_MINUTES = 30;
 

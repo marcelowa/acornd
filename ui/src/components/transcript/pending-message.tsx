@@ -13,7 +13,8 @@ export interface PendingMessageProps {
  * Sent, accepted, and not committed yet: a steered message is part of the turn that is
  * running, a follow-up waits behind it. It looks unfinished on purpose — dashed, muted,
  * labelled — because it is, and because the alternative is a message that disappears until
- * the server decides what to do with it.
+ * the server decides what to do with it. A message a failed turn kept is waiting for the next
+ * turn rather than steering this one, and says that instead of promising a turn nobody runs.
  */
 export function PendingMessage({ entry, className }: PendingMessageProps) {
 	return (
@@ -30,7 +31,11 @@ export function PendingMessage({ entry, className }: PendingMessageProps) {
 			</Text>
 			<PaneFooter>
 				<Text as="span" size="2xs" tone="muted">
-					{entry.action === "steer" ? "steering this turn" : "queued behind this turn"}
+					{entry.waiting
+						? "waiting for the next turn"
+						: entry.action === "steer"
+							? "steering this turn"
+							: "queued behind this turn"}
 				</Text>
 				<CopyButton value={entry.text} />
 			</PaneFooter>

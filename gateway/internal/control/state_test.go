@@ -53,15 +53,16 @@ func TestStateForDescribesTheConversationItWasAskedFor(t *testing.T) {
 // The listing carries last activity, so the rail can group conversations by date. A
 // conversation that never moved carries none, which the wire omits rather than claiming
 // an activity that never happened: the rail renders it flat, above the groups.
-// Busy is one rule: a fresh record, or a prompt the record has not caught up to. A
-// record with ancient activity is a dead run's residue, and a conversation that never
-// moved is not busy no matter what the worker once claimed.
-func TestRunningMeansLiveOrJustPrompted(t *testing.T) {
+// Busy is one rule: the worker's record, or a prompt the record has not caught up to. A record
+// with old activity is still a run — the last entry can be an hour-old tool call whose command is
+// still going, and the interface dims the dot rather than being told the run ended. A run with no
+// activity at all is a run that just started.
+func TestRunningIsTheRecordsWordAndAGrace(t *testing.T) {
 	now := time.Now().UnixMilli()
 	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
 	control.conversations = []protocol.ConversationInfo{
 		{ID: "live", Running: true, UpdatedAt: now - 60_000},
-		{ID: "stuck", Running: true, UpdatedAt: now - 60*60*1000},
+		{ID: "quiet", Running: true, UpdatedAt: now - 60*60*1000},
 		{ID: "fresh", Running: true},
 		{ID: "prompted", Running: false},
 	}
@@ -75,11 +76,11 @@ func TestRunningMeansLiveOrJustPrompted(t *testing.T) {
 	if !byID["live"].Running {
 		t.Error("a run with recent activity is busy")
 	}
-	if byID["stuck"].Running {
-		t.Error("an hour-old record with no new prompt is a residue, not a run")
+	if !byID["quiet"].Running {
+		t.Error("an hour-old record is still a live run, and must keep its Stop button")
 	}
-	if byID["fresh"].Running {
-		t.Error("a record with no activity at all is not a run")
+	if !byID["fresh"].Running {
+		t.Error("a record with no activity yet is a run that just started")
 	}
 	if !byID["prompted"].Running {
 		t.Error("an accepted prompt counts before the record exists")
@@ -140,10 +141,10 @@ func TestConversationsCarryLastActivity(t *testing.T) {
 
 // The signature is what decides whether attached clients are told the state moved, so it has
 // to follow the rule the state publishes — the gated busy flag — and not the worker's raw
-// record. Two inputs move that flag with nothing else changing: the prompt grace expiring,
-// and a stuck record aging past the freshness window. A signature that read the raw record
-// would stay quiet through both, and a client that read the flag in between would keep a busy
-// sign that nothing would ever take down.
+// record. The prompt grace expires with nothing else changing, and a signature that read the
+// raw record would stay quiet through it: a client that read the flag in between would keep a
+// busy sign that nothing would ever take down. The age of a record is not in the signature:
+// the interface has its own clock for dimming the dot, so there is no state change to announce.
 func TestTheSignatureFollowsTheBusyRule(t *testing.T) {
 	now := time.Now().UnixMilli()
 	cases := []struct {
@@ -160,11 +161,6 @@ func TestTheSignatureFollowsTheBusyRule(t *testing.T) {
 			last:       protocol.ConversationInfo{ID: "1"},
 			firstStamp: now - 9_000,
 			lastStamp:  now - 11_000,
-		},
-		{
-			name:  "a record aging past the freshness window",
-			first: protocol.ConversationInfo{ID: "1", Running: true, UpdatedAt: now - 29*60*1000},
-			last:  protocol.ConversationInfo{ID: "1", Running: true, UpdatedAt: now - 31*60*1000},
 		},
 	}
 	for _, testCase := range cases {

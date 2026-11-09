@@ -306,10 +306,9 @@ type Control struct {
 	// would outrank the install default for good, which is the opposite of a fallback.
 	lastResort protocol.ModelBinding
 	// promptedAt remembers an accepted prompt per conversation, in Unix milliseconds. The
-	// worker's run record lags behind the click and outlives dead runs; the stamp covers
-	// both directions: just-prompted counts as busy before the record exists, and only a
-	// record with recent activity counts after. A settlement clears its stamp, so the
-	// grace ends when the run does rather than running its ten seconds out.
+	// worker's run record lags behind the click; the stamp covers exactly that gap. A
+	// settlement clears its stamp, so the grace ends when the run does rather than running
+	// its ten seconds out.
 	promptedAt map[string]int64
 	// actionAt remembers an accepted builtin per conversation, in Unix
 	// milliseconds. A compaction is one bounded model task, not a turn, so no
@@ -446,9 +445,11 @@ func (c *Control) stateStale() bool {
 }
 
 // conversationSignature is what the interface sees, not the worker's raw record: the busy
-// rule gates a record with a prompt stamp and a freshness window, so a flag that moved only
+// rule gates a record with a prompt stamp and a builtin's clock, so a flag that moved only
 // because time passed is still a change the rail has to hear about — otherwise a client that
-// read the state inside the grace keeps a busy sign nothing will ever take down.
+// read the state inside the grace keeps a busy sign nothing will ever take down. The age of a
+// run record is not in the signature: the interface has its own clock for dimming the dot, so
+// the two windows cannot disagree.
 func (c *Control) conversationSignature() string {
 	c.mu.RLock()
 	infos := append([]protocol.ConversationInfo(nil), c.conversations...)
