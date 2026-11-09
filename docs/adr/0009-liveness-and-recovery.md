@@ -129,3 +129,25 @@ with restarts made to fail:
 - **Recovery does not re-attach every conversation**, only the one a client is watching.
   Subagents running in the background are unaffected, because their tasks are durable and
   the worker resumes them on open.
+
+## Amendment (2026-11-09): a quiet run is still a run
+
+The rule above — a live record **and** activity fresher than thirty minutes — no longer
+holds. It was there to stop a dead run's residue from keeping a lit dot, but the record is
+committed state and a resume clears it; the residue it guarded against is a worker that never
+came back, which the harness-down state already says. What the window did instead was hide a
+**live** run as soon as it was quiet.
+
+The case: a `bash` tool call started at 00:35 and hung inside the sandbox (a `youki create`
+blocked in `__skb_wait_for_more_packets`, still there eight hours later). At 01:05 the window
+expired; the conversation read `running: false`, the still-running tool card settled as **done**
+(`ui/src/app/map.ts` settles a slot when the flag says the run is over), and Stop disappeared
+from the composer. A message sent then was accepted by the harness — which still had the run —
+as a steer, and sat in `pi.inbox` labelled "steering this turn" behind a boundary the hung tool
+would never reach. There was no control left that could end the turn.
+
+The interface now reads the record as it is and dims the dot on its own clock
+(`ui/src/lib/clock.ts`, `STALE_AFTER_MINUTES`); the record's age is not a reason to take away
+the only control that can end it. The prompt and builtin graces remain: they cover the click,
+not the record. The update gate reads the same rule, so a quiet run is not swapped out from
+under an update it could still finish during.

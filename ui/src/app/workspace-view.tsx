@@ -419,10 +419,11 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 		/>
 	);
 
-	// Busy is the flag: the gateway owns the rule now — a fresh record, or an accepted
-	// prompt the record has not caught up to — so the interface reads it instead of
-	// re-deriving it from transcript evidence. The age is the interface's: the same rule the
-	// rail uses, so the two dots cannot disagree about whether a run is still happening.
+	// Busy is the worker's own record, plus an accepted prompt the record has not caught up
+	// to: the gateway owns that rule, so the interface reads it instead of re-deriving it
+	// from transcript evidence. The age is the interface's: the same rule the rail uses, so
+	// the two dots cannot disagree about whether a run is still happening. It dims the dot;
+	// it does not take the composer's Stop away, because a quiet run is still a run to stop.
 	const busy = running;
 	const now = useNow();
 	const run = runState(busy, platform.active?.updatedAt, now);
@@ -730,7 +731,7 @@ export function WorkspaceView({ platform }: WorkspaceViewProps) {
 								setAborting(true);
 								platform.abort();
 							}}
-							running={run === "running"}
+							running={busy}
 							aborting={aborting}
 							focusConversation={platform.active?.id}
 							focusToken={platform.composerFocusToken}

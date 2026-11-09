@@ -249,7 +249,9 @@ type ConversationInfo struct {
 	// so the UI filters them and can always bring one back.
 	Hidden bool `json:"hidden,omitempty"`
 	// Running is read from committed state, so a run that survived a restart still
-	// reports as running and a background run is never invisible.
+	// reports as running and a background run is never invisible. It stays true while a
+	// run is live even when nothing has moved for a while: the interface decides how old
+	// is too old to keep pulsing a dot, but a quiet run is still one that can be stopped.
 	Running bool `json:"running,omitempty"`
 	// LastEntryID is the client's unread cursor.
 	LastEntryID string `json:"lastEntryId,omitempty"`

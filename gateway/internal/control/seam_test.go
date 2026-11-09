@@ -104,10 +104,10 @@ func TestAFailedListReadKeepsWhatIsOnScreen(t *testing.T) {
 	}
 }
 
-// "Running" is three rules, and each one alone is a lie the sidebar used to tell: a prompt in the
-// last ten seconds, a tool card in the last five minutes, or a run the worker says is still going
-// and that spoke in the last half hour.
-func TestARunShowsAsRunningOnAnyOfThreeClocks(t *testing.T) {
+// "Running" is the worker's record plus the two clicks that outrun it: a prompt in the last ten
+// seconds, or a builtin in the last five minutes. The record is not on a clock: a run nobody has
+// heard from for an hour is still the run the console must offer to stop.
+func TestARunShowsAsRunningFromItsRecordOrAGrace(t *testing.T) {
 	const now = 1_000_000_000
 	cases := []struct {
 		why      string
@@ -117,11 +117,11 @@ func TestARunShowsAsRunningOnAnyOfThreeClocks(t *testing.T) {
 		want     bool
 	}{
 		{"a prompt just sent", protocol.ConversationInfo{ID: "1"}, now, 0, true},
-		{"a tool card just written", protocol.ConversationInfo{ID: "1"}, 0, now, true},
+		{"a builtin just started", protocol.ConversationInfo{ID: "1"}, 0, now, true},
 		{"a run the worker says is live", protocol.ConversationInfo{ID: "1", Running: true, UpdatedAt: now}, 0, 0, true},
-		{"a run that spoke an hour ago", protocol.ConversationInfo{ID: "1", Running: true, UpdatedAt: now - 31*60_000}, 0, 0, false},
+		{"a run that spoke an hour ago", protocol.ConversationInfo{ID: "1", Running: true, UpdatedAt: now - 31*60_000}, 0, 0, true},
 		{"an idle conversation", protocol.ConversationInfo{ID: "1", UpdatedAt: now}, 0, 0, false},
-		{"a run with no timestamp", protocol.ConversationInfo{ID: "1", Running: true}, 0, 0, false},
+		{"a run with no timestamp", protocol.ConversationInfo{ID: "1", Running: true}, 0, 0, true},
 	}
 	for _, one := range cases {
 		control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}, DataDir: t.TempDir()})

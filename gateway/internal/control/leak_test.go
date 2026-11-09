@@ -148,17 +148,16 @@ func TestAWorkspaceNeverUsedIsEvicted(t *testing.T) {
 	}
 }
 
-// A run with no timestamp is a run the worker did not date, and an undated run is not one this
-// can vouch for. The window is measured from the timestamp, so with none there is nothing to
-// measure — which is a rule about the guard, not about the size of the clock. The stamps here are
-// older than their windows and the clock is small enough that measuring from zero would land
-// inside the half hour, so this fails if the guard is dropped.
-func TestARunWithNoTimestampIsNotRunningHoweverSmallTheClock(t *testing.T) {
+// A run with no timestamp is a run the worker did not date — a resumed run writes its system
+// prompt before the first dated entry. The busy rule does not measure a record's age, so there is
+// no window to fall back to: the worker's word is the record. The clock is small enough that any
+// window would have to reason from the epoch; this fails if a timestamp guard comes back.
+func TestARunWithNoTimestampIsStillARun(t *testing.T) {
 	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}, DataDir: t.TempDir()})
 	now := int64(1_000_000)
 	control.promptedAt["1"] = now - 20_000
 	control.actionAt["1"] = now - 400_000
-	if control.runActive(protocol.ConversationInfo{ID: "1", Running: true}, now) {
-		t.Error("a run with no timestamp should not read as running")
+	if !control.runActive(protocol.ConversationInfo{ID: "1", Running: true}, now) {
+		t.Error("a live record is a run, dated or not")
 	}
 }

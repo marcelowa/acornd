@@ -132,8 +132,8 @@ settled, and what a later pass may build on:
   44px, and the bar is 56px. `xs` is included on purpose: one rule with no exceptions. Fields print
   at 16px there so iOS does not zoom. Desktop keeps 24/32/36/40 buttons and 12/14/16/20 icons.
 - **Run state survives the fold**: the reconnecting and harness-down pills sit above the card in
-  both states, and a run whose last move is half an hour old stops claiming to be live — in the
-  composer too, not just in the rail dot.
+  both states. A run whose last move is half an hour old dims its dot instead of pulsing, but the
+  composer keeps Stop and Steer: a quiet run is still a run to stop.
 
 ## Writing
 

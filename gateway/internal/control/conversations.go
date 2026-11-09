@@ -23,7 +23,9 @@ type Conversation struct {
 	Root  bool   `json:"root"`
 	// Hidden conversations are tombstoned, not deleted; the UI can restore them.
 	Hidden bool `json:"hidden"`
-	// Running, LastEntryID, UpdatedAt, Tokens, and Cost are live state for the rail.
+	// Running, LastEntryID, UpdatedAt, Tokens, and Cost are live state for the rail. Running
+	// is true while a run is live, however long it has been quiet: the rail dims a run that
+	// stopped moving, but Stop and Steer stay offered while the record says the run exists.
 	Running     bool   `json:"running"`
 	LastEntryID string `json:"lastEntryId"`
 	// UpdatedAt is last activity, Unix milliseconds, so the rail can group by date.
@@ -364,14 +366,23 @@ func (c *Control) landedConversations() []string {
 	return list
 }
 
-// runActive is the one busy rule the interface reads. The worker's run record is the
-// signal, but it lags behind the click and outlives dead runs, so both directions are
-// gated: a prompt accepted in the last ten seconds counts before the record exists, and a
-// record only counts while the activity is fresh. A settlement clears its prompt stamp,
-// so the grace ends when the run does: the sign comes down with the answer rather than
-// outliving it by seconds. Thirty minutes of silence with no new prompt is a residue,
-// not a run — a legitimately quiet hour-long tool call is the known cost, and its tool
-// cards still say it is working.
+// The two clocks the interface is shown besides the worker's own run record, in milliseconds:
+// a prompt the record has not caught up to, and a builtin that has no run record at all.
+const (
+	promptGraceMs = 10_000
+	actionGraceMs = 5 * 60_000
+)
+
+// runActive is the one busy rule the interface reads: the worker's run record, plus the two
+// clicks that outrun it. A settlement clears its prompt stamp, so the prompt grace ends when
+// the run does: the sign comes down with the answer rather than outliving it by seconds.
+//
+// The record itself is never aged out here. A run that has been quiet for an hour is still a
+// run — a long tool call is the ordinary case — and the console dims its dot with the age
+// (lib/clock.ts) rather than being told the run is over. Ending it on a clock was worse than
+// the residue it guarded against: a live tool call past the window lost its Stop button, its
+// card settled as done, and every message sent to the turn queued behind a run the interface
+// would no longer admit was running.
 func (c *Control) runActive(info protocol.ConversationInfo, now int64) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -387,18 +398,19 @@ func (c *Control) runActive(info protocol.ConversationInfo, now int64) bool {
 // lock; the eviction sweep then took the registry lock and waited on that control, and the
 // whole interface sat down until the process was killed.
 func (c *Control) runActiveLocked(info protocol.ConversationInfo, now int64) bool {
-	prompted := c.promptedAt[info.ID]
-	action := c.actionAt[info.ID]
-	if now-prompted < 10_000 {
+	return busy(info, c.promptedAt[info.ID], c.actionAt[info.ID], now)
+}
+
+// busy is the rule without the lock, so the signature, the state build, and the update gate all
+// read the same one. prompted and action are the stamps in Unix milliseconds, zero when none.
+func busy(info protocol.ConversationInfo, prompted, action, now int64) bool {
+	if now-prompted < promptGraceMs {
 		return true
 	}
-	if now-action < 5*60_000 {
+	if now-action < actionGraceMs {
 		return true
 	}
-	if !info.Running || info.UpdatedAt <= 0 {
-		return false
-	}
-	return now-info.UpdatedAt < 30*60*1000
+	return info.Running
 }
 
 // updateSummary reads the install's update tier without importing it: the
@@ -418,21 +430,26 @@ func (c *Control) AnyRunning() bool {
 }
 
 // RunningIDs names the conversations running now, for the update tier's
-// drain-stop: the dialog promises runs stop, so they must be enumerable.
+// drain-stop: the dialog promises runs stop, so they must be enumerable. It
+// reads the same rule as runActive, so a quiet run is not swapped out from
+// under an update it could still finish during. A harness that is down has no
+// run that can finish: its record is what a restart resumes, and an update
+// that waited for it would wait for the process it is replacing.
 func (c *Control) RunningIDs() []string {
 	now := time.Now().UnixMilli()
 	c.mu.RLock()
+	if !c.workerUp {
+		c.mu.RUnlock()
+		return nil
+	}
 	infos := make([]protocol.ConversationInfo, len(c.conversations))
 	copy(infos, c.conversations)
 	prompted := maps.Clone(c.promptedAt)
+	action := maps.Clone(c.actionAt)
 	c.mu.RUnlock()
 	var ids []string
 	for _, info := range infos {
-		if now-prompted[info.ID] < 10_000 {
-			ids = append(ids, info.ID)
-			continue
-		}
-		if info.Running && info.UpdatedAt > 0 && now-info.UpdatedAt < 30*60*1000 {
+		if busy(info, prompted[info.ID], action[info.ID], now) {
 			ids = append(ids, info.ID)
 		}
 	}

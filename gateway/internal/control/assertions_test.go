@@ -93,14 +93,14 @@ func TestABlankBindingIsNotWrittenDown(t *testing.T) {
 	}
 }
 
-// The busy rule the interface reads. It is deliberately generous in both directions — a prompt
-// counts before the worker's record exists, and a run record outlives a dead run — so each window
-// is a number somebody chose, and each boundary is worth pinning: a mutant that moves one changes
-// when a person can send a message.
-func TestTheBusyRuleKeepsItsWindows(t *testing.T) {
+// The busy rule the interface reads. It is deliberately generous in one direction — a prompt
+// counts before the worker's record exists — so each grace is a number somebody chose, and each
+// boundary is worth pinning: a mutant that moves one changes when a person can send a message.
+// The record itself is not on a clock: a quiet run is still a run, and the interface dims its
+// dot instead of losing the Stop button.
+func TestTheBusyRuleKeepsItsGraceWindows(t *testing.T) {
 	const promptWindow = 10_000
 	const actionWindow = 5 * 60_000
-	const runningWindow = 30 * 60 * 1000
 	// Timestamps are real milliseconds: the rule subtracts from a clock, so a fixture anchored at
 	// the epoch would be answering a different question.
 	base := time.Now().UnixMilli()
@@ -121,11 +121,14 @@ func TestTheBusyRuleKeepsItsWindows(t *testing.T) {
 		{"an action older than its window", 0, base, finished, base + actionWindow, false},
 		// Both windows are asked in order: a stale prompt does not hide a live action.
 		{"a stale prompt and a live action", base, base, finished, base + promptWindow + 1, true},
-		{"a run that is going", 0, 0, running, base + runningWindow - 1, true},
-		{"a run nobody has heard from", 0, 0, running, base + runningWindow, false},
+		{"a run that is going", 0, 0, running, base, true},
+		// The run record is the worker's committed word. Age does not end it; the console's dot
+		// dims with age, but a quiet run keeps its Stop button and its tool cards open.
+		{"a run nobody has heard from", 0, 0, running, base + 31*60_000, true},
 		{"nothing running and no record", 0, 0, finished, base, false},
-		// A record with no timestamp cannot say when it started, so it cannot say it is going.
-		{"a run with no timestamp", 0, 0, protocol.ConversationInfo{ID: "1", Running: true}, base, false},
+		// The worker dates most runs, but a resumed one writes its system prompt before the
+		// first dated entry. A record with no timestamp is still a live run.
+		{"a run with no timestamp", 0, 0, protocol.ConversationInfo{ID: "1", Running: true}, base, true},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -136,5 +139,27 @@ func TestTheBusyRuleKeepsItsWindows(t *testing.T) {
 				t.Errorf("busy = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+// A harness that is down has no run it can finish. The update gate asks this list before
+// swapping the binary, and waiting on a dead worker's last record would wait for the process
+// the update is replacing. An up harness reports the same record as the state does.
+func TestADownHarnessHasNoRunsToStop(t *testing.T) {
+	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
+	control.conversations = []protocol.ConversationInfo{{ID: "1", Running: true, UpdatedAt: time.Now().UnixMilli()}}
+	control.workerUp = false
+	if ids := control.RunningIDs(); len(ids) != 0 {
+		t.Errorf("a down harness has nothing to stop, got %v", ids)
+	}
+	if control.AnyRunning() {
+		t.Error("a down harness is not running anything, so an update is not blocked by it")
+	}
+	control.workerUp = true
+	if ids := control.RunningIDs(); len(ids) != 1 || ids[0] != "1" {
+		t.Errorf("an up harness reports its live run, got %v", ids)
+	}
+	if !control.AnyRunning() {
+		t.Error("an up harness with a live run is running something")
 	}
 }

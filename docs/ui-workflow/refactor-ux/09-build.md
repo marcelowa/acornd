@@ -9,8 +9,8 @@ direction it argued for is in the app.
 **J1 / J6 — the rail row.** Spend and when-it-moved sit on the row's second line
 (`conversation-row.tsx`), in `2xs` mono, muted and tabular: values you can compare down a column
 without hovering, which a phone cannot do at all. `formatMoved` in `lib/format.ts` gives `now`,
-`12m`, `3h`, `2d`. A run flagged running whose last move is older than the gateway's own 30-minute
-freshness window keeps its dot but loses the accent, so a dead run stops looking alive. The
+`12m`, `3h`, `2d`. A run flagged running whose last move is older than the interface's own
+30-minute freshness window keeps its dot but loses the accent, so a dead run stops looking alive. The
 tooltip keeps the id and the sender.
 
 **J2 — the workspaces screen.** The row wraps: below `sm` the controls drop to their own line
