@@ -33,27 +33,49 @@ func Command(argv []string) ([]string, error) {
 }
 
 // Configure brings the two interfaces up, gives the tap its address and default route, and —
-// when the workspace has no grant — refuses the ranges that mean "inside this machine".
+// when the workspace has no grant — refuses the ranges that mean "inside this machine". It is
+// the real configurer; configure is the sequence a test can drive without CAP_NET_ADMIN.
 func Configure(address, gateway string, refusePrivate bool) error {
+	return configure(system{}, address, gateway, refusePrivate)
+}
+
+// configurer is the four namespace operations the sequence performs. It is an interface so the
+// order and the refused ranges can be tested without a namespace; the real one is system.
+type configurer interface {
+	Up(string) error
+	Address(string, string) error
+	Gateway(string, string) error
+	Unreachable(string) error
+}
+
+// system is the kernel: the package's own netlink calls.
+type system struct{}
+
+func (system) Up(name string) error               { return Up(name) }
+func (system) Address(link, address string) error { return Address(link, address) }
+func (system) Gateway(link, gateway string) error { return Gateway(link, gateway) }
+func (system) Unreachable(range_ string) error    { return Unreachable(range_) }
+
+func configure(c configurer, address, gateway string, refusePrivate bool) error {
 	if address == "" || gateway == "" {
 		return fmt.Errorf("no address or gateway: recreate the sandbox")
 	}
 	for _, name := range []string{"lo", "eth0"} {
-		if err := Up(name); err != nil {
+		if err := c.Up(name); err != nil {
 			return fmt.Errorf("cannot bring %s up: %w", name, err)
 		}
 	}
-	if err := Address("eth0", address); err != nil {
+	if err := c.Address("eth0", address); err != nil {
 		return fmt.Errorf("cannot give eth0 %s: %w", address, err)
 	}
-	if err := Gateway("eth0", gateway); err != nil {
+	if err := c.Gateway("eth0", gateway); err != nil {
 		return fmt.Errorf("cannot route through %s: %w", gateway, err)
 	}
 	if !refusePrivate {
 		return nil
 	}
 	for _, refused := range refusedRanges {
-		if err := Unreachable(refused); err != nil {
+		if err := c.Unreachable(refused); err != nil {
 			return fmt.Errorf("cannot refuse %s: %w", refused, err)
 		}
 	}
