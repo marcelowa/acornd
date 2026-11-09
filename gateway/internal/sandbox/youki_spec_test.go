@@ -189,14 +189,8 @@ func TestYoukiSpecIsTheSandboxThePolicyDescribes(t *testing.T) {
 	if spec.Process.Cwd != "/" {
 		t.Errorf("cwd must exist inside the rootfs and / always does, got %q", spec.Process.Cwd)
 	}
-	if len(spec.Process.Args) < 2 || spec.Process.Args[0] != guestSupervisor || spec.Process.Args[1] != "internal" {
-		t.Errorf("the sandbox's first process is the supervisor, got %v", spec.Process.Args)
-	}
-	if !slices.Contains(spec.Process.Args, "--socket") || !slices.Contains(spec.Process.Args, guestSocketPath) {
-		t.Errorf("the supervisor must be told where its socket is: %v", spec.Process.Args)
-	}
-	if !slices.Contains(spec.Process.Args, "--idle-timeout") || !slices.Contains(spec.Process.Args, DefaultIdleTimeout) {
-		t.Errorf("the idle timeout is the same policy value every engine gets: %v", spec.Process.Args)
+	if len(spec.Process.Args) != 2 || spec.Process.Args[0] != guestYouki || spec.Process.Args[1] != "--version" {
+		t.Errorf("step 2's first process is the runtime's version command, got %v", spec.Process.Args)
 	}
 	for _, want := range []string{"PATH=" + processPath, "HOME=" + guestRootHome, "LANG=C.UTF-8"} {
 		if !slices.Contains(spec.Process.Env, want) {
@@ -220,7 +214,8 @@ func TestYoukiSpecIsTheSandboxThePolicyDescribes(t *testing.T) {
 		{guestRootHome, config.DataDir, []string{"rw"}, "the private home, where a toolchain installs"},
 		{config.GuestRun, config.Run, []string{"rw"}, "the supervisor's socket folder on both sides"},
 		{"/etc/resolv.conf", config.ResolvConf, []string{"ro"}, "a resolver the sandbox can reach"},
-		{guestSupervisor, config.Supervisor, []string{"ro"}, "this binary, bound in"},
+		{guestSupervisor, config.Supervisor, []string{"ro"}, "this binary, bound in for step 3"},
+		{guestYouki, config.Youki, []string{"ro"}, "the runtime step 2 runs"},
 		{guestCABundle, config.SecretProxy.BundleFile, []string{"ro"}, "the trust bundle, read-only"},
 		{"/dev/net/tun", "/dev/net/tun", []string{"rw"}, "the device grant, after the /dev tmpfs"},
 	} {
@@ -291,6 +286,7 @@ func TestYoukiSpecRefusesARecordThatCannotBeASandbox(t *testing.T) {
 		{"no run folder", func(c *youkiConfig) { c.Run = "" }, "run folder"},
 		{"no guest run", func(c *youkiConfig) { c.GuestRun = "" }, "guest run folder"},
 		{"no socket", func(c *youkiConfig) { c.GuestSocket = "" }, "guest socket"},
+		{"no runtime", func(c *youkiConfig) { c.Youki = "" }, "runtime"},
 		{"no supervisor", func(c *youkiConfig) { c.Supervisor = "" }, "supervisor"},
 	} {
 		t.Run(one.why, func(t *testing.T) {

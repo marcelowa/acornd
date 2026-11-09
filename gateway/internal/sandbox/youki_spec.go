@@ -50,6 +50,10 @@ const (
 	// guestRootHome is where the workspace's private home appears inside a youki sandbox. The
 	// rootfs is always the workspace's own image, so it is the root's home on every image.
 	guestRootHome = "/root"
+
+	// guestYouki is where the pinned runtime is bound for step 2's first process. Step 3 replaces
+	// that process with the supervisor and takes this bind with it.
+	guestYouki = "/usr/local/bin/youki"
 )
 
 // ociSpec is the part of the runtime specification this engine writes. The fields it does not
@@ -247,6 +251,7 @@ func validateYoukiRecord(config youkiConfig, name string) error {
 		{config.Run == "" || !filepath.IsAbs(config.Run), fmt.Errorf("sandbox: the youki record's run folder %q is not an absolute path", config.Run)},
 		{config.GuestRun == "", errors.New("sandbox: the youki record has no guest run folder for the supervisor's socket")},
 		{config.GuestSocket == "", errors.New("sandbox: the youki record has no guest socket for the supervisor")},
+		{config.Youki == "" || !filepath.IsAbs(config.Youki), fmt.Errorf("sandbox: the youki record's runtime %q is not an absolute path", config.Youki)},
 		{config.Supervisor == "" || !filepath.IsAbs(config.Supervisor), fmt.Errorf("sandbox: the youki record's supervisor %q is not an absolute path", config.Supervisor)},
 	} {
 		if check.bad {
@@ -256,17 +261,12 @@ func validateYoukiRecord(config youkiConfig, name string) error {
 	return nil
 }
 
-// youkiArgs is the sandbox's first process: this binary, running the supervisor that holds the
-// namespaces and runs each command. It is the same program bwrap runs, which is why the worker's
-// client does not change.
-func youkiArgs(config youkiConfig) []string {
-	args := []string{guestSupervisor, "internal", "sandbox-supervisor", "--socket", config.GuestSocket}
-	if config.IdleTimeout != "" {
-		// A kept-alive workspace is given a timeout that never fires rather than none at all,
-		// so the flag always says what the policy decided.
-		args = append(args, "--idle-timeout", config.IdleTimeout)
-	}
-	return args
+// youkiArgs is the sandbox's first process. Step 2 runs the runtime's own version command: it
+// proves create, start, state and delete through the mounts without a supervisor or a worker.
+// Step 3 replaces this with the supervisor that holds the namespaces and runs each command —
+// the same program bwrap runs, which is why the worker's client does not change.
+func youkiArgs(youkiConfig) []string {
+	return []string{guestYouki, "--version"}
 }
 
 // youkiProcessEnv is what the sandbox's first process gets. Three variables: a path for the few
@@ -324,6 +324,9 @@ func youkiMounts(config youkiConfig) []ociMount {
 		ociMount{Destination: config.Workspace, Type: "bind", Source: config.Workspace, Options: []string{"rbind", "rw"}},
 		ociMount{Destination: config.GuestRun, Type: "bind", Source: config.Run, Options: []string{"rbind", "rw"}},
 		ociMount{Destination: guestSupervisor, Type: "bind", Source: config.Supervisor, Options: []string{"rbind", "ro"}},
+		// Step 2's first process is the runtime itself; step 3 replaces it with the supervisor and
+		// this bind goes with it.
+		ociMount{Destination: guestYouki, Type: "bind", Source: config.Youki, Options: []string{"rbind", "ro"}},
 	)
 }
 

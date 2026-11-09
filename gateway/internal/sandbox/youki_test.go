@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -21,10 +22,12 @@ import (
 // The runtime is faked the way bubblewrap's is: the probes read only what it prints, so the
 // suite runs the same on a machine with youki and one without.
 type fakeYouki struct {
-	version string
-	probe   error
-	state   string
-	calls   [][]string
+	version   string
+	probe     error
+	state     string
+	createErr error
+	startErr  error
+	calls     [][]string
 }
 
 func (f *fakeYouki) Run(_ context.Context, args ...string) (string, error) {
@@ -39,8 +42,25 @@ func (f *fakeYouki) Run(_ context.Context, args ...string) (string, error) {
 			return "", errors.New("no such container")
 		}
 		return `{"status":"` + f.state + `"}`, nil
+	case len(args) >= 1 && args[0] == "create":
+		return "", f.createErr
+	case len(args) >= 1 && args[0] == "start":
+		return "", f.startErr
+	case len(args) >= 1 && args[0] == "delete":
+		return "", nil
 	}
 	return "", nil
+}
+
+// fakeCalls is every call the fake runtime saw with one verb, in order.
+func fakeCalls(runner *fakeYouki, verb string) [][]string {
+	var calls [][]string
+	for _, call := range runner.calls {
+		if len(call) > 0 && call[0] == verb {
+			calls = append(calls, call)
+		}
+	}
+	return calls
 }
 
 // installFakeYouki puts an executable where Installed looks, so a test does not need the 8 MB
@@ -279,6 +299,108 @@ func TestYoukiRemoveKeepsTheWorkspace(t *testing.T) {
 	// Removing what is not there is already the wanted state.
 	if err := driver.Remove(context.Background(), "acornd-absent"); err != nil {
 		t.Fatalf("second remove: %v", err)
+	}
+}
+
+// Step 2's lifecycle: create writes the record and the OCI configuration, then the runtime's
+// create and start make the container. The fake runner is the argv the real one would see.
+func TestYoukiCreateCreatesThenStarts(t *testing.T) {
+	driver, runner := testYouki(t, t.TempDir())
+	workspace := t.TempDir()
+	if err := driver.Create(context.Background(), Policy{Workspace: workspace}, t.TempDir()); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	name := Name(workspace)
+	creates := fakeCalls(runner, "create")
+	if len(creates) != 1 {
+		t.Fatalf("create was called %d times: %v", len(creates), runner.calls)
+	}
+	for _, want := range []string{"--bundle", driver.workspaceDir(name), "--pid-file", driver.pidPath(name), name} {
+		if !slices.Contains(creates[0], want) {
+			t.Errorf("create should carry %q: %v", want, creates[0])
+		}
+	}
+	starts := fakeCalls(runner, "start")
+	if len(starts) != 1 || len(starts[0]) != 2 || starts[0][1] != name {
+		t.Errorf("start should name the container: %v", starts)
+	}
+	// The record and the OCI configuration are what the next start reads.
+	if _, err := driver.readConfig(name); err != nil {
+		t.Fatalf("the record after create: %v", err)
+	}
+}
+
+func TestYoukiStartAdoptsARunningContainer(t *testing.T) {
+	driver, runner := testYouki(t, t.TempDir())
+	workspace := t.TempDir()
+	if _, err := driver.writeConfig(Policy{Workspace: workspace}); err != nil {
+		t.Fatal(err)
+	}
+	runner.state = "running"
+	runner.calls = nil
+	if err := driver.Start(context.Background(), Name(workspace), nil); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if len(fakeCalls(runner, "create")) != 0 || len(fakeCalls(runner, "start")) != 0 {
+		t.Fatalf("a running container must be adopted, not started again: %v", runner.calls)
+	}
+}
+
+func TestYoukiStopDeletesTheContainerAndKeepsTheFiles(t *testing.T) {
+	driver, runner := testYouki(t, t.TempDir())
+	workspace := t.TempDir()
+	if err := driver.Create(context.Background(), Policy{Workspace: workspace}, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	name := Name(workspace)
+	runner.calls = nil
+	if err := driver.Stop(context.Background(), name); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	deletes := fakeCalls(runner, "delete")
+	if len(deletes) != 1 || !slices.Contains(deletes[0], "--force") || deletes[0][len(deletes[0])-1] != name {
+		t.Errorf("stop should delete the container with --force: %v", deletes)
+	}
+	// Stop keeps every file: only Remove takes the image copy and the home.
+	for _, path := range []string{
+		driver.configPath(name),
+		filepath.Join(driver.workspaceDir(name), "rootfs"),
+		filepath.Join(driver.workspaceDir(name), "home"),
+		filepath.Join(driver.workspaceDir(name), "config.json"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("stop took %s: %v", path, err)
+		}
+	}
+}
+
+func TestYoukiStartRecreatesAStoppedContainer(t *testing.T) {
+	driver, runner := testYouki(t, t.TempDir())
+	workspace := t.TempDir()
+	if err := driver.Create(context.Background(), Policy{Workspace: workspace}, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	runner.state = "stopped"
+	runner.calls = nil
+	if err := driver.Start(context.Background(), Name(workspace), nil); err != nil {
+		t.Fatalf("start after stop: %v", err)
+	}
+	if len(fakeCalls(runner, "delete")) != 1 || len(fakeCalls(runner, "create")) != 1 || len(fakeCalls(runner, "start")) != 1 {
+		t.Fatalf("a stopped container should be deleted and created again: %v", runner.calls)
+	}
+}
+
+func TestYoukiCreateSaysWhyTheRuntimeRefused(t *testing.T) {
+	driver, runner := testYouki(t, t.TempDir())
+	runner.createErr = errors.New("cgroup: no delegation")
+	workspace := t.TempDir()
+	err := driver.Create(context.Background(), Policy{Workspace: workspace}, t.TempDir())
+	if err == nil || !errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "cgroup") {
+		t.Fatalf("a create the runtime refused should be a refusal with its reason: %v", err)
+	}
+	// The record stays: a person can read what was tried, and Remove cleans it.
+	if _, err := os.Stat(driver.configPath(Name(workspace))); err != nil {
+		t.Fatalf("the record after a failed create: %v", err)
 	}
 }
 

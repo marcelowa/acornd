@@ -19,11 +19,11 @@ import (
 // for a machine without a hypervisor, and the only one of the three that can state a policy —
 // capabilities, devices, rlimits, read-only and masked paths — rather than only dropping it.
 //
-// This is the driver skeleton: it installs the pinned runtime, answers the machine's questions,
-// writes the record and the OCI configuration, and does not start a container yet. The lifecycle
-// verbs are the next change, and the engine is not in EngineNames until they can boot one: a
-// chooser that offers an engine whose create refuses is worse than one that does not show it.
-// See issue #47 and docs/adr/0022-youki-engine.md.
+// The driver installs the pinned runtime, answers the machine's questions, writes the record and
+// the OCI configuration, and boots a container whose first process is the runtime's own version
+// in step 2. The supervisor and the worker's socket client are step 3; the engine is not in
+// EngineNames until they land, because a workspace whose commands cannot run is not one a
+// chooser should offer. See issue #47 and docs/adr/0022-youki-engine.md.
 type Youki struct {
 	dataDir string
 	// state is where one record and one OCI bundle per workspace live.
@@ -462,9 +462,9 @@ func (y *Youki) Prepare(_ context.Context, policy Policy, _ string) error {
 	return err
 }
 
-// Create resolves the policy into a record and a bundle, then boots it. The boot is the next
-// change; until it lands this refuses with a sentence rather than leaving a workspace that
-// believes it has a sandbox.
+// Create resolves the policy into a record and a bundle, then boots it: control's policy is
+// "ensure created, then ensure running", and a sandbox that is created but not running is a
+// workspace whose tools do not work.
 func (y *Youki) Create(ctx context.Context, policy Policy, dir string) error {
 	if err := y.Prepare(ctx, policy, dir); err != nil {
 		return err
@@ -472,23 +472,51 @@ func (y *Youki) Create(ctx context.Context, policy Policy, dir string) error {
 	return y.Start(ctx, Name(policy.Workspace), policy.Secrets)
 }
 
-// Start boots a sandbox that exists and is stopped. It is the runtime's `create` and `start`,
-// with the cgroup and the adoption check; this build writes the configuration and cannot boot
-// it, so it refuses loudly. The record and the bundle stay, which is what Remove deletes.
-func (y *Youki) Start(context.Context, string, []Secret) error {
-	return fmt.Errorf("%w: this build can write a youki sandbox's record and OCI configuration, but starting a container is not built yet", ErrUnavailable)
+// Start boots a sandbox that exists and is stopped. A container the runtime still has running
+// is adopted: a gateway that restarted finds the sandbox it started before and does not put a
+// second one over the same workspace. Anything else is deleted first, because a created but
+// never-started container, or one left by a start that failed, owns the id the create below
+// needs.
+func (y *Youki) Start(ctx context.Context, name string, _ []Secret) error {
+	if _, err := y.readConfig(name); err != nil {
+		return err
+	}
+	if y.runtimeState(ctx, name) == "running" {
+		return nil
+	}
+	// Best effort: there is no container in the common case, and a delete that finds nothing
+	// says so with an error this path does not need.
+	_ = y.delete(ctx, name)
+	if err := y.create(ctx, name); err != nil {
+		return err
+	}
+	return y.start(ctx, name)
 }
 
-// Stop ends the sandbox and keeps every file. This build cannot start one, so there is nothing
-// of it running; the runtime's delete and the cgroup's removal are the next change.
-func (y *Youki) Stop(context.Context, string) error { return nil }
+// Stop ends the sandbox and keeps every file: the runtime's delete kills the processes, and
+// only then is the cgroup empty enough for the kernel to let it go. Removing the cgroup first
+// leaves a live container with no budget, which the spike measured as the kernel keeping the
+// cgroup alive. The rootfs, the home and the OCI configuration stay for the next start.
+func (y *Youki) Stop(ctx context.Context, name string) error {
+	// A runtime that is not installed cannot have a container; a delete that fails with the
+	// runtime here is a container still holding processes, which the caller has to see.
+	if err := y.delete(ctx, name); err != nil && y.Installed() {
+		return err
+	}
+	y.removeCgroup(name)
+	_ = os.Remove(y.pidPath(name))
+	return nil
+}
 
 // Remove deletes the record, the bundle — the rootfs, the private home and the OCI configuration
 // — and the socket's folder. The workspace folder is the user's and is not touched.
 func (y *Youki) Remove(ctx context.Context, name string) error {
 	// Removing a running sandbox removes its files but leaves the runtime's process and its
-	// commands; Stop is idempotent, so the control path that already stopped it pays nothing.
-	_ = y.Stop(ctx, name)
+	// commands (ADR 0030). Stop is idempotent, and a stop that cannot end the container stops
+	// the removal here rather than deleting the files under a live one.
+	if err := y.Stop(ctx, name); err != nil {
+		return err
+	}
 	// Read before removing: the record is what names the socket's folder, and it lives outside
 	// everything else this deletes.
 	run := ""
@@ -532,6 +560,92 @@ func (y *Youki) List(ctx context.Context) ([]Instance, error) {
 		instances = append(instances, Instance{Name: name, Image: config.Image, Status: status})
 	}
 	return instances, nil
+}
+
+// create is the runtime's create: the bundle is this workspace's folder, and the pid file is
+// where a person can find the container's init. The output goes to a file rather than a pipe —
+// the container's init inherits it, and a CombinedOutput would wait for an EOF that never comes
+// (issue #47 §10 trap 2).
+func (y *Youki) create(ctx context.Context, name string) error {
+	args := []string{"create", "--bundle", y.workspaceDir(name), "--pid-file", y.pidPath(name), name}
+	if err := y.runLogged(ctx, y.logPath(name), args...); err != nil {
+		return fmt.Errorf("%w: youki create: %w", ErrUnavailable, err)
+	}
+	return nil
+}
+
+// start is the runtime's start: the init was created by create, and this tells it to go.
+func (y *Youki) start(ctx context.Context, name string) error {
+	if err := y.runLogged(ctx, y.logPath(name), "start", name); err != nil {
+		return fmt.Errorf("%w: youki start: %w", ErrUnavailable, err)
+	}
+	return nil
+}
+
+// delete is the runtime's delete with --force, so a stopped sandbox does not depend on being
+// down first. A container the runtime does not have is an error the caller decides about.
+func (y *Youki) delete(ctx context.Context, name string) error {
+	_, err := y.run(ctx, "delete", "--force", name)
+	return err
+}
+
+// runLogged runs the runtime with its output going to a file. The file is the point: a pipe
+// would keep CombinedOutput waiting for an EOF that only the container's exit closes. WaitDelay
+// is the belt for a runtime that leaves a child behind.
+func (y *Youki) runLogged(ctx context.Context, logPath string, args ...string) error {
+	if y.runner != nil {
+		_, err := y.runner.Run(ctx, args...)
+		return err
+	}
+	if !y.Installed() {
+		return fmt.Errorf("the youki runtime is not installed at %s", y.binary())
+	}
+	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = log.Close() }()
+	command := exec.CommandContext(ctx, y.binary(), args...)
+	command.Stdout = log
+	command.Stderr = log
+	command.WaitDelay = time.Second
+	if err := command.Run(); err != nil {
+		if detail := y.logTail(logPath); detail != "" {
+			return fmt.Errorf("%w: %s", err, detail)
+		}
+		return err
+	}
+	return nil
+}
+
+// removeCgroup removes the leaf the runtime created. It is best effort: a systemd host keeps the
+// cgroup somewhere step 4's delegation decides, and a cgroup that is not there is the wanted
+// state. Remove, not RemoveAll: a cgroup with a live process in it is not ours to delete.
+func (y *Youki) removeCgroup(name string) {
+	_ = os.Remove(filepath.Join("/sys/fs/cgroup", strings.TrimPrefix(youkiCgroupPath(name), "/")))
+}
+
+// logPath is the runtime's own output for one workspace, beside the bundle.
+func (y *Youki) logPath(name string) string { return filepath.Join(y.workspaceDir(name), "youki.log") }
+
+// pidPath is where the runtime writes the container's init pid. It is for a person and for a
+// delete that has to find a process; the record and `youki state` are what the lifecycle reads.
+func (y *Youki) pidPath(name string) string {
+	return filepath.Join(y.workspaceDir(name), "container.pid")
+}
+
+// logTail is the last few lines of a runtime log, for an error that would otherwise be a bare
+// exit status.
+func (y *Youki) logTail(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) > 3 {
+		lines = lines[len(lines)-3:]
+	}
+	return strings.Join(lines, "; ")
 }
 
 // runtimeState is what the runtime says about one container, or "" when it has none. It is read

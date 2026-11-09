@@ -7,7 +7,7 @@ HOST ?= 0.0.0.0
 PORT ?= 7777
 URL ?= http://127.0.0.1:7777
 
-.PHONY: help deps build typecheck lint modernize analyze tools commits check test cover test-sandbox test-bwrap sandbox-preflight ui ui-build run dev fmt clean release release-branch sast security
+.PHONY: help deps build typecheck lint modernize analyze tools commits check test cover test-sandbox test-bwrap test-youki sandbox-preflight ui ui-build run dev fmt clean release release-branch sast security
 
 # The linters, installed into the Go and bun toolchains rather than vendored. `make lint` runs
 # whichever are present and names the ones that are not, so a missing tool is a message and
@@ -342,6 +342,16 @@ test-bwrap: ## the bubblewrap engine end to end: it fetches an image, so it is n
 	# The one driver test that needs the host set up: a nested sandbox under pasta, where the
 	# parent holds CAP_SYS_ADMIN and no CAP_SETUID. The fast tier skips it.
 	cd gateway && env -u ACORND_NO_SANDBOX ACORND_BWRAP_ONLY=1 go test -count=1 ./internal/sandbox/ -run 'TestANestedSandboxWithNoEgressStartsInsidePasta|TestALeafSandboxRefusesAUserNamespaceInsideIt'
+
+test-youki: ## the youki engine end to end: it fetches the runtime and an image
+	# Step 2's sandbox runs the runtime's own version command; the supervisor, the worker client
+	# and the e2e rows arrive in step 3. The runtime is vendored and fetched on first use, and
+	# the image comes from a registry, so this is not part of `make test`.
+	#
+	# ACORND_YOUKI_ONLY is the switch the spec gives this tier. -v is on purpose: a machine
+	# without a delegated cgroup skips with its reason, and a skip nobody sees is a green run
+	# that booted nothing.
+	cd gateway && env -u ACORND_NO_SANDBOX ACORND_YOUKI_ONLY=1 ACORND_IMAGE_TEST=1 go test -count=1 -v ./internal/sandbox/ -run 'TestYoukiLifecycle'
 
 test-sandbox: sandbox-preflight ## the engine boundary: live driver, SDK client, and its e2e tests
 	# env -u so a shell that exported the fast tier's switch cannot silently turn this into a
