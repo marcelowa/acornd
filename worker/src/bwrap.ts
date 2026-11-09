@@ -41,7 +41,7 @@ export async function openSandbox(
 		// folder, which is the one mistake worth refusing loudly.
 		throw new Error(`${path} is not the config for ${workspace}`);
 	}
-	return new BwrapClient(config);
+	return new SupervisorClient(config);
 }
 
 /** What control resolved for one workspace: paths, the sandbox's socket, and its private home. */
@@ -129,16 +129,21 @@ interface Event {
 	error?: string;
 }
 
-class BwrapClient extends WorkspaceFiles implements SandboxClient {
+/**
+ * The supervisor socket client: one request per command, streaming frames back. It is
+ * engine-neutral — bwrap and youki both run the same supervisor as the sandbox's first process —
+ * and the engine name only decides the client's `name`.
+ */
+export class SupervisorClient extends WorkspaceFiles implements SandboxClient {
 	readonly name: string;
 	private readonly config: BwrapConfig;
 	private readonly keepalive: ReturnType<typeof setInterval>;
 	private nextID = 0;
 
-	constructor(config: BwrapConfig) {
+	constructor(config: BwrapConfig, engine = "bwrap") {
 		super();
 		this.config = config;
-		this.name = `bwrap:${config.workspace}`;
+		this.name = `${engine}:${config.workspace}`;
 		this.keepalive = setInterval(() => this.sendKeepalive(), KEEPALIVE_INTERVAL_MS);
 		this.keepalive.unref?.();
 		// One now, not in five minutes: the sandbox's timer starts when it is created, and a

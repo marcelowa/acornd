@@ -110,6 +110,7 @@ The chain is **conversation → its definition → this workspace → the instal
 | W15 | Removing a sandbox stops it before deleting its files; a test that removes a started sandbox leaves no process. | `TestBwrapHasALifecycleLikeEveryOtherEngine` |
 | W16 | A real microVM boots inside a bwrap workspace with the granted `/dev/kvm`, `/dev/net/tun`, and caps; the host's microsandbox engine runs a command in it. | `TestAMicroVMStartsInsideABwrapSandbox` |
 | W17 | An existing sandbox is never recreated, but its config is refreshed before the running check: an upgrade that changes a baked setting is written for the next start, and a stopped sandbox starts from the new config. A change the running argv cannot absorb — the secrets proxy's forward, its trust mount, or a new placeholder name — stops and starts the sandbox instead. | `TestProduceRefreshesTheConfigOfAnExistingSandbox`, `TestBwrapPrepareWritesTheCurrentConfig`, `TestProduceRestartsARunningSandboxWhoseBakedConfigChanged` |
+| W18 | A workspace can run on youki: the workspace's own image is the root, commands go through the supervisor socket, a write lands as the host user's file, and the policy file states the capabilities, devices, rlimits, read-only and masked paths. | `TestYoukiWorkspaceRunsItsToolsInNamespaces`, `TestYoukiLifecycleAgainstTheRealRuntime`, `worker/test/youki.test.ts` |
 
 ## Resources: rules, agents, skills
 

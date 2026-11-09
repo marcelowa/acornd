@@ -2,18 +2,24 @@ package sandbox
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/marcelowa/acornd/gateway/internal/supervise"
 )
 
-// Live: the real runtime and a real image. Step 2's first process is `youki --version`, so the
-// container exits at once; what this decides is create, start, state, delete and the mounts,
-// which the fake runner cannot. Step 3 replaces the command with the supervisor, and the e2e
-// rows in issue #47 §11 take over the parts a command inside the sandbox can see.
+// Live: the real runtime and a real image. The sandbox's first process is the supervisor, so
+// what this decides is that create/start bring it up, that the socket answers a command, that
+// stop keeps the files and start brings the same workspace back, and that remove takes them —
+// the parts the fake runner cannot. The e2e row in internal/e2e is the same engine through the
+// worker and the gateway.
 func TestYoukiLifecycleAgainstTheRealRuntime(t *testing.T) {
 	if os.Getenv("ACORND_YOUKI_ONLY") == "" {
 		t.Skip("the youki tier runs this: it fetches the runtime and an image")
@@ -55,12 +61,16 @@ func TestYoukiLifecycleAgainstTheRealRuntime(t *testing.T) {
 	if err := driver.Create(ctx, Policy{Workspace: workspace, Image: "debian:stable-slim"}, filepath.Join(dataDir, "policy")); err != nil {
 		t.Fatalf("create: %v\nlog: %s", err, driver.logTail(driver.logPath(name)))
 	}
-	waitFor(t, 20*time.Second, func() bool {
-		return logContains(driver.logPath(name), "youki version:")
-	}, "the container's version command did not write its output")
+	config, err := driver.readConfig(name)
+	if err != nil {
+		t.Fatalf("the record: %v", err)
+	}
+	if got := runInSupervisor(t, config.Socket, "printf youki-socket-ok"); got != "youki-socket-ok" {
+		t.Fatalf("the supervisor should run a command in the sandbox, got %q", got)
+	}
 
-	// Stop keeps every file; Start recreates the container from the recorded spec and the
-	// second one writes a second version line.
+	// Stop keeps every file; Start brings the same workspace back, and the new supervisor
+	// answers on the same socket.
 	if err := driver.Stop(ctx, name); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
@@ -70,9 +80,9 @@ func TestYoukiLifecycleAgainstTheRealRuntime(t *testing.T) {
 	if err := driver.Start(ctx, name, nil); err != nil {
 		t.Fatalf("start after stop: %v\nlog: %s", err, driver.logTail(driver.logPath(name)))
 	}
-	waitFor(t, 20*time.Second, func() bool {
-		return strings.Count(logText(driver.logPath(name)), "youki version:") >= 2
-	}, "the second container did not run")
+	if got := runInSupervisor(t, config.Socket, "printf youki-restarted-ok"); got != "youki-restarted-ok" {
+		t.Fatalf("the restarted supervisor should run a command, got %q", got)
+	}
 
 	if err := driver.Remove(ctx, name); err != nil {
 		t.Fatalf("remove: %v", err)
@@ -82,27 +92,46 @@ func TestYoukiLifecycleAgainstTheRealRuntime(t *testing.T) {
 	}
 }
 
-// waitFor waits for a condition with a deadline, never for a fixed duration.
-func waitFor(t *testing.T, wait time.Duration, condition func() bool, why string) {
+// runInSupervisor is one command through the socket, the way the worker sends it: a JSON line
+// out, events back, the chunks until the exit.
+func runInSupervisor(t *testing.T, socket, command string) string {
 	t.Helper()
-	deadline := time.Now().Add(wait)
-	for time.Now().Before(deadline) {
-		if condition() {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("%s after %s", why, wait)
-}
-
-func logContains(path, want string) bool {
-	return strings.Contains(logText(path), want)
-}
-
-func logText(path string) string {
-	raw, err := os.ReadFile(path)
+	connection, err := net.DialTimeout("unix", socket, 5*time.Second)
 	if err != nil {
-		return ""
+		t.Fatalf("connect to the supervisor at %s: %v", socket, err)
 	}
-	return string(raw)
+	defer func() { _ = connection.Close() }()
+	request := supervise.Request{
+		Type: "run",
+		ID:   "1",
+		Argv: []string{"/bin/sh", "-c", command},
+		Env:  map[string]string{"PATH": processPath},
+		Dir:  "/",
+	}
+	if err := json.NewEncoder(connection).Encode(request); err != nil {
+		t.Fatalf("send the command: %v", err)
+	}
+	decoder := json.NewDecoder(connection)
+	var output strings.Builder
+	for {
+		var event supervise.Event
+		if err := decoder.Decode(&event); err != nil {
+			t.Fatalf("read the supervisor: %v", err)
+		}
+		if event.ID != "1" {
+			continue
+		}
+		switch event.Type {
+		case "chunk":
+			data, err := base64.StdEncoding.DecodeString(event.Data)
+			if err != nil {
+				t.Fatalf("the supervisor sent a chunk that is not base64: %v", err)
+			}
+			output.Write(data)
+		case "error":
+			t.Fatalf("the supervisor could not run the command: %s", event.Error)
+		case "exit":
+			return output.String()
+		}
+	}
 }

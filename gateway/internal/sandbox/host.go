@@ -112,9 +112,6 @@ func Engine(dataDir, state, name string) (Driver, error) {
 		}
 		return driver, nil
 	case "youki":
-		// Built, and deliberately not in EngineNames yet: its lifecycle cannot boot a container
-		// until the next change, and a chooser that offers an engine whose create refuses is
-		// worse than one that does not show it. Issue #47 §12 step 1.
 		driver := NewYouki(dataDir)
 		if state != "" {
 			driver = driver.WithStateDir(state)
@@ -134,16 +131,16 @@ func Engine(dataDir, state, name string) (Driver, error) {
 }
 
 // EngineNames are the engines this build offers a workspace, in the order a machine prefers
-// them: bubblewrap first because it needs no hypervisor, no root, and no device — then the
-// microVM, which is the stronger boundary when a machine can give it one — then the host, which
-// isolates nothing and is last for that reason. It is the order a chooser shows too (ADR 0026),
-// and only the first two may be a machine's default: see defaultEngines. The host is off unless
-// this process was told to have it: see ChoosableEngines.
+// them: bubblewrap first because it needs no hypervisor, no root, and no device — then youki,
+// which is the same boundary with a policy file — then the microVM, which is the
+// stronger boundary when a machine can give it one — then the host, which isolates nothing and
+// is last for that reason. It is the order a chooser shows too (ADR 0026). The host is off
+// unless this process was told to have it: see ChoosableEngines.
 //
-// youki is built and reachable through Engine, but it is not in this list until its lifecycle
-// can boot a container: a chooser that offers an engine whose create refuses is worse than one
-// that does not show it yet (issue #47 §12 step 1).
-func EngineNames() []string { return []string{"bwrap", "microsandbox", "host"} }
+// The default order is not this list: youki is selectable per workspace, and it stays out of
+// the default until its tier is green on a machine with and without systemd (issue #47 R12).
+// See defaultEngines.
+func EngineNames() []string { return []string{"bwrap", "youki", "microsandbox", "host"} }
 
 // ChoosableEngines are the engines an install may name or offer, in preference order: every
 // engine this build has, minus the host engine unless this process was told to have one. It is

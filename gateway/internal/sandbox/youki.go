@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/marcelowa/acornd/gateway/internal/supervise"
 )
 
 // Youki is the OCI-runtime engine: user, mount, pid, network, ipc and uts namespaces declared in
@@ -478,11 +480,20 @@ func (y *Youki) Create(ctx context.Context, policy Policy, dir string) error {
 // never-started container, or one left by a start that failed, owns the id the create below
 // needs.
 func (y *Youki) Start(ctx context.Context, name string, _ []Secret) error {
-	if _, err := y.readConfig(name); err != nil {
+	config, err := y.readConfig(name)
+	if err != nil {
 		return err
 	}
 	if y.runtimeState(ctx, name) == "running" {
-		return nil
+		// A gateway that restarted finds the container it started before. The runtime says the
+		// init exists; the socket says it is still the supervisor that answers. The fake runner
+		// has no socket, so a unit test of the argv trusts the state.
+		if y.runner != nil {
+			return nil
+		}
+		if err := supervise.WaitForReady(ctx, config.Socket, 2*time.Second); err == nil {
+			return nil
+		}
 	}
 	// Best effort: there is no container in the common case, and a delete that finds nothing
 	// says so with an error this path does not need.
@@ -490,7 +501,20 @@ func (y *Youki) Start(ctx context.Context, name string, _ []Secret) error {
 	if err := y.create(ctx, name); err != nil {
 		return err
 	}
-	return y.start(ctx, name)
+	if err := y.start(ctx, name); err != nil {
+		return err
+	}
+	if y.runner == nil {
+		if err := supervise.WaitForReady(ctx, config.Socket, 15*time.Second); err != nil {
+			detail := y.logTail(y.logPath(name))
+			_ = y.Stop(context.Background(), name)
+			if detail != "" {
+				return fmt.Errorf("%w: %w: %s", ErrUnavailable, err, detail)
+			}
+			return fmt.Errorf("%w: %w", ErrUnavailable, err)
+		}
+	}
+	return nil
 }
 
 // Stop ends the sandbox and keeps every file: the runtime's delete kills the processes, and

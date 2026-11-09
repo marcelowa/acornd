@@ -370,7 +370,8 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	// The shared engine, linked where a driver looks for it, so the first workspace to start
 	// does not pay for a download per test. A host-engine test never touches this driver.
 	_, bwrapTest := bwrapEngineTests.Load(t.Name())
-	if _, host := hostEngineTests.Load(t.Name()); engineHome != "" && !host && !bwrapTest {
+	_, youkiTest := youkiEngineTests.Load(t.Name())
+	if _, host := hostEngineTests.Load(t.Name()); engineHome != "" && !host && !bwrapTest && !youkiTest {
 		if err := os.MkdirAll(filepath.Join(s.DataDir, "tools"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -408,6 +409,9 @@ func start(t *testing.T, opts ...func(*settings)) *system {
 	if value, ok := bwrapEngineTests.Load(t.Name()); ok && value == true {
 		hostEngine = true
 		engineEnv = "bwrap"
+	} else if value, ok := youkiEngineTests.Load(t.Name()); ok && value == true {
+		hostEngine = true
+		engineEnv = "youki"
 	} else if value, ok := hostEngineTests.Load(t.Name()); ok && value == true {
 		hostEngine = true
 		engineEnv = "host"
@@ -585,6 +589,49 @@ func bwrapAvailable(t *testing.T) {
 	}
 	if os.Getenv("ACORND_IMAGE_TEST") == "" {
 		missing("a bwrap workspace fetches its image: set ACORND_IMAGE_TEST=1 to run this")
+	}
+}
+
+// youkiEngineTests records the tests that asked to run on the youki engine. start reads it and
+// runs their gateway with ACORND_SANDBOX_ENGINE=youki: an OCI runtime and user namespaces
+// instead of a hypervisor, with the same supervisor socket bwrap's client speaks.
+var youkiEngineTests sync.Map
+
+// youkiEngine marks a test as running on the youki engine, before start.
+func youkiEngine(t *testing.T) {
+	t.Helper()
+	youkiAvailable(t)
+	youkiEngineTests.Store(t.Name(), true)
+}
+
+// youkiAvailable is the machine half: the cgroup v2 mount the runtime needs to create a
+// container, pasta for a workspace with its network on, and an image. It skips on a machine
+// that cannot run the tier, unless ACORND_YOUKI_ONLY says this *is* the youki tier — then it
+// fails, because a tier that silently skips on the one machine meant to run it is how its bug
+// class survives. `make test-youki` sets that switch.
+func youkiAvailable(t *testing.T) {
+	t.Helper()
+	only := os.Getenv("ACORND_YOUKI_ONLY") != ""
+	missing := func(format string, args ...any) {
+		if only {
+			t.Fatalf(format, args...)
+		}
+		t.Skipf(format, args...)
+	}
+	if runtime.GOOS != "linux" {
+		missing("youki is a Linux runtime")
+	}
+	// The runtime creates a cgroup for the container. A plain directory is not one: the bwrap
+	// workspace this suite can run in has no /sys mount at all, and a test that made the
+	// directory there would still not have a cgroup to create.
+	if _, err := os.Stat("/sys/fs/cgroup/cgroup.controllers"); err != nil {
+		missing("this machine has no cgroup v2 mount, so youki cannot create its cgroup")
+	}
+	if _, err := exec.LookPath("pasta"); err != nil {
+		missing("no pasta on this machine: a youki workspace with egress needs it (apt install passt)")
+	}
+	if os.Getenv("ACORND_IMAGE_TEST") == "" {
+		missing("a youki workspace fetches its image: set ACORND_IMAGE_TEST=1 to run this")
 	}
 }
 

@@ -113,15 +113,19 @@ func (t *Tier) canRun(name string) error {
 }
 
 // defaultEngines are the engines a machine may hand to a workspace that named none, in the
-// order it prefers them: EngineNames without the host engine. The host stays in EngineNames
-// because a test install can still name it, and doctor still reports what it is; it is never
-// the answer a machine gives on its own (ADR 0015).
+// order it prefers them: EngineNames without the host engine and without youki. The host stays
+// in EngineNames because a test install can still name it, and doctor still reports what it is;
+// it is never the answer a machine gives on its own (ADR 0015). youki is selectable per
+// workspace, and it joins this order only once its tier is green on a machine with and without
+// systemd (issue #47 R12); a default that moved before the tier passed is the change the PRD
+// refuses.
 func defaultEngines() []string {
 	names := make([]string, 0, len(EngineNames()))
 	for _, name := range EngineNames() {
-		if name != "host" {
-			names = append(names, name)
+		if name == "host" || name == "youki" {
+			continue
 		}
+		names = append(names, name)
 	}
 	return names
 }
