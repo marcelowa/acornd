@@ -158,3 +158,58 @@ func TestAYoukiSandboxCannotReachPrivateNetworks(t *testing.T) {
 		t.Fatalf("the sandbox reached this machine's private address, want %q in %q", want, output)
 	}
 }
+
+// The workspace's rootfs, end to end: an install inside a youki workspace lands in the
+// workspace's own copy of its image and is still there for the next command, while the host
+// keeps its own tools untouched. The twin of the bwrap row (issue #47 R3).
+func TestYoukiWorkspaceInstallsIntoItsOwnImage(t *testing.T) {
+	t.Parallel()
+	youkiEngine(t)
+	s := start(t,
+		withScript(
+			scriptRule{
+				Match: "install it",
+				Tools: []scriptTool{{Name: "bash", Args: map[string]any{
+					"command": `id -u; cat /etc/os-release | head -1; ` +
+						`apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq less >/dev/null 2>&1; ` +
+						`printf 'installed:%s' "$(command -v less)"`,
+				}}},
+				// The reply is a word the command does not contain: the stream's text is the whole
+				// transcript, so a wait for "installed" would match the tool call's own arguments.
+				Reply: "first-turn-done",
+			},
+			scriptRule{
+				Match: "still there",
+				Tools: []scriptTool{{Name: "bash", Args: map[string]any{
+					"command": `command -v less && less --version | head -1 && printf 'alive:%s' "$(test -x /usr/bin/less && echo yes)"`,
+				}}},
+				Reply: "second-turn-done",
+			},
+		),
+	)
+	c := s.client()
+	root := c.waitForConversation("personal")
+
+	c.prompt("personal", root, "install it")
+	view := c.waitForText("personal", root, "first-turn-done")
+	first := view.lastToolResult()
+	if !strings.Contains(first, "installed:/usr/bin/less") {
+		t.Fatalf("the install should have landed inside the sandbox, got %q\ntranscript:\n%s", first, view.all())
+	}
+	if !strings.Contains(first, "13.") && !strings.Contains(first, "PRETTY_NAME") {
+		t.Errorf("the command should see the image's own os-release, got %q", first)
+	}
+
+	// A second command is the same sandbox, and an install that did not survive it would make the
+	// image a decoration.
+	c.prompt("personal", root, "still there")
+	second := c.waitForText("personal", root, "second-turn-done").lastToolResult()
+	if !strings.Contains(second, "alive:yes") {
+		t.Fatalf("the install did not survive the command that made it, got %q", second)
+	}
+
+	// Nothing of this reached the host: the workspace's root is its own copy in the engine store.
+	if _, err := os.Stat(filepath.Join(s.DataDir, "sandboxes", "youki")); err != nil {
+		t.Fatalf("the engine's folder should hold the image and the workspace's copy: %v", err)
+	}
+}
