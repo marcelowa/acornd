@@ -615,13 +615,20 @@ export function toTranscript(
 
 	// Accepted and not committed: a steered message joins the turn that is running and a
 	// follow-up waits behind it. Showing them beats a message that vanished until it lands;
-	// `write` items are the harness's own drafts, not a person's words.
+	// `write` items are the harness's own drafts, not a person's words. A leaf left with no run
+	// (a failed turn's `keep` policy) is not steering anything: it waits for the next turn.
 	for (const item of view?.docs?.["pi.inbox"]?.items ?? []) {
 		if (item.mode !== "steer" && item.mode !== "followUp") continue;
 		const text = textOf(item.content).trim();
 		if (text === "") continue;
 		liveContent = true;
-		transcript.push({ kind: "pending", id: `pending-${item.id}`, text, action: item.mode });
+		transcript.push({
+			kind: "pending",
+			id: `pending-${item.id}`,
+			text,
+			action: item.mode,
+			waiting: !running,
+		});
 	}
 
 	// A run with no visible evidence yet is thinking with no output: the dots are the

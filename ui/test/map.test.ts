@@ -260,14 +260,30 @@ describe("the wire mapping", () => {
 				},
 			},
 		};
-		const entries = toTranscript(view, {});
+		const entries = toTranscript(view, {}, true);
 		expect(entries).toHaveLength(2);
 		const [steer, followUp] = entries;
 		expect(steer?.kind === "pending" ? steer.action : undefined).toBe("steer");
 		expect(steer?.kind === "pending" ? steer.text : undefined).toBe(
 			"wait, check the lock order",
 		);
+		expect(steer?.kind === "pending" ? steer.waiting : undefined).toBe(false);
 		expect(followUp?.id).toBe("pending-b");
+	});
+
+	test("a kept inbox item with no run is waiting, not steering", () => {
+		// A failed turn under the harness's `keep` policy leaves its queue behind. Nothing is
+		// running, so the card must not promise it is joining a turn that does not exist.
+		const view: WireView = {
+			entries: [],
+			docs: {
+				"pi.inbox": {
+					items: [{ id: "a", mode: "steer", content: "what happened?" }],
+				},
+			},
+		};
+		const [entry] = toTranscript(view, {}, false);
+		expect(entry?.kind === "pending" ? entry.waiting : undefined).toBe(true);
 	});
 
 	test("a landed message keeps the mark it was sent with", () => {

@@ -252,13 +252,16 @@ export interface SummaryEntry {
 
 /**
  * Something sent while a turn was running. It is real — the server took it — but it has not
- * committed yet, so the transcript says so instead of pretending it is not there.
+ * committed yet, so the transcript says so instead of pretending it is not there. `waiting` is
+ * for the item a failed run left behind under the harness's `keep` policy: no turn is live, so
+ * it is not steering one; it will be placed when the next turn starts.
  */
 export interface PendingEntry {
 	kind: "pending";
 	id: string;
 	text: string;
 	action: "steer" | "followUp";
+	waiting: boolean;
 }
 
 /** One model provider as the settings screen lists it. */ export interface ProviderSummary {
