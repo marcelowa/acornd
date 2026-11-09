@@ -1,6 +1,8 @@
 package e2e
 
 import (
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,5 +58,103 @@ func TestYoukiWorkspaceRunsItsToolsInNamespaces(t *testing.T) {
 	written := filepath.Join(general.Workspace.Path, "made-in-the-sandbox.txt")
 	if _, err := os.Stat(written); err != nil {
 		t.Fatalf("the sandbox did not write into the workspace: %v", err)
+	}
+}
+
+// The machine's own loopback is not the workspace's. pasta's forwarding defaults mirror every
+// listener into the sandbox's loopback and its gateway translation maps 10.0.2.2 onto the same
+// surface; `-t none -u none -T none -U none --no-map-gw` closes both. This is the row issue #47
+// §5 says to run first, because it was never measured with youki.
+func TestAYoukiSandboxCannotReachTheMachinesLoopback(t *testing.T) {
+	t.Parallel()
+	youkiEngine(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening on the machine's loopback: %v", err)
+	}
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
+
+	s := start(t,
+		withScript(
+			scriptRule{
+				Match: "reach the host",
+				Tools: []scriptTool{{Name: "bash", Args: map[string]any{
+					"command": fmt.Sprintf(
+						`try() { timeout 3 bash -c "exec 3<>/dev/tcp/$1/$2" 2>/dev/null && echo "$1:$2 open" || echo "$1:$2 closed"; }; `+
+							`try 127.0.0.1 %d; try 10.0.2.2 %d`, port, port),
+				}}},
+				Reply: "probed",
+			},
+		),
+	)
+	c := s.client()
+	root := c.waitForConversation("personal")
+	c.prompt("personal", root, "reach the host")
+	output := c.waitForText("personal", root, "probed").lastToolResult()
+
+	for _, want := range []string{
+		fmt.Sprintf("127.0.0.1:%d closed", port),
+		fmt.Sprintf("10.0.2.2:%d closed", port),
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("the sandbox should not reach the machine, want %q in %q", want, output)
+		}
+	}
+}
+
+// A youki workspace with no private-networks grant cannot reach this machine's private address:
+// egress carries the machine's routing table, so the boundary is a route inside the sandbox.
+func TestAYoukiSandboxCannotReachPrivateNetworks(t *testing.T) {
+	t.Parallel()
+	youkiEngine(t)
+	address := hostPrivateIPv4(t)
+	if address == "" {
+		t.Skip("this machine has no private IPv4 address to aim at")
+	}
+	listener, err := net.Listen("tcp", net.JoinHostPort(address, "0"))
+	if err != nil {
+		t.Fatalf("listening on %s: %v", address, err)
+	}
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
+
+	s := start(t,
+		withScript(
+			scriptRule{
+				Match: "reach the private network",
+				Tools: []scriptTool{{Name: "bash", Args: map[string]any{
+					"command": fmt.Sprintf(
+						`try() { timeout 3 bash -c "exec 3<>/dev/tcp/$1/$2" 2>/dev/null && echo "$1:$2 open" || echo "$1:$2 closed"; }; `+
+							`try %s %d`, address, port),
+				}}},
+				Reply: "probed-private",
+			},
+		),
+	)
+	c := s.client()
+	root := c.waitForConversation("personal")
+	c.prompt("personal", root, "reach the private network")
+	output := c.waitForText("personal", root, "probed-private").lastToolResult()
+	if want := fmt.Sprintf("%s:%d closed", address, port); !strings.Contains(output, want) {
+		t.Fatalf("the sandbox reached this machine's private address, want %q in %q", want, output)
 	}
 }

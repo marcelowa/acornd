@@ -10,9 +10,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/marcelowa/acornd/gateway/internal/netns"
 	"github.com/marcelowa/acornd/gateway/internal/supervise"
 )
 
@@ -20,6 +22,24 @@ import (
 // The driver binds this executable into the sandbox and runs it with the supervisor's arguments;
 // a test binary that ignored them would start a second test run inside the sandbox instead.
 func TestMain(m *testing.M) {
+	// The pasta probe asks this binary to run `help`: it must exit without starting the suite,
+	// or the probe recurses into the tests it is meant to gate.
+	if len(os.Args) > 1 && os.Args[1] == "help" {
+		os.Exit(0)
+	}
+	// A live egress test runs this binary as the sandbox's netns helper, exactly as the product
+	// runs acornd; the configuration is the same netns.Command.
+	if len(os.Args) > 2 && os.Args[1] == "internal" && os.Args[2] == "netns" {
+		command, err := netns.Command(os.Args[3:])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "acornd test binary: netns:", err)
+			os.Exit(2)
+		}
+		if err := syscall.Exec(command[0], command, os.Environ()); err != nil {
+			fmt.Fprintln(os.Stderr, "acornd test binary: netns:", err)
+			os.Exit(2)
+		}
+	}
 	if len(os.Args) > 2 && os.Args[1] == "internal" && os.Args[2] == "sandbox-supervisor" {
 		socket := ""
 		for index, argument := range os.Args {

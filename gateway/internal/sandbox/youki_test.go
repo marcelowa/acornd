@@ -607,3 +607,43 @@ func youkiReleaseTarball(t *testing.T) ([]byte, string) {
 	digest := sha256.Sum256(buffer.Bytes())
 	return buffer.Bytes(), hex.EncodeToString(digest[:])
 }
+
+// The pasta argv is the egress boundary: outbound only, no port forwarding, the gateway address
+// not translated to the machine's loopback, and the private ranges refused by the netns helper
+// before the container is created. It is an argv because pasta reads nothing else about this
+// decision.
+func TestYoukiPastaArgvKeepsTheMachinesLoopbackOut(t *testing.T) {
+	driver, _ := testYouki(t, t.TempDir())
+	config := testYoukiConfig()
+	config.Network = sandboxNetwork{Mode: "pasta", Address: sandboxAddress, Gateway: sandboxGateway, Pasta: "/usr/bin/pasta"}
+	argv, err := driver.pastaArgv(config, "acornd-ws-12345678")
+	if err != nil {
+		t.Fatalf("pasta argv: %v", err)
+	}
+	joined := strings.Join(argv, " ")
+	for _, want := range []string{
+		// The machine's own loopback is not the workspace's, by either route pasta offers.
+		"/usr/bin/pasta -q -t none -u none -T none -U none --no-map-gw",
+		"--dns-forward " + sandboxDNS,
+		"-a 10.0.2.15 -n 24 -g 10.0.2.2 --",
+		"internal netns --address " + sandboxAddress + " --gateway " + sandboxGateway + " " + refusePrivate,
+		driver.binary() + " run --bundle " + driver.workspaceDir("acornd-ws-12345678") + " --pid-file " + driver.pidPath("acornd-ws-12345678") + " acornd-ws-12345678",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("pasta argv should contain %q:\n%s", want, joined)
+		}
+	}
+
+	// A workspace with the grant reads the machine's resolver and has no refused ranges.
+	config.Network.Private = true
+	argv, err = driver.pastaArgv(config, "acornd-ws-12345678")
+	if err != nil {
+		t.Fatalf("pasta argv with the grant: %v", err)
+	}
+	joined = strings.Join(argv, " ")
+	for _, unwanted := range []string{"--refuse-private", "--dns-forward"} {
+		if strings.Contains(joined, unwanted) {
+			t.Errorf("a granted workspace should not carry %q:\n%s", unwanted, joined)
+		}
+	}
+}

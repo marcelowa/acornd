@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/marcelowa/acornd/gateway/internal/supervise"
@@ -516,12 +517,39 @@ func (y *Youki) adopt(ctx context.Context, name string, config youkiConfig) bool
 
 // boot deletes a container that is not the one this record names — created but never started,
 // or left by a start that failed — then creates, bounds and starts one, and waits for the
-// supervisor. The budget is written between create and start, so the first command is already
-// bounded.
+// supervisor. Network off is the runtime's create/start; egress is pasta carrying a `youki run`
+// that stays for the container's life. The budget is written before the first command either
+// way: between create and start, or right after the supervisor answers.
 func (y *Youki) boot(ctx context.Context, name string, config youkiConfig) error {
 	// Best effort: there is no container in the common case, and a delete that finds nothing
 	// says so with an error this path does not need.
 	_ = y.delete(ctx, name)
+	if err := y.launch(ctx, name, config); err != nil {
+		return err
+	}
+	if y.runner != nil {
+		return nil
+	}
+	if err := y.waitForSupervisor(ctx, name, config); err != nil {
+		return err
+	}
+	if config.Network.Mode == "pasta" {
+		// The runtime wrote memory.max and cpu.max at create; the swap limit is ours, and the
+		// worker has not attached yet, so the first command is already bounded.
+		if err := y.enforceBudget(config.CgroupPath); err != nil {
+			_ = y.Stop(context.Background(), name)
+			return fmt.Errorf("%w: %w", ErrUnavailable, err)
+		}
+	}
+	return nil
+}
+
+// launch is the create/start pair the network mode decides: the runtime's create and start with
+// an empty namespace, or pasta carrying a `youki run` that stays for the container's life.
+func (y *Youki) launch(ctx context.Context, name string, config youkiConfig) error {
+	if config.Network.Mode == "pasta" {
+		return y.startPasta(name, config)
+	}
 	if err := y.create(ctx, name); err != nil {
 		return err
 	}
@@ -531,12 +559,12 @@ func (y *Youki) boot(ctx context.Context, name string, config youkiConfig) error
 			return fmt.Errorf("%w: %w", ErrUnavailable, err)
 		}
 	}
-	if err := y.start(ctx, name); err != nil {
-		return err
-	}
-	if y.runner != nil {
-		return nil
-	}
+	return y.start(ctx, name)
+}
+
+// waitForSupervisor waits for the ready frame, and stops the sandbox it just started when the
+// supervisor never answers.
+func (y *Youki) waitForSupervisor(ctx context.Context, name string, config youkiConfig) error {
 	if err := supervise.WaitForReady(ctx, config.Socket, 15*time.Second); err != nil {
 		detail := y.logTail(y.logPath(name))
 		_ = y.Stop(context.Background(), name)
@@ -554,16 +582,19 @@ func (y *Youki) boot(ctx context.Context, name string, config youkiConfig) error
 // cgroup alive. The rootfs, the home and the OCI configuration stay for the next start.
 func (y *Youki) Stop(ctx context.Context, name string) error {
 	// A runtime that is not installed cannot have a container; a delete that fails with the
-	// runtime here is a container still holding processes, which the caller has to see.
-	if err := y.delete(ctx, name); err != nil && y.Installed() {
-		return err
-	}
+	// runtime here is a container still holding processes, which the caller has to see. The
+	// parent is stopped either way, so a failed delete does not leave pasta forwarding.
+	deleteErr := y.delete(ctx, name)
+	y.stopRuntime(name)
 	cgroupPath := ""
 	if config, err := y.readConfig(name); err == nil {
 		cgroupPath = config.CgroupPath
 	}
 	y.removeCgroup(cgroupPath)
 	_ = os.Remove(y.pidPath(name))
+	if deleteErr != nil && y.Installed() {
+		return deleteErr
+	}
 	return nil
 }
 
@@ -644,6 +675,103 @@ func (y *Youki) enforceBudget(cgroupPath string) error {
 		return fmt.Errorf("the sandbox's swap limit at %s: %w", path, err)
 	}
 	return nil
+}
+
+// pastaArgv is the boot command for a workspace with egress: pasta makes the network namespace
+// and forwards its traffic, acornd's netns helper configures it and refuses the ranges the
+// workspace was not granted, and `youki run` creates the container inside it. The container's
+// spec omits the network namespace, so the container's init joins pasta's.
+func (y *Youki) pastaArgv(config youkiConfig, name string) ([]string, error) {
+	if config.Network.Pasta == "" || config.Supervisor == "" {
+		return nil, fmt.Errorf("sandbox: this workspace has egress but its record has no pasta or acornd path: recreate the sandbox")
+	}
+	address, prefix, ok := strings.Cut(config.Network.Address, "/")
+	if !ok || address == "" || prefix == "" {
+		return nil, fmt.Errorf("sandbox: the record's network address %q is not an address with a prefix", config.Network.Address)
+	}
+	argv := []string{
+		config.Network.Pasta, "-q",
+		"-t", "none", "-u", "none", "-T", noForwarding, "-U", "none",
+		"--no-map-gw",
+	}
+	if !config.Network.Private {
+		argv = append(argv, "--dns-forward", sandboxDNS)
+	}
+	argv = append(argv, "-a", address, "-n", prefix, "-g", config.Network.Gateway, "--")
+	configure := []string{
+		config.Supervisor, "internal", "netns",
+		"--address", config.Network.Address,
+		"--gateway", config.Network.Gateway,
+	}
+	if !config.Network.Private {
+		configure = append(configure, refusePrivate)
+	}
+	configure = append(configure, y.binary(), "run", "--bundle", y.workspaceDir(name), "--pid-file", y.pidPath(name), name)
+	return append(argv, configure...), nil
+}
+
+// startPasta runs the boot command in its own session: pasta and the runtime must outlive the
+// gateway that started them, and `youki run` stays for the container's life, which is what
+// keeps pasta forwarding. Its output goes to the same log the runtime writes.
+func (y *Youki) startPasta(name string, config youkiConfig) error {
+	argv, err := y.pastaArgv(config, name)
+	if err != nil {
+		return err
+	}
+	log, err := os.OpenFile(y.logPath(name), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = log.Close() }()
+	command := exec.Command(argv[0], argv[1:]...)
+	command.Stdout = log
+	command.Stderr = log
+	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	command.WaitDelay = time.Second
+	if err := command.Start(); err != nil {
+		return fmt.Errorf("%w: starting pasta: %w", ErrUnavailable, err)
+	}
+	if err := os.WriteFile(y.runtimePidPath(name), []byte(strconv.Itoa(command.Process.Pid)), 0o600); err != nil {
+		_ = command.Process.Kill()
+		return err
+	}
+	go func() { _ = command.Wait() }()
+	return nil
+}
+
+// stopRuntime ends the pasta/runtime process a start left behind. `youki delete --force` has
+// already killed the container; this is the parent that keeps pasta's namespace alive, and it
+// must not outlive the sandbox.
+func (y *Youki) stopRuntime(name string) {
+	raw, err := os.ReadFile(y.runtimePidPath(name))
+	if err != nil {
+		return
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || pid <= 0 {
+		_ = os.Remove(y.runtimePidPath(name))
+		return
+	}
+	process, err := os.FindProcess(pid)
+	if err == nil {
+		_ = process.Signal(syscall.SIGTERM)
+		for range 100 {
+			if !alive(pid) {
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		if alive(pid) {
+			_ = process.Kill()
+		}
+	}
+	_ = os.Remove(y.runtimePidPath(name))
+}
+
+// runtimePidPath is the pasta/runtime process, which is not the container's init: the init pid
+// is the runtime's own file, and this one is what a stop signals.
+func (y *Youki) runtimePidPath(name string) string {
+	return filepath.Join(y.workspaceDir(name), "runtime.pid")
 }
 
 // start is the runtime's start: the init was created by create, and this tells it to go.

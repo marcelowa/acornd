@@ -84,10 +84,13 @@ var Allowed = map[string][]string{
 	// One workspace's secrets proxy: loopback, the vault's grants handed in, nothing of this
 	// project imported. It is a leaf on purpose — the package that knows the vault stays control.
 	"internal/secretsproxy": {},
-	"internal/sandbox":      {"internal/supervise"},
-	"internal/supervise":    {},
-	"internal/update":       {},
-	"internal/vault":        {},
-	"internal/workerpool":   {"internal/protocol"},
-	"web":                   {},
+	// The engines and their drivers. It reaches netns for the test binary's netns helper, which
+	// runs the same configuration the product's acornd runs before a sandbox's first process
+	// (ADR 0025); the alternative was a second copy of the refused ranges in the test.
+	"internal/sandbox":    {"internal/netns", "internal/supervise"},
+	"internal/supervise":  {},
+	"internal/update":     {},
+	"internal/vault":      {},
+	"internal/workerpool": {"internal/protocol"},
+	"web":                 {},
 }
