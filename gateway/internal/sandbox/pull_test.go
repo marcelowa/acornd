@@ -28,7 +28,7 @@ func TestAnImageThatIsAlreadyThereIsNotFetchedAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	if pulls != 1 {
-		t.Fatalf("the first pull should fetch once, got %d", pulls)
+		t.Fatalf("the first pull should Fetch once, got %d", pulls)
 	}
 	if err := pullToDir(dir, base, complete, "debian:stable-slim", engine.pull); err != nil {
 		t.Fatal(err)

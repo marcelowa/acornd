@@ -6,9 +6,9 @@ import (
 	"strings"
 )
 
-// nestedFromProcess says whether this acornd is already inside a sandbox. The environment can
+// NestedFromProcess says whether this acornd is already inside a sandbox. The environment can
 // answer for it in both directions; when it does not, the kernel is asked.
-func nestedFromProcess() bool {
+func NestedFromProcess() bool {
 	return nestedFromMarker(os.Getenv(nestedEnv), "/proc/self/uid_map", "/proc/self/setgroups")
 }
 

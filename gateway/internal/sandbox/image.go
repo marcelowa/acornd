@@ -23,16 +23,16 @@ import (
 // Pulling an image into a plain directory, so an engine with no runtime can still start a
 // workspace from one.
 //
-// It is deliberately the small half of what a container runtime does: fetch the manifest for
+// It is deliberately the small half of what a container runtime does: Fetch the manifest for
 // this platform, verify and unpack its layers into a folder, and cache the result by the
 // manifest's own digest. No store, no reference counting, no snapshots — a workspace copies the
 // cached tree and owns that copy. That copy is what makes an install inside the sandbox outlive
 // the command that made it: the workspace's rootfs is its own disk, and the host never sees a
 // byte of it.
 
-// imageSource fetches and unpacks an image reference into dest, which it creates. It is a field
+// ImageSource fetches and unpacks an image reference into dest, which it creates. It is a field
 // on the driver so that a test can answer without a registry.
-type imageSource func(ctx context.Context, reference, dest string, log func(string, ...any)) error
+type ImageSource func(ctx context.Context, reference, dest string, log func(string, ...any)) error
 
 // registry is the part of the distribution API this needs: a token, a manifest, and blobs.
 type registry struct {
@@ -220,10 +220,10 @@ var acceptManifests = []string{
 	"application/vnd.docker.distribution.manifest.v2+json",
 }
 
-// pullImage fetches an image and unpacks its layers into dest. Every layer is verified against
+// PullImage fetches an image and unpacks its layers into dest. Every layer is verified against
 // the digest the manifest names before it is unpacked: an image is code, and code that arrives
 // unverified is not worth running.
-func pullImage(ctx context.Context, reference, dest string, log func(string, ...any)) error {
+func PullImage(ctx context.Context, reference, dest string, log func(string, ...any)) error {
 	ref, err := parseImageReference(reference)
 	if err != nil {
 		return err

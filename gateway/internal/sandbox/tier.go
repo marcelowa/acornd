@@ -9,7 +9,7 @@ import (
 )
 
 // ErrNoEngine is what a machine that can run no sandbox answers with. It is not a failed
-// probe: both engines that isolate anything are unavailable here, so there is nothing to hand
+// probe: both engines that isolate anything are Unavailable here, so there is nothing to hand
 // a workspace that named none. A caller tells it apart from a bad name because the repair is
 // different — a machine to prepare, not a typo.
 var ErrNoEngine = errors.New("no sandbox engine can run on this machine")

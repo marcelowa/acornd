@@ -169,7 +169,7 @@ func TestPullImageUnpacksTheLayerForThisPlatform(t *testing.T) {
 	// The driver builds its registry URL from the reference's host, so the fake one is named by
 	// the server's own address.
 	host := strings.TrimPrefix(server.URL, "http://")
-	if err := pullImage(context.Background(), host+"/library/debian:latest", dest, nil); err != nil {
+	if err := PullImage(context.Background(), host+"/library/debian:latest", dest, nil); err != nil {
 		t.Fatalf("pull: %v", err)
 	}
 	if got, err := os.ReadFile(filepath.Join(dest, "etc", "os-release")); err != nil || string(got) != "ID=debian\n" {
@@ -209,7 +209,7 @@ func TestPullImageAppliesWhiteoutsAcrossLayers(t *testing.T) {
 	defer server.Close()
 
 	dest := filepath.Join(t.TempDir(), "base")
-	if err := pullImage(context.Background(), strings.TrimPrefix(server.URL, "http://")+"/library/debian:latest", dest, nil); err != nil {
+	if err := PullImage(context.Background(), strings.TrimPrefix(server.URL, "http://")+"/library/debian:latest", dest, nil); err != nil {
 		t.Fatalf("pull: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dest, "etc", "gone")); !os.IsNotExist(err) {
@@ -232,7 +232,7 @@ func TestPullImageRefusesALayerThatDoesNotMatchItsDigest(t *testing.T) {
 	defer server.Close()
 
 	dest := filepath.Join(t.TempDir(), "base")
-	err := pullImage(context.Background(), strings.TrimPrefix(server.URL, "http://")+"/library/debian:latest", dest, nil)
+	err := PullImage(context.Background(), strings.TrimPrefix(server.URL, "http://")+"/library/debian:latest", dest, nil)
 	if err == nil {
 		t.Fatal("a corrupted layer was accepted")
 	}

@@ -1,4 +1,4 @@
-package sandbox
+package youki
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 )
 
 // The loopback test first: issue #47 §5 says pasta's forwarding inside a youki container was
@@ -24,23 +26,23 @@ func TestYoukiSandboxCannotReachTheMachinesLoopback(t *testing.T) {
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	name := Name(workspace)
+	name := sandbox.Name(workspace)
 	t.Cleanup(func() { _ = driver.Remove(context.Background(), name) })
-	if err := driver.Create(ctx, Policy{Workspace: workspace, Image: "debian:stable-slim", Egress: true}, t.TempDir()); err != nil {
+	if err := driver.Create(ctx, sandbox.Policy{Workspace: workspace, Image: "debian:stable-slim", Egress: true}, t.TempDir()); err != nil {
 		t.Fatalf("create: %v\nlog: %s", err, driver.logTail(driver.logPath(name)))
 	}
 	config, err := driver.readConfig(name)
 	if err != nil {
 		t.Fatalf("the record: %v", err)
 	}
-	command := tryScript(tryProbe("127.0.0.1", port), tryProbe(sandboxGateway, port))
+	command := tryScript(tryProbe("127.0.0.1", port), tryProbe(sandbox.SandboxGateway, port))
 	output, code := runInSupervisor(t, config.Socket, command)
 	if code != 0 {
 		t.Fatalf("the probe did not run: %q (exit %d)", output, code)
 	}
 	for _, want := range []string{
 		fmt.Sprintf("127.0.0.1:%d closed", port),
-		fmt.Sprintf("%s:%d closed", sandboxGateway, port),
+		fmt.Sprintf("%s:%d closed", sandbox.SandboxGateway, port),
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("the sandbox should not reach the machine, want %q in %q", want, output)
@@ -64,9 +66,9 @@ func TestYoukiSandboxCannotReachPrivateNetworks(t *testing.T) {
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	name := Name(workspace)
+	name := sandbox.Name(workspace)
 	t.Cleanup(func() { _ = driver.Remove(context.Background(), name) })
-	if err := driver.Create(ctx, Policy{Workspace: workspace, Image: "debian:stable-slim", Egress: true}, t.TempDir()); err != nil {
+	if err := driver.Create(ctx, sandbox.Policy{Workspace: workspace, Image: "debian:stable-slim", Egress: true}, t.TempDir()); err != nil {
 		t.Fatalf("create: %v\nlog: %s", err, driver.logTail(driver.logPath(name)))
 	}
 	config, err := driver.readConfig(name)

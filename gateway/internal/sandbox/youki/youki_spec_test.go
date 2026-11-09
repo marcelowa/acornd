@@ -1,4 +1,4 @@
-package sandbox
+package youki
 
 import (
 	"os"
@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 )
 
 // The three rules that decide whether a youki container can itself run a container are
@@ -20,7 +22,7 @@ func testYoukiConfig() youkiConfig {
 		Engine:      "youki",
 		Workspace:   "/work/ws",
 		Image:       "debian:stable-slim",
-		Network:     sandboxNetwork{Mode: NetworkOffName},
+		Network:     sandbox.SandboxNetwork{Mode: sandbox.NetworkOffName},
 		Rootfs:      "/state/ws/rootfs",
 		DataDir:     "/state/ws/home",
 		Hidden:      "/home/me/.acornd",
@@ -31,12 +33,12 @@ func testYoukiConfig() youkiConfig {
 		Spec:        "/state/ws/config.json",
 		CgroupPath:  "/acornd.slice/acornd-ws-12345678",
 		Socket:      "/run/acornd/abc/s.sock",
-		GuestSocket: guestSocketPath,
+		GuestSocket: sandbox.GuestSocketPath,
 		Run:         "/run/acornd/abc",
-		GuestRun:    guestRunDir,
-		IdleTimeout: DefaultIdleTimeout,
-		CPUs:        DefaultCPUs,
-		Memory:      DefaultMemory,
+		GuestRun:    sandbox.GuestRunDir,
+		IdleTimeout: sandbox.DefaultIdleTimeout,
+		CPUs:        sandbox.DefaultCPUs,
+		Memory:      sandbox.DefaultMemory,
 		Beta:        youkiBeta,
 	}
 }
@@ -129,13 +131,13 @@ func TestYoukiSpecCgroupsPathIsAbsolute(t *testing.T) {
 
 func TestYoukiSpecOmitsTheNetworkNamespaceWhenEgressIsOn(t *testing.T) {
 	config := testYoukiConfig()
-	config.Network = sandboxNetwork{Mode: "pasta"}
+	config.Network = sandbox.SandboxNetwork{Mode: "pasta"}
 	on := mustYoukiSpec(t, config)
 	if slices.ContainsFunc(on.Linux.Namespaces, func(namespace ociNamespace) bool { return namespace.Type == "network" }) {
 		t.Errorf("egress on must join pasta's namespace, not make an empty one: %v", on.Linux.Namespaces)
 	}
 
-	config.Network = sandboxNetwork{Mode: NetworkOffName}
+	config.Network = sandbox.SandboxNetwork{Mode: sandbox.NetworkOffName}
 	off := mustYoukiSpec(t, config)
 	if !slices.ContainsFunc(off.Linux.Namespaces, func(namespace ociNamespace) bool { return namespace.Type == "network" }) {
 		t.Errorf("egress off must be an empty network namespace: %v", off.Linux.Namespaces)
@@ -167,12 +169,12 @@ func TestYoukiSpecMapsOneUserAndReportsWhatThatCosts(t *testing.T) {
 // in.
 func TestYoukiSpecIsTheSandboxThePolicyDescribes(t *testing.T) {
 	config := testYoukiConfig()
-	config.Network = sandboxNetwork{Mode: "pasta", Address: sandboxAddress, Gateway: sandboxGateway, Pasta: "/usr/bin/pasta"}
+	config.Network = sandbox.SandboxNetwork{Mode: "pasta", Address: sandbox.SandboxAddress, Gateway: sandbox.SandboxGateway, Pasta: "/usr/bin/pasta"}
 	config.Devices = true
 	config.DeviceNodes = []ociDevice{{Path: "/dev/net/tun", Type: "c", Major: 10, Minor: 200}}
-	config.SecretProxy = &sandboxSecretProxy{
+	config.SecretProxy = &sandbox.SandboxSecretProxy{
 		URL: "http://acornd:token@127.0.0.1:41234", BundleFile: "/state/ws/ca-bundle.pem",
-		Bundle: guestCABundle, Port: 41234,
+		Bundle: sandbox.GuestCABundle, Port: 41234,
 	}
 	spec := mustYoukiSpec(t, config)
 
@@ -191,16 +193,16 @@ func TestYoukiSpecIsTheSandboxThePolicyDescribes(t *testing.T) {
 	if spec.Process.Cwd != "/" {
 		t.Errorf("cwd must exist inside the rootfs and / always does, got %q", spec.Process.Cwd)
 	}
-	if len(spec.Process.Args) < 2 || spec.Process.Args[0] != guestSupervisor || spec.Process.Args[1] != "internal" {
+	if len(spec.Process.Args) < 2 || spec.Process.Args[0] != sandbox.GuestSupervisor || spec.Process.Args[1] != "internal" {
 		t.Errorf("the sandbox's first process is the supervisor, got %v", spec.Process.Args)
 	}
-	if !slices.Contains(spec.Process.Args, "--socket") || !slices.Contains(spec.Process.Args, guestSocketPath) {
+	if !slices.Contains(spec.Process.Args, "--socket") || !slices.Contains(spec.Process.Args, sandbox.GuestSocketPath) {
 		t.Errorf("the supervisor must be told where its socket is: %v", spec.Process.Args)
 	}
-	if !slices.Contains(spec.Process.Args, "--idle-timeout") || !slices.Contains(spec.Process.Args, DefaultIdleTimeout) {
+	if !slices.Contains(spec.Process.Args, "--idle-timeout") || !slices.Contains(spec.Process.Args, sandbox.DefaultIdleTimeout) {
 		t.Errorf("the idle timeout is the same policy value every engine gets: %v", spec.Process.Args)
 	}
-	for _, want := range []string{"PATH=" + processPath, "HOME=" + guestRootHome, "LANG=C.UTF-8"} {
+	for _, want := range []string{"PATH=" + sandbox.ProcessPath, "HOME=" + guestRootHome, "LANG=C.UTF-8"} {
 		if !slices.Contains(spec.Process.Env, want) {
 			t.Errorf("the sandbox's own environment should carry %q: %v", want, spec.Process.Env)
 		}
@@ -222,8 +224,8 @@ func TestYoukiSpecIsTheSandboxThePolicyDescribes(t *testing.T) {
 		{guestRootHome, config.DataDir, []string{"rw"}, "the private home, where a toolchain installs"},
 		{config.GuestRun, config.Run, []string{"rw"}, "the supervisor's socket folder on both sides"},
 		{"/etc/resolv.conf", config.ResolvConf, []string{"ro"}, "a resolver the sandbox can reach"},
-		{guestSupervisor, config.Supervisor, []string{"ro"}, "this binary, bound in"},
-		{guestCABundle, config.SecretProxy.BundleFile, []string{"ro"}, "the trust bundle, read-only"},
+		{sandbox.GuestSupervisor, config.Supervisor, []string{"ro"}, "this binary, bound in"},
+		{sandbox.GuestCABundle, config.SecretProxy.BundleFile, []string{"ro"}, "the trust bundle, read-only"},
 		{"/dev/net/tun", "/dev/net/tun", []string{"rw"}, "the device grant, after the /dev tmpfs"},
 	} {
 		mount, ok := youkiMountAt(spec, one.destination)

@@ -34,6 +34,7 @@ import (
 
 	"github.com/marcelowa/acornd/gateway/internal/identity"
 	"github.com/marcelowa/acornd/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox/youki"
 )
 
 var (
@@ -600,6 +601,7 @@ var youkiEngineTests sync.Map
 // youkiEngine marks a test as running on the youki engine, before start.
 func youkiEngine(t *testing.T) {
 	t.Helper()
+	youki.Register()
 	youkiAvailable(t)
 	youkiEngineTests.Store(t.Name(), true)
 }

@@ -1,4 +1,4 @@
-package sandbox
+package youki
 
 import (
 	"context"
@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/marcelowa/acornd/gateway/internal/supervise"
+
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 )
 
 // Youki is the OCI-runtime engine: user, mount, pid, network, ipc and uts namespaces declared in
@@ -40,18 +42,18 @@ type Youki struct {
 	client   *http.Client
 	// runner runs the runtime. It is an interface so the probes can be answered without the
 	// binary, the same way bwrap's runner is.
-	runner Runner
+	runner sandbox.Runner
 	look   func(string) (string, error)
 	// pull fetches an image into a directory. It is a field so a test can answer without a
 	// registry.
-	pull imageSource
+	pull sandbox.ImageSource
 	// resolver is the machine's resolver file and the file its upstream servers are in.
-	resolver resolverFiles
+	resolver sandbox.ResolverFiles
 	// pasta is the egress probe, a field so a test can answer without running one.
 	pasta func(string) error
 	// devices are the host paths a sandbox may be given, so a test can answer for a machine
 	// that has neither without making the suite depend on this one.
-	devices hostDevices
+	devices sandbox.HostDevices
 	// cgroup answers whether this machine lets a sandbox have a budget. It is a field so a test
 	// can answer for a machine that is not this one.
 	cgroup func() error
@@ -105,9 +107,9 @@ func NewYouki(dataDir string) *Youki {
 		base:     youkiReleaseBase + "/v" + youkiVersion,
 		checksum: youkiSHA256,
 		look:     exec.LookPath,
-		pull:     pullImage,
-		resolver: resolverFiles{Host: "/etc/resolv.conf", Upstream: "/run/systemd/resolve/resolv.conf"},
-		devices:  hostDevices{tun: "/dev/net/tun", kvm: "/dev/kvm"},
+		pull:     sandbox.PullImage,
+		resolver: sandbox.ResolverFiles{Host: "/etc/resolv.conf", Upstream: "/run/systemd/resolve/resolv.conf"},
+		devices:  sandbox.HostDevices{Tun: "/dev/net/tun", KVM: "/dev/kvm"},
 		cgroup:   probeCgroup,
 	}
 }
@@ -119,7 +121,7 @@ func (y *Youki) WithStateDir(state string) *Youki {
 }
 
 // WithRunner replaces the runtime binary, which is how the driver is tested without one.
-func (y *Youki) WithRunner(runner Runner) *Youki {
+func (y *Youki) WithRunner(runner sandbox.Runner) *Youki {
 	y.runner = runner
 	return y
 }
@@ -131,7 +133,7 @@ func (y *Youki) WithLookPath(look func(string) (string, error)) *Youki {
 }
 
 // WithImageSource replaces the registry with a directory of its own, as bwrap's driver does.
-func (y *Youki) WithImageSource(pull imageSource) *Youki {
+func (y *Youki) WithImageSource(pull sandbox.ImageSource) *Youki {
 	y.pull = pull
 	return y
 }
@@ -139,7 +141,7 @@ func (y *Youki) WithImageSource(pull imageSource) *Youki {
 // WithDevicePaths answers "does this machine have them" for a test, which must not depend on
 // the device nodes of the machine running it.
 func (y *Youki) WithDevicePaths(tun, kvm string) *Youki {
-	y.devices = hostDevices{tun: tun, kvm: kvm}
+	y.devices = sandbox.HostDevices{Tun: tun, KVM: kvm}
 	return y
 }
 
@@ -216,11 +218,11 @@ func (y *Youki) Install(ctx context.Context, log func(string, ...any)) error {
 func (y *Youki) release(goos, goarch string) (artifact, want string, err error) {
 	artifact = youkiArtifact(goos, goarch)
 	if artifact == "" {
-		return "", "", fmt.Errorf("%w: youki has no release for %s/%s", ErrUnavailable, goos, goarch)
+		return "", "", fmt.Errorf("%w: youki has no release for %s/%s", sandbox.ErrUnavailable, goos, goarch)
 	}
 	want = y.checksum(goarch)
 	if want == "" {
-		return "", "", fmt.Errorf("%w: this build has no checksum for youki on %s, so the release cannot be verified", ErrUnavailable, goarch)
+		return "", "", fmt.Errorf("%w: this build has no checksum for youki on %s, so the release cannot be verified", sandbox.ErrUnavailable, goarch)
 	}
 	return artifact, want, nil
 }
@@ -232,7 +234,7 @@ func (y *Youki) stage(ctx context.Context, artifact, want, staging string) error
 	if client == nil {
 		client = http.DefaultClient
 	}
-	body, err := fetch(ctx, client, y.base+"/"+artifact)
+	body, err := sandbox.Fetch(ctx, client, y.base+"/"+artifact)
 	if err != nil {
 		return err
 	}
@@ -243,13 +245,13 @@ func (y *Youki) stage(ctx context.Context, artifact, want, staging string) error
 	if err := os.MkdirAll(staging, 0o755); err != nil {
 		return err
 	}
-	if err := unpackVerified(body, want, staging); err != nil {
+	if err := sandbox.UnpackVerified(body, want, staging); err != nil {
 		return err
 	}
 	binary := filepath.Join(staging, "youki")
 	info, err := os.Stat(binary)
 	if err != nil || info.IsDir() {
-		return fmt.Errorf("%w: %s did not contain a youki binary", ErrUnavailable, artifact)
+		return fmt.Errorf("%w: %s did not contain a youki binary", sandbox.ErrUnavailable, artifact)
 	}
 	return os.Chmod(binary, 0o755)
 }
@@ -261,7 +263,7 @@ func (y *Youki) run(ctx context.Context, args ...string) (string, error) {
 		return y.runner.Run(ctx, args...)
 	}
 	if !y.Installed() {
-		return "", fmt.Errorf("%w: the youki runtime is not installed at %s", ErrUnavailable, y.binary())
+		return "", fmt.Errorf("%w: the youki runtime is not installed at %s", sandbox.ErrUnavailable, y.binary())
 	}
 	command := exec.CommandContext(ctx, y.binary(), args...)
 	// A runtime can leave a child holding the output pipe, and CombinedOutput waits for every
@@ -273,7 +275,7 @@ func (y *Youki) run(ctx context.Context, args ...string) (string, error) {
 		if text == "" {
 			text = err.Error()
 		}
-		return text, fmt.Errorf("youki: %s", firstLine(text))
+		return text, fmt.Errorf("youki: %s", sandbox.FirstLine(text))
 	}
 	return text, nil
 }
@@ -285,10 +287,10 @@ func (y *Youki) run(ctx context.Context, args ...string) (string, error) {
 // kernel restriction on every machine.
 func (y *Youki) Usable() error {
 	if runtime.GOOS != "linux" {
-		return fmt.Errorf("%w: youki is a Linux runtime, and this machine is %s", ErrUnavailable, runtime.GOOS)
+		return fmt.Errorf("%w: youki is a Linux runtime, and this machine is %s", sandbox.ErrUnavailable, runtime.GOOS)
 	}
 	if !y.Installed() {
-		return fmt.Errorf("%w: the youki runtime is not installed at %s (acornd fetches the pinned release on first use)", ErrUnavailable, y.binary())
+		return fmt.Errorf("%w: the youki runtime is not installed at %s (acornd fetches the pinned release on first use)", sandbox.ErrUnavailable, y.binary())
 	}
 	dir, err := os.MkdirTemp("", "acornd-youki-probe-")
 	if err != nil {
@@ -303,10 +305,10 @@ func (y *Youki) Usable() error {
 		if detail == "" {
 			detail = err.Error()
 		}
-		return fmt.Errorf("%w: youki cannot make a rootless configuration here, which is what a user namespace needs: %s (Ubuntu 23.10 and later restrict them with AppArmor; fix: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0)", ErrUnavailable, lastLine(detail))
+		return fmt.Errorf("%w: youki cannot make a rootless configuration here, which is what a user namespace needs: %s (Ubuntu 23.10 and later restrict them with AppArmor; fix: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0)", sandbox.ErrUnavailable, sandbox.LastLine(detail))
 	}
 	if err := y.cgroup(); err != nil {
-		return fmt.Errorf("%w: %w", ErrUnavailable, err)
+		return fmt.Errorf("%w: %w", sandbox.ErrUnavailable, err)
 	}
 	return nil
 }
@@ -314,26 +316,26 @@ func (y *Youki) Usable() error {
 // Egress reports whether a workspace with its network on can run here: pasta carries it, and
 // pasta does not depend on the engine. A machine without pasta can still run a workspace with
 // its network off, which is why this is not Usable.
-func (y *Youki) Egress() error { return probeEgress(y.look, y.pasta) }
+func (y *Youki) Egress() error { return sandbox.ProbeEgress(y.look, y.pasta) }
 
 // Nesting reports whether a hypervisor can run in a youki sandbox: the machine needs /dev/kvm,
 // and the runtime needs to be the release whose nesting behaviour was measured. It is a
 // capability, not a policy; whether a workspace asks for it is the policy's business.
-func (y *Youki) Nesting(context.Context) NestingSupport {
-	if _, err := os.Stat(y.devices.kvm); err != nil {
-		return unavailable("no /dev/kvm on this machine, so a hypervisor inside a youki sandbox cannot start")
+func (y *Youki) Nesting(context.Context) sandbox.NestingSupport {
+	if _, err := os.Stat(y.devices.KVM); err != nil {
+		return sandbox.Unavailable("no /dev/kvm on this machine, so a hypervisor inside a youki sandbox cannot start")
 	}
 	if !y.Installed() {
-		return unavailable("the youki runtime is not installed at %s, so the version whose nesting behaviour is measured cannot be checked", y.binary())
+		return sandbox.Unavailable("the youki runtime is not installed at %s, so the version whose nesting behaviour is measured cannot be checked", y.binary())
 	}
 	version := y.runtimeVersion()
 	if version == "" {
-		return unavailable("the youki runtime at %s did not report its version, and a container that nests needs %s or later", y.binary(), youkiVersion)
+		return sandbox.Unavailable("the youki runtime at %s did not report its version, and a container that nests needs %s or later", y.binary(), youkiVersion)
 	}
 	if !versionAtLeast(version, youkiVersion) {
-		return unavailable("the youki runtime is %s and a container that nests needs %s or later (that is the release whose CAP_SETFCAP behaviour was measured)", version, youkiVersion)
+		return sandbox.Unavailable("the youki runtime is %s and a container that nests needs %s or later (that is the release whose CAP_SETFCAP behaviour was measured)", version, youkiVersion)
 	}
-	return NestingSupport{Available: true}
+	return sandbox.NestingSupport{Available: true}
 }
 
 // runtimeVersion is the installed binary's own answer, read once per call: it is only asked by
@@ -408,10 +410,10 @@ func parseVersion(value string) ([3]int, bool) {
 // writes, with the keys the worker's socket client reads, plus the paths this engine needs to
 // build its OCI configuration. A person can read it; the runtime never does.
 type youkiConfig struct {
-	Engine    string         `json:"engine"`
-	Workspace string         `json:"workspace"`
-	Image     string         `json:"image"`
-	Network   sandboxNetwork `json:"network"`
+	Engine    string                 `json:"engine"`
+	Workspace string                 `json:"workspace"`
+	Image     string                 `json:"image"`
+	Network   sandbox.SandboxNetwork `json:"network"`
 	// Nested is whether this sandbox was created inside another sandbox. The worker uses it to
 	// decide which engine an inner acornd may pick; the OCI configuration does not change,
 	// because a youki container that nests needs the same three rules at every depth.
@@ -427,7 +429,7 @@ type youkiConfig struct {
 	// ResolvConf is the file bound at /etc/resolv.conf: the machine's own, or a copy of its
 	// upstreams when the machine's points at a loopback resolver the sandbox cannot reach.
 	ResolvConf string `json:"resolvConf,omitempty"`
-	// Youki is the vendored runtime, and Supervisor is this binary bound in at guestSupervisor:
+	// Youki is the vendored runtime, and Supervisor is this binary bound in at sandbox.GuestSupervisor:
 	// the same program bwrap runs, so the worker's client is the same.
 	Youki      string `json:"youki"`
 	Supervisor string `json:"supervisor"`
@@ -447,7 +449,7 @@ type youkiConfig struct {
 	IdleTimeout string `json:"idleTimeout"`
 	// SecretProxy is phase 2 (ADR 0031). The record keeps the key the worker reads; this build
 	// delivers secrets as environment values and writes no proxy.
-	SecretProxy *sandboxSecretProxy `json:"secretProxy,omitempty"`
+	SecretProxy *sandbox.SandboxSecretProxy `json:"secretProxy,omitempty"`
 	// Devices is whether this sandbox received the host's /dev/net/tun and /dev/kvm, and
 	// DeviceNodes is what the runtime creates for them. The numbers come from the host's own
 	// nodes, so a machine without one gets no entry rather than a guess.
@@ -471,7 +473,7 @@ const youkiBeta = "one user id is mapped (0 ↔ the user): chown to another id f
 // Prepare writes the record and the OCI configuration the next start will read, without starting
 // anything. Produce calls it for an existing sandbox so a changed policy is written for the next
 // start; the running container keeps the shape it booted with.
-func (y *Youki) Prepare(_ context.Context, policy Policy, _ string) error {
+func (y *Youki) Prepare(_ context.Context, policy sandbox.Policy, _ string) error {
 	_, err := y.writeConfig(policy)
 	return err
 }
@@ -479,11 +481,11 @@ func (y *Youki) Prepare(_ context.Context, policy Policy, _ string) error {
 // Create resolves the policy into a record and a bundle, then boots it: control's policy is
 // "ensure created, then ensure running", and a sandbox that is created but not running is a
 // workspace whose tools do not work.
-func (y *Youki) Create(ctx context.Context, policy Policy, dir string) error {
+func (y *Youki) Create(ctx context.Context, policy sandbox.Policy, dir string) error {
 	if err := y.Prepare(ctx, policy, dir); err != nil {
 		return err
 	}
-	return y.Start(ctx, Name(policy.Workspace), policy.Secrets)
+	return y.Start(ctx, sandbox.Name(policy.Workspace), policy.Secrets)
 }
 
 // Start boots a sandbox that exists and is stopped. A container the runtime still has running
@@ -491,7 +493,7 @@ func (y *Youki) Create(ctx context.Context, policy Policy, dir string) error {
 // second one over the same workspace. Anything else is deleted first, because a created but
 // never-started container, or one left by a start that failed, owns the id the create below
 // needs.
-func (y *Youki) Start(ctx context.Context, name string, _ []Secret) error {
+func (y *Youki) Start(ctx context.Context, name string, _ []sandbox.Secret) error {
 	config, err := y.readConfig(name)
 	if err != nil {
 		return err
@@ -538,7 +540,7 @@ func (y *Youki) boot(ctx context.Context, name string, config youkiConfig) error
 		// worker has not attached yet, so the first command is already bounded.
 		if err := y.enforceBudget(config.CgroupPath); err != nil {
 			_ = y.Stop(context.Background(), name)
-			return fmt.Errorf("%w: %w", ErrUnavailable, err)
+			return fmt.Errorf("%w: %w", sandbox.ErrUnavailable, err)
 		}
 	}
 	return nil
@@ -556,7 +558,7 @@ func (y *Youki) launch(ctx context.Context, name string, config youkiConfig) err
 	if y.runner == nil {
 		if err := y.enforceBudget(config.CgroupPath); err != nil {
 			_ = y.Stop(context.Background(), name)
-			return fmt.Errorf("%w: %w", ErrUnavailable, err)
+			return fmt.Errorf("%w: %w", sandbox.ErrUnavailable, err)
 		}
 	}
 	return y.start(ctx, name)
@@ -569,9 +571,9 @@ func (y *Youki) waitForSupervisor(ctx context.Context, name string, config youki
 		detail := y.logTail(y.logPath(name))
 		_ = y.Stop(context.Background(), name)
 		if detail != "" {
-			return fmt.Errorf("%w: %w: %s", ErrUnavailable, err, detail)
+			return fmt.Errorf("%w: %w: %s", sandbox.ErrUnavailable, err, detail)
 		}
-		return fmt.Errorf("%w: %w", ErrUnavailable, err)
+		return fmt.Errorf("%w: %w", sandbox.ErrUnavailable, err)
 	}
 	return nil
 }
@@ -579,7 +581,7 @@ func (y *Youki) waitForSupervisor(ctx context.Context, name string, config youki
 // Stop ends the sandbox and keeps every file: the runtime's delete kills the processes, and
 // only then is the cgroup empty enough for the kernel to let it go. Removing the cgroup first
 // leaves a live container with no budget, which the spike measured as the kernel keeping the
-// cgroup alive. The rootfs, the home and the OCI configuration stay for the next start.
+// cgroup sandbox.Alive. The rootfs, the home and the OCI configuration stay for the next start.
 func (y *Youki) Stop(ctx context.Context, name string) error {
 	// A runtime that is not installed cannot have a container; a delete that fails with the
 	// runtime here is a container still holding processes, which the caller has to see. The
@@ -625,7 +627,7 @@ func (y *Youki) Remove(ctx context.Context, name string) error {
 // List reports the sandboxes this engine knows, running or stopped: one per record, which is
 // what makes a stopped sandbox startable rather than remade. The runtime's state only says
 // whether a record's container is still running; the record is what a sandbox is.
-func (y *Youki) List(ctx context.Context) ([]Instance, error) {
+func (y *Youki) List(ctx context.Context) ([]sandbox.Instance, error) {
 	entries, err := os.ReadDir(y.StateDir())
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -633,7 +635,7 @@ func (y *Youki) List(ctx context.Context) ([]Instance, error) {
 		}
 		return nil, err
 	}
-	instances := make([]Instance, 0, len(entries))
+	instances := make([]sandbox.Instance, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
@@ -647,7 +649,7 @@ func (y *Youki) List(ctx context.Context) ([]Instance, error) {
 		if y.runtimeState(ctx, name) == "running" {
 			status = "running"
 		}
-		instances = append(instances, Instance{Name: name, Image: config.Image, Status: status})
+		instances = append(instances, sandbox.Instance{Name: name, Image: config.Image, Status: status})
 	}
 	return instances, nil
 }
@@ -659,7 +661,7 @@ func (y *Youki) List(ctx context.Context) ([]Instance, error) {
 func (y *Youki) create(ctx context.Context, name string) error {
 	args := []string{"create", "--bundle", y.workspaceDir(name), "--pid-file", y.pidPath(name), name}
 	if err := y.runLogged(ctx, y.logPath(name), args...); err != nil {
-		return fmt.Errorf("%w: youki create: %w", ErrUnavailable, err)
+		return fmt.Errorf("%w: youki create: %w", sandbox.ErrUnavailable, err)
 	}
 	return nil
 }
@@ -691,11 +693,11 @@ func (y *Youki) pastaArgv(config youkiConfig, name string) ([]string, error) {
 	}
 	argv := []string{
 		config.Network.Pasta, "-q",
-		"-t", "none", "-u", "none", "-T", noForwarding, "-U", "none",
+		"-t", "none", "-u", "none", "-T", sandbox.NoForwarding, "-U", "none",
 		"--no-map-gw",
 	}
 	if !config.Network.Private {
-		argv = append(argv, "--dns-forward", sandboxDNS)
+		argv = append(argv, "--dns-forward", sandbox.SandboxDNS)
 	}
 	argv = append(argv, "-a", address, "-n", prefix, "-g", config.Network.Gateway, "--")
 	configure := []string{
@@ -704,7 +706,7 @@ func (y *Youki) pastaArgv(config youkiConfig, name string) ([]string, error) {
 		"--gateway", config.Network.Gateway,
 	}
 	if !config.Network.Private {
-		configure = append(configure, refusePrivate)
+		configure = append(configure, sandbox.RefusePrivate)
 	}
 	configure = append(configure, y.binary(), "run", "--bundle", y.workspaceDir(name), "--pid-file", y.pidPath(name), name)
 	return append(argv, configure...), nil
@@ -729,7 +731,7 @@ func (y *Youki) startPasta(name string, config youkiConfig) error {
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	command.WaitDelay = time.Second
 	if err := command.Start(); err != nil {
-		return fmt.Errorf("%w: starting pasta: %w", ErrUnavailable, err)
+		return fmt.Errorf("%w: starting pasta: %w", sandbox.ErrUnavailable, err)
 	}
 	if err := os.WriteFile(y.runtimePidPath(name), []byte(strconv.Itoa(command.Process.Pid)), 0o600); err != nil {
 		_ = command.Process.Kill()
@@ -740,7 +742,7 @@ func (y *Youki) startPasta(name string, config youkiConfig) error {
 }
 
 // stopRuntime ends the pasta/runtime process a start left behind. `youki delete --force` has
-// already killed the container; this is the parent that keeps pasta's namespace alive, and it
+// already killed the container; this is the parent that keeps pasta's namespace sandbox.Alive, and it
 // must not outlive the sandbox.
 func (y *Youki) stopRuntime(name string) {
 	raw, err := os.ReadFile(y.runtimePidPath(name))
@@ -756,12 +758,12 @@ func (y *Youki) stopRuntime(name string) {
 	if err == nil {
 		_ = process.Signal(syscall.SIGTERM)
 		for range 100 {
-			if !alive(pid) {
+			if !sandbox.Alive(pid) {
 				break
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
-		if alive(pid) {
+		if sandbox.Alive(pid) {
 			_ = process.Kill()
 		}
 	}
@@ -777,7 +779,7 @@ func (y *Youki) runtimePidPath(name string) string {
 // start is the runtime's start: the init was created by create, and this tells it to go.
 func (y *Youki) start(ctx context.Context, name string) error {
 	if err := y.runLogged(ctx, y.logPath(name), "start", name); err != nil {
-		return fmt.Errorf("%w: youki start: %w", ErrUnavailable, err)
+		return fmt.Errorf("%w: youki start: %w", sandbox.ErrUnavailable, err)
 	}
 	return nil
 }
@@ -871,7 +873,7 @@ func (y *Youki) runtimeState(ctx context.Context, name string) string {
 // SecretDelivery is the environment: phase 1 of ADR 0021's container row. A value reaches the
 // command's environment and nothing else; the substitution proxy is ADR 0031 and is not this
 // release.
-func (y *Youki) SecretDelivery() Delivery { return DeliveryEnvironment }
+func (y *Youki) SecretDelivery() sandbox.Delivery { return sandbox.DeliveryEnvironment }
 
 // SecretEnvInWorker is true: the value has to be in the worker's process for the supervisor to
 // start a command with it. The sandbox's own record never carries it.
@@ -879,13 +881,13 @@ func (y *Youki) SecretEnvInWorker() bool { return true }
 
 // SecretsChanged cannot change a running process's environment. The worker is restarted, which
 // reads the new set on the way up.
-func (y *Youki) SecretsChanged(context.Context, string, []Secret) (SecretChange, error) {
-	return SecretChange{RestartRequired: true}, nil
+func (y *Youki) SecretsChanged(context.Context, string, []sandbox.Secret) (sandbox.SecretChange, error) {
+	return sandbox.SecretChange{RestartRequired: true}, nil
 }
 
 // writeConfig is the record and the OCI configuration, both written for a person to read and for
 // the next start to use. The record is written last: it is the marker that a sandbox exists.
-func (y *Youki) writeConfig(policy Policy) (youkiConfig, error) {
+func (y *Youki) writeConfig(policy sandbox.Policy) (youkiConfig, error) {
 	config, name, err := y.record(policy)
 	if err != nil {
 		return youkiConfig{}, err
@@ -913,16 +915,16 @@ func (y *Youki) writeConfig(policy Policy) (youkiConfig, error) {
 
 // record resolves the policy into everything the configuration needs, without writing either
 // file: the paths, the network, the resolver, the socket and the supervisor.
-func (y *Youki) record(policy Policy) (youkiConfig, string, error) {
-	policy = policy.withDefaults()
-	if err := validateWorkspace(policy); err != nil {
+func (y *Youki) record(policy sandbox.Policy) (youkiConfig, string, error) {
+	policy = policy.WithDefaults()
+	if err := sandbox.ValidateWorkspace(policy); err != nil {
 		return youkiConfig{}, "", err
 	}
-	name := Name(policy.Workspace)
+	name := sandbox.Name(policy.Workspace)
 	if err := y.stateDirs(name); err != nil {
 		return youkiConfig{}, "", err
 	}
-	rootfs, err := workspaceRootfs(policy, y.StateDir(), name, policy.Image, y.pull)
+	rootfs, err := sandbox.WorkspaceRootfs(policy, y.StateDir(), name, policy.Image, y.pull)
 	if err != nil {
 		return youkiConfig{}, "", err
 	}
@@ -931,11 +933,11 @@ func (y *Youki) record(policy Policy) (youkiConfig, string, error) {
 		return youkiConfig{}, "", err
 	}
 	workspaceDir := y.workspaceDir(name)
-	resolvConf, err := resolveResolvFor(workspaceDir, y.resolver, network.Mode, network.Private)
+	resolvConf, err := sandbox.ResolveResolvFor(workspaceDir, y.resolver, network.Mode, network.Private)
 	if err != nil {
 		return youkiConfig{}, "", err
 	}
-	run, socket, err := sandboxSocketPaths(y.dataDir, policy.Workspace)
+	run, socket, err := sandbox.SandboxSocketPaths(y.dataDir, policy.Workspace)
 	if err != nil {
 		return youkiConfig{}, "", err
 	}
@@ -948,21 +950,21 @@ func (y *Youki) record(policy Policy) (youkiConfig, string, error) {
 		Workspace:      policy.Workspace,
 		Image:          policy.Image,
 		Network:        network,
-		Nested:         nestedFromProcess(),
+		Nested:         sandbox.NestedFromProcess(),
 		Rootfs:         rootfs,
 		DataDir:        filepath.Join(workspaceDir, "home"),
 		Hidden:         y.dataDir,
-		ReadOnly:       readonlyGlobals(policy),
+		ReadOnly:       sandbox.ReadonlyGlobals(policy),
 		ResolvConf:     resolvConf,
 		Youki:          y.binary(),
 		Supervisor:     supervisor,
 		Spec:           filepath.Join(workspaceDir, "config.json"),
 		CgroupPath:     cgroupPathFor(name),
 		Socket:         socket,
-		GuestSocket:    guestSocketPath,
+		GuestSocket:    sandbox.GuestSocketPath,
 		Run:            run,
-		GuestRun:       guestRunDir,
-		IdleTimeout:    idleTimeoutOrDefault(policy.IdleTimeout),
+		GuestRun:       sandbox.GuestRunDir,
+		IdleTimeout:    sandbox.IdleTimeoutOrDefault(policy.IdleTimeout),
 		Devices:        policy.Devices,
 		DeviceNodes:    y.deviceNodes(policy.Devices),
 		DisableNesting: policy.DisableVMNesting,
@@ -987,16 +989,16 @@ func (y *Youki) stateDirs(name string) error {
 // networkFor is the namespace's networking: off, or pasta carrying it. Egress without pasta is
 // an install that needs one `apt install passt` and would otherwise be a sandbox that cannot
 // reach anything while claiming it can.
-func (y *Youki) networkFor(policy Policy) (sandboxNetwork, error) {
+func (y *Youki) networkFor(policy sandbox.Policy) (sandbox.SandboxNetwork, error) {
 	if !policy.Egress {
-		return sandboxNetwork{Mode: NetworkOffName}, nil
+		return sandbox.SandboxNetwork{Mode: sandbox.NetworkOffName}, nil
 	}
 	pasta, err := y.look("pasta")
 	if err != nil {
-		return sandboxNetwork{}, fmt.Errorf("%w: egress in a youki workspace is carried by pasta (install it: apt install passt)", ErrUnavailable)
+		return sandbox.SandboxNetwork{}, fmt.Errorf("%w: egress in a youki workspace is carried by pasta (install it: apt install passt)", sandbox.ErrUnavailable)
 	}
-	return sandboxNetwork{
-		Mode: "pasta", Address: sandboxAddress, Gateway: sandboxGateway, Pasta: pasta,
+	return sandbox.SandboxNetwork{
+		Mode: "pasta", Address: sandbox.SandboxAddress, Gateway: sandbox.SandboxGateway, Pasta: pasta,
 		Private: policy.PrivateEgress,
 	}, nil
 }
@@ -1009,7 +1011,7 @@ func (y *Youki) deviceNodes(granted bool) []ociDevice {
 		return nil
 	}
 	var nodes []ociDevice
-	for _, path := range []string{y.devices.tun, y.devices.kvm} {
+	for _, path := range []string{y.devices.Tun, y.devices.KVM} {
 		if path == "" {
 			continue
 		}

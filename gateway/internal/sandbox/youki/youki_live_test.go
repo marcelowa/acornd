@@ -1,4 +1,4 @@
-package sandbox
+package youki
 
 import (
 	"context"
@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/marcelowa/acornd/gateway/internal/supervise"
+
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 )
 
 // liveYouki is the real runtime and a real image, for the tests that boot a container: the
@@ -25,7 +27,7 @@ func liveYouki(t *testing.T) (*Youki, context.Context) {
 		t.Skip("the youki tier runs this: it fetches the runtime and an image")
 	}
 	if os.Getenv("ACORND_IMAGE_TEST") == "" {
-		t.Skip("set ACORND_IMAGE_TEST=1 to fetch an image")
+		t.Skip("set ACORND_IMAGE_TEST=1 to sandbox.Fetch an image")
 	}
 	if runtime.GOOS != "linux" {
 		t.Skip("youki is a Linux runtime")
@@ -63,10 +65,10 @@ func TestYoukiLifecycleAgainstTheRealRuntime(t *testing.T) {
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	name := Name(workspace)
+	name := sandbox.Name(workspace)
 	t.Cleanup(func() { _ = driver.Remove(context.Background(), name) })
 
-	if err := driver.Create(ctx, Policy{Workspace: workspace, Image: "debian:stable-slim"}, t.TempDir()); err != nil {
+	if err := driver.Create(ctx, sandbox.Policy{Workspace: workspace, Image: "debian:stable-slim"}, t.TempDir()); err != nil {
 		t.Fatalf("create: %v\nlog: %s", err, driver.logTail(driver.logPath(name)))
 	}
 	config, err := driver.readConfig(name)
@@ -114,7 +116,7 @@ func runInSupervisor(t *testing.T, socket, command string) (string, int) {
 		Type: "run",
 		ID:   "1",
 		Argv: []string{"/bin/sh", "-c", command},
-		Env:  map[string]string{"PATH": processPath},
+		Env:  map[string]string{"PATH": sandbox.ProcessPath},
 		Dir:  "/",
 	}
 	if err := json.NewEncoder(connection).Encode(request); err != nil {

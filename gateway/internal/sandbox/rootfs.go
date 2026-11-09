@@ -16,8 +16,8 @@ import (
 // privileged mount, no overlay, and no cleanup beyond removing the folder. ADR 0039 is the
 // overlay this is the baseline for.
 
-// workspaceRootfs returns the workspace's own copy of its image, making it on first use.
-func workspaceRootfs(policy Policy, state, name, image string, pull imageSource) (string, error) {
+// WorkspaceRootfs returns the workspace's own copy of its image, making it on first use.
+func WorkspaceRootfs(policy Policy, state, name, image string, pull ImageSource) (string, error) {
 	rootfs := filepath.Join(state, name, "rootfs")
 	if info, err := os.Stat(filepath.Join(rootfs, ".acornd-rootfs")); err == nil && !info.IsDir() {
 		return rootfs, nil
@@ -49,7 +49,7 @@ func workspaceRootfs(policy Policy, state, name, image string, pull imageSource)
 
 // imageBase is the shared unpacked image, fetched once per digest and reused by every
 // workspace. It is read-only in practice: a workspace copies it before it runs anything.
-func imageBase(state, image string, pull imageSource) (string, error) {
+func imageBase(state, image string, pull ImageSource) (string, error) {
 	if strings.TrimSpace(image) == "" {
 		image = DefaultImage
 	}
@@ -81,7 +81,7 @@ func imageReady(complete string) bool {
 // processes: a workspace copying a half-written image is a failure with no cause in it, and two
 // gateways on one machine share this folder. The marker is re-checked after the lock is taken,
 // because whoever held it may have finished the job.
-func pullToDir(dir, base, complete, image string, pull imageSource) error {
+func pullToDir(dir, base, complete, image string, pull ImageSource) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}

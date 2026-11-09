@@ -39,26 +39,26 @@ type Bwrap struct {
 	look   func(string) (string, error)
 	// pull fetches an image into a directory. It is a field so a test can answer without a
 	// registry, the same way the runner answers without a binary.
-	pull imageSource
+	pull ImageSource
 	// resolver is the machine's resolver file and the file its upstream servers are in. Paths are
 	// fields so a test can answer for a machine that is not this one.
-	resolver resolverFiles
+	resolver ResolverFiles
 	// pasta is the egress probe, a field so a test can answer without running one.
 	pasta func(string) error
 	// devices are the host paths a sandbox may be given. They are fields so a test can
 	// answer for a machine that has neither without making the suite depend on this one.
-	devices hostDevices
+	devices HostDevices
 
 	once    sync.Once
 	version string
 }
 
-// hostDevices is where the host's tun and KVM nodes are. A path that is empty, missing, or
+// HostDevices is where the host's tun and KVM nodes are. A path that is empty, missing, or
 // not a device is simply not bound: a workspace still opens, and the engine says why it
 // cannot nest instead of failing the boot.
-type hostDevices struct {
-	tun string
-	kvm string
+type HostDevices struct {
+	Tun string
+	KVM string
 }
 
 // nestedEnv marks a process that is already inside a sandbox: the outer bwrap sets it for the
@@ -73,22 +73,22 @@ func NewBwrap(dataDir string) *Bwrap {
 		dataDir:  dataDir,
 		state:    filepath.Join(dataDir, "sandboxes", "bwrap"),
 		look:     exec.LookPath,
-		pull:     pullImage,
-		resolver: resolverFiles{Host: "/etc/resolv.conf", Upstream: "/run/systemd/resolve/resolv.conf"},
-		devices:  hostDevices{tun: "/dev/net/tun", kvm: "/dev/kvm"},
+		pull:     PullImage,
+		resolver: ResolverFiles{Host: "/etc/resolv.conf", Upstream: "/run/systemd/resolve/resolv.conf"},
+		devices:  HostDevices{Tun: "/dev/net/tun", KVM: "/dev/kvm"},
 	}
 }
 
 // WithDevicePaths answers "does this machine have them" for a test, which must not depend on
 // the device nodes of the machine running it.
 func (b *Bwrap) WithDevicePaths(tun, kvm string) *Bwrap {
-	b.devices = hostDevices{tun: tun, kvm: kvm}
+	b.devices = HostDevices{Tun: tun, KVM: kvm}
 	return b
 }
 
 // WithImageSource replaces the registry with a directory of its own, which is how the pull and
 // the unpack are tested without a network.
-func (b *Bwrap) WithImageSource(pull imageSource) *Bwrap {
+func (b *Bwrap) WithImageSource(pull ImageSource) *Bwrap {
 	b.pull = pull
 	return b
 }
@@ -118,7 +118,7 @@ func (b *Bwrap) run(ctx context.Context, args ...string) (string, error) {
 		if text == "" {
 			text = err.Error()
 		}
-		return text, fmt.Errorf("bubblewrap: %s", firstLine(text))
+		return text, fmt.Errorf("bubblewrap: %s", FirstLine(text))
 	}
 	return text, nil
 }
@@ -171,7 +171,7 @@ func (b *Bwrap) Installed() bool {
 }
 
 // Install cannot install: bubblewrap is a package, and apt needs root. The refusal names the
-// command, because "sandbox unavailable" with no next step is not an answer.
+// command, because "sandbox Unavailable" with no next step is not an answer.
 func (b *Bwrap) Install(context.Context, func(string, ...any)) error {
 	if b.Installed() {
 		return nil
@@ -191,7 +191,7 @@ func (b *Bwrap) Usable() error {
 		if detail == "" {
 			detail = err.Error()
 		}
-		return fmt.Errorf("%w: bubblewrap cannot create a user namespace here: %s (Ubuntu 23.10 and later restrict them with AppArmor; fix: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0)", ErrUnavailable, lastLine(detail))
+		return fmt.Errorf("%w: bubblewrap cannot create a user namespace here: %s (Ubuntu 23.10 and later restrict them with AppArmor; fix: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0)", ErrUnavailable, LastLine(detail))
 	}
 	return nil
 }
@@ -199,12 +199,12 @@ func (b *Bwrap) Usable() error {
 // Egress reports whether a workspace with its network on can run here: pasta carries it, and
 // that means pasta can make a namespace on this machine. A machine without pasta can still run a
 // workspace with its network off, which is why this is not Usable.
-func (b *Bwrap) Egress() error { return probeEgress(b.look, b.pasta) }
+func (b *Bwrap) Egress() error { return ProbeEgress(b.look, b.pasta) }
 
-// probeEgress is the network question both container engines ask: pasta carries a workspace with
+// ProbeEgress is the network question both container engines ask: pasta carries a workspace with
 // its network on, and pasta does not care which engine made the sandbox. The engine's own probe
 // is a field so a test can answer without running one.
-func probeEgress(look func(string) (string, error), pasta func(string) error) error {
+func ProbeEgress(look func(string) (string, error), pasta func(string) error) error {
 	path, err := look("pasta")
 	if err != nil {
 		return fmt.Errorf("%w: a workspace with its network on needs pasta to carry it (install it: apt install passt)", ErrUnavailable)
@@ -266,9 +266,9 @@ func probePastaWithin(pasta string, wait time.Duration) error {
 		detail = err.Error()
 	}
 	if pastaStartFailure(detail) {
-		return fmt.Errorf("%w: pasta cannot start the supervisor it is given: %s (Ubuntu 26.04's passt package ships an AppArmor profile that lets pasta start a program only from /usr/bin or /bin, and acornd's supervisor is in neither; `acornd setup` turns it off)", ErrUnavailable, lastLine(detail))
+		return fmt.Errorf("%w: pasta cannot start the supervisor it is given: %s (Ubuntu 26.04's passt package ships an AppArmor profile that lets pasta start a program only from /usr/bin or /bin, and acornd's supervisor is in neither; `acornd setup` turns it off)", ErrUnavailable, LastLine(detail))
 	}
-	return fmt.Errorf("%w: pasta cannot make a network namespace here: %s", ErrUnavailable, lastLine(detail))
+	return fmt.Errorf("%w: pasta cannot make a network namespace here: %s", ErrUnavailable, LastLine(detail))
 }
 
 // pastaStartFailure is pasta's sentence when it could not start the program it was given: a
@@ -290,8 +290,8 @@ func pastaUserNamespaceFailure(detail string) bool {
 // has /dev/kvm and the workspace grants devices: the device is bound into the sandbox and
 // the capabilities nested pasta needs come with it.
 func (b *Bwrap) Nesting(context.Context) NestingSupport {
-	if _, err := os.Stat(b.devices.kvm); err != nil {
-		return unavailable("no /dev/kvm on this machine, so a hypervisor inside a bwrap sandbox cannot start")
+	if _, err := os.Stat(b.devices.KVM); err != nil {
+		return Unavailable("no /dev/kvm on this machine, so a hypervisor inside a bwrap sandbox cannot start")
 	}
 	return NestingSupport{Available: true}
 }
@@ -303,8 +303,8 @@ type bwrapConfig struct {
 	Workspace string `json:"workspace"`
 	Image     string `json:"image"`
 	// Network is how a command reaches the network: a namespace with no interfaces, or one whose
-	// traffic pasta forwards through the host. See sandboxNetwork.
-	Network sandboxNetwork `json:"network"`
+	// traffic pasta forwards through the host. See SandboxNetwork.
+	Network SandboxNetwork `json:"network"`
 	// Rootfs is the workspace's own unpacked copy of its image, bound as `/`. It is where an
 	// install inside the sandbox lands and stays: the host never sees it, and removing the
 	// sandbox removes it.
@@ -331,7 +331,7 @@ type bwrapConfig struct {
 	// SecretProxy is where this sandbox's commands send a placeholder: the credential for
 	// HTTPS_PROXY, the trust bundle, and the port pasta forwards. Absent when the workspace has
 	// no secrets, and then the argv forwards nothing.
-	SecretProxy *sandboxSecretProxy `json:"secretProxy,omitempty"`
+	SecretProxy *SandboxSecretProxy `json:"secretProxy,omitempty"`
 	// Devices is whether this sandbox received the host's /dev/net/tun and /dev/kvm.
 	Devices bool `json:"devices,omitempty"`
 	// Nested is whether this sandbox was created inside another bwrap workspace. A nested
@@ -346,10 +346,10 @@ type bwrapConfig struct {
 	Beta string `json:"beta"`
 }
 
-// processPath is what the sandbox's own processes find a program on. The supervisor is started by
+// ProcessPath is what the sandbox's own processes find a program on. The supervisor is started by
 // absolute path and reads flags, but a shell inside a sandbox is started with the policy's own PATH;
 // this is the one the sandbox process itself gets before anything of the workspace exists.
-const processPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+const ProcessPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 // sandboxProcessEnv is the environment the sandbox's own processes are started with. Three
 // variables: a path for the few programs those processes may run, the workspace's private home so a
@@ -361,13 +361,13 @@ func sandboxProcessEnv(config bwrapConfig) []string {
 	if home == "" {
 		home = "/"
 	}
-	return []string{"PATH=" + processPath, "HOME=" + home, "LANG=C.UTF-8"}
+	return []string{"PATH=" + ProcessPath, "HOME=" + home, "LANG=C.UTF-8"}
 }
 
-// sandboxSecretProxy is what a command needs to use this workspace's secrets: a proxy URL with its
+// SandboxSecretProxy is what a command needs to use this workspace's secrets: a proxy URL with its
 // session credential, the bundle a client has to trust, and the port pasta forwards. The worker
 // reads the first two and sets them in the environment it hands each command.
-type sandboxSecretProxy struct {
+type SandboxSecretProxy struct {
 	URL string `json:"url"`
 	// BundleFile is the trust bundle on the machine; Bundle is where it is bound inside, and is
 	// repeated here because the worker tells node about it.
@@ -376,18 +376,18 @@ type sandboxSecretProxy struct {
 	Port       int    `json:"port"`
 }
 
-// guestCABundle is the path every Debian-family image reads its roots from, and Alpine ships it
+// GuestCABundle is the path every Debian-family image reads its roots from, and Alpine ships it
 // too. The workspace's bundle is bound over it: a client reads one file and finds the image's own
 // roots and this install's CA, which is what keeps every other TLS connection working.
-const guestCABundle = "/etc/ssl/certs/ca-certificates.crt"
+const GuestCABundle = "/etc/ssl/certs/ca-certificates.crt"
 
-// noForwarding is pasta's word for a port it does not carry. A workspace with no proxy forwards
+// NoForwarding is pasta's word for a port it does not carry. A workspace with no proxy forwards
 // nothing, which is the shape every workspace had before the proxy existed.
-const noForwarding = "none"
+const NoForwarding = "none"
 
-// sandboxNetwork is the network a command gets. The tool paths are resolved when the workspace is
+// SandboxNetwork is the network a command gets. The tool paths are resolved when the workspace is
 // created, so a missing one is a sentence then rather than a mystery in the middle of a turn.
-type sandboxNetwork struct {
+type SandboxNetwork struct {
 	Mode string `json:"mode"`
 	// Private is whether this sandbox may reach private networks. False, the default, gives it
 	// routes that refuse them: pasta carries the machine's own routing table, so a sandbox whose
@@ -404,19 +404,19 @@ type sandboxNetwork struct {
 // used for twenty years, and it is chosen not to collide with the ranges a machine is likely to
 // have.
 const (
-	sandboxAddress = "10.0.2.15/24"
-	sandboxGateway = "10.0.2.2"
-	// sandboxDNS is where the sandbox sends its queries when its private networks are refused:
+	SandboxAddress = "10.0.2.15/24"
+	SandboxGateway = "10.0.2.2"
+	// SandboxDNS is where the sandbox sends its queries when its private networks are refused:
 	// pasta maps it to the machine's own resolver, so DNS never needs a route into anything
 	// private. It is inside 10.0.2.0/24, whose connected route is more specific than the refused
 	// ranges, which is what keeps the gateway and this address reachable.
-	sandboxDNS = "10.0.2.3"
+	SandboxDNS = "10.0.2.3"
 )
 
-// refusePrivate is the flag that asks the namespace's own configuration to install the routes
+// RefusePrivate is the flag that asks the namespace's own configuration to install the routes
 // refusing private ranges. The list is not here: it lives where the routes are installed
 // (cmd/acornd/netns.go), so one file decides what a workspace without a grant cannot reach.
-const refusePrivate = "--refuse-private"
+const RefusePrivate = "--refuse-private"
 
 // Create resolves the policy into a config and the workspace's images, then boots it: control's
 // policy is "ensure created, then ensure running", and a sandbox that is created but not running
@@ -458,7 +458,7 @@ func (b *Bwrap) RestartRequired(_ context.Context, policy Policy) (bool, error) 
 // proxyForwardChanged is whether the running sandbox and the policy disagree about the one port
 // pasta forwards. A rotation keeps the listener and its derived port, so it does not restart
 // anything; adding the first proxy, removing the last one, or moving the port does.
-func proxyForwardChanged(running *sandboxSecretProxy, wanted *SecretProxy) bool {
+func proxyForwardChanged(running *SandboxSecretProxy, wanted *SecretProxy) bool {
 	if running == nil || wanted == nil {
 		return running != nil || wanted != nil
 	}
@@ -473,7 +473,7 @@ func proxyForwardChanged(running *sandboxSecretProxy, wanted *SecretProxy) bool 
 // writeConfig is Create without the boot: what the workspace runs under, written where a person
 // can read it and the sandbox can be started from it later.
 // validatePolicy refuses a policy before anything is created for it.
-func (b *Bwrap) validatePolicy(policy Policy) error { return validateWorkspace(policy) }
+func (b *Bwrap) validatePolicy(policy Policy) error { return ValidateWorkspace(policy) }
 
 // supervisorPaths is everything the supervisor needs to exist before it can run: this binary to
 // be, bubblewrap on the machine, and sockets short enough for a Unix path.
@@ -493,7 +493,7 @@ func (b *Bwrap) supervisor(policy Policy) (supervisorPaths, error) {
 	if err != nil {
 		return supervisorPaths{}, fmt.Errorf("%w: bubblewrap is not installed (install it: apt install bubblewrap)", ErrUnavailable)
 	}
-	run, socket, err := sandboxSocketPaths(b.dataDir, policy.Workspace)
+	run, socket, err := SandboxSocketPaths(b.dataDir, policy.Workspace)
 	if err != nil {
 		return supervisorPaths{}, err
 	}
@@ -513,9 +513,9 @@ func (b *Bwrap) stateDirs(policy Policy) (string, error) {
 	return dataDir, nil
 }
 
-// readonlyGlobals is the machine's global resources that exist: a path the policy names but this
+// ReadonlyGlobals is the machine's global resources that exist: a path the policy names but this
 // machine does not have is a mount that would fail, not a resource to mount.
-func readonlyGlobals(policy Policy) []string {
+func ReadonlyGlobals(policy Policy) []string {
 	var readonly []string
 	for _, path := range policy.Global {
 		if _, err := os.Stat(path); err == nil {
@@ -529,16 +529,16 @@ func readonlyGlobals(policy Policy) []string {
 // networkFor is the namespace's networking: off, or pasta carrying it. Egress without pasta is an
 // install that needs one `apt install passt` and would otherwise be a sandbox that cannot reach
 // anything while claiming it can.
-func (b *Bwrap) networkFor(policy Policy) (sandboxNetwork, error) {
+func (b *Bwrap) networkFor(policy Policy) (SandboxNetwork, error) {
 	if !policy.Egress {
-		return sandboxNetwork{Mode: NetworkOffName}, nil
+		return SandboxNetwork{Mode: NetworkOffName}, nil
 	}
 	pasta, err := b.look("pasta")
 	if err != nil {
-		return sandboxNetwork{}, fmt.Errorf("%w: egress in a bwrap workspace is carried by pasta (install it: apt install passt)", ErrUnavailable)
+		return SandboxNetwork{}, fmt.Errorf("%w: egress in a bwrap workspace is carried by pasta (install it: apt install passt)", ErrUnavailable)
 	}
-	return sandboxNetwork{
-		Mode: "pasta", Address: sandboxAddress, Gateway: sandboxGateway, Pasta: pasta,
+	return SandboxNetwork{
+		Mode: "pasta", Address: SandboxAddress, Gateway: SandboxGateway, Pasta: pasta,
 		Private: policy.PrivateEgress,
 	}, nil
 }
@@ -546,14 +546,14 @@ func (b *Bwrap) networkFor(policy Policy) (sandboxNetwork, error) {
 // network is how this sandbox reaches the network and which resolver it is given. One call, because
 // the resolver depends on the network: a workspace with no egress resolves through the machine's
 // own file so that it is refused before it is asked, and one with egress resolves through pasta.
-func (b *Bwrap) network(policy Policy) (sandboxNetwork, string, error) {
+func (b *Bwrap) network(policy Policy) (SandboxNetwork, string, error) {
 	network, err := b.networkFor(policy)
 	if err != nil {
-		return sandboxNetwork{}, "", err
+		return SandboxNetwork{}, "", err
 	}
-	resolvConf, err := resolveResolvFor(b.workspaceDir(Name(policy.Workspace)), b.resolver, network.Mode, network.Private)
+	resolvConf, err := ResolveResolvFor(b.workspaceDir(Name(policy.Workspace)), b.resolver, network.Mode, network.Private)
 	if err != nil {
-		return sandboxNetwork{}, "", err
+		return SandboxNetwork{}, "", err
 	}
 	return network, resolvConf, nil
 }
@@ -570,7 +570,7 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 	if err != nil {
 		return bwrapConfig{}, err
 	}
-	rootfs, err := workspaceRootfs(policy, b.StateDir(), Name(policy.Workspace), image, b.pull)
+	rootfs, err := WorkspaceRootfs(policy, b.StateDir(), Name(policy.Workspace), image, b.pull)
 	if err != nil {
 		return bwrapConfig{}, err
 	}
@@ -594,18 +594,18 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 		Rootfs:      rootfs,
 		DataDir:     dataDir,
 		Hidden:      b.dataDir,
-		ReadOnly:    readonlyGlobals(policy),
+		ReadOnly:    ReadonlyGlobals(policy),
 		ResolvConf:  resolvConf,
 		Supervisor:  supervisor.executable,
 		Socket:      supervisor.socket,
-		GuestSocket: guestSocketPath,
+		GuestSocket: GuestSocketPath,
 		Bwrap:       supervisor.bwrap,
 		Run:         supervisor.run,
-		GuestRun:    guestRunDir,
-		IdleTimeout: idleTimeoutOrDefault(policy.IdleTimeout),
+		GuestRun:    GuestRunDir,
+		IdleTimeout: IdleTimeoutOrDefault(policy.IdleTimeout),
 		SecretProxy: secretProxy,
 		Devices:     policy.Devices,
-		Nested:      nestedFromProcess(),
+		Nested:      NestedFromProcess(),
 		// A workspace that disables VM nesting means a leaf: no hypervisor, no container, no
 		// user namespace. The argv enforces it where the sandbox has a namespace of its own.
 		DisableNesting: policy.DisableVMNesting,
@@ -639,7 +639,7 @@ func (b *Bwrap) Start(ctx context.Context, name string, _ []Secret) error {
 	}
 	// Decided again here, not only when the sandbox was created: a sandbox made by an earlier
 	// build has no grant and points at the machine's resolver, which its network now refuses.
-	resolvConf, err := resolveResolvFor(b.workspaceDir(name), b.resolver, config.Network.Mode, config.Network.Private)
+	resolvConf, err := ResolveResolvFor(b.workspaceDir(name), b.resolver, config.Network.Mode, config.Network.Private)
 	if err != nil {
 		return err
 	}
@@ -716,12 +716,12 @@ func (b *Bwrap) stopProcess(name string) {
 	}
 	_ = process.Signal(syscall.SIGTERM)
 	for range 100 {
-		if !alive(pid) {
+		if !Alive(pid) {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if alive(pid) {
+	if Alive(pid) {
 		_ = process.Kill()
 	}
 }
@@ -785,7 +785,7 @@ func (b *Bwrap) Remove(ctx context.Context, name string) error {
 // The bundle is the image's roots *and* ours on purpose. Binding only ours would work for a secret
 // and break every other TLS connection a command makes, which is a sandbox that cannot install a
 // package; binding only the image's is a proxy nobody trusts.
-func (b *Bwrap) secretProxyFor(policy Policy, name, rootfs string) (*sandboxSecretProxy, error) {
+func (b *Bwrap) secretProxyFor(policy Policy, name, rootfs string) (*SandboxSecretProxy, error) {
 	if policy.SecretProxy == nil {
 		return nil, nil
 	}
@@ -806,10 +806,10 @@ func (b *Bwrap) secretProxyFor(policy Policy, name, rootfs string) (*sandboxSecr
 	if err := writeTrustBundle(bundleFile, imageRoots(rootfs), ca); err != nil {
 		return nil, err
 	}
-	return &sandboxSecretProxy{
+	return &SandboxSecretProxy{
 		URL:        policy.SecretProxy.URL,
 		BundleFile: bundleFile,
-		Bundle:     guestCABundle,
+		Bundle:     GuestCABundle,
 		Port:       number,
 	}, nil
 }
@@ -817,9 +817,9 @@ func (b *Bwrap) secretProxyFor(policy Policy, name, rootfs string) (*sandboxSecr
 // imageRoots is the roots a sandbox would have trusted before this install's CA was added: its own
 // image's bundle, or the machine's when the workspace binds the host root read-only.
 func imageRoots(rootfs string) []byte {
-	paths := []string{guestCABundle}
+	paths := []string{GuestCABundle}
 	if rootfs != "" {
-		paths = append([]string{filepath.Join(rootfs, guestCABundle)}, paths...)
+		paths = append([]string{filepath.Join(rootfs, GuestCABundle)}, paths...)
 	}
 	for _, path := range paths {
 		if data, err := os.ReadFile(path); err == nil {
@@ -907,8 +907,8 @@ func lastWord(out string) string {
 	return fields[len(fields)-1]
 }
 
-// lastLine keeps a probe's failure to one line, so a state frame stays readable.
-func lastLine(out string) string {
+// LastLine keeps a probe's failure to one line, so a state frame stays readable.
+func LastLine(out string) string {
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if len(lines) == 0 {
 		return ""
@@ -980,12 +980,12 @@ func (b *Bwrap) bootArgv(config bwrapConfig) ([]string, error) {
 		// sandbox, so nothing on the machine or its overlay is dialled. The connected route to
 		// the gateway's /24 is more specific and stays, which is what DNS and the sandbox's own
 		// address need.
-		configure = append(configure, refusePrivate)
+		configure = append(configure, RefusePrivate)
 	}
 	// One port into the sandbox's own loopback: the secrets proxy, and nothing else of the
 	// machine. Measured: with -T naming a port, that port answers and every other listener on the
 	// machine's loopback stays refused. See docs/adr/0031-a-proxy-for-bwrap-secrets.md.
-	forwards := noForwarding
+	forwards := NoForwarding
 	if config.SecretProxy != nil {
 		forwards = strconv.Itoa(config.SecretProxy.Port)
 	}
@@ -1004,7 +1004,7 @@ func (b *Bwrap) bootArgv(config bwrapConfig) ([]string, error) {
 	if !config.Network.Private {
 		// The sandbox's resolver is pasta itself, so DNS answers without a route into the
 		// machine's networks. See resolveResolv.
-		argv = append(argv, "--dns-forward", sandboxDNS)
+		argv = append(argv, "--dns-forward", SandboxDNS)
 	}
 	argv = append(argv, "-a", address, "-n", prefix, "-g", config.Network.Gateway, "--")
 	argv = append(argv, configure...)
@@ -1017,7 +1017,7 @@ func (b *Bwrap) bootArgv(config bwrapConfig) ([]string, error) {
 // inside the parent sandbox; binding the devices alone is not enough.
 func (b *Bwrap) deviceArgs() []string {
 	var args []string
-	for _, device := range []string{b.devices.tun, b.devices.kvm} {
+	for _, device := range []string{b.devices.Tun, b.devices.KVM} {
 		if device == "" {
 			continue
 		}
@@ -1046,9 +1046,9 @@ func (b *Bwrap) sandboxArgv(config bwrapConfig) ([]string, error) {
 	argv := []string{config.Bwrap, "--clearenv"}
 	argv = append(argv, b.mountArgs(config)...)
 	argv = append(argv, isolationArgs(config)...)
-	argv = append(argv, "--", guestSupervisor, "internal", "sandbox-supervisor", "--socket", config.GuestSocket)
+	argv = append(argv, "--", GuestSupervisor, "internal", "sandbox-supervisor", "--socket", config.GuestSocket)
 	if config.IdleTimeout != "" {
-		// A kept-alive workspace is given a timeout that never fires rather than none at all, so
+		// A kept-Alive workspace is given a timeout that never fires rather than none at all, so
 		// the flag always says what the policy decided.
 		argv = append(argv, "--idle-timeout", config.IdleTimeout)
 	}
@@ -1077,13 +1077,13 @@ func (b *Bwrap) mountArgs(config bwrapConfig) []string {
 	if config.SecretProxy != nil {
 		// After the root, so the bind lands in the image the sandbox actually has. Read-only: the
 		// bundle is the install's, and a workspace that could write it could trust itself.
-		argv = append(argv, "--ro-bind", config.SecretProxy.BundleFile, guestCABundle)
+		argv = append(argv, "--ro-bind", config.SecretProxy.BundleFile, GuestCABundle)
 	}
 	return append(argv,
 		"--bind", config.DataDir, guestHome(config),
 		"--bind", config.Workspace, config.Workspace,
 		"--bind", config.Run, config.GuestRun,
-		"--ro-bind", config.Supervisor, guestSupervisor)
+		"--ro-bind", config.Supervisor, GuestSupervisor)
 }
 
 // isolationArgs is what the sandbox is separated from. A nested sandbox shares the user
@@ -1154,8 +1154,8 @@ func (b *Bwrap) pid(name string) int {
 	return pid
 }
 
-// alive reports whether a process exists. Signal 0 asks the question without sending anything.
-func alive(pid int) bool {
+// Alive reports whether a process exists. Signal 0 asks the question without sending anything.
+func Alive(pid int) bool {
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return false
@@ -1184,11 +1184,11 @@ func resolverOrHost(config bwrapConfig) string {
 	return "/etc/resolv.conf"
 }
 
-// idleTimeoutOrDefault is the policy's idle timeout, or the default when the policy did not name
-// one. The default normally comes from Policy.withDefaults, which the microVM driver calls while
+// IdleTimeoutOrDefault is the policy's idle timeout, or the default when the policy did not name
+// one. The default normally comes from Policy.WithDefaults, which the microVM driver calls while
 // rendering its file; a driver that reads the field directly has to ask, or a sandbox that nobody
 // told about the timer keeps running forever.
-func idleTimeoutOrDefault(value string) string {
+func IdleTimeoutOrDefault(value string) string {
 	if trimmed := strings.TrimSpace(value); trimmed != "" {
 		return trimmed
 	}

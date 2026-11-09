@@ -89,14 +89,14 @@ func TestNameSurvivesOddFolders(t *testing.T) {
 // the rule, and this is how the policy says so to an engine that keeps its own timer.
 func TestAKeptAliveWorkspaceIsNotStoppedForBeingIdle(t *testing.T) {
 	kept := Policy{Image: DefaultImage, Workspace: "/work/ws"}
-	if got := kept.withDefaults().IdleTimeout; got != DefaultIdleTimeout {
+	if got := kept.WithDefaults().IdleTimeout; got != DefaultIdleTimeout {
 		t.Fatalf("default idle timeout: %q", got)
 	}
 	kept.IdleTimeout = KeptAliveIdleTimeout
-	if kept.withDefaults().IdleTimeout != KeptAliveIdleTimeout {
+	if kept.WithDefaults().IdleTimeout != KeptAliveIdleTimeout {
 		t.Fatal("a policy's own idle timeout must survive the defaults")
 	}
 	if KeptAliveIdleTimeout == DefaultIdleTimeout {
-		t.Fatal("a kept-alive workspace must ask for a different timeout than the default")
+		t.Fatal("a kept-Alive workspace must ask for a different timeout than the default")
 	}
 }

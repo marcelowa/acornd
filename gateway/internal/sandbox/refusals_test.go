@@ -144,8 +144,8 @@ func TestFirstLineKeepsTheCause(t *testing.T) {
 		{"", ""},
 	}
 	for _, test := range cases {
-		if got := firstLine(test.in); got != test.want {
-			t.Errorf("firstLine(%q) = %q, want %q", test.in, got, test.want)
+		if got := FirstLine(test.in); got != test.want {
+			t.Errorf("FirstLine(%q) = %q, want %q", test.in, got, test.want)
 		}
 	}
 }

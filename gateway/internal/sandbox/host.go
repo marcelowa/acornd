@@ -64,7 +64,7 @@ func (h *Host) Egress() error { return nil }
 // run on the machine itself, with all of it. The refusal is the honest one — a badge saying
 // "nested" over an unconfined run would be worse than useless.
 func (h *Host) Nesting(context.Context) NestingSupport {
-	return unavailable("the host engine is not a sandbox: commands already run on the machine itself")
+	return Unavailable("the host engine is not a sandbox: commands already run on the machine itself")
 }
 
 // List reports nothing: there are no sandboxes to list. Each workspace is its own folder.
@@ -98,25 +98,10 @@ func (h *Host) Remove(context.Context, string) error          { return nil }
 // the list rather than answered with another engine — a run that meant microsandbox and got the
 // host would be a security change nobody asked for.
 func Engine(dataDir, state, name string) (Driver, error) {
+	if make, ok := driverFactories[name]; ok {
+		return make(dataDir, state), nil
+	}
 	switch name {
-	case "microsandbox":
-		driver := NewMicrosandbox(dataDir)
-		if state != "" {
-			driver = driver.WithStateDir(state)
-		}
-		return driver, nil
-	case "bwrap":
-		driver := NewBwrap(dataDir)
-		if state != "" {
-			driver = driver.WithStateDir(state)
-		}
-		return driver, nil
-	case "youki":
-		driver := NewYouki(dataDir)
-		if state != "" {
-			driver = driver.WithStateDir(state)
-		}
-		return driver, nil
 	case "host":
 		if !HostEnabled() {
 			return nil, fmt.Errorf("sandbox: the host engine is off: it isolates nothing, so only automated tests enable it (%s=1)", TestHostEnv)

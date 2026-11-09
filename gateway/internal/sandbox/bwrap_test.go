@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/marcelowa/acornd/gateway/internal/netns"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox/sandboxtest"
 	"github.com/marcelowa/acornd/gateway/internal/supervise"
 )
 
@@ -79,56 +80,11 @@ func testBwrap(t *testing.T, dataDir string) (*Bwrap, *fakeBwrap) {
 	runner := &fakeBwrap{version: "bubblewrap 0.11.0"}
 	driver := NewBwrap(dataDir).
 		WithRunner(runner).
-		WithImageSource(fakeImage).
+		WithImageSource(sandboxtest.FakeImage).
 		WithDevicePaths("", "").
 		WithLookPath(func(string) (string, error) { return "/usr/bin/bwrap", nil })
 	driver.pasta = func(string) error { return nil }
 	return driver, runner
-}
-
-// fakeImage is a registry that answers with a minimal root, so the pull is not this suite's
-// business (image_test.go covers it) and no test needs a network.
-//
-// The root carries this binary's own libraries when it has any: the sandbox runs this executable
-// as its supervisor, and an image with no libc can only run a static one — which is exactly what a
-// release build is, and exactly what a test binary is not.
-func fakeImage(_ context.Context, reference, dest string, _ func(string, ...any)) error {
-	for _, dir := range []string{filepath.Join(dest, "etc"), filepath.Join(dest, "usr", "bin"), filepath.Join(dest, "usr", "local", "bin")} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
-	}
-	if err := os.WriteFile(filepath.Join(dest, "etc", "os-release"), []byte("ID=test\n"), 0o644); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(dest, "usr", "bin", "sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		return err
-	}
-	executable, err := os.Executable()
-	if err != nil {
-		return nil
-	}
-	libraries, err := exec.Command("ldd", executable).Output()
-	if err != nil {
-		return nil
-	}
-	for field := range strings.FieldsSeq(string(libraries)) {
-		if !strings.HasPrefix(field, "/") {
-			continue
-		}
-		target := filepath.Join(dest, field)
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
-		}
-		content, err := os.ReadFile(field)
-		if err != nil {
-			continue
-		}
-		if err := os.WriteFile(target, content, 0o755); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func TestBwrapVersionIsBubblewrapsOwn(t *testing.T) {
@@ -153,7 +109,7 @@ func TestBwrapRefusesWhenTheMachineWillNotMakeAUserNamespace(t *testing.T) {
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("error is not a refusal: %v", err)
 	}
-	// The sentence names the reason and the fix, because "sandbox unavailable" is not one.
+	// The sentence names the reason and the fix, because "sandbox Unavailable" is not one.
 	for _, want := range []string{"user namespace", "AppArmor", "sysctl -w kernel.apparmor_restrict_unprivileged_userns=0"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q does not mention %q", err, want)
@@ -284,7 +240,7 @@ func TestBwrapCreateCarriesEgressWithPasta(t *testing.T) {
 	if config.Network.Pasta != "/usr/bin/pasta" {
 		t.Fatalf("tool paths: %+v", config.Network)
 	}
-	if config.Network.Address != sandboxAddress || config.Network.Gateway != sandboxGateway {
+	if config.Network.Address != SandboxAddress || config.Network.Gateway != SandboxGateway {
 		t.Fatalf("address: %+v", config.Network)
 	}
 }
@@ -297,7 +253,7 @@ func TestBwrapCreateNamesWhatEgressNeeds(t *testing.T) {
 	withOnly := func(available string) *Bwrap {
 		return NewBwrap(t.TempDir()).
 			WithRunner(&fakeBwrap{version: "bubblewrap 0.11.0"}).
-			WithImageSource(fakeImage).
+			WithImageSource(sandboxtest.FakeImage).
 			WithLookPath(func(name string) (string, error) {
 				if name == available || name == "bwrap" {
 					return "/usr/bin/" + name, nil
@@ -386,9 +342,9 @@ func TestBwrapSandboxArgvIsOneSandboxPerWorkspace(t *testing.T) {
 		Bwrap:       "/usr/bin/bwrap",
 		Supervisor:  "/install/acornd",
 		Run:         "/state/ws/run",
-		GuestRun:    guestRunDir,
-		GuestSocket: guestSocketPath,
-		Network:     sandboxNetwork{Mode: "off"},
+		GuestRun:    GuestRunDir,
+		GuestSocket: GuestSocketPath,
+		Network:     SandboxNetwork{Mode: "off"},
 		IdleTimeout: DefaultIdleTimeout,
 	}
 	argv, err := driver.sandboxArgv(config)
@@ -414,7 +370,7 @@ func TestBwrapSandboxArgvIsOneSandboxPerWorkspace(t *testing.T) {
 		"--ro-bind /install/acornd /usr/local/bin/acornd",
 		"-- /usr/local/bin/acornd internal sandbox-supervisor --socket /run/acornd/s.sock",
 		// The same policy value the microVM engine is given: both engines answer "stop when idle"
-		// the same way, and a kept-alive workspace asks for a timeout that never fires.
+		// the same way, and a kept-Alive workspace asks for a timeout that never fires.
 		"--idle-timeout 30m",
 	} {
 		if !strings.Contains(joined, want) {
@@ -438,9 +394,9 @@ func TestBwrapSandboxArgvSharesPastaForEgress(t *testing.T) {
 		Bwrap:       "/usr/bin/bwrap",
 		Supervisor:  "/install/acornd",
 		Run:         "/state/ws/run",
-		GuestRun:    guestRunDir,
-		GuestSocket: guestSocketPath,
-		Network: sandboxNetwork{
+		GuestRun:    GuestRunDir,
+		GuestSocket: GuestSocketPath,
+		Network: SandboxNetwork{
 			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
 			Pasta: "/usr/bin/pasta",
 		},
@@ -505,7 +461,7 @@ func TestBwrapHasALifecycleLikeEveryOtherEngine(t *testing.T) {
 	dataDir := t.TempDir()
 	workspace := t.TempDir()
 	driver := NewBwrap(dataDir).
-		WithImageSource(fakeImage).
+		WithImageSource(sandboxtest.FakeImage).
 		WithLookPath(func(name string) (string, error) {
 			if path, err := exec.LookPath(name); err == nil {
 				return path, nil
@@ -551,7 +507,7 @@ func TestBwrapHasALifecycleLikeEveryOtherEngine(t *testing.T) {
 	if instances, _ := driver.List(context.Background()); len(instances) != 0 {
 		t.Fatalf("a removed sandbox is gone: %+v", instances)
 	}
-	if pid > 0 && alive(pid) {
+	if pid > 0 && Alive(pid) {
 		t.Fatalf("remove left the sandbox process %d running", pid)
 	}
 }
@@ -587,18 +543,18 @@ func TestABwrapWorkspaceWithASecretsProxyCarriesOnePortAndItsCA(t *testing.T) {
 		Bwrap:       "/usr/bin/bwrap",
 		Supervisor:  "/install/acornd",
 		Run:         "/state/ws/run",
-		GuestRun:    guestRunDir,
-		GuestSocket: guestSocketPath,
-		Network: sandboxNetwork{
+		GuestRun:    GuestRunDir,
+		GuestSocket: GuestSocketPath,
+		Network: SandboxNetwork{
 			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
 			Pasta: "/usr/bin/pasta",
 		},
 	}
 
 	withProxy := base
-	withProxy.SecretProxy = &sandboxSecretProxy{
+	withProxy.SecretProxy = &SandboxSecretProxy{
 		URL: "http://acornd:a-token@127.0.0.1:41234", BundleFile: "/state/ws/ca-bundle.pem",
-		Bundle: guestCABundle, Port: 41234,
+		Bundle: GuestCABundle, Port: 41234,
 	}
 	argv, err := driver.bootArgv(withProxy)
 	if err != nil {
@@ -608,7 +564,7 @@ func TestABwrapWorkspaceWithASecretsProxyCarriesOnePortAndItsCA(t *testing.T) {
 	if !strings.Contains(joined, "-t none -u none -T 41234 -U none") {
 		t.Errorf("pasta should carry exactly the proxy's port:\n%s", joined)
 	}
-	if !strings.Contains(joined, "--ro-bind /state/ws/ca-bundle.pem "+guestCABundle) {
+	if !strings.Contains(joined, "--ro-bind /state/ws/ca-bundle.pem "+GuestCABundle) {
 		t.Errorf("the bundle should be bound read-only over the image's roots:\n%s", joined)
 	}
 
@@ -632,7 +588,7 @@ func TestTheTrustBundleIsTheImagesRootsAndThisInstallsCA(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(rootfs, "etc/ssl/certs"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(rootfs, guestCABundle), []byte("-- an image root --"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(rootfs, GuestCABundle), []byte("-- an image root --"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	path := filepath.Join(t.TempDir(), "bundle.pem")
@@ -814,7 +770,7 @@ func TestBwrapRestartsOnlyWhenTheProxyForwardChanges(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
 	workspace := t.TempDir()
 	name := Name(workspace)
-	write := func(proxy *sandboxSecretProxy) {
+	write := func(proxy *SandboxSecretProxy) {
 		t.Helper()
 		raw, err := json.Marshal(bwrapConfig{Workspace: workspace, SecretProxy: proxy})
 		if err != nil {
@@ -842,7 +798,7 @@ func TestBwrapRestartsOnlyWhenTheProxyForwardChanges(t *testing.T) {
 		t.Fatalf("the first proxy needs the sandbox started again: %v, %v", restart, err)
 	}
 
-	write(&sandboxSecretProxy{Port: 21606})
+	write(&SandboxSecretProxy{Port: 21606})
 	if restart, err := driver.RestartRequired(context.Background(), policy(21606)); err != nil || restart {
 		t.Fatalf("the same forward is a live rotation: %v, %v", restart, err)
 	}
@@ -894,14 +850,14 @@ func TestBwrapNestedEgressReusesPastaUserNamespace(t *testing.T) {
 	config := bwrapConfig{
 		Bwrap:       "/usr/bin/bwrap",
 		Rootfs:      "/rootfs",
-		Network:     sandboxNetwork{Mode: "pasta", Address: sandboxAddress, Gateway: sandboxGateway, Pasta: "/usr/bin/pasta"},
+		Network:     SandboxNetwork{Mode: "pasta", Address: SandboxAddress, Gateway: SandboxGateway, Pasta: "/usr/bin/pasta"},
 		Nested:      true,
 		DataDir:     "/home",
 		Workspace:   "/work",
 		Run:         "/run",
-		GuestRun:    guestRunDir,
+		GuestRun:    GuestRunDir,
 		Supervisor:  "/usr/local/bin/acornd",
-		GuestSocket: guestSocketPath,
+		GuestSocket: GuestSocketPath,
 	}
 	argv, err := driver.sandboxArgv(config)
 	if err != nil {
@@ -930,14 +886,14 @@ func TestBwrapNestedWithoutEgressReusesTheUserNamespace(t *testing.T) {
 	config := bwrapConfig{
 		Bwrap:       "/usr/bin/bwrap",
 		Rootfs:      "/rootfs",
-		Network:     sandboxNetwork{Mode: NetworkOffName},
+		Network:     SandboxNetwork{Mode: NetworkOffName},
 		Nested:      true,
 		DataDir:     "/home",
 		Workspace:   "/work",
 		Run:         "/run",
-		GuestRun:    guestRunDir,
+		GuestRun:    GuestRunDir,
 		Supervisor:  "/usr/local/bin/acornd",
-		GuestSocket: guestSocketPath,
+		GuestSocket: GuestSocketPath,
 	}
 	argv, err := driver.sandboxArgv(config)
 	if err != nil {
@@ -987,7 +943,7 @@ func TestANestedSandboxWithNoEgressStartsInsidePasta(t *testing.T) {
 		t.Skipf("this machine will not make a user namespace: %v", err)
 	}
 
-	config := bwrapConfig{Nested: true, Network: sandboxNetwork{Mode: NetworkOffName}}
+	config := bwrapConfig{Nested: true, Network: SandboxNetwork{Mode: NetworkOffName}}
 	inner := append([]string{bwrap, "--ro-bind", "/", "/", "--proc", "/proc"}, isolationArgs(config)...)
 	inner = append(inner, "--", "/bin/sh", "-c",
 		`test "$(tail -n +3 /proc/net/dev | cut -d: -f1 | tr -d ' ')" = lo`)
@@ -1012,14 +968,14 @@ func TestBwrapLeafSandboxRefusesAnotherUserNamespace(t *testing.T) {
 	config := bwrapConfig{
 		Bwrap:          "/usr/bin/bwrap",
 		Rootfs:         "/rootfs",
-		Network:        sandboxNetwork{Mode: NetworkOffName},
+		Network:        SandboxNetwork{Mode: NetworkOffName},
 		DisableNesting: true,
 		DataDir:        "/home",
 		Workspace:      "/work",
 		Run:            "/run",
-		GuestRun:       guestRunDir,
+		GuestRun:       GuestRunDir,
 		Supervisor:     "/usr/local/bin/acornd",
-		GuestSocket:    guestSocketPath,
+		GuestSocket:    GuestSocketPath,
 	}
 	argv, err := driver.sandboxArgv(config)
 	if err != nil {
@@ -1044,15 +1000,15 @@ func TestBwrapNestedSandboxIsNotToldToDisableUserns(t *testing.T) {
 	config := bwrapConfig{
 		Bwrap:          "/usr/bin/bwrap",
 		Rootfs:         "/rootfs",
-		Network:        sandboxNetwork{Mode: "pasta"},
+		Network:        SandboxNetwork{Mode: "pasta"},
 		Nested:         true,
 		DisableNesting: true,
 		DataDir:        "/home",
 		Workspace:      "/work",
 		Run:            "/run",
-		GuestRun:       guestRunDir,
+		GuestRun:       GuestRunDir,
 		Supervisor:     "/usr/local/bin/acornd",
-		GuestSocket:    guestSocketPath,
+		GuestSocket:    GuestSocketPath,
 	}
 	argv, err := driver.sandboxArgv(config)
 	if err != nil {
@@ -1084,7 +1040,7 @@ func TestALeafSandboxRefusesAUserNamespaceInsideIt(t *testing.T) {
 		t.Skipf("this machine will not make a user namespace: %v", err)
 	}
 	run := func(disable bool) ([]byte, error) {
-		config := bwrapConfig{DisableNesting: disable, Network: sandboxNetwork{Mode: NetworkOffName}}
+		config := bwrapConfig{DisableNesting: disable, Network: SandboxNetwork{Mode: NetworkOffName}}
 		argv := append([]string{"--ro-bind", "/", "/", "--proc", "/proc"}, isolationArgs(config)...)
 		argv = append(argv, "--", "/bin/sh", "-c", "unshare -Ur true")
 		return exec.Command(bwrap, argv...).CombinedOutput()
@@ -1211,7 +1167,7 @@ func TestBwrapBindsUpstreamResolversWhenTheMachineUsesALoopbackOne(t *testing.T)
 		t.Fatal(err)
 	}
 	driver := NewBwrap(t.TempDir())
-	driver.resolver = resolverFiles{Host: host, Upstream: upstream}
+	driver.resolver = ResolverFiles{Host: host, Upstream: upstream}
 	workspace := filepath.Join(dir, "state", "acornd-test")
 	got, err := resolverFileFor(driver.resolver, workspace)
 	if err != nil {
@@ -1236,7 +1192,7 @@ func TestBwrapBindsTheMachinesOwnResolverWhenItIsUsable(t *testing.T) {
 		t.Fatal(err)
 	}
 	driver := NewBwrap(t.TempDir())
-	driver.resolver = resolverFiles{Host: host, Upstream: filepath.Join(dir, "absent")}
+	driver.resolver = ResolverFiles{Host: host, Upstream: filepath.Join(dir, "absent")}
 	got, err := resolverFileFor(driver.resolver, filepath.Join(dir, "state", "acornd-test"))
 	if err != nil {
 		t.Fatalf("resolver: %v", err)
@@ -1250,7 +1206,7 @@ func TestBwrapBindsTheMachinesOwnResolverWhenItIsUsable(t *testing.T) {
 	}
 }
 
-// A workspace that asked to be kept alive keeps the value that says so: the default is only for a
+// A workspace that asked to be kept Alive keeps the value that says so: the default is only for a
 // policy that named nothing.
 func TestBwrapKeepsTheIdleTimeoutAPolicyNames(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
@@ -1274,8 +1230,8 @@ func TestBwrapRefusesPrivateNetworksWithoutAGrant(t *testing.T) {
 	config := bwrapConfig{
 		Workspace: "/work/ws", Rootfs: "/state/ws/rootfs", DataDir: "/state/ws/home",
 		Bwrap: "/usr/bin/bwrap", Supervisor: "/install/acornd",
-		Run: "/state/ws/run", GuestRun: guestRunDir, GuestSocket: guestSocketPath,
-		Network: sandboxNetwork{
+		Run: "/state/ws/run", GuestRun: GuestRunDir, GuestSocket: GuestSocketPath,
+		Network: SandboxNetwork{
 			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
 			Pasta: "/usr/bin/pasta",
 		},
@@ -1304,8 +1260,8 @@ func TestBwrapAGrantReachesPrivateNetworks(t *testing.T) {
 	config := bwrapConfig{
 		Workspace: "/work/ws", Rootfs: "/state/ws/rootfs", DataDir: "/state/ws/home",
 		Bwrap: "/usr/bin/bwrap", Supervisor: "/install/acornd",
-		Run: "/state/ws/run", GuestRun: guestRunDir, GuestSocket: guestSocketPath,
-		Network: sandboxNetwork{
+		Run: "/state/ws/run", GuestRun: GuestRunDir, GuestSocket: GuestSocketPath,
+		Network: SandboxNetwork{
 			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
 			Pasta: "/usr/bin/pasta", Private: true,
 		},
@@ -1329,7 +1285,7 @@ func TestBwrapWritesTheResolverItsNetworkCanReach(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
 	workspace := t.TempDir()
 	name := Name(workspace)
-	path, err := resolveResolvFor(driver.workspaceDir(name), driver.resolver, "pasta", false)
+	path, err := ResolveResolvFor(driver.workspaceDir(name), driver.resolver, "pasta", false)
 	if err != nil {
 		t.Fatalf("resolver: %v", err)
 	}
@@ -1340,7 +1296,7 @@ func TestBwrapWritesTheResolverItsNetworkCanReach(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(content), "nameserver "+sandboxDNS) {
+	if !strings.Contains(string(content), "nameserver "+SandboxDNS) {
 		t.Fatalf("the resolver should name pasta's forwarder, got %q", content)
 	}
 }
@@ -1370,7 +1326,7 @@ func TestBwrapEgressProbeSaysWhatToDo(t *testing.T) {
 func TestTheSandboxProcessGetsItsOwnEnvironment(t *testing.T) {
 	t.Parallel()
 	env := sandboxProcessEnv(bwrapConfig{DataDir: "/state/ws/home"})
-	want := []string{"PATH=" + processPath, "HOME=/state/ws/home", "LANG=C.UTF-8"}
+	want := []string{"PATH=" + ProcessPath, "HOME=/state/ws/home", "LANG=C.UTF-8"}
 	if !slices.Equal(env, want) {
 		t.Errorf("the sandbox's environment is %q, want %q", env, want)
 	}
@@ -1389,7 +1345,7 @@ func TestTheSandboxArgvClearsTheEnvironmentFirst(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
 	argv, err := driver.sandboxArgv(bwrapConfig{
 		Bwrap: "/usr/bin/bwrap", Workspace: "/work/ws", DataDir: "/state/ws/home",
-		Run: "/state/ws/run", GuestRun: guestRunDir, GuestSocket: guestSocketPath,
+		Run: "/state/ws/run", GuestRun: GuestRunDir, GuestSocket: GuestSocketPath,
 		Supervisor: "/install/acornd",
 	})
 	if err != nil {

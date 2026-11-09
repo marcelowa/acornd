@@ -25,7 +25,7 @@ import (
 type Microsandbox struct {
 	dataDir string
 	// state is where the sandboxes live, when it is not the default under the home. Sockets
-	// need a short path and images take a while to fetch, so both are reasons to point it
+	// need a short path and images take a while to Fetch, so both are reasons to point it
 	// somewhere deliberate.
 	state     string
 	runner    Runner
@@ -105,7 +105,7 @@ func (m *Microsandbox) StateDir() string {
 
 // WithStateDir moves the engine's store — images, sandbox disks, snapshots — somewhere else.
 // Both reasons are real: a Unix socket path has to stay short, and a machine that runs many
-// installs (tests, several accounts) should not fetch every image again.
+// installs (tests, several accounts) should not Fetch every image again.
 func (m *Microsandbox) WithStateDir(dir string) *Microsandbox {
 	m.state = dir
 	return m
@@ -171,12 +171,12 @@ func (m *Microsandbox) stage(ctx context.Context, artifact, staging string) erro
 	if err := os.MkdirAll(staging, 0o755); err != nil {
 		return err
 	}
-	body, err := fetch(ctx, client, m.base+"/"+artifact)
+	body, err := Fetch(ctx, client, m.base+"/"+artifact)
 	if err != nil {
 		return err
 	}
 	defer body.Close()
-	if err := unpackVerified(body, want, staging); err != nil {
+	if err := UnpackVerified(body, want, staging); err != nil {
 		return err
 	}
 	if err := layOut(staging); err != nil {
@@ -254,7 +254,7 @@ func currentOwner() owner {
 func (p Policy) Render() []byte { return p.render(currentOwner()) }
 
 func (p Policy) render(o owner) []byte {
-	p = p.withDefaults()
+	p = p.WithDefaults()
 	var b strings.Builder
 	fmt.Fprintf(&b, "image: %s\n", yamlString(p.Image))
 	fmt.Fprintf(&b, "cpus: %d\n", p.CPUs)
@@ -351,7 +351,7 @@ func (m *Microsandbox) Nesting(ctx context.Context) NestingSupport {
 // the first workspace to need it changes.
 func (m *Microsandbox) engineNesting(ctx context.Context) NestingSupport {
 	if !m.Installed() {
-		return unavailable("the engine is not installed")
+		return Unavailable("the engine is not installed")
 	}
 	m.nestingMu.Lock()
 	defer m.nestingMu.Unlock()
@@ -365,10 +365,10 @@ func (m *Microsandbox) engineNesting(ctx context.Context) NestingSupport {
 func (m *Microsandbox) detectEngineNesting(ctx context.Context) NestingSupport {
 	help, err := m.run(ctx, "create", "--help")
 	if err != nil {
-		return unavailable("cannot ask engine %s whether it can nest: %v", Version, err)
+		return Unavailable("cannot ask engine %s whether it can nest: %v", Version, err)
 	}
 	if !strings.Contains(help, "--nested-virt") {
-		return unavailable("engine %s has no nesting switch: its guests cannot nest", Version)
+		return Unavailable("engine %s has no nesting switch: its guests cannot nest", Version)
 	}
 	return NestingSupport{Available: true}
 }
@@ -522,7 +522,7 @@ func (m *Microsandbox) runEnv(ctx context.Context, extra []string, args ...strin
 		if text == "" {
 			text = commandErr.Error()
 		}
-		return text, fmt.Errorf("sandbox engine %s: %s", strings.Join(args, " "), firstLine(text))
+		return text, fmt.Errorf("sandbox engine %s: %s", strings.Join(args, " "), FirstLine(text))
 	}
 	return text, nil
 }
@@ -668,7 +668,7 @@ func loadNames(library string) map[string]string {
 // file covers every platform, so an artifact missing from it is an error rather than a
 // reason to skip verification.
 func fetchChecksum(ctx context.Context, client *http.Client, url, artifact string) (string, error) {
-	body, err := fetch(ctx, client, url)
+	body, err := Fetch(ctx, client, url)
 	if err != nil {
 		return "", err
 	}
@@ -686,7 +686,7 @@ func fetchChecksum(ctx context.Context, client *http.Client, url, artifact strin
 	return "", fmt.Errorf("%w: %s is not in the release checksums", ErrUnavailable, artifact)
 }
 
-func fetch(ctx context.Context, client *http.Client, url string) (io.ReadCloser, error) {
+func Fetch(ctx context.Context, client *http.Client, url string) (io.ReadCloser, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -702,10 +702,10 @@ func fetch(ctx context.Context, client *http.Client, url string) (io.ReadCloser,
 	return response.Body, nil
 }
 
-// unpackVerified unpacks a release tarball, refusing to write anything that would land
+// UnpackVerified unpacks a release tarball, refusing to write anything that would land
 // outside the destination. The archive is only as trustworthy as its checksum, which is why
 // both checks happen: a verified download of a hostile archive would still be hostile.
-func unpackVerified(body io.Reader, want, dest string) error {
+func UnpackVerified(body io.Reader, want, dest string) error {
 	digest := sha256.New()
 	reader, err := gzip.NewReader(io.TeeReader(body, digest))
 	if err != nil {
@@ -797,9 +797,9 @@ func safeJoin(dest, name string) (string, error) {
 	return target, nil
 }
 
-// firstLine keeps one engine complaint rather than a wall of them: the first is the cause,
+// FirstLine keeps one engine complaint rather than a wall of them: the first is the cause,
 // the rest are usually consequences.
-func firstLine(text string) string {
+func FirstLine(text string) string {
 	if before, _, ok := strings.Cut(text, "\n"); ok {
 		return before
 	}

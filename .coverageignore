@@ -16,3 +16,4 @@ internal/sandbox/runtime_other.go -- platform: only compiled off unix
 internal/netns/netns_other.go -- platform: only compiled off linux
 cmd/acornd/setupcred_other.go -- platform: credentials come from the OS keyring, linux only
 cmd/acornd/tty_other.go -- platform: terminal handling is a unix syscall, windows only
+internal/sandbox/youki/youki_device_other.go -- platform: only compiled off linux

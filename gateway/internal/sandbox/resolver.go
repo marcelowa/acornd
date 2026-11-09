@@ -12,9 +12,9 @@ import (
 // symptom — an `apt-get update` that works on the host and fails inside — so the rule lives here
 // once rather than once per engine.
 
-// resolverFiles is where a machine keeps its resolver configuration: the file in use, and the one
+// ResolverFiles is where a machine keeps its resolver configuration: the file in use, and the one
 // its upstream servers are written to when a local resolver owns 127.0.0.53.
-type resolverFiles struct {
+type ResolverFiles struct {
 	Host     string
 	Upstream string
 }
@@ -27,13 +27,13 @@ type resolverFiles struct {
 // sandbox refuses. That sandbox reads a file naming pasta, which forwards the query to the machine's
 // resolver from the machine's side — the sandbox never needs a route into anything private, and a
 // name still resolves.
-func resolveResolvFor(workspaceDir string, files resolverFiles, mode string, private bool) (string, error) {
+func ResolveResolvFor(workspaceDir string, files ResolverFiles, mode string, private bool) (string, error) {
 	if mode != "pasta" || private {
 		return resolverFileFor(files, workspaceDir)
 	}
 	path := filepath.Join(workspaceDir, "pasta-resolv.conf")
 	content := "# written by acornd: pasta forwards these queries to the machine's resolver\n" +
-		"nameserver " + sandboxDNS + "\n"
+		"nameserver " + SandboxDNS + "\n"
 	if err := os.MkdirAll(workspaceDir, 0o700); err != nil {
 		return "", err
 	}
@@ -50,7 +50,7 @@ func resolveResolvFor(workspaceDir string, files resolverFiles, mode string, pri
 // what most distributions do — a sandbox cannot use it: 127.0.0.1 inside a sandbox is the
 // sandbox's own loopback, where nothing listens. The machine's upstream servers are in a file of
 // their own, so that is what gets bound; everything else binds the machine's file unchanged.
-func resolverFileFor(files resolverFiles, workspaceDir string) (string, error) {
+func resolverFileFor(files ResolverFiles, workspaceDir string) (string, error) {
 	raw, err := os.ReadFile(files.Host)
 	if err != nil {
 		// No resolver file to read: binding the machine's path is what the sandbox did before, and

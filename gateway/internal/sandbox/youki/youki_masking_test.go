@@ -1,4 +1,4 @@
-package sandbox
+package youki
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 )
 
 // maskProbe is the three things the policy file states for a leaf, read from inside: the
@@ -24,9 +26,9 @@ func TestYoukiLeafSandboxKeepsItsMasks(t *testing.T) {
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	name := Name(workspace)
+	name := sandbox.Name(workspace)
 	t.Cleanup(func() { _ = driver.Remove(context.Background(), name) })
-	policy := Policy{Workspace: workspace, Image: "debian:stable-slim", DisableVMNesting: true}
+	policy := sandbox.Policy{Workspace: workspace, Image: "debian:stable-slim", DisableVMNesting: true}
 	if err := driver.Create(ctx, policy, t.TempDir()); err != nil {
 		t.Fatalf("create: %v\nlog: %s", err, driver.logTail(driver.logPath(name)))
 	}
@@ -53,9 +55,9 @@ func TestYoukiNestingSandboxCarriesSetfcapAndUnmaskedProc(t *testing.T) {
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	name := Name(workspace)
+	name := sandbox.Name(workspace)
 	t.Cleanup(func() { _ = driver.Remove(context.Background(), name) })
-	policy := Policy{Workspace: workspace, Image: "debian:stable-slim"}
+	policy := sandbox.Policy{Workspace: workspace, Image: "debian:stable-slim"}
 	if err := driver.Create(ctx, policy, t.TempDir()); err != nil {
 		t.Fatalf("create: %v\nlog: %s", err, driver.logTail(driver.logPath(name)))
 	}
@@ -87,9 +89,9 @@ func TestYoukiPolicyFileIsApplied(t *testing.T) {
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	name := Name(workspace)
+	name := sandbox.Name(workspace)
 	t.Cleanup(func() { _ = driver.Remove(context.Background(), name) })
-	policy := Policy{Workspace: workspace, Image: "debian:stable-slim", Devices: true, Global: []string{global}}
+	policy := sandbox.Policy{Workspace: workspace, Image: "debian:stable-slim", Devices: true, Global: []string{global}}
 	if err := driver.Create(ctx, policy, t.TempDir()); err != nil {
 		t.Fatalf("create: %v\nlog: %s", err, driver.logTail(driver.logPath(name)))
 	}

@@ -1,4 +1,4 @@
-package sandbox
+package youki
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 )
 
 // The test that justifies the release: the budget in the record is the cgroup's memory.max and
@@ -19,9 +21,9 @@ func TestYoukiBudgetsKillTheRunaway(t *testing.T) {
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	name := Name(workspace)
+	name := sandbox.Name(workspace)
 	t.Cleanup(func() { _ = driver.Remove(context.Background(), name) })
-	policy := Policy{Workspace: workspace, Image: "debian:stable-slim", CPUs: 1, Memory: "256M"}
+	policy := sandbox.Policy{Workspace: workspace, Image: "debian:stable-slim", CPUs: 1, Memory: "256M"}
 	if err := driver.Create(ctx, policy, t.TempDir()); err != nil {
 		t.Fatalf("create: %v\nlog: %s", err, driver.logTail(driver.logPath(name)))
 	}

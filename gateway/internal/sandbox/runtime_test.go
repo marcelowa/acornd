@@ -112,3 +112,33 @@ func TestTwoPullsOfOneImageDoNotInterleave(t *testing.T) {
 		}
 	}
 }
+
+// The socket's length is a hard limit, and the failure without it is a supervisor that never
+// answers. The boundary is pinned on both sides: a path exactly at the limit is accepted, one
+// character over is refused.
+func TestSandboxSocketPathsRefusesAPathOverTheLimit(t *testing.T) {
+	dataDir := t.TempDir()
+	workspace := "/work/one"
+	base := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(base, "run"))
+	_, socket, err := SandboxSocketPaths(dataDir, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The socket is the session folder, a short hash, and "/s.sock". Padding the session by
+	// (limit - length + 1) + len("/run") - 1 puts the socket one character over the limit; the
+	// exact limit is one character less.
+	pad := socketLimit - len(socket) + 1 + len("/run") - 1
+	over := filepath.Join(base, strings.Repeat("x", pad))
+	t.Setenv("XDG_RUNTIME_DIR", over)
+	if _, _, err := SandboxSocketPaths(dataDir, workspace); err == nil {
+		t.Fatalf("a socket of %d characters (limit %d) was accepted", socketLimit+1, socketLimit)
+	} else if !strings.Contains(err.Error(), "too long") {
+		t.Fatalf("the refusal should name the limit: %v", err)
+	}
+	exact := filepath.Join(base, strings.Repeat("x", pad-1))
+	t.Setenv("XDG_RUNTIME_DIR", exact)
+	if _, _, err := SandboxSocketPaths(dataDir, workspace); err != nil {
+		t.Fatalf("a socket of exactly %d characters was refused: %v", socketLimit, err)
+	}
+}

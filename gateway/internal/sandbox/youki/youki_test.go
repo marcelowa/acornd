@@ -1,4 +1,4 @@
-package sandbox
+package youki
 
 import (
 	"archive/tar"
@@ -17,6 +17,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/marcelowa/acornd/gateway/internal/sandbox/sandboxtest"
+
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 )
 
 // The runtime is faked the way bubblewrap's is: the probes read only what it prints, so the
@@ -83,7 +87,7 @@ func testYouki(t *testing.T, dataDir string) (*Youki, *fakeYouki) {
 	runner := &fakeYouki{version: "youki version: " + youkiVersion + "\ncommit: 0.7.0-test\n"}
 	driver := NewYouki(dataDir).
 		WithRunner(runner).
-		WithImageSource(fakeImage).
+		WithImageSource(sandboxtest.FakeImage).
 		WithDevicePaths("", "").
 		WithLookPath(func(name string) (string, error) { return "/usr/bin/" + name, nil })
 	driver.pasta = func(string) error { return nil }
@@ -109,7 +113,7 @@ func TestYoukiIsAnEngineOfTheSeam(t *testing.T) {
 	}
 	// The seam can build it even though the chooser does not offer it yet: the next change is
 	// the lifecycle, and a chooser entry that cannot create is a trap.
-	built, err := Engine(t.TempDir(), "", "youki")
+	built, err := sandbox.Engine(t.TempDir(), "", "youki")
 	if err != nil {
 		t.Fatalf("Engine(youki): %v", err)
 	}
@@ -129,7 +133,7 @@ func TestYoukiPrepareWritesTheRecordAndTheOCIConfiguration(t *testing.T) {
 	if err := os.MkdirAll(skills, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	policy := Policy{
+	policy := sandbox.Policy{
 		Workspace: workspace,
 		Image:     "debian:stable-slim",
 		CPUs:      4,
@@ -140,7 +144,7 @@ func TestYoukiPrepareWritesTheRecordAndTheOCIConfiguration(t *testing.T) {
 		t.Fatalf("prepare: %v", err)
 	}
 
-	path := driver.configPath(Name(workspace))
+	path := driver.configPath(sandbox.Name(workspace))
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("record: %v", err)
@@ -163,13 +167,13 @@ func TestYoukiPrepareWritesTheRecordAndTheOCIConfiguration(t *testing.T) {
 	if record.Engine != "youki" || record.Workspace != workspace || record.Image != "debian:stable-slim" {
 		t.Fatalf("record names %q on engine %q for %q", record.Workspace, record.Engine, record.Image)
 	}
-	if record.Network.Mode != NetworkOffName {
+	if record.Network.Mode != sandbox.NetworkOffName {
 		t.Errorf("network = %q, want off", record.Network.Mode)
 	}
-	if record.IdleTimeout != DefaultIdleTimeout {
-		t.Errorf("idle timeout = %q, want %q", record.IdleTimeout, DefaultIdleTimeout)
+	if record.IdleTimeout != sandbox.DefaultIdleTimeout {
+		t.Errorf("idle timeout = %q, want %q", record.IdleTimeout, sandbox.DefaultIdleTimeout)
 	}
-	if record.GuestSocket != guestSocketPath || record.GuestRun != guestRunDir {
+	if record.GuestSocket != sandbox.GuestSocketPath || record.GuestRun != sandbox.GuestRunDir {
 		t.Errorf("the supervisor's guest paths = %q and %q", record.GuestSocket, record.GuestRun)
 	}
 	// Only folders that exist are mounted: a mount that does not resolve would make every
@@ -240,11 +244,11 @@ func TestYoukiPrepareNamesWhatEgressNeeds(t *testing.T) {
 		}
 		return "/usr/bin/" + name, nil
 	}
-	if _, err := driver.writeConfig(Policy{Workspace: t.TempDir(), Egress: true}); err == nil || !strings.Contains(err.Error(), "apt install passt") {
+	if _, err := driver.writeConfig(sandbox.Policy{Workspace: t.TempDir(), Egress: true}); err == nil || !strings.Contains(err.Error(), "apt install passt") {
 		t.Fatalf("no pasta: %v, want the package that provides it", err)
 	}
 	// Without egress neither is needed: a sandbox with no network needs no network tools.
-	if _, err := driver.writeConfig(Policy{Workspace: t.TempDir()}); err != nil {
+	if _, err := driver.writeConfig(sandbox.Policy{Workspace: t.TempDir()}); err != nil {
 		t.Fatalf("network off should not need pasta: %v", err)
 	}
 }
@@ -252,14 +256,14 @@ func TestYoukiPrepareNamesWhatEgressNeeds(t *testing.T) {
 func TestYoukiListsItsOwnRecord(t *testing.T) {
 	driver, runner := testYouki(t, t.TempDir())
 	workspace := t.TempDir()
-	if _, err := driver.writeConfig(Policy{Workspace: workspace}); err != nil {
+	if _, err := driver.writeConfig(sandbox.Policy{Workspace: workspace}); err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
 	instances, err := driver.List(context.Background())
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(instances) != 1 || instances[0].Name != Name(workspace) || instances[0].Running() {
+	if len(instances) != 1 || instances[0].Name != sandbox.Name(workspace) || instances[0].Running() {
 		t.Fatalf("a record whose runtime has no container should be listed and stopped: %+v", instances)
 	}
 	// The record is the truth about what exists; the runtime's state only says whether it is
@@ -277,14 +281,14 @@ func TestYoukiListsItsOwnRecord(t *testing.T) {
 func TestYoukiRemoveKeepsTheWorkspace(t *testing.T) {
 	driver, _ := testYouki(t, t.TempDir())
 	workspace := t.TempDir()
-	config, err := driver.writeConfig(Policy{Workspace: workspace})
+	config, err := driver.writeConfig(sandbox.Policy{Workspace: workspace})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := driver.Remove(context.Background(), Name(workspace)); err != nil {
+	if err := driver.Remove(context.Background(), sandbox.Name(workspace)); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
-	if _, err := os.Stat(driver.configPath(Name(workspace))); !os.IsNotExist(err) {
+	if _, err := os.Stat(driver.configPath(sandbox.Name(workspace))); !os.IsNotExist(err) {
 		t.Fatalf("the record survived remove: %v", err)
 	}
 	// The socket's folder is named only by the record, so it has to be read before the record
@@ -295,7 +299,7 @@ func TestYoukiRemoveKeepsTheWorkspace(t *testing.T) {
 	if _, err := os.Stat(config.Spec); !os.IsNotExist(err) {
 		t.Fatalf("remove left the OCI configuration behind: %v", err)
 	}
-	if _, err := os.Stat(driver.workspaceDir(Name(workspace))); !os.IsNotExist(err) {
+	if _, err := os.Stat(driver.workspaceDir(sandbox.Name(workspace))); !os.IsNotExist(err) {
 		t.Fatalf("remove left the sandbox's bundle behind: %v", err)
 	}
 	if _, err := os.Stat(workspace); err != nil {
@@ -312,10 +316,10 @@ func TestYoukiRemoveKeepsTheWorkspace(t *testing.T) {
 func TestYoukiCreateCreatesThenStarts(t *testing.T) {
 	driver, runner := testYouki(t, t.TempDir())
 	workspace := t.TempDir()
-	if err := driver.Create(context.Background(), Policy{Workspace: workspace}, t.TempDir()); err != nil {
+	if err := driver.Create(context.Background(), sandbox.Policy{Workspace: workspace}, t.TempDir()); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	name := Name(workspace)
+	name := sandbox.Name(workspace)
 	creates := fakeCalls(runner, "create")
 	if len(creates) != 1 {
 		t.Fatalf("create was called %d times: %v", len(creates), runner.calls)
@@ -338,12 +342,12 @@ func TestYoukiCreateCreatesThenStarts(t *testing.T) {
 func TestYoukiStartAdoptsARunningContainer(t *testing.T) {
 	driver, runner := testYouki(t, t.TempDir())
 	workspace := t.TempDir()
-	if _, err := driver.writeConfig(Policy{Workspace: workspace}); err != nil {
+	if _, err := driver.writeConfig(sandbox.Policy{Workspace: workspace}); err != nil {
 		t.Fatal(err)
 	}
 	runner.state = "running"
 	runner.calls = nil
-	if err := driver.Start(context.Background(), Name(workspace), nil); err != nil {
+	if err := driver.Start(context.Background(), sandbox.Name(workspace), nil); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	if len(fakeCalls(runner, "create")) != 0 || len(fakeCalls(runner, "start")) != 0 {
@@ -354,10 +358,10 @@ func TestYoukiStartAdoptsARunningContainer(t *testing.T) {
 func TestYoukiStopDeletesTheContainerAndKeepsTheFiles(t *testing.T) {
 	driver, runner := testYouki(t, t.TempDir())
 	workspace := t.TempDir()
-	if err := driver.Create(context.Background(), Policy{Workspace: workspace}, t.TempDir()); err != nil {
+	if err := driver.Create(context.Background(), sandbox.Policy{Workspace: workspace}, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
-	name := Name(workspace)
+	name := sandbox.Name(workspace)
 	runner.calls = nil
 	if err := driver.Stop(context.Background(), name); err != nil {
 		t.Fatalf("stop: %v", err)
@@ -382,12 +386,12 @@ func TestYoukiStopDeletesTheContainerAndKeepsTheFiles(t *testing.T) {
 func TestYoukiStartRecreatesAStoppedContainer(t *testing.T) {
 	driver, runner := testYouki(t, t.TempDir())
 	workspace := t.TempDir()
-	if err := driver.Create(context.Background(), Policy{Workspace: workspace}, t.TempDir()); err != nil {
+	if err := driver.Create(context.Background(), sandbox.Policy{Workspace: workspace}, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	runner.state = "stopped"
 	runner.calls = nil
-	if err := driver.Start(context.Background(), Name(workspace), nil); err != nil {
+	if err := driver.Start(context.Background(), sandbox.Name(workspace), nil); err != nil {
 		t.Fatalf("start after stop: %v", err)
 	}
 	if len(fakeCalls(runner, "delete")) != 1 || len(fakeCalls(runner, "create")) != 1 || len(fakeCalls(runner, "start")) != 1 {
@@ -399,12 +403,12 @@ func TestYoukiCreateSaysWhyTheRuntimeRefused(t *testing.T) {
 	driver, runner := testYouki(t, t.TempDir())
 	runner.createErr = errors.New("cgroup: no delegation")
 	workspace := t.TempDir()
-	err := driver.Create(context.Background(), Policy{Workspace: workspace}, t.TempDir())
-	if err == nil || !errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "cgroup") {
+	err := driver.Create(context.Background(), sandbox.Policy{Workspace: workspace}, t.TempDir())
+	if err == nil || !errors.Is(err, sandbox.ErrUnavailable) || !strings.Contains(err.Error(), "cgroup") {
 		t.Fatalf("a create the runtime refused should be a refusal with its reason: %v", err)
 	}
 	// The record stays: a person can read what was tried, and Remove cleans it.
-	if _, err := os.Stat(driver.configPath(Name(workspace))); err != nil {
+	if _, err := os.Stat(driver.configPath(sandbox.Name(workspace))); err != nil {
 		t.Fatalf("the record after a failed create: %v", err)
 	}
 }
@@ -419,7 +423,7 @@ func TestYoukiProbesNameWhatIsMissing(t *testing.T) {
 			t.Fatal("Installed said yes with no binary")
 		}
 		err := driver.Usable()
-		if err == nil || !errors.Is(err, ErrUnavailable) {
+		if err == nil || !errors.Is(err, sandbox.ErrUnavailable) {
 			t.Fatalf("Usable should refuse a machine without the runtime: %v", err)
 		}
 		if !strings.Contains(err.Error(), "not installed") || !strings.Contains(err.Error(), driver.binary()) {
@@ -430,7 +434,7 @@ func TestYoukiProbesNameWhatIsMissing(t *testing.T) {
 		driver, runner := testYouki(t, t.TempDir())
 		runner.probe = errors.New("exit status 1")
 		err := driver.Usable()
-		if err == nil || !errors.Is(err, ErrUnavailable) {
+		if err == nil || !errors.Is(err, sandbox.ErrUnavailable) {
 			t.Fatalf("Usable accepted a machine that refuses a user namespace: %v", err)
 		}
 		for _, want := range []string{"user namespace", "AppArmor", "sysctl -w kernel.apparmor_restrict_unprivileged_userns=0"} {
@@ -443,7 +447,7 @@ func TestYoukiProbesNameWhatIsMissing(t *testing.T) {
 		driver, _ := testYouki(t, t.TempDir())
 		driver.cgroup = func() error { return errors.New("this machine has no cgroup v2 mount") }
 		err := driver.Usable()
-		if err == nil || !errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "cgroup") {
+		if err == nil || !errors.Is(err, sandbox.ErrUnavailable) || !strings.Contains(err.Error(), "cgroup") {
 			t.Fatalf("Usable should refuse a machine without a cgroup, and name it: %v", err)
 		}
 	})
@@ -552,7 +556,7 @@ func TestYoukiRefusesAReleaseThatIsNotThePinnedOne(t *testing.T) {
 	driver.base = server.URL
 	driver.checksum = func(string) string { return strings.Repeat("0", 64) }
 	err := driver.Install(context.Background(), nil)
-	if err == nil || !errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "checksum") {
+	if err == nil || !errors.Is(err, sandbox.ErrUnavailable) || !strings.Contains(err.Error(), "checksum") {
 		t.Fatalf("a download that is not the pinned file should be refused: %v", err)
 	}
 	if driver.Installed() {
@@ -579,7 +583,7 @@ func TestYoukiDoesNotShipAnArtifactItCannotRun(t *testing.T) {
 	}
 	for _, arch := range []string{"amd64", "arm64"} {
 		if youkiSHA256(arch) == "" {
-			t.Errorf("this build would fetch %s without a checksum", arch)
+			t.Errorf("this build would sandbox.Fetch %s without a checksum", arch)
 		}
 	}
 }
@@ -615,7 +619,7 @@ func youkiReleaseTarball(t *testing.T) ([]byte, string) {
 func TestYoukiPastaArgvKeepsTheMachinesLoopbackOut(t *testing.T) {
 	driver, _ := testYouki(t, t.TempDir())
 	config := testYoukiConfig()
-	config.Network = sandboxNetwork{Mode: "pasta", Address: sandboxAddress, Gateway: sandboxGateway, Pasta: "/usr/bin/pasta"}
+	config.Network = sandbox.SandboxNetwork{Mode: "pasta", Address: sandbox.SandboxAddress, Gateway: sandbox.SandboxGateway, Pasta: "/usr/bin/pasta"}
 	argv, err := driver.pastaArgv(config, "acornd-ws-12345678")
 	if err != nil {
 		t.Fatalf("pasta argv: %v", err)
@@ -624,9 +628,9 @@ func TestYoukiPastaArgvKeepsTheMachinesLoopbackOut(t *testing.T) {
 	for _, want := range []string{
 		// The machine's own loopback is not the workspace's, by either route pasta offers.
 		"/usr/bin/pasta -q -t none -u none -T none -U none --no-map-gw",
-		"--dns-forward " + sandboxDNS,
+		"--dns-forward " + sandbox.SandboxDNS,
 		"-a 10.0.2.15 -n 24 -g 10.0.2.2 --",
-		"internal netns --address " + sandboxAddress + " --gateway " + sandboxGateway + " " + refusePrivate,
+		"internal netns --address " + sandbox.SandboxAddress + " --gateway " + sandbox.SandboxGateway + " " + sandbox.RefusePrivate,
 		driver.binary() + " run --bundle " + driver.workspaceDir("acornd-ws-12345678") + " --pid-file " + driver.pidPath("acornd-ws-12345678") + " acornd-ws-12345678",
 	} {
 		if !strings.Contains(joined, want) {

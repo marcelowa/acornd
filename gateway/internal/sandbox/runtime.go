@@ -26,9 +26,9 @@ func RuntimeDir() (string, error) {
 // carries the workspace's name. Both container engines run the same supervisor, so the paths
 // are the same on both sides of either engine's bind.
 const (
-	guestSupervisor = "/usr/local/bin/acornd"
-	guestRunDir     = "/run/acornd"
-	guestSocketPath = guestRunDir + "/s.sock"
+	GuestSupervisor = "/usr/local/bin/acornd"
+	GuestRunDir     = "/run/acornd"
+	GuestSocketPath = GuestRunDir + "/s.sock"
 )
 
 // socketLimit is the length a Unix socket path may have (Linux allows 107 characters and a
@@ -48,17 +48,17 @@ func socketDirFor(dataDir, workspace string) (string, error) {
 	return dir, nil
 }
 
-// sandboxSocketPaths is the session's runtime folder and the two sockets in it. The socket lives
+// SandboxSocketPaths is the session's runtime folder and the two sockets in it. The socket lives
 // there rather than in the store because a Unix socket path has a hard length and this way the
 // length is the same wherever the install lives; the limit is checked here because the failure
 // without it is a supervisor that never answers. ADR 0024 lost a day to that limit.
-func sandboxSocketPaths(dataDir, workspace string) (run, socket string, err error) {
+func SandboxSocketPaths(dataDir, workspace string) (run, socket string, err error) {
 	run, err = socketDirFor(dataDir, workspace)
 	if err != nil {
 		return "", "", err
 	}
 	socket = filepath.Join(run, "s.sock")
-	for _, path := range []string{socket, guestSocketPath} {
+	for _, path := range []string{socket, GuestSocketPath} {
 		if len(path) > socketLimit {
 			return "", "", fmt.Errorf("sandbox: the supervisor's socket path is too long for a Unix socket: %s is %d characters and %d is the limit (shorten XDG_RUNTIME_DIR, or the workspace name)", path, len(path), socketLimit)
 		}

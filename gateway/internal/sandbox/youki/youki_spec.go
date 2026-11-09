@@ -1,4 +1,4 @@
-package sandbox
+package youki
 
 import (
 	"errors"
@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 )
 
 // The OCI configuration is the whole of what a youki sandbox may be: capabilities, devices,
@@ -160,7 +162,7 @@ func youkiSpec(config youkiConfig, name string) (ociSpec, error) {
 	}
 	uid, gid := os.Getuid(), os.Getgid()
 	if uid < 0 || gid < 0 {
-		return ociSpec{}, fmt.Errorf("%w: cannot map a user id on this platform, and a youki sandbox maps one", ErrUnavailable)
+		return ociSpec{}, fmt.Errorf("%w: cannot map a user id on this platform, and a youki sandbox maps one", sandbox.ErrUnavailable)
 	}
 	resources, err := youkiResources(config)
 	if err != nil {
@@ -256,9 +258,9 @@ func validateYoukiRecord(config youkiConfig, name string) error {
 // namespaces and runs each command. It is the same program bwrap runs, so the worker's client
 // is the one that already exists.
 func youkiArgs(config youkiConfig) []string {
-	args := []string{guestSupervisor, "internal", "sandbox-supervisor", "--socket", config.GuestSocket}
+	args := []string{sandbox.GuestSupervisor, "internal", "sandbox-supervisor", "--socket", config.GuestSocket}
 	if config.IdleTimeout != "" {
-		// A kept-alive workspace is given a timeout that never fires rather than none at all,
+		// A kept-sandbox.Alive workspace is given a timeout that never fires rather than none at all,
 		// so the flag always says what the policy decided.
 		args = append(args, "--idle-timeout", config.IdleTimeout)
 	}
@@ -269,7 +271,7 @@ func youkiArgs(config youkiConfig) []string {
 // programs it may run, the workspace's private home, and a locale. Everything the gateway holds
 // stays out; a command gets the environment the worker sends it, and nothing inherited.
 func youkiProcessEnv() []string {
-	return []string{"PATH=" + processPath, "HOME=" + guestRootHome, "LANG=C.UTF-8"}
+	return []string{"PATH=" + sandbox.ProcessPath, "HOME=" + guestRootHome, "LANG=C.UTF-8"}
 }
 
 // youkiMounts is everything a command can see, in the order the runtime applies it. The base
@@ -309,7 +311,7 @@ func youkiMounts(config youkiConfig) []ociMount {
 		// After the root, so the bind lands in the image the sandbox actually has. Read-only:
 		// the bundle is the install's, and a workspace that could write it could trust itself.
 		mounts = append(mounts, ociMount{
-			Destination: guestCABundle,
+			Destination: sandbox.GuestCABundle,
 			Type:        "bind",
 			Source:      config.SecretProxy.BundleFile,
 			Options:     []string{"rbind", "ro"},
@@ -319,7 +321,7 @@ func youkiMounts(config youkiConfig) []ociMount {
 		ociMount{Destination: guestRootHome, Type: "bind", Source: config.DataDir, Options: []string{"rbind", "rw"}},
 		ociMount{Destination: config.Workspace, Type: "bind", Source: config.Workspace, Options: []string{"rbind", "rw"}},
 		ociMount{Destination: config.GuestRun, Type: "bind", Source: config.Run, Options: []string{"rbind", "rw"}},
-		ociMount{Destination: guestSupervisor, Type: "bind", Source: config.Supervisor, Options: []string{"rbind", "ro"}},
+		ociMount{Destination: sandbox.GuestSupervisor, Type: "bind", Source: config.Supervisor, Options: []string{"rbind", "ro"}},
 	)
 }
 

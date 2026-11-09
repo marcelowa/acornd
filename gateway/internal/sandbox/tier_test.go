@@ -134,7 +134,7 @@ func TestTheDefaultIsTheFirstEngineThatCanRun(t *testing.T) {
 				if slices.Contains(tc.can, name) {
 					return nil
 				}
-				return errors.New("unavailable")
+				return errors.New("Unavailable")
 			})
 			if err != nil {
 				t.Fatalf("default: %v", err)
@@ -204,7 +204,7 @@ func TestYoukiIsChoosableButNotADefaultYet(t *testing.T) {
 		if name == "youki" {
 			return nil
 		}
-		return errors.New("unavailable")
+		return errors.New("Unavailable")
 	})
 	if engine != "" || !errors.Is(err, ErrNoEngine) {
 		t.Fatalf("a machine with only youki must not hand it out as a default: %q %v", engine, err)
