@@ -111,6 +111,15 @@ func Engine(dataDir, state, name string) (Driver, error) {
 			driver = driver.WithStateDir(state)
 		}
 		return driver, nil
+	case "youki":
+		// Built, and deliberately not in EngineNames yet: its lifecycle cannot boot a container
+		// until the next change, and a chooser that offers an engine whose create refuses is
+		// worse than one that does not show it. Issue #47 §12 step 1.
+		driver := NewYouki(dataDir)
+		if state != "" {
+			driver = driver.WithStateDir(state)
+		}
+		return driver, nil
 	case "host":
 		if !HostEnabled() {
 			return nil, fmt.Errorf("sandbox: the host engine is off: it isolates nothing, so only automated tests enable it (%s=1)", TestHostEnv)
@@ -124,12 +133,16 @@ func Engine(dataDir, state, name string) (Driver, error) {
 	}
 }
 
-// EngineNames are the engines this build runs, in the order a machine prefers them: bubblewrap
-// first because it needs no hypervisor, no root, and no device — then the microVM, which is the
-// stronger boundary when a machine can give it one — then the host, which isolates nothing and
-// is last for that reason. It is the order a chooser shows too (ADR 0026), and only the first
-// two may be a machine's default: see defaultEngines. The host is off unless this process was
-// told to have it: see ChoosableEngines.
+// EngineNames are the engines this build offers a workspace, in the order a machine prefers
+// them: bubblewrap first because it needs no hypervisor, no root, and no device — then the
+// microVM, which is the stronger boundary when a machine can give it one — then the host, which
+// isolates nothing and is last for that reason. It is the order a chooser shows too (ADR 0026),
+// and only the first two may be a machine's default: see defaultEngines. The host is off unless
+// this process was told to have it: see ChoosableEngines.
+//
+// youki is built and reachable through Engine, but it is not in this list until its lifecycle
+// can boot a container: a chooser that offers an engine whose create refuses is worse than one
+// that does not show it yet (issue #47 §12 step 1).
 func EngineNames() []string { return []string{"bwrap", "microsandbox", "host"} }
 
 // ChoosableEngines are the engines an install may name or offer, in preference order: every
