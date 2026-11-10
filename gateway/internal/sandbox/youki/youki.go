@@ -47,6 +47,10 @@ type Youki struct {
 	// binary, the same way bwrap's runner is.
 	runner sandbox.Runner
 	look   func(string) (string, error)
+	// ready answers whether the supervisor at a socket is alive. It is a field so a test can
+	// answer without a sandbox, and it is what tells a container the runtime still has from a
+	// sandbox whose first process has gone: the runtime says running for both.
+	ready func(context.Context, string, time.Duration) error
 	// pull fetches an image into a directory. It is a field so a test can answer without a
 	// registry.
 	pull sandbox.ImageSource
@@ -120,6 +124,7 @@ func NewYouki(dataDir string) *Youki {
 		base:         youkiReleaseBase + "/v" + youkiVersion,
 		checksum:     youkiSHA256,
 		look:         exec.LookPath,
+		ready:        supervise.WaitForReady,
 		pull:         sandbox.PullImage,
 		resolver:     sandbox.ResolverFiles{Host: "/etc/resolv.conf", Upstream: "/run/systemd/resolve/resolv.conf"},
 		devices:      sandbox.HostDevices{Tun: "/dev/net/tun", KVM: "/dev/kvm"},
@@ -556,7 +561,10 @@ func (y *Youki) adopt(ctx context.Context, name string, config youkiConfig) bool
 	if y.runner != nil {
 		return true
 	}
-	return supervise.WaitForReady(ctx, config.Socket, 2*time.Second) == nil
+	if y.ready == nil {
+		return false
+	}
+	return y.ready(ctx, config.Socket, 2*time.Second) == nil
 }
 
 // boot deletes a container that is not the one this record names — created but never started,
@@ -568,6 +576,10 @@ func (y *Youki) boot(ctx context.Context, name string, config youkiConfig) error
 	// Best effort: there is no container in the common case, and a delete that finds nothing
 	// says so with an error this path does not need.
 	_ = y.delete(ctx, name)
+	// The supervisor can stop itself (its idle timer) without a delete, and a stop that failed
+	// can leave the budget's leaf behind. The runtime creates the cgroup named by the record,
+	// and an existing one is a create that fails on a path that should have been empty.
+	y.removeCgroup(config.CgroupPath)
 	if err := y.launch(ctx, name, config); err != nil {
 		return err
 	}
@@ -690,6 +702,12 @@ func (y *Youki) List(ctx context.Context) ([]sandbox.Instance, error) {
 		status := "stopped"
 		if y.runtimeState(ctx, name) == "running" {
 			status = "running"
+			// The runtime keeps the container record after its first process is gone. A running
+			// container with a dead supervisor is not a sandbox a worker can attach to: report it
+			// stopped, so Produce starts it instead of handing the worker a socket that is not there.
+			if y.ready != nil && y.ready(ctx, config.Socket, 500*time.Millisecond) != nil {
+				status = "stopped"
+			}
 		}
 		instances = append(instances, sandbox.Instance{Name: name, Image: config.Image, Status: status})
 	}

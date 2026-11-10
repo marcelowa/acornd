@@ -132,7 +132,17 @@ type Manager struct {
 	// construction failure: the rest of the gateway works without a sandbox, and the tools
 	// refuse, which is the point.
 	problem error
+	// failedAt is when that problem was learned. A probe can be wrong for a moment — a cgroup
+	// being rewritten, a user manager restarting, a machine under load — and remembering it
+	// forever turned one bad second into a workspace that stays dead until the gateway
+	// restarts. The next attempt after ensureRetry asks the machine again.
+	failedAt time.Time
 }
+
+// ensureRetry is how long a failed probe is believed before the next Produce asks again. It is
+// short: a tool call that woke control waits for the answer, and a machine that has recovered
+// should not make it wait for a human to restart anything.
+const ensureRetry = 2 * time.Second
 
 // Open wires up the engine. It fails only on a mistake the caller can fix (no folder
 // directory, no driver) and it installs nothing: fetching 26MB is first use's business, not
@@ -159,23 +169,29 @@ func Open(ctx context.Context, opts Options) (*Manager, error) {
 // used if it is not usable. A machine that cannot sandbox is a state, not a gateway that
 // will not boot.
 //
-// A failure is remembered rather than retried: the reason is almost always something a
-// person has to fix (a missing hypervisor, a group, a network), and hammering it from every
-// workspace would produce a log that says the same thing many times.
+// A failure is remembered for ensureRetry, then the next caller asks the machine again. The
+// reason is usually something a person has to fix, but not always: a probe that met a busy
+// cgroup or a restarting user manager must not be the last word. The cooldown keeps a burst of
+// workspace starts from hammering the same failing probe.
 func (m *Manager) ensure(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.problem != nil {
-		return m.problem
+		if m.report || time.Since(m.failedAt) < ensureRetry {
+			return m.problem
+		}
+		m.problem = nil
 	}
 	if !m.driver.Installed() {
 		if err := m.driver.Install(ctx, m.log); err != nil {
 			m.problem = err
+			m.failedAt = time.Now()
 			return err
 		}
 	}
 	if err := m.driver.Usable(); err != nil {
 		m.problem = err
+		m.failedAt = time.Now()
 		return err
 	}
 	return nil
@@ -397,19 +413,17 @@ func (m *Manager) SecretsChanged(ctx context.Context, workspace string, secrets 
 
 // Stop shuts a workspace's sandbox down, keeping everything it accumulated. The engine also
 // stops idle sandboxes on its own, so this is for when we know sooner.
+//
+// A remembered probe problem does not stop this: a sandbox that exists has to be stopped even
+// when a later probe says the engine is unavailable, and a stop that is refused leaves it
+// running under a worker that is already gone.
 func (m *Manager) Stop(ctx context.Context, workspace string) error {
-	if problem := m.Problem(); problem != nil {
-		return problem
-	}
 	return ignoreMissing(m.driver.Stop(ctx, Name(workspace)))
 }
 
 // Remove deletes a workspace's sandbox and everything in it. Called when the workspace is
 // forgotten, and the only thing that discards the sandbox's accumulated state.
 func (m *Manager) Remove(ctx context.Context, workspace string) error {
-	if problem := m.Problem(); problem != nil {
-		return problem
-	}
 	return ignoreMissing(m.driver.Remove(ctx, Name(workspace)))
 }
 

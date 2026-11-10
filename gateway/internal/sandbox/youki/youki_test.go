@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/marcelowa/acornd/gateway/internal/sandbox/sandboxtest"
 
@@ -270,14 +271,26 @@ func TestYoukiListsItsOwnRecord(t *testing.T) {
 		t.Fatalf("a record whose runtime has no container should be listed and stopped: %+v", instances)
 	}
 	// The record is the truth about what exists; the runtime's state only says whether it is
-	// still running, which is what makes a gateway restart an adoption rather than a cleanup.
+	// still running, and the supervisor says whether a worker can attach. A runtime that still
+	// has the container with no supervisor answering is stopped, not running.
 	runner.state = "running"
+	driver.ready = func(context.Context, string, time.Duration) error { return nil }
 	instances, err = driver.List(context.Background())
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if len(instances) != 1 || !instances[0].Running() {
-		t.Fatalf("a record whose runtime says running should be running: %+v", instances)
+		t.Fatalf("a record whose runtime says running and whose supervisor answers should be running: %+v", instances)
+	}
+	// The runtime keeps the container record after its first process is gone. The socket is the
+	// thing that decides whether it is a sandbox a worker can use.
+	driver.ready = func(context.Context, string, time.Duration) error { return errors.New("no supervisor") }
+	instances, err = driver.List(context.Background())
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(instances) != 1 || instances[0].Running() {
+		t.Fatalf("a running container with a dead supervisor should be stopped so Produce starts it: %+v", instances)
 	}
 }
 
@@ -858,5 +871,36 @@ func TestYoukiOverlayRecordAndRuntimeArgv(t *testing.T) {
 	plain := driver.runtimeArgv(config, "create")
 	if len(plain) == 0 || plain[0] != driver.binary() || plain[len(plain)-1] != "create" {
 		t.Fatalf("a copy root should run the runtime directly: %v", plain)
+	}
+}
+
+// The supervisor can stop itself on its idle timer without a delete, and a stop that failed can
+// leave the budget's leaf behind. The next start has to clear it: the runtime creates the cgroup
+// named by the record, and an existing one is a create that fails on a path that should be empty.
+func TestYoukiStartClearsAStaleLeafCgroup(t *testing.T) {
+	driver, runner := testYouki(t, t.TempDir())
+	workspace := t.TempDir()
+	driver.cgroupParent = "/acornd.slice"
+	name := sandbox.Name(workspace)
+	if _, err := driver.writeConfig(sandbox.Policy{Workspace: workspace}); err != nil {
+		t.Fatal(err)
+	}
+	config, err := driver.readConfig(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldMount := cgroupMount
+	cgroupMount = t.TempDir()
+	t.Cleanup(func() { cgroupMount = oldMount })
+	leaf := cgroupDir(config.CgroupPath)
+	if err := os.MkdirAll(leaf, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner.state = "stopped"
+	if err := driver.Start(context.Background(), name, nil); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if _, err := os.Stat(leaf); !os.IsNotExist(err) {
+		t.Fatalf("the stale leaf cgroup should be gone, stat: %v", err)
 	}
 }

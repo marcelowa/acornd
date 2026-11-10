@@ -1,8 +1,14 @@
 import { connect, type Socket } from "node:net";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { concatChunks, type ExecOptions, type ExecResult, type SandboxClient } from "./sandbox.ts";
-import { WorkspaceFiles } from "./workspace-files.ts";
+import {
+	concatChunks,
+	type ExecOptions,
+	type ExecResult,
+	type SandboxClient,
+	type WriteSink,
+} from "./sandbox.ts";
+import type { DirEntry, FileStat } from "./files.ts";
 
 /**
  * The bubblewrap engine: a sandbox that runs as one process per workspace, with this worker's
@@ -14,8 +20,10 @@ import { WorkspaceFiles } from "./workspace-files.ts";
  * holds, streams it back, and reaps what it leaves behind. That is why a daemon outlives the
  * command that started it, and why a command costs a fork instead of a sandbox.
  *
- * File operations are the host's, unchanged: bubblewrap binds a folder at the path it already
- * has, so a path means the same thing inside and outside.
+ * File operations go through the supervisor too. A path means what it means inside the
+ * sandbox: the workspace is bound at its own path, and the private home is the root's, but
+ * `/etc`, `/tmp`, and everything else are the image's, not the machine's. The host has no path
+ * to the workspace through this engine, and a file tool must not invent one.
  *
  * See docs/adr/0023-bwrap-engine.md.
  */
@@ -26,7 +34,7 @@ export function engineName(): string {
 export async function openSandbox(
 	name: string,
 	workspace: string,
-	_wake?: () => Promise<void>,
+	wake?: () => Promise<void>,
 ): Promise<SandboxClient> {
 	const state = process.env.ACORND_BWRAP_STATE;
 	if (state === undefined || state === "") {
@@ -41,7 +49,7 @@ export async function openSandbox(
 		// folder, which is the one mistake worth refusing loudly.
 		throw new Error(`${path} is not the config for ${workspace}`);
 	}
-	return new SupervisorClient(config);
+	return new SupervisorClient(config, "bwrap", wake);
 }
 
 /** What control resolved for one workspace: paths, the sandbox's socket, and its private home. */
@@ -59,6 +67,12 @@ export interface BwrapConfig {
 	nested?: boolean;
 	/** The workspace's own unpacked image, bound as `/`. */
 	rootfs?: string;
+	/**
+	 * Which shape the root has: a copy of the image, or an overlay over the shared base. In
+	 * overlay mode `rootfs` is empty and the image is still the root, so the private home is the
+	 * guest's `/root` in both shapes.
+	 */
+	rootMode?: string;
 	/** The private home, where a toolchain installed by one command is found by the next. */
 	home: string;
 	/** The install folder, hidden when the machine's root is the root. */
@@ -115,18 +129,30 @@ function searchPath(home: string): string {
 
 /** Where the private home appears inside the sandbox. */
 export function guestHome(config: BwrapConfig): string {
-	return config.rootfs === undefined ? config.home : "/root";
+	// A root of its own — a copy or an overlay — makes `/` the image, and the private home is the
+	// root's. Without one the sandbox sees the machine's root, and the home is at its real path.
+	return config.rootfs !== undefined || config.rootMode === "overlay" ? "/root" : config.home;
 }
 
 /** One request's frames, as the supervisor speaks them. */
 interface Event {
-	type: "ready" | "started" | "chunk" | "exit" | "error";
+	type: "ready" | "started" | "chunk" | "exit" | "error" | "file";
 	id?: string;
 	stream?: "stdout" | "stderr";
 	data?: string;
 	code?: number;
 	stopped?: string;
 	error?: string;
+	/** Base64, as Go encodes a []byte in JSON. */
+	content?: string;
+	missing?: boolean;
+	entries?: { name: string; directory: boolean; size: number; mtimeMs: number }[];
+	info?: { directory: boolean; size: number; mtimeMs: number };
+}
+
+/** The words of an unknown failure, for a message a person will read. */
+function message(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
 }
 
 /**
@@ -134,16 +160,18 @@ interface Event {
  * engine-neutral — bwrap and youki both run the same supervisor as the sandbox's first process —
  * and the engine name only decides the client's `name`.
  */
-export class SupervisorClient extends WorkspaceFiles implements SandboxClient {
+export class SupervisorClient implements SandboxClient {
 	readonly name: string;
 	private readonly config: BwrapConfig;
 	private readonly keepalive: ReturnType<typeof setInterval>;
+	private readonly wake: (() => Promise<void>) | undefined;
 	private nextID = 0;
+	private nextFileID = 0;
 
-	constructor(config: BwrapConfig, engine = "bwrap") {
-		super();
+	constructor(config: BwrapConfig, engine = "bwrap", wake?: () => Promise<void>) {
 		this.config = config;
 		this.name = `${engine}:${config.workspace}`;
+		this.wake = wake;
 		this.keepalive = setInterval(() => this.sendKeepalive(), KEEPALIVE_INTERVAL_MS);
 		this.keepalive.unref?.();
 		// One now, not in five minutes: the sandbox's timer starts when it is created, and a
@@ -197,9 +225,11 @@ export class SupervisorClient extends WorkspaceFiles implements SandboxClient {
 		}
 		for (const [key, value] of Object.entries(options.env ?? {})) env[key] = value;
 		// The sandbox's own home, always: the machine's is not in the image, so an install there
-		// would land nowhere and a `~` would mean a path the command cannot see.
-		env["HOME"] = guestHome(this.config);
-		env["PATH"] = searchPath(this.config.home);
+		// would land nowhere and a `~` would mean a path the command cannot see. The search path
+		// follows the same home, or it would name a host path the sandbox does not have.
+		const home = guestHome(this.config);
+		env["HOME"] = home;
+		env["PATH"] = searchPath(home);
 		const proxy = this.config.secretProxy;
 		if (proxy !== undefined) {
 			// Both schemes: a placeholder is replaced on a plain request too, because a request the
@@ -233,8 +263,27 @@ export class SupervisorClient extends WorkspaceFiles implements SandboxClient {
 		}
 	}
 
-	/** One connection per command: connecting to a Unix socket costs less than a millisecond. */
-	private connect(): Promise<Socket> {
+	/** One connection per request: connecting to a Unix socket costs less than a millisecond. */
+	private async connect(): Promise<Socket> {
+		try {
+			return await this.dial();
+		} catch (error) {
+			if (this.wake === undefined) throw error;
+			// The sandbox stopped under this worker — its idle timer, a host that went to sleep,
+			// or a gateway that restarted. Control owns the start (ADR 0037), so ask it, then
+			// attach once, never start anything from here.
+			try {
+				await this.wake();
+			} catch (wakeError) {
+				throw new Error(
+					`the sandbox at ${this.config.socket} is not answering (${message(error)}): ${message(wakeError)}`,
+				);
+			}
+			return await this.dial();
+		}
+	}
+
+	private dial(): Promise<Socket> {
 		return new Promise((resolve, reject) => {
 			const socket = connect(this.config.socket);
 			const failed = (error: Error): void => {
@@ -355,5 +404,157 @@ export class SupervisorClient extends WorkspaceFiles implements SandboxClient {
 			});
 			socket.on("error", (error: Error) => finish(error));
 		});
+	}
+
+	// -- files ------------------------------------------------------------------------
+
+	/** One file request, one answer. It uses the same socket protocol as a command. */
+	private async fileRequest(
+		request: Record<string, unknown> & { type: string; id: string },
+	): Promise<Event> {
+		const socket = await this.connect();
+		try {
+			socket.write(`${JSON.stringify(request)}\n`);
+			const event = await this.frame(socket);
+			if (event.type === "error") {
+				throw new Error(event.error ?? "the sandbox could not answer the file request");
+			}
+			if (event.type !== "file") {
+				throw new Error(`the sandbox answered a file request with ${event.type}`);
+			}
+			return event;
+		} finally {
+			socket.destroy();
+		}
+	}
+
+	/** Read one frame. A supervisor that accepts but never answers is bounded, not trusted. */
+	private frame(socket: Socket): Promise<Event> {
+		return new Promise((resolve, reject) => {
+			let buffered = "";
+			let settled = false;
+			const timer = setTimeout(
+				() => settle(new Error("the sandbox did not answer the file request")),
+				10_000,
+			);
+			timer.unref?.();
+			const settle = (outcome: Event | Error): void => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timer);
+				socket.off("data", onData);
+				socket.off("error", onError);
+				socket.off("close", onClose);
+				if (outcome instanceof Error) reject(outcome);
+				else resolve(outcome);
+			};
+			const onData = (chunk: Buffer): void => {
+				buffered += chunk.toString("utf8");
+				let newline = buffered.indexOf("\n");
+				while (newline >= 0) {
+					const line = buffered.slice(0, newline).trim();
+					buffered = buffered.slice(newline + 1);
+					newline = buffered.indexOf("\n");
+					if (line === "") continue;
+					try {
+						settle(JSON.parse(line) as Event);
+					} catch {
+						settle(new Error("the sandbox sent a frame that is not JSON"));
+					}
+					return;
+				}
+			};
+			const onError = (error: Error): void => settle(error);
+			const onClose = (): void =>
+				settle(new Error("the sandbox closed the connection before it answered"));
+			socket.on("data", onData);
+			socket.once("error", onError);
+			socket.once("close", onClose);
+		});
+	}
+
+	private fileID(): string {
+		return `f${++this.nextFileID}`;
+	}
+
+	async read(path: string): Promise<string | null> {
+		const event = await this.fileRequest({ type: "read", id: this.fileID(), path });
+		if (event.missing === true) return null;
+		return Buffer.from(event.content ?? "", "base64").toString("utf8");
+	}
+
+	async readBytes(path: string): Promise<Uint8Array> {
+		const event = await this.fileRequest({ type: "read", id: this.fileID(), path });
+		if (event.missing === true) throw new Error(`No such file or directory: ${path}`);
+		return new Uint8Array(Buffer.from(event.content ?? "", "base64"));
+	}
+
+	async list(path: string): Promise<DirEntry[]> {
+		const event = await this.fileRequest({ type: "list", id: this.fileID(), path });
+		return (event.entries ?? []).map((entry) => ({
+			name: entry.name,
+			directory: entry.directory,
+			size: entry.size,
+			mtimeMs: entry.mtimeMs,
+		}));
+	}
+
+	async stat(path: string): Promise<FileStat | null> {
+		const event = await this.fileRequest({ type: "stat", id: this.fileID(), path });
+		if (event.missing === true || event.info === undefined) return null;
+		return {
+			directory: event.info.directory,
+			size: event.info.size,
+			mtimeMs: event.info.mtimeMs,
+		};
+	}
+
+	async write(path: string, content: string | Uint8Array): Promise<void> {
+		await this.writeChunk(path, content, false);
+	}
+
+	async writeStream(path: string): Promise<WriteSink> {
+		let first = true;
+		return {
+			write: async (data: string | Uint8Array): Promise<void> => {
+				await this.writeChunk(path, data, !first);
+				first = false;
+			},
+			close: async (): Promise<void> => {},
+		};
+	}
+
+	private async writeChunk(
+		path: string,
+		content: string | Uint8Array,
+		append: boolean,
+	): Promise<void> {
+		const bytes =
+			typeof content === "string" ? Buffer.from(content, "utf8") : Buffer.from(content);
+		await this.fileRequest({
+			type: "write",
+			id: this.fileID(),
+			path,
+			content: bytes.toString("base64"),
+			...(append ? { append: true } : {}),
+		});
+	}
+
+	async mkdir(path: string): Promise<void> {
+		await this.fileRequest({ type: "mkdir", id: this.fileID(), path });
+	}
+
+	async remove(path: string, options: { recursive?: boolean; force?: boolean }): Promise<void> {
+		await this.fileRequest({
+			type: "remove",
+			id: this.fileID(),
+			path,
+			...(options.recursive === true ? { recursive: true } : {}),
+			...(options.force === true ? { force: true } : {}),
+		});
+	}
+
+	async rename(from: string, to: string): Promise<void> {
+		await this.fileRequest({ type: "rename", id: this.fileID(), path: from, to });
 	}
 }

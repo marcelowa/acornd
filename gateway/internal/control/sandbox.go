@@ -121,10 +121,9 @@ func (c *Control) provisionSandbox(ctx context.Context) SandboxState {
 	}
 	report := manager.Report()
 	state := SandboxState{Engine: report.Engine, Version: report.Version, Isolated: report.Isolated}
-	if problem := manager.Problem(); problem != nil {
-		state.Problem = problem.Error()
-		return state
-	}
+	// The manager's remembered problem is not a verdict until Produce has asked the machine
+	// again. It may be a probe that met a busy cgroup or a user manager that was restarting;
+	// the retry inside Produce is what turns that from a dead workspace into one more attempt.
 	delivery := manager.SecretDelivery()
 	resolved := c.resolveSecrets(delivery)
 	policy := c.opts.Workspace.SandboxPolicy(c.opts.DataDir, c.opts.UserHome)

@@ -18,6 +18,18 @@ export interface SandboxClient extends Files {
 	/** The engine's name for this sandbox, which is derived from the workspace. */
 	readonly name: string;
 	/**
+	 * Why there is no sandbox, when there is none at all. The file tools read through this
+	 * interface, and a missing sandbox must not look like a missing file; the resource loaders
+	 * still get the empty answer they can work with.
+	 */
+	readonly unavailable?: string;
+	/**
+	 * Whether opening the sandbox is still waiting for control's next start. Resource loading
+	 * at worker startup reads this and does not wait: a sandbox that is not there yet must not
+	 * hold the worker's first line for a wake.
+	 */
+	readonly pending?: boolean;
+	/**
 	 * Run a command inside the sandbox. A string goes through a shell; an array runs its
 	 * program directly with the rest as arguments, without a shell to parse them. Chunks
 	 * arrive as they are produced.
@@ -108,6 +120,7 @@ export function refusedSandbox(reason: string): SandboxClient {
 	};
 	return {
 		name: "",
+		unavailable: reason,
 		read: async () => null,
 		list: async () => [],
 		stat: async () => null,
@@ -118,6 +131,56 @@ export function refusedSandbox(reason: string): SandboxClient {
 		mkdir: async () => fail(),
 		remove: async () => fail(),
 		rename: async () => fail(),
+	};
+}
+
+/**
+ * A sandbox that could not be prepared when the worker started, but may be preparable now.
+ *
+ * Control owns the start (ADR 0037), so the first thing a tool does is ask it to try again.
+ * A workspace that lost a race with an idle eviction, or met a machine probe that was busy for
+ * a moment, recovers on the next call instead of staying dead until the gateway restarts. Every
+ * method is the opened client's method once the wake lands; a wake that does not land is the
+ * tool's error, in the words control gave.
+ */
+export function deferredSandbox(
+	engine: SandboxEngine,
+	name: string,
+	workspace: string,
+	wake: () => Promise<void>,
+	reason: string,
+): SandboxClient {
+	let opening: Promise<SandboxClient> | undefined;
+	const client = (): Promise<SandboxClient> => {
+		if (opening === undefined) {
+			opening = wake().then(
+				async () => await engine.openSandbox(name, workspace, wake),
+				(error: unknown) => {
+					opening = undefined;
+					throw new Error(
+						`the sandbox could not be prepared: ${error instanceof Error ? error.message : String(error)} (it was: ${reason})`,
+					);
+				},
+			);
+			opening.catch(() => {
+				opening = undefined;
+			});
+		}
+		return opening;
+	};
+	return {
+		name,
+		pending: true,
+		read: async (path) => (await client()).read(path),
+		list: async (path) => (await client()).list(path),
+		stat: async (path) => (await client()).stat(path),
+		readBytes: async (path) => (await client()).readBytes(path),
+		exec: async (command, options) => (await client()).exec(command, options),
+		write: async (path, content) => (await client()).write(path, content),
+		writeStream: async (path) => (await client()).writeStream(path),
+		mkdir: async (path) => (await client()).mkdir(path),
+		remove: async (path, options) => (await client()).remove(path, options),
+		rename: async (from, to) => (await client()).rename(from, to),
 	};
 }
 

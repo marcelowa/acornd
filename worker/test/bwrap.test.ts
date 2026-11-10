@@ -109,7 +109,7 @@ test("the request carries the argv it was given and the directory the command ru
 });
 
 test("the environment is exactly what the caller gets: secrets in, nothing else", async () => {
-	const { state, client, fake } = await open();
+	const { client, fake } = await open();
 	try {
 		await client.exec("true", { env: { GITHUB_TOKEN: "from the vault" } });
 		const withSecret = fake.captured.at(-1);
@@ -117,7 +117,7 @@ test("the environment is exactly what the caller gets: secrets in, nothing else"
 		// The private home and a search path that finds a toolchain installed there.
 		// The sandbox's home, not the machine's: the machine's home is not in the image.
 		expect(withSecret?.env["HOME"]).toBe("/root");
-		expect(withSecret?.env["PATH"]).toStartWith(`${join(state, "home")}/.local/bin`);
+		expect(withSecret?.env["PATH"]).toStartWith("/root/.local/bin");
 
 		// clearEnv is the caller saying "nothing but what I pass", and it has to mean it.
 		process.env.ACORND_SHOULD_NOT_LEAK = "yes";
