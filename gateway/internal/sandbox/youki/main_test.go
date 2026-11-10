@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/marcelowa/acornd/gateway/internal/netns"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 	"github.com/marcelowa/acornd/gateway/internal/supervise"
 )
 
@@ -29,6 +30,20 @@ func TestMain(m *testing.M) {
 			fmt.Fprintln(os.Stderr, "acornd test binary: netns:", err)
 			os.Exit(2)
 		}
+	}
+	if len(os.Args) > 2 && os.Args[1] == "internal" && os.Args[2] == "overlay-run" {
+		if err := sandbox.OverlayRunCommand(os.Args[3:]); err != nil {
+			fmt.Fprintln(os.Stderr, "acornd test binary: overlay-run:", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	if len(os.Args) > 2 && os.Args[1] == "internal" && os.Args[2] == "overlay" {
+		if err := sandbox.OverlayCommand(os.Args[3:]); err != nil {
+			fmt.Fprintln(os.Stderr, "acornd test binary: overlay:", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
 	if len(os.Args) > 2 && os.Args[1] == "internal" && os.Args[2] == "sandbox-supervisor" {
 		socket := ""

@@ -1,6 +1,6 @@
 # ADR 0039 — A sandbox's root is an overlay, not a copy
 
-Status: accepted, not built
+Status: accepted, built (2026-11-10)
 Date: 2026-11-08
 
 ## Context
@@ -102,3 +102,31 @@ filesystem cannot clone, so the copy cannot be made cheap — it is the overlay 
   private networks — runs over an overlay root; that is the proof the sandbox is still a sandbox.
 - The spike's own numbers are the table above, measured with the argv in decision 3 and the
   gateway's `debian:stable-slim` base; it is not a test because it tests bubblewrap.
+
+## What the build decided
+
+The probe mounts the real image base, not `/`: a throwaway overlay whose lower is the machine's
+root fails with `EINVAL` because that tree contains other mounts, and a probe that fails for the
+wrong reason would take the copy on every machine. The base is already unpacked by the time a
+workspace is prepared, so the probe costs one mount and one `bwrap` run.
+
+The record carries `rootMode` (`overlay` or `copy`), `base`, `upper` and `work`. A config written
+before this change has no mode and its `rootfs` is the copy, which is what the driver reads.
+
+The upper is provisioned with the marker and the apt line; the base is never written. `Remove`
+deletes the workspace folder, which holds the upper and the work dir, and leaves the base under
+`images` for the next workspace. A machine that cannot overlay keeps the copy path exactly as it
+was; the bwrap tier's driver test skips with that reason and the e2e rows run on either shape.
+
+youki uses the same base/upper/work layout, with one difference in how the mount is made: an
+OCI `createRuntime` hook runs after the runtime has created the default devices in the rootfs, so
+mounting the overlay there hides `/dev/null` and the container fails; a private mount namespace
+around `youki create` (and `youki run` when pasta is in front) mounts the overlay before those
+devices exist and the runtime keeps it. The wrapper is `acornd internal overlay-run`, and it asks
+for a user namespace first: a normal account has the mount power inside that bubble, so the
+overlay works rootless. A kernel that refuses the user namespace keeps the copy, and the probe
+says so before a workspace is created.
+
+Tests added by the build: `TestTwoWorkspacesShareOneImageBase`,
+`TestBwrapOverlayRootMountsTheBaseAndUpper`, `TestBwrapRemoveTakesTheUpperAndLeavesTheBase`,
+`TestBwrapWithoutOverlayBindsTheCopy`, `TestBwrapOverlaysOnThisMachine`.

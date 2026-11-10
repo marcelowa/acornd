@@ -87,7 +87,7 @@ func TestTwoPullsOfOneImageDoNotInterleave(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			base, err := imageBase(store, image, pull)
+			base, err := ImageBase(store, image, pull)
 			if err == nil {
 				entries, readErr := os.ReadDir(filepath.Join(base, "usr", "lib"))
 				if readErr != nil {

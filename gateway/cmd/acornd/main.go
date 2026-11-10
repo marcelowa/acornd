@@ -96,9 +96,19 @@ func internalCommand(argv []string) {
 		case "sandbox-supervisor":
 			supervisorCommand(argv[1:])
 			return
+		case "overlay":
+			if err := sandbox.OverlayCommand(argv[1:]); err != nil {
+				log.Fatalf("acornd: overlay: %v", err)
+			}
+			return
+		case "overlay-run":
+			if err := sandbox.OverlayRunCommand(argv[1:]); err != nil {
+				log.Fatalf("acornd: overlay-run: %v", err)
+			}
+			return
 		}
 	}
-	fmt.Fprintln(os.Stderr, "usage: acornd internal <netns|sandbox-supervisor> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: acornd internal <netns|sandbox-supervisor|overlay|overlay-run> [flags]")
 	os.Exit(2)
 }
 

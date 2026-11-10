@@ -160,9 +160,9 @@ func youkiSpec(config youkiConfig, name string) (ociSpec, error) {
 	if err := validateYoukiRecord(config, name); err != nil {
 		return ociSpec{}, err
 	}
-	uid, gid := os.Getuid(), os.Getgid()
-	if uid < 0 || gid < 0 {
-		return ociSpec{}, fmt.Errorf("%w: cannot map a user id on this platform, and a youki sandbox maps one", sandbox.ErrUnavailable)
+	uid, gid, err := youkiUserMapping(config)
+	if err != nil {
+		return ociSpec{}, err
 	}
 	resources, err := youkiResources(config)
 	if err != nil {
@@ -215,8 +215,8 @@ func youkiSpec(config youkiConfig, name string) (ociSpec, error) {
 		Mounts: youkiMounts(config),
 		Linux: ociLinux{
 			CgroupsPath:   config.CgroupPath,
-			UIDMappings:   []ociIDMapping{{ContainerID: 0, HostID: uint32(uid), Size: 1}},
-			GIDMappings:   []ociIDMapping{{ContainerID: 0, HostID: uint32(gid), Size: 1}},
+			UIDMappings:   []ociIDMapping{{ContainerID: 0, HostID: uid, Size: 1}},
+			GIDMappings:   []ociIDMapping{{ContainerID: 0, HostID: gid, Size: 1}},
 			Namespaces:    namespaces,
 			Resources:     resources,
 			MaskedPaths:   masked,
@@ -278,7 +278,8 @@ func youkiProcessEnv() []string {
 // mounts come first; the device binds land after /dev, as bwrap orders them; and the workspace,
 // its home, the socket's folder, the resolver and this binary are the binds the policy decides.
 func youkiMounts(config youkiConfig) []ociMount {
-	mounts := []ociMount{
+	var mounts []ociMount
+	mounts = append(mounts, []ociMount{
 		{Destination: "/proc", Type: "proc", Source: "proc", Options: []string{}},
 		{Destination: "/dev", Type: "tmpfs", Source: "tmpfs", Options: []string{"nosuid", "strictatime", "mode=755", "size=65536k"}},
 		{Destination: "/dev/pts", Type: "devpts", Source: "devpts", Options: []string{"nosuid", "noexec", "newinstance", "ptmxmode=0666", "mode=0620"}},
@@ -291,7 +292,7 @@ func youkiMounts(config youkiConfig) []ociMount {
 		// The workspace's root is its image; /tmp is a tmpfs so a command's scratch files do not
 		// become the next command's, which is what bwrap's --tmpfs /tmp gives.
 		{Destination: "/tmp", Type: "tmpfs", Source: "tmpfs", Options: []string{"nosuid", "nodev", "mode=1777"}},
-	}
+	}...)
 	mounts = append(mounts, ociMount{
 		Destination: "/etc/resolv.conf",
 		Type:        "bind",
@@ -455,4 +456,18 @@ func memoryMultiplier(unit string) (int64, bool) {
 
 func badMemorySize(value string) error {
 	return fmt.Errorf("sandbox: memory %q is not a size (use 256M, 2G, or bytes)", value)
+}
+
+// youkiUserMapping is the host id the container's root maps to. An overlay runs inside the
+// wrapper's user namespace, where this account is root; a copy runs directly and maps to the
+// account itself.
+func youkiUserMapping(config youkiConfig) (uint32, uint32, error) {
+	uid, gid := os.Getuid(), os.Getgid()
+	if config.RootMode == "overlay" {
+		uid, gid = 0, 0
+	}
+	if uid < 0 || gid < 0 {
+		return 0, 0, fmt.Errorf("%w: cannot map a user id on this platform, and a youki sandbox maps one", sandbox.ErrUnavailable)
+	}
+	return uint32(uid), uint32(gid), nil
 }

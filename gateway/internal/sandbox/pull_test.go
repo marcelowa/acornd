@@ -101,18 +101,18 @@ func TestWithNoImageSourceAPullSaysSo(t *testing.T) {
 func TestAnImageIsNamedByItsReference(t *testing.T) {
 	store := t.TempDir()
 	pull := func(context.Context, string, string, func(string, ...any)) error { return nil }
-	first, err := imageBase(store, "debian:stable-slim", pull)
+	first, err := ImageBase(store, "debian:stable-slim", pull)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := imageBase(store, "golang:1.24", pull)
+	second, err := ImageBase(store, "golang:1.24", pull)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first == second {
 		t.Errorf("two images share the folder %q", first)
 	}
-	if _, err := imageBase(store, "::not a reference::", pull); err == nil {
+	if _, err := ImageBase(store, "::not a reference::", pull); err == nil {
 		t.Error("a reference this build cannot read should be refused")
 	}
 }

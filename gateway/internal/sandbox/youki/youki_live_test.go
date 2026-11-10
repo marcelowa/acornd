@@ -42,7 +42,9 @@ func liveYouki(t *testing.T) (*Youki, context.Context) {
 	if err := os.MkdirAll(cgroupDir(parent), 0o755); err != nil {
 		t.Skipf("this machine does not delegate a cgroup to the sandbox, so youki cannot create its cgroup: %v", err)
 	}
-	t.Cleanup(func() { _ = os.Remove(cgroupDir(parent)) })
+	// The parent slice stays: a rootless run cannot recreate it at the cgroup root, and it is
+	// the delegation the next test in this process uses. The driver removes each sandbox's
+	// child cgroup when it stops.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	t.Cleanup(cancel)
 	driver := NewYouki(t.TempDir())
@@ -144,5 +146,49 @@ func runInSupervisor(t *testing.T, socket, command string) (string, int) {
 		case "exit":
 			return output.String(), event.Code
 		}
+	}
+}
+
+// The overlay root: the OCI mounts bind the base, upper and work under /run/acornd-overlay and
+// mount the merge at /, so the container's root is the shared image plus this workspace's delta.
+// A write lands in the upper and the base is untouched; the mount table says it is an overlay.
+func TestYoukiOverlayRootOnThisMachine(t *testing.T) {
+	driver, ctx := liveYouki(t)
+	if !driver.overlayEnabled() {
+		t.Skip("this machine cannot mount an overlay in a private mount namespace; the copy is its shape")
+	}
+	workspace := filepath.Join(t.TempDir(), "overlay")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := sandbox.Name(workspace)
+	t.Cleanup(func() {
+		if err := driver.Remove(context.Background(), name); err != nil {
+			t.Logf("remove: %v", err)
+		}
+	})
+	if err := driver.Create(ctx, sandbox.Policy{Workspace: workspace, Image: "debian:stable-slim"}, t.TempDir()); err != nil {
+		t.Fatalf("create: %v\nlog: %s", err, driver.logTail(driver.logPath(name)))
+	}
+	config, err := driver.readConfig(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.RootMode != "overlay" || config.Base == "" || config.Upper == "" || config.Work == "" {
+		t.Fatalf("the record is not an overlay: %+v", config)
+	}
+	out, code := runInSupervisor(t, config.Socket,
+		`printf overlay-ok; touch /made-in-overlay; grep ' / overlay ' /proc/mounts | head -1`)
+	if code != 0 || !strings.Contains(out, "overlay-ok") {
+		t.Fatalf("the overlay command did not run: %q (exit %d)", out, code)
+	}
+	if !strings.Contains(out, "overlay") {
+		t.Errorf("the sandbox's root is not an overlay mount: %q", out)
+	}
+	if _, err := os.Stat(filepath.Join(config.Upper, "made-in-overlay")); err != nil {
+		t.Errorf("the write did not land in the upper: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(config.Base, "made-in-overlay")); !os.IsNotExist(err) {
+		t.Errorf("the shared base was written: %v", err)
 	}
 }

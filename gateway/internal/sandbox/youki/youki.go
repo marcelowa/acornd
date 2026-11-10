@@ -3,6 +3,7 @@ package youki
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -57,6 +59,11 @@ type Youki struct {
 	// cgroup answers whether this machine lets a sandbox have a budget. It is a field so a test
 	// can answer for a machine that is not this one.
 	cgroup func() error
+	// overlay answers whether this machine can mount an overlay root in the container's user
+	// namespace. It is a field so a test can answer without one.
+	overlay     func() bool
+	overlayOnce sync.Once
+	overlayOK   bool
 	// supervisor is the program the sandbox runs as its first process. Empty means this binary,
 	// which is the gateway; a test that drives the engine from its own binary names the gateway
 	// binary it built instead, because the test binary is not the program a sandbox should run.
@@ -105,7 +112,7 @@ func youkiArtifact(goos, goarch string) string {
 
 // NewYouki builds the driver. The runtime is installed on first use, as the microVM engine is.
 func NewYouki(dataDir string) *Youki {
-	return &Youki{
+	driver := &Youki{
 		dataDir:  dataDir,
 		state:    filepath.Join(dataDir, "sandboxes", "youki"),
 		base:     youkiReleaseBase + "/v" + youkiVersion,
@@ -116,6 +123,8 @@ func NewYouki(dataDir string) *Youki {
 		devices:  sandbox.HostDevices{Tun: "/dev/net/tun", KVM: "/dev/kvm"},
 		cgroup:   probeCgroup,
 	}
+	driver.overlay = driver.overlaySupported
+	return driver
 }
 
 // WithStateDir moves the engine's folder, as the other engines' drivers do.
@@ -429,10 +438,18 @@ type youkiConfig struct {
 	// decide which engine an inner acornd may pick; the OCI configuration does not change,
 	// because a youki container that nests needs the same three rules at every depth.
 	Nested bool `json:"nested,omitempty"`
-	// Rootfs is the workspace's own unpacked copy of its image, and the runtime's root.path. It
-	// is where an install inside the sandbox lands and stays.
-	Rootfs  string `json:"rootfs,omitempty"`
-	DataDir string `json:"home"`
+	// Rootfs is the runtime's root.path: the workspace's copy of its image in copy mode, and the
+	// empty mountpoint the overlay is mounted on in overlay mode. It is where an install inside
+	// the sandbox lands and stays.
+	Rootfs string `json:"rootfs,omitempty"`
+	// RootMode is "overlay" or "copy"; Base, Upper and Work are the overlay's three paths and are
+	// set only in overlay mode. The OCI mounts bind them under /run/acornd-overlay and mount the
+	// merged root at /.
+	RootMode string `json:"rootMode,omitempty"`
+	Base     string `json:"base,omitempty"`
+	Upper    string `json:"upper,omitempty"`
+	Work     string `json:"work,omitempty"`
+	DataDir  string `json:"home"`
 	// Hidden is the install folder the worker's record shape names. A youki sandbox's root is
 	// its image, so there is nothing of the install folder in it to hide.
 	Hidden   string   `json:"hidden"`
@@ -671,7 +688,11 @@ func (y *Youki) List(ctx context.Context) ([]sandbox.Instance, error) {
 // the container's init inherits it, and a CombinedOutput would wait for an EOF that never comes
 // (issue #47 §10 trap 2).
 func (y *Youki) create(ctx context.Context, name string) error {
-	args := []string{"create", "--bundle", y.workspaceDir(name), "--pid-file", y.pidPath(name), name}
+	config, err := y.readConfig(name)
+	if err != nil {
+		return err
+	}
+	args := y.runtimeArgv(config, "create", "--bundle", y.workspaceDir(name), "--pid-file", y.pidPath(name), name)
 	if err := y.runLogged(ctx, y.logPath(name), args...); err != nil {
 		return fmt.Errorf("%w: youki create: %w", sandbox.ErrUnavailable, err)
 	}
@@ -726,7 +747,7 @@ func (y *Youki) pastaArgv(config youkiConfig, name string) ([]string, error) {
 	if !config.Network.Private {
 		configure = append(configure, sandbox.RefusePrivate)
 	}
-	configure = append(configure, y.binary(), "run", "--bundle", y.workspaceDir(name), "--pid-file", y.pidPath(name), name)
+	configure = append(configure, y.runtimeArgv(config, "run", "--bundle", y.workspaceDir(name), "--pid-file", y.pidPath(name), name)...)
 	return append(argv, configure...), nil
 }
 
@@ -796,7 +817,7 @@ func (y *Youki) runtimePidPath(name string) string {
 
 // start is the runtime's start: the init was created by create, and this tells it to go.
 func (y *Youki) start(ctx context.Context, name string) error {
-	if err := y.runLogged(ctx, y.logPath(name), "start", name); err != nil {
+	if err := y.runLogged(ctx, y.logPath(name), append([]string{y.binary()}, "start", name)...); err != nil {
 		return fmt.Errorf("%w: youki start: %w", sandbox.ErrUnavailable, err)
 	}
 	return nil
@@ -812,9 +833,13 @@ func (y *Youki) delete(ctx context.Context, name string) error {
 // runLogged runs the runtime with its output going to a file. The file is the point: a pipe
 // would keep CombinedOutput waiting for an EOF that only the container's exit closes. WaitDelay
 // is the belt for a runtime that leaves a child behind.
-func (y *Youki) runLogged(ctx context.Context, logPath string, args ...string) error {
+func (y *Youki) runLogged(ctx context.Context, logPath string, argv ...string) error {
+	if len(argv) == 0 {
+		return errors.New("sandbox: no runtime command")
+	}
 	if y.runner != nil {
-		_, err := y.runner.Run(ctx, args...)
+		// A fake runner is the runtime, not the wrapper: it is given the runtime's own args.
+		_, err := y.runner.Run(ctx, argv[1:]...)
 		return err
 	}
 	if !y.Installed() {
@@ -825,7 +850,7 @@ func (y *Youki) runLogged(ctx context.Context, logPath string, args ...string) e
 		return err
 	}
 	defer func() { _ = log.Close() }()
-	command := exec.CommandContext(ctx, y.binary(), args...)
+	command := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	command.Stdout = log
 	command.Stderr = log
 	command.WaitDelay = time.Second
@@ -950,6 +975,16 @@ func (y *Youki) writeConfig(policy sandbox.Policy) (youkiConfig, error) {
 	return config, nil
 }
 
+// overlayEnabled is the probe's answer, taken once: the kernel either mounts an overlay in the
+// container's user namespace or it does not.
+func (y *Youki) overlayEnabled() bool {
+	if y.overlay == nil {
+		return false
+	}
+	y.overlayOnce.Do(func() { y.overlayOK = y.overlay() })
+	return y.overlayOK
+}
+
 // supervisorPath is the binary the sandbox runs as its first process: the one a caller named, or
 // this binary, which is the gateway.
 func (y *Youki) supervisorPath() (string, error) {
@@ -989,7 +1024,7 @@ func (y *Youki) record(policy sandbox.Policy) (youkiConfig, string, error) {
 	if err := y.stateDirs(name); err != nil {
 		return youkiConfig{}, "", err
 	}
-	rootfs, err := sandbox.WorkspaceRootfs(policy, y.StateDir(), name, policy.Image, y.pull)
+	rootfs, root, err := y.workspaceRoot(policy, name)
 	if err != nil {
 		return youkiConfig{}, "", err
 	}
@@ -997,7 +1032,7 @@ func (y *Youki) record(policy sandbox.Policy) (youkiConfig, string, error) {
 	if err != nil {
 		return youkiConfig{}, "", err
 	}
-	workspaceDir, resolvConf, secretProxy, err := y.recordPaths(&policy, name, rootfs, network)
+	workspaceDir, resolvConf, secretProxy, err := y.recordPaths(&policy, name, root.ImageRootsPath(), network)
 	if err != nil {
 		return youkiConfig{}, "", err
 	}
@@ -1016,6 +1051,10 @@ func (y *Youki) record(policy sandbox.Policy) (youkiConfig, string, error) {
 		Network:        network,
 		Nested:         sandbox.NestedFromProcess(),
 		Rootfs:         rootfs,
+		RootMode:       root.Mode,
+		Base:           root.Base,
+		Upper:          root.Upper,
+		Work:           root.Work,
 		DataDir:        filepath.Join(workspaceDir, "home"),
 		Hidden:         y.dataDir,
 		ReadOnly:       sandbox.ReadonlyGlobals(policy),
@@ -1109,4 +1148,38 @@ func (y *Youki) readConfig(name string) (youkiConfig, error) {
 		return youkiConfig{}, fmt.Errorf("sandbox: the youki record for %s is not readable: %w", name, err)
 	}
 	return config, nil
+}
+
+// runtimeArgv is the command that runs the runtime. An overlay root is mounted by the overlay-run
+// helper before the runtime creates the container: youki creates the default devices in the rootfs
+// during create, so the overlay has to be there first, not in a hook after those devices exist.
+func (y *Youki) runtimeArgv(config youkiConfig, args ...string) []string {
+	if config.RootMode != "overlay" {
+		return append([]string{y.binary()}, args...)
+	}
+	return append([]string{
+		config.Supervisor, "internal", "overlay-run",
+		"--base", config.Base,
+		"--upper", config.Upper,
+		"--work", config.Work,
+		"--root", config.Rootfs,
+		"--", y.binary(),
+	}, args...)
+}
+
+// workspaceRoot is the root a workspace runs on: the copy, or the empty mountpoint the overlay-run
+// wrapper mounts the merge on before youki creates the container's default devices.
+func (y *Youki) workspaceRoot(policy sandbox.Policy, name string) (string, sandbox.Root, error) {
+	root, err := sandbox.WorkspaceRoot(policy, y.StateDir(), name, policy.Image, y.pull, y.overlayEnabled())
+	if err != nil {
+		return "", sandbox.Root{}, err
+	}
+	if root.Mode != "overlay" {
+		return root.Rootfs, root, nil
+	}
+	rootfs := filepath.Join(y.workspaceDir(name), "rootfs")
+	if err := os.MkdirAll(rootfs, 0o755); err != nil {
+		return "", sandbox.Root{}, err
+	}
+	return rootfs, root, nil
 }

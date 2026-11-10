@@ -86,6 +86,9 @@ func testBwrap(t *testing.T, dataDir string) (*Bwrap, *fakeBwrap) {
 		WithDevicePaths("", "").
 		WithLookPath(func(string) (string, error) { return "/usr/bin/bwrap", nil })
 	driver.pasta = func(string) error { return nil }
+	// The unit tests run on machines whose bubblewrap may not overlay; a test that is about
+	// the overlay sets this itself.
+	driver.overlay = func(string) bool { return false }
 	return driver, runner
 }
 
@@ -1322,5 +1325,133 @@ func TestANestedSandboxWithoutSysAdminKeepsAUserNamespaceOfItsOwn(t *testing.T) 
 func TestBwrapSubstitutesThroughAControlProxy(t *testing.T) {
 	if !NewBwrap(t.TempDir()).SecretProxyInControl() {
 		t.Error("bwrap substitutes through the proxy control runs for it")
+	}
+}
+
+// The overlay root is one mount over the shared base and this workspace's upper. The argv has to
+// name the lower, the upper and the work dir, and must not also bind a copied tree.
+func TestBwrapOverlayRootMountsTheBaseAndUpper(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	driver.overlay = func(string) bool { return true }
+	workspace := t.TempDir()
+	policy := sandbox.Policy{Workspace: workspace, Image: "debian:stable-slim"}
+	config, err := driver.writeConfig(policy, t.TempDir())
+	if err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if config.RootMode != "overlay" || config.Rootfs != "" {
+		t.Fatalf("root = %q / %q, want an overlay", config.RootMode, config.Rootfs)
+	}
+	if config.Base == "" || config.Upper == "" || config.Work == "" {
+		t.Fatalf("the overlay names %q / %q / %q", config.Base, config.Upper, config.Work)
+	}
+	joined := strings.Join(driver.mountArgs(config), " ")
+	want := "--overlay-src " + config.Base + " --overlay " + config.Upper + " " + config.Work + " /"
+	if !strings.Contains(joined, want) {
+		t.Errorf("mount args do not carry %q:\n%s", want, joined)
+	}
+	if strings.Contains(joined, "--bind "+config.Rootfs+" /") {
+		t.Errorf("an overlay root must not also bind a copy:\n%s", joined)
+	}
+}
+
+// A machine whose probe says no keeps the copy: the same argv a workspace had before the overlay.
+func TestBwrapWithoutOverlayBindsTheCopy(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	driver.overlay = func(string) bool { return false }
+	workspace := t.TempDir()
+	config, err := driver.writeConfig(sandbox.Policy{Workspace: workspace, Image: "debian:stable-slim"}, t.TempDir())
+	if err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if config.RootMode != "copy" || config.Base != "" || config.Rootfs == "" {
+		t.Fatalf("root = %+v, want a copy", config)
+	}
+	joined := strings.Join(driver.mountArgs(config), " ")
+	if !strings.Contains(joined, "--bind "+config.Rootfs+" /") {
+		t.Errorf("the copy is not bound at /:\n%s", joined)
+	}
+	if strings.Contains(joined, "--overlay") {
+		t.Errorf("a copy must not ask for an overlay:\n%s", joined)
+	}
+}
+
+// The probe is the same mount the sandbox will use, with a throwaway upper and the machine's root
+// as the lower. A fake runner records it, so the argv is pinned without a kernel.
+func TestBwrapOverlayProbeRunsTheEngine(t *testing.T) {
+	driver, runner := testBwrap(t, t.TempDir())
+	driver.overlay = driver.overlaySupported
+	if !driver.overlayEnabled("debian:stable-slim") {
+		t.Fatal("a probe that exits 0 should say the machine can overlay")
+	}
+	found := false
+	for _, call := range runner.calls {
+		joined := strings.Join(call, " ")
+		if strings.Contains(joined, "--overlay-src /") && strings.Contains(joined, "--overlay ") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the probe did not mount an overlay: %v", runner.calls)
+	}
+}
+
+// Removing an overlay sandbox takes the delta and leaves the shared base for the next workspace.
+func TestBwrapRemoveTakesTheUpperAndLeavesTheBase(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	driver.overlay = func(string) bool { return true }
+	workspace := t.TempDir()
+	policy := sandbox.Policy{Workspace: workspace, Image: "debian:stable-slim"}
+	config, err := driver.writeConfig(policy, t.TempDir())
+	if err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	name := sandbox.Name(workspace)
+	if err := driver.Remove(context.Background(), name); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	for _, path := range []string{config.Upper, config.Work} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("remove left %s: %v", path, err)
+		}
+	}
+	if info, err := os.Stat(config.Base); err != nil || !info.IsDir() {
+		t.Errorf("remove took the shared base %s: %v", config.Base, err)
+	}
+}
+
+// The real probe, on the machine that runs the tier: the image base and bubblewrap either mount
+// an overlay or they do not. A machine without the capability skips with its reason; the copy
+// fallback is the other shape and is tested above.
+func TestBwrapOverlaysOnThisMachine(t *testing.T) {
+	if os.Getenv("ACORND_BWRAP_ONLY") == "" {
+		t.Skip("the bwrap tier runs this: it needs a real bubblewrap and an image")
+	}
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	dataDir := t.TempDir()
+	driver := NewBwrap(dataDir)
+	if state := os.Getenv("ACORND_SANDBOX_STATE"); state != "" {
+		driver = driver.WithStateDir(state)
+	}
+	if err := driver.Usable(); err != nil {
+		t.Skipf("this machine will not make a user namespace: %v", err)
+	}
+	workspace := t.TempDir()
+	policy := sandbox.Policy{Workspace: workspace, Image: "debian:stable-slim"}
+	config, err := driver.writeConfig(policy, t.TempDir())
+	if err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if !driver.overlayEnabled(policy.Image) {
+		t.Skip("this machine cannot mount an overlay inside a user namespace; the copy fallback is its shape")
+	}
+	if config.RootMode != "overlay" {
+		t.Fatalf("the probe can overlay but the config is %q", config.RootMode)
+	}
+	if config.Base == "" || config.Upper == "" || config.Work == "" {
+		t.Fatalf("the overlay record is incomplete: %+v", config)
+	}
+	if info, err := os.Stat(config.Base); err != nil || !info.IsDir() {
+		t.Fatalf("the shared base is not there: %v", err)
 	}
 }
