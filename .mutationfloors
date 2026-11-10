@@ -18,7 +18,7 @@ internal/control     88  347
 internal/sandbox      100  231
 internal/sandbox/bwrap 100 80
 internal/sandbox/microsandbox 89 112
-internal/sandbox/youki 100  186
+internal/sandbox/youki 100  188
 internal/supervise   85   47
 internal/update      90  258
 internal/vault       95  117

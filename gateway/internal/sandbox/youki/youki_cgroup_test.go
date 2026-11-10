@@ -40,36 +40,51 @@ func TestYoukiCgroupProbeNamesAMissingSubtreeControl(t *testing.T) {
 	}
 }
 
-// A rootless systemd user's process lives in a service or a scope; the sibling `acornd.slice`
-// under the slice that owns it is the cgroup the user can write. The current cgroup is tried
-// second, for a delegated cgroup with no processes, and the root last for a non-systemd machine.
+// A rootless systemd user's process is usually in a login session scope, which systemd does not
+// delegate. The user manager's app.slice is the one it does: every user unit and user scope is
+// there, and the user owns it. The direct parent and the cgroup root are the fallbacks.
 func TestYoukiCgroupCandidatesStartAtTheDelegatedParent(t *testing.T) {
 	for _, tc := range []struct {
 		current string
+		uid     int
 		first   string
 		last    string
 	}{
 		{
 			current: "/user.slice/user-1000.slice/user@1000.service/app.slice/acornfall.service",
+			uid:     1000,
 			first:   "/user.slice/user-1000.slice/user@1000.service/app.slice/acornd.slice",
 			last:    "/acornd.slice",
 		},
 		{
 			current: "/user.slice/user-1000.slice/user@1000.service/service/init",
-			first:   "/user.slice/user-1000.slice/user@1000.service/service/acornd.slice",
+			uid:     1000,
+			first:   "/user.slice/user-1000.slice/user@1000.service/app.slice/acornd.slice",
 			last:    "/acornd.slice",
 		},
 		{
 			current: "/user.slice/user-1000.slice/session-3.scope",
-			first:   "/user.slice/user-1000.slice/acornd.slice",
+			uid:     1000,
+			first:   "/user.slice/user-1000.slice/user@1000.service/app.slice/acornd.slice",
 			last:    "/acornd.slice",
 		},
-		{current: "/", first: "/acornd.slice", last: "/acornd.slice"},
+		{current: "/", uid: 1000, first: "/user.slice/user-1000.slice/user@1000.service/app.slice/acornd.slice", last: "/acornd.slice"},
+		{current: "/", uid: 0, first: "/acornd.slice", last: "/acornd.slice"},
 	} {
-		candidates := cgroupCandidates(tc.current)
+		candidates := cgroupCandidates(tc.current, tc.uid)
 		if len(candidates) == 0 || candidates[0] != tc.first || candidates[len(candidates)-1] != tc.last {
-			t.Errorf("candidates(%q) = %v, want first %q and last %q", tc.current, candidates, tc.first, tc.last)
+			t.Errorf("candidates(%q, %d) = %v, want first %q and last %q", tc.current, tc.uid, candidates, tc.first, tc.last)
 		}
+	}
+}
+
+// The exact case the interface reports: a login session scope, whose own parent is root-owned,
+// and the user manager's app.slice is the writable delegated slice.
+func TestYoukiCgroupCandidatesUseTheUserManagerForALoginSession(t *testing.T) {
+	got := cgroupCandidates("/user.slice/user-1000.slice/session-c1.scope", 1000)
+	want := "/user.slice/user-1000.slice/user@1000.service/app.slice/acornd.slice"
+	if len(got) == 0 || got[0] != want {
+		t.Fatalf("candidates for a login session = %v, want first %q", got, want)
 	}
 }
 
@@ -208,5 +223,31 @@ func TestYoukiPrepareProbesTheCgroupBeforeTheRecord(t *testing.T) {
 	err := y.Prepare(context.Background(), sandbox.Policy{}, "")
 	if err == nil || !strings.Contains(err.Error(), "no delegated cgroup") {
 		t.Fatalf("Prepare should refuse before writing a record: %v", err)
+	}
+}
+
+// The failure the interface showed: the process is in a login session scope, its direct parent
+// is root-owned, and the writable cgroup is the user manager's app.slice. The probe has to try
+// that slice before it reports that the machine delegates nothing.
+func TestYoukiProbeUsesTheUserManagerAppSliceForALoginSession(t *testing.T) {
+	root := t.TempDir()
+	oldMount, oldCurrent, oldUID := cgroupMount, currentCgroupPath, processUID
+	cgroupMount = root
+	currentCgroupPath = func() string { return "/user.slice/user-1000.slice/session-c1.scope" }
+	processUID = func() int { return 1000 }
+	t.Cleanup(func() { cgroupMount, currentCgroupPath, processUID = oldMount, oldCurrent, oldUID })
+	if err := os.WriteFile(filepath.Join(root, "cgroup.controllers"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	app := "/user.slice/user-1000.slice/user@1000.service/app.slice"
+	fakeCgroup(t, root, app, "cpu memory pids\n")
+	fakeCgroup(t, root, app+"/acornd.slice", "")
+
+	y := NewYouki(t.TempDir())
+	if err := y.cgroup(); err != nil {
+		t.Fatalf("probe the user manager's app.slice: %v", err)
+	}
+	if want := app + "/acornd.slice"; y.cgroupParent != want {
+		t.Fatalf("parent = %q, want %q", y.cgroupParent, want)
 	}
 }

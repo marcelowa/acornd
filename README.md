@@ -176,7 +176,7 @@ workspace refuses its tools, and `acornd doctor` says what each engine is missin
 |---|---|---|
 | `microsandbox` | One microVM (a small virtual machine) per workspace. The strongest boundary. | A hypervisor: `/dev/kvm` on Linux, the system hypervisor on macOS. It fetches a 72 MB engine on first use. |
 | `bwrap` | The workspace's own image in one long-lived bubblewrap sandbox, over a shared image base. Beta. | Linux, a user namespace, and pasta for its network: `apt install bubblewrap passt`. No KVM. On Ubuntu 26.04 and later, pasta's AppArmor profile has to be off, which `acornd setup` does. |
-| `youki` | The workspace's own image in an OCI container, over a shared image base, with a policy file, a cgroup budget and secrets through the gateway's proxy. Selectable per workspace; not a default yet. | Linux, a user namespace, a delegated cgroup v2 for its budget (on systemd the user's own slice works; no root needed), and pasta for its network. It fetches a 7.8 MB runtime on first use, and the chooser offers it before that. |
+| `youki` | The workspace's own image in an OCI container, over a shared image base, with a policy file, a cgroup budget and secrets through the gateway's proxy. Selectable per workspace; not a default yet. | Linux, a user namespace, a delegated cgroup v2 for its budget (on systemd the user manager's `app.slice` works; no root needed), and pasta for its network. It fetches a 7.8 MB runtime on first use, and the chooser offers it before that. |
 
 - The workspace folder is mounted read-write at its own path. The global resource folders
   (`~/.agents`, the install's agents, skills, prompts, commands) are read-only at their own paths.

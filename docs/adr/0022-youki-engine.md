@@ -223,10 +223,12 @@ Short list, because the rest is done:
 The absolute `cgroupsPath` is still what selects the cgroupfs manager, but `/acornd.slice` is
 the cgroup root, and a normal user cannot write it. A rootless systemd user's process lives in a
 service or a session scope under their own slice, and that slice is delegated: `acornd.slice`
-belongs beside the service, not at `/`. The driver now probes the candidates in order — the
-sibling `acornd.slice` under the current cgroup's parent (the delegated user slice), a child of
-the current cgroup, then `/acornd.slice` for a non-systemd root that can write it — enables
-`+memory +cpu` in the parent and the child, and records the chosen parent in the spec. It also
+belongs beside the service, not at `/`. A login session is a `session-*.scope` systemd does not
+delegate either; the user manager's `app.slice` is the delegated one a session process can write.
+The driver probes the candidates in order — that `app.slice` first, the sibling `acornd.slice`
+under the current cgroup's parent, a child of the current cgroup, then `/acornd.slice` for a
+non-systemd root that can write it — enables `+memory +cpu` in the parent and the child, and
+records the chosen parent in the spec. It also
 probes from `Prepare`: a direct `Create` does not go through the manager's `Usable`, and a record
 written with the fallback path is a runtime that fails opening its `cpu.max` after creating the
 container. Measured as `marcelo` on acornd-1 inside `systemd-run --user --scope`: the full youki

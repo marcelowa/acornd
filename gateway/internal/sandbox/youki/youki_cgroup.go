@@ -65,18 +65,26 @@ func currentCgroup() string {
 // whose cgroup differs from this process's, without a cgroup namespace.
 var currentCgroupPath = currentCgroup
 
-// cgroupCandidates is where a sandbox's parent can live, best first. The first is the delegated
-// cgroup above this process: on a systemd user service the process is the service itself or its
-// `init` subgroup, and the sibling `acornd.slice` under the service's slice is the one the user
-// owns. The second is a child of the current cgroup, for a delegated cgroup that has no
-// processes. The root is the last answer, for a non-systemd machine where acornd can write it.
-func cgroupCandidates(current string) []string {
+// processUID is this process's uid for the user-manager path. It is a variable for the same
+// reason: a test can be a user whose manager slice it can build in a temporary cgroup root.
+var processUID = os.Getuid
+
+// cgroupCandidates is where a sandbox's parent can live, best first. The user manager's
+// app.slice comes first: a login session's own cgroup is a scope systemd does not delegate, but
+// every user unit and `systemd-run --user --scope` lives under app.slice, which the user owns.
+// Next is the sibling `acornd.slice` above this process (a service under app.slice), then a child
+// of the current cgroup for a delegated cgroup with no processes, and the root last for a
+// non-systemd machine where acornd can write it.
+func cgroupCandidates(current string, uid int) []string {
 	var candidates []string
 	add := func(candidate string) {
 		if candidate == "" || slices.Contains(candidates, candidate) {
 			return
 		}
 		candidates = append(candidates, candidate)
+	}
+	if uid > 0 {
+		add(fmt.Sprintf("/user.slice/user-%d.slice/user@%d.service/app.slice/%s", uid, uid, cgroupChild))
 	}
 	if current != "" && current != "/" && current != "." {
 		add(path.Join(path.Dir(current), cgroupChild))
@@ -94,7 +102,7 @@ func (y *Youki) probeCgroup() error {
 		return fmt.Errorf("this machine has no cgroup v2 mount, so a youki sandbox cannot have a budget: %w", err)
 	}
 	var failures []string
-	for _, parent := range cgroupCandidates(currentCgroupPath()) {
+	for _, parent := range cgroupCandidates(currentCgroupPath(), processUID()) {
 		if err := prepareCgroup(parent); err != nil {
 			failures = append(failures, fmt.Sprintf("%s: %v", parent, err))
 			continue
@@ -102,7 +110,7 @@ func (y *Youki) probeCgroup() error {
 		y.cgroupParent = parent
 		return nil
 	}
-	return fmt.Errorf("this machine does not delegate a cgroup to the sandbox, so a youki sandbox cannot have a budget (tried %s); on systemd run acornd in a unit with Delegate=yes and DelegateSubgroup=init, or in a non-systemd cgroup root you own", strings.Join(failures, "; "))
+	return fmt.Errorf("this machine does not delegate a cgroup to the sandbox, so a youki sandbox cannot have a budget (tried %s); on systemd start acornd as a user unit or scope (the user's app.slice is delegated), or in a unit with Delegate=yes and DelegateSubgroup=init; on a non-systemd host use a cgroup root you own", strings.Join(failures, "; "))
 }
 
 // prepareCgroup makes one candidate usable: the controllers are enabled in its parent, then in
