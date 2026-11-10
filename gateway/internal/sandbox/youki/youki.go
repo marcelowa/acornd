@@ -313,7 +313,9 @@ func (y *Youki) Usable() error {
 		return fmt.Errorf("%w: youki is a Linux runtime, and this machine is %s", sandbox.ErrUnavailable, runtime.GOOS)
 	}
 	if !y.Installed() {
-		return fmt.Errorf("%w: the youki runtime is not installed at %s (acornd fetches the pinned release on first use)", sandbox.ErrUnavailable, y.binary())
+		// The runtime is fetched on first use. The machine facts below are what a report-only
+		// probe can answer without it; the first workspace installs, then asks again.
+		return y.cgroup()
 	}
 	dir, err := os.MkdirTemp("", "acornd-youki-probe-")
 	if err != nil {

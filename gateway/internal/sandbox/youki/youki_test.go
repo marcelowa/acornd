@@ -420,17 +420,16 @@ func TestYoukiProbesNameWhatIsMissing(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("youki is a Linux runtime: the probes this pins are the machine's answers on Linux")
 	}
-	t.Run("not installed", func(t *testing.T) {
+	t.Run("not installed is a download", func(t *testing.T) {
 		driver := NewYouki(t.TempDir())
 		if driver.Installed() {
 			t.Fatal("Installed said yes with no binary")
 		}
-		err := driver.Usable()
-		if err == nil || !errors.Is(err, sandbox.ErrUnavailable) {
-			t.Fatalf("Usable should refuse a machine without the runtime: %v", err)
-		}
-		if !strings.Contains(err.Error(), "not installed") || !strings.Contains(err.Error(), driver.binary()) {
-			t.Errorf("the refusal should name the missing binary: %v", err)
+		// The runtime is fetched on first use, so a report-only probe answers the machine
+		// questions without it: the UI must offer the engine and say it downloads.
+		driver.cgroup = func() error { return nil }
+		if err := driver.Usable(); err != nil {
+			t.Fatalf("a machine with a cgroup but no runtime yet should be offered: %v", err)
 		}
 	})
 	t.Run("no user namespace", func(t *testing.T) {

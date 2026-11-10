@@ -230,7 +230,9 @@ the current cgroup, then `/acornd.slice` for a non-systemd root that can write i
 probes from `Prepare`: a direct `Create` does not go through the manager's `Usable`, and a record
 written with the fallback path is a runtime that fails opening its `cpu.max` after creating the
 container. Measured as `marcelo` on acornd-1 inside `systemd-run --user --scope`: the full youki
-tier and the W18–W23 e2e rows pass, including the budget.
+tier and the W18–W23 e2e rows pass, including the budget. The engine list offers youki
+before the runtime is installed: the runtime is fetched by the first workspace, so only the
+cgroup and user-namespace facts are report-only probes.
 
 ## Amendment — 2026-11-10: R7 is built
 
