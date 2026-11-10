@@ -27,6 +27,9 @@ func netnsCommand(argv []string) {
 	// Exec, not spawn: this process is the sandbox's first, so its pid, its exit status, and
 	// the signals sent to it belong to what runs next.
 	if err := syscall.Exec(command[0], command, os.Environ()); err != nil {
-		log.Fatalf("acornd netns: cannot run %s: %v", command[0], err)
+		// %q, because the command comes from the argv and an escaped newline cannot start a log
+		// record the caller did not write. Gosec's taint analysis follows the value, not the verb.
+		// #nosec G706 -- %q escapes the control characters a log injection needs.
+		log.Fatalf("acornd netns: cannot run %q: %v", command[0], err)
 	}
 }
