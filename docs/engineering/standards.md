@@ -193,6 +193,10 @@ dependency.
 The floors are the one standard that a pull request is most tempted to edit rather than meet, so
 `make floors` compares both files with `origin/main` rather than with their own promise: a number
 that moves down fails, and so does a floor line deleted while its package is still in the tree.
+A package split is the one move that is not a fall: the code and its tests leave the parent for
+named subpackages, so the check counts the parent plus the subpackage rows against the old killed
+floor, and every new package gets its own ratchet. A parent that loses assertions without that
+move is still a failure.
 
 None of this is enforced by a machine unless it runs on every change: `.github/workflows/ci.yml`
 runs on every push, in jobs that share one setup action (`.github/actions/setup`), and `verify` is

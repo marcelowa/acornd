@@ -9,6 +9,11 @@
 // What is checked, and what is deliberately not:
 //
 //   - a floor that falls is a failure, coverage and both mutation numbers;
+//   - a package split is the one move that is not a fall: code and its tests leave a package
+//     for named subpackages, so the parent's killed count drops while the sum the old floor
+//     promised moves with them. The parent plus the new subpackages must still meet the old
+//     killed floor, and every new package has its own row; a drop that is not accounted for
+//     this way is still a failure.
 //   - a floor line that disappears while its package is still in the tree is a failure, because
 //     that is the same move written the other way;
 //   - a floor that rises is reported and passes — the file is edited by hand, and the person who
@@ -86,7 +91,7 @@ function compare(kind, name, was, now, violations, raises) {
 	else raises.push(`${name}: ${moved}`);
 }
 
-function judge(kind, base, head, violations, raises, exists) {
+function judge(kind, base, head, violations, raises, splits, exists) {
 	let compared = 0;
 	for (const [name, was] of base) {
 		compared += 1;
@@ -97,9 +102,37 @@ function judge(kind, base, head, violations, raises, exists) {
 			}
 			continue;
 		}
+		// A package split moves mutants into subpackages. The killed count is the number that
+		// can be added up; efficacy is a ratio, and each moved package carries its own row. A
+		// split needs a subpackage that is new to this tree, so a parent that simply lost
+		// assertions cannot borrow an old neighbour's count.
+		if (kind === "mutation" && now[1] < was[1] && hasNewDescendant(name, head, base)) {
+			const moved = subpackageKilled(name, head);
+			if (now[1] + moved >= was[1]) {
+				splits.push(`${name}: ${was.join("/")} -> ${now.join("/")} + ${moved} in subpackages (mutation)`);
+				continue;
+			}
+		}
 		compare(kind, name, was, now, violations, raises);
 	}
 	return compared;
+}
+
+/** Whether a package gained a subpackage floor in this tree: the shape of a split. */
+function hasNewDescendant(name, head, base) {
+	for (const child of head.keys()) {
+		if (child.startsWith(name + "/") && !base.has(child)) return true;
+	}
+	return false;
+}
+
+/** The killed floors of a package's subpackages: what the old parent floor used to include. */
+function subpackageKilled(name, head) {
+	let total = 0;
+	for (const [child, values] of head) {
+		if (child.startsWith(name + "/")) total += values[1] ?? 0;
+	}
+	return total;
 }
 
 const base = option("--base") ?? "origin/main";
@@ -123,8 +156,9 @@ const inTree = (name) => existsSync(join("gateway", name));
 
 const violations = [];
 const raises = [];
-const coverageCount = judge("coverage", baseCoverage, headCoverage, violations, raises, inTree);
-const mutationCount = judge("mutation", baseMutation, headMutation, violations, raises, inTree);
+const splits = [];
+const coverageCount = judge("coverage", baseCoverage, headCoverage, violations, raises, splits, inTree);
+const mutationCount = judge("mutation", baseMutation, headMutation, violations, raises, splits, inTree);
 
 if (violations.length > 0) {
 	console.error(`floors in ${COVERAGE} and ${MUTATION} may only move up (standards.md S10):`);
@@ -138,6 +172,7 @@ if (violations.length > 0) {
 
 const raiseText = raises.length === 0 ? "none moved" : `${raises.length} raised`;
 console.log(
-	`floors: ${coverageCount} coverage and ${mutationCount} mutation packages, compared with ${base}, ${raiseText}`,
+	`floors: ${coverageCount} coverage and ${mutationCount} mutation packages, compared with ${base}, ${raiseText}${splits.length === 0 ? "" : `, ${splits.length} split`}`,
 );
 for (const raise of raises) console.log(`  raised  ${raise}`);
+for (const split of splits) console.log(`  split   ${split}`);

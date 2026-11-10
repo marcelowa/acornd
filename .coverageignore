@@ -8,9 +8,9 @@
 # it is outside the denominator and outside the 3%. The cap is for code that is compiled and
 # reachable, which is exactly the code that must not be excluded.
 
-internal/sandbox/nested_darwin.go -- platform: only compiled on darwin, cannot run on the CI host
-internal/sandbox/nested_other.go -- platform: only compiled off darwin
-internal/sandbox/kvm_other.go -- platform: only compiled off linux
+internal/sandbox/microsandbox/nested_darwin.go -- platform: only compiled on darwin, cannot run on the CI host
+internal/sandbox/microsandbox/nested_other.go -- platform: only compiled off darwin
+internal/sandbox/microsandbox/kvm_other.go -- platform: only compiled off linux
 internal/sandbox/lock_other.go -- platform: only compiled off unix
 internal/sandbox/runtime_other.go -- platform: only compiled off unix
 internal/netns/netns_other.go -- platform: only compiled off linux

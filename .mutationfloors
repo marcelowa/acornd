@@ -9,9 +9,15 @@
 # So: the efficacy floor may sit below the highest observation and tolerates that dip; the killed
 # floor may only move up, and it is checked separately.
 #
-# Measured 2026-10-27.
+# Measured 2026-10-27; the sandbox rows were re-measured 2026-11-10 after the driver split.
+#
+# The split is a move, not a loss: the parent's 389 was one sweep over the shared package and its
+# driver subdirectories because gremlins walks a tree. Each row below is one of those packages
+# with its own tests; 190 + 86 + 112 + 159 = 547, and the four sweeps run in parallel.
 internal/control     88  347
-internal/sandbox      100  389
+internal/sandbox      100  190
+internal/sandbox/bwrap 100 86
+internal/sandbox/microsandbox 89 112
 internal/sandbox/youki 100  159
 internal/supervise   85   47
 internal/update      90  258
@@ -62,3 +68,10 @@ internal/people      98   66
 # end-to-end suite, and gremlins only runs the package's own. A number from them would report the
 # absence of unit tests, not the strength of the tests. Their signal is coverage through the
 # feature suite, and `make cover` says it.
+#
+# microsandbox's thirteen survivors are the machine's own edges, not a gap: kvm_linux.go:25/31/35
+# read the KVM group and its name, microsandbox.go:90 is the default state folder, :138/:172 are
+# install steps that refuse, :151 a client left unset, :235 a platform without Linux ownership,
+# :377 the state-path boundary, microsandbox_secrets.go:310 a secret removal that fails, and
+# nested_linux.go:27 a missing KVM parameter file. Each needs a seam that would exist only to be
+# broken.

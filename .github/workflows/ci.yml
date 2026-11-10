@@ -198,13 +198,14 @@ jobs:
   mutation-targets:
     # Mutation testing on the packages a change touches. It was the weekly report and nothing
     # else, so a pull request that deleted an assertion was green until Monday and then filed an
-    # issue. Now the diff decides which packages are swept, `--max` bounds the cost at two of
+    # issue. Now the diff decides which packages are swept, `--max` bounds the cost at four of
     # them, and a survivor fails the run: an assertion that stopped distinguishing is exactly the
     # standard going down quietly.
     #
     # The list is its own job because a matrix has to be known before the sweep starts. One job
     # per package, each on its own runner, pays the slowest package instead of the sum: the
-    # sandbox's 5m47s plus youki's 2m12s became 5m47s.
+    # sandbox's 5m47s plus youki's 2m12s became 5m47s. After the driver split, the shared package
+    # and its three drivers are four sweeps and the run pays the slowest.
     runs-on: ubuntu-26.04
     outputs:
       packages: ${{ steps.targets.outputs.packages }}
@@ -220,14 +221,14 @@ jobs:
       - name: Decide what to sweep
         id: targets
         run: |
-          list=$(bun scripts/mutation-targets.mjs --base origin/main --max 2)
+          list=$(bun scripts/mutation-targets.mjs --base origin/main --max 4)
           packages=$(printf '%s\n' "$list" | jq -R -s -c 'split("\n") | map(select(length > 0))')
           echo "packages=$packages" >> "$GITHUB_OUTPUT"
           echo "sweeping: ${list:-nothing}"
 
   mutations:
     # One job per package. The loop this replaces paid the sum of the sweeps; the matrix pays
-    # the slowest, because each package gets its own runner. `--max 2` still bounds the cost.
+    # the slowest, because each package gets its own runner. `--max 4` still bounds the cost.
     #
     # The timeout coefficient is gremlins' per-mutant allowance multiplied by the coverage run's
     # wall time, and a mutant that spins costs all of it. At the default 500 one identity mutant
