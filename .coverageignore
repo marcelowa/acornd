@@ -17,3 +17,4 @@ internal/netns/netns_other.go -- platform: only compiled off linux
 cmd/acornd/setupcred_other.go -- platform: credentials come from the OS keyring, linux only
 cmd/acornd/tty_other.go -- platform: terminal handling is a unix syscall, windows only
 internal/sandbox/youki/youki_device_other.go -- platform: only compiled off linux
+internal/sandbox/overlay_linux.go -- root-only: the overlay mount needs CAP_SYS_ADMIN, which the CI runner does not have; the youki live tier runs it on acornd-1

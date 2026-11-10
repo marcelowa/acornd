@@ -94,6 +94,8 @@ func testYouki(t *testing.T, dataDir string) (*Youki, *fakeYouki) {
 	driver.pasta = func(string) error { return nil }
 	// The cgroup probe is the machine's, and a unit test of the argv must not create one.
 	driver.cgroup = func() error { return nil }
+	// The unit tests keep the copy root: a test that is about the overlay sets this itself.
+	driver.overlay = func() bool { return false }
 	installFakeYouki(t, driver)
 	return driver, runner
 }
@@ -813,5 +815,49 @@ func TestYoukiRestartsOnlyWhenTheProxyForwardChanges(t *testing.T) {
 	without.SecretProxy = nil
 	if restart, err := driver.RestartRequired(context.Background(), without); err != nil || !restart {
 		t.Fatalf("removing the proxy should restart: %v %v", restart, err)
+	}
+}
+
+// The overlay root is not an OCI mount: youki creates its default devices in the rootfs before a
+// hook could mount one, so the runtime is run under a private mount namespace that mounts the
+// overlay first. The record says which shape it is, and the runtime argv carries the wrapper.
+func TestYoukiOverlayRecordAndRuntimeArgv(t *testing.T) {
+	driver, _ := testYouki(t, t.TempDir())
+	driver.overlay = func() bool { return true }
+	workspace := t.TempDir()
+	if err := driver.Prepare(context.Background(), sandbox.Policy{Workspace: workspace, Image: "debian:stable-slim"}, t.TempDir()); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	config, err := driver.readConfig(sandbox.Name(workspace))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.RootMode != "overlay" || config.Base == "" || config.Upper == "" || config.Work == "" {
+		t.Fatalf("the record is not an overlay: %+v", config)
+	}
+	if config.Rootfs != filepath.Join(driver.workspaceDir(sandbox.Name(workspace)), "rootfs") {
+		t.Errorf("root.path = %q, want the empty mountpoint", config.Rootfs)
+	}
+	spec := mustYoukiSpec(t, config)
+	for _, mount := range spec.Mounts {
+		if mount.Destination == "/" && mount.Type == "overlay" {
+			t.Error("the overlay must be mounted before the runtime, not in the OCI mounts")
+		}
+	}
+	argv := driver.runtimeArgv(config, "create")
+	if len(argv) < 3 || argv[0] != config.Supervisor || argv[1] != "internal" || argv[2] != "overlay-run" {
+		t.Fatalf("the runtime should run under overlay-run: %v", argv)
+	}
+	joined := strings.Join(argv, " ")
+	for _, want := range []string{"--base " + config.Base, "--upper " + config.Upper, "--work " + config.Work, "--root " + config.Rootfs, "-- " + driver.binary() + " create"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("runtime argv is missing %q: %s", want, joined)
+		}
+	}
+
+	config.RootMode = "copy"
+	plain := driver.runtimeArgv(config, "create")
+	if len(plain) == 0 || plain[0] != driver.binary() || plain[len(plain)-1] != "create" {
+		t.Fatalf("a copy root should run the runtime directly: %v", plain)
 	}
 }

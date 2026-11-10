@@ -278,7 +278,8 @@ func youkiProcessEnv() []string {
 // mounts come first; the device binds land after /dev, as bwrap orders them; and the workspace,
 // its home, the socket's folder, the resolver and this binary are the binds the policy decides.
 func youkiMounts(config youkiConfig) []ociMount {
-	mounts := []ociMount{
+	var mounts []ociMount
+	mounts = append(mounts, []ociMount{
 		{Destination: "/proc", Type: "proc", Source: "proc", Options: []string{}},
 		{Destination: "/dev", Type: "tmpfs", Source: "tmpfs", Options: []string{"nosuid", "strictatime", "mode=755", "size=65536k"}},
 		{Destination: "/dev/pts", Type: "devpts", Source: "devpts", Options: []string{"nosuid", "noexec", "newinstance", "ptmxmode=0666", "mode=0620"}},
@@ -291,7 +292,7 @@ func youkiMounts(config youkiConfig) []ociMount {
 		// The workspace's root is its image; /tmp is a tmpfs so a command's scratch files do not
 		// become the next command's, which is what bwrap's --tmpfs /tmp gives.
 		{Destination: "/tmp", Type: "tmpfs", Source: "tmpfs", Options: []string{"nosuid", "nodev", "mode=1777"}},
-	}
+	}...)
 	mounts = append(mounts, ociMount{
 		Destination: "/etc/resolv.conf",
 		Type:        "bind",

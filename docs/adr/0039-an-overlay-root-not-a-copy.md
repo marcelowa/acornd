@@ -118,9 +118,13 @@ deletes the workspace folder, which holds the upper and the work dir, and leaves
 `images` for the next workspace. A machine that cannot overlay keeps the copy path exactly as it
 was; the bwrap tier's driver test skips with that reason and the e2e rows run on either shape.
 
-This is bwrap's root. youki still copies its image: an OCI `root.path` is a directory, so the same
-overlay needs a `createRuntime` hook rather than an argv flag (the PRD's sequencing), and it is not
-part of this build.
+youki uses the same base/upper/work layout, with one difference in how the mount is made: an
+OCI `createRuntime` hook runs after the runtime has created the default devices in the rootfs, so
+mounting the overlay there hides `/dev/null` and the container fails; a private mount namespace
+around `youki create` (and `youki run` when pasta is in front) mounts the overlay before those
+devices exist and the runtime keeps it. The wrapper is `acornd internal overlay-run`; a gateway
+that cannot make a private mount namespace (a non-root user without CAP_SYS_ADMIN) keeps the copy,
+and the probe says so before a workspace is created.
 
 Tests added by the build: `TestTwoWorkspacesShareOneImageBase`,
 `TestBwrapOverlayRootMountsTheBaseAndUpper`, `TestBwrapRemoveTakesTheUpperAndLeavesTheBase`,
