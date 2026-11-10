@@ -1,6 +1,6 @@
 //go:build !linux
 
-package sandbox
+package microsandbox
 
 // kvmHint is empty where there is no /dev/kvm to explain.
 func kvmHint() string { return "" }

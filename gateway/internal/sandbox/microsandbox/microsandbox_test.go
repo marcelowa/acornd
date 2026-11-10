@@ -1,4 +1,4 @@
-package sandbox
+package microsandbox
 
 import (
 	"archive/tar"
@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -97,7 +98,7 @@ func TestInstallRefusesAMismatchedChecksum(t *testing.T) {
 	defer server.Close()
 
 	err := testDriver(t, server.URL, server.Client()).Install(context.Background(), nil)
-	if !errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "checksum mismatch") {
+	if !errors.Is(err, sandbox.ErrUnavailable) || !strings.Contains(err.Error(), "checksum mismatch") {
 		t.Fatalf("want a checksum refusal, got %v", err)
 	}
 	if driver := testDriver(t, server.URL, server.Client()); driver.Installed() {
@@ -111,7 +112,7 @@ func TestInstallRefusesAnUnlistedArtifact(t *testing.T) {
 	defer server.Close()
 
 	err := testDriver(t, server.URL, server.Client()).Install(context.Background(), nil)
-	if !errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "not in the release checksums") {
+	if !errors.Is(err, sandbox.ErrUnavailable) || !strings.Contains(err.Error(), "not in the release checksums") {
 		t.Fatalf("want a missing-checksum refusal, got %v", err)
 	}
 }
@@ -120,14 +121,14 @@ func TestInstallRefusesAnUnlistedArtifact(t *testing.T) {
 // refuse members that would land outside the destination.
 func TestUnpackRefusesAPathThatEscapes(t *testing.T) {
 	payload := archive(t, map[string]string{"../escape": "owned\n"})
-	if err := UnpackVerified(bytes.NewReader(payload), "", t.TempDir()); !errors.Is(err, ErrUnavailable) {
+	if err := sandbox.UnpackVerified(bytes.NewReader(payload), "", t.TempDir()); !errors.Is(err, sandbox.ErrUnavailable) {
 		t.Fatalf("want a refusal, got %v", err)
 	}
 }
 
 func TestUnpackRefusesAnAbsolutePath(t *testing.T) {
 	payload := archive(t, map[string]string{"/etc/passwd": "owned\n"})
-	if err := UnpackVerified(bytes.NewReader(payload), "", t.TempDir()); !errors.Is(err, ErrUnavailable) {
+	if err := sandbox.UnpackVerified(bytes.NewReader(payload), "", t.TempDir()); !errors.Is(err, sandbox.ErrUnavailable) {
 		t.Fatalf("want a refusal, got %v", err)
 	}
 }
@@ -143,7 +144,7 @@ func TestUnpackKeepsRelativeSymlinks(t *testing.T) {
 	writer.Close()
 
 	dest := t.TempDir()
-	if err := UnpackVerified(bytes.NewReader(buffer.Bytes()), "", dest); err != nil {
+	if err := sandbox.UnpackVerified(bytes.NewReader(buffer.Bytes()), "", dest); err != nil {
 		t.Fatal(err)
 	}
 	target, err := os.Readlink(filepath.Join(dest, "lib", "libkrunfw.so.1"))
@@ -169,9 +170,9 @@ func TestLoadNamesAnswerForBothPlatforms(t *testing.T) {
 // The policy file is the engine's format, so it is the driver that owns it. A mount is full
 // of colons and none of them need quoting; a folder called "a: b" does.
 func TestRenderPinsTheWholePolicy(t *testing.T) {
-	policy := Policy{Image: "golang:1.24", CPUs: 4, Memory: "4G", Egress: true, Workspace: "/home/me/work", IdleTimeout: "1h",
+	policy := sandbox.Policy{Image: "golang:1.24", CPUs: 4, Memory: "4G", Egress: true, Workspace: "/home/me/work", IdleTimeout: "1h",
 		Global: []string{"/home/me/.agents"}}
-	got := string(policy.render(owner{uid: 1000, gid: 1000, mapFiles: true}))
+	got := string(renderWithOwner(policy, owner{uid: 1000, gid: 1000, mapFiles: true}))
 	want := "" +
 		"image: golang:1.24\n" +
 		"cpus: 4\n" +
@@ -189,8 +190,8 @@ func TestRenderPinsTheWholePolicy(t *testing.T) {
 // scripts, and a write into them from inside the sandbox is refused rather than quietly
 // changing the instructions every future conversation will read.
 func TestRenderMountsTheGlobalsReadOnly(t *testing.T) {
-	policy := Policy{Workspace: "/w", Global: []string{"/home/me/.agents", "/home/me/.acornd/config.json"}}
-	got := string(policy.render(owner{mapFiles: false}))
+	policy := sandbox.Policy{Workspace: "/w", Global: []string{"/home/me/.agents", "/home/me/.acornd/config.json"}}
+	got := string(renderWithOwner(policy, owner{mapFiles: false}))
 	for _, want := range []string{
 		"  - /home/me/.agents:/home/me/.agents:ro\n",
 		"  - /home/me/.acornd/config.json:/home/me/.acornd/config.json:ro\n",
@@ -207,17 +208,17 @@ func TestRenderMountsTheGlobalsReadOnly(t *testing.T) {
 // The engine's default network is an open one, so silence would mean yes. A workspace whose
 // egress is off has to say so.
 func TestRenderSaysNoToTheNetwork(t *testing.T) {
-	if got := string(Policy{Workspace: "/w", Egress: false}.render(owner{})); !strings.Contains(got, "network: none\n") {
+	if got := string(renderWithOwner(sandbox.Policy{Workspace: "/w", Egress: false}, owner{})); !strings.Contains(got, "network: none\n") {
 		t.Errorf("egress off should be explicit, got:\n%s", got)
 	}
-	if got := string(Policy{Workspace: "/w", Egress: true}.render(owner{})); strings.Contains(got, "network:") {
+	if got := string(renderWithOwner(sandbox.Policy{Workspace: "/w", Egress: true}, owner{})); strings.Contains(got, "network:") {
 		t.Errorf("egress on should leave the engine's default alone, got:\n%s", got)
 	}
 }
 
 func TestRenderDefaultsTheUnset(t *testing.T) {
-	got := string(Policy{Workspace: "/w"}.render(owner{}))
-	for _, want := range []string{"image: " + DefaultImage, "cpus: 2", "memory: 2G", "idle_timeout: 30m"} {
+	got := string(renderWithOwner(sandbox.Policy{Workspace: "/w"}, owner{}))
+	for _, want := range []string{"image: " + sandbox.DefaultImage, "cpus: 2", "memory: 2G", "idle_timeout: 30m"} {
 		if !strings.Contains(got, want+"\n") {
 			t.Errorf("default %q missing from:\n%s", want, got)
 		}
@@ -225,7 +226,7 @@ func TestRenderDefaultsTheUnset(t *testing.T) {
 }
 
 func TestRenderQuotesAnAwkwardPath(t *testing.T) {
-	got := string(Policy{Workspace: "/home/me/od d: name"}.render(owner{uid: 1, gid: 2, mapFiles: true}))
+	got := string(renderWithOwner(sandbox.Policy{Workspace: "/home/me/od d: name"}, owner{uid: 1, gid: 2, mapFiles: true}))
 	if !strings.Contains(got, `"/home/me/od d: name:/home/me/od d: name:uid=1,gid=2"`) {
 		t.Errorf("a path with a colon and a space has to be quoted, got:\n%s", got)
 	}
@@ -233,7 +234,7 @@ func TestRenderQuotesAnAwkwardPath(t *testing.T) {
 
 // macOS shares files as the user already, and the ownership options are a Linux answer.
 func TestRenderLeavesOwnershipAloneOffLinux(t *testing.T) {
-	got := string(Policy{Workspace: "/Users/me/work"}.render(owner{mapFiles: false}))
+	got := string(renderWithOwner(sandbox.Policy{Workspace: "/Users/me/work"}, owner{mapFiles: false}))
 	if strings.Contains(got, "uid=") {
 		t.Errorf("ownership should not be invented where the platform maps it, got:\n%s", got)
 	}
@@ -245,7 +246,7 @@ func TestTheLifecycleCallsTheEngineAsDocumented(t *testing.T) {
 	driver := NewMicrosandbox(shortTempDir(t)).WithRunner(runner)
 	driver.installed = true
 	ctx := context.Background()
-	if err := driver.Create(ctx, Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
+	if err := driver.Create(ctx, sandbox.Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	if err := driver.Start(ctx, "ws", nil); err != nil {
@@ -287,14 +288,14 @@ func TestThePolicyFileIsWrittenBesideTheWorkspaceState(t *testing.T) {
 	dir := t.TempDir()
 	driver := NewMicrosandbox(shortTempDir(t)).WithRunner(&recorded{})
 	driver.installed = true
-	if err := driver.Create(context.Background(), Policy{Workspace: "/home/me/work", Egress: true}, dir); err != nil {
+	if err := driver.Create(context.Background(), sandbox.Policy{Workspace: "/home/me/work", Egress: true}, dir); err != nil {
 		t.Fatal(err)
 	}
 	written, err := os.ReadFile(filepath.Join(dir, "sandbox.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(written), "image: "+DefaultImage) {
+	if !strings.Contains(string(written), "image: "+sandbox.DefaultImage) {
 		t.Errorf("policy file should hold the policy, got:\n%s", written)
 	}
 }
@@ -321,12 +322,12 @@ func (r *helpRunner) Run(_ context.Context, args ...string) (string, error) {
 
 // nestingDriver is a driver with an engine installed, told what the engine advertises and
 // what the machine can grant — neither of which is this machine's business in a test.
-func nestingDriver(t *testing.T, help string, host NestingSupport) (*Microsandbox, *helpRunner) {
+func nestingDriver(t *testing.T, help string, host sandbox.NestingSupport) (*Microsandbox, *helpRunner) {
 	t.Helper()
 	runner := &helpRunner{help: help}
 	driver := NewMicrosandbox(shortTempDir(t)).WithRunner(runner)
 	driver.installed = true
-	driver.hostNested = func() NestingSupport { return host }
+	driver.hostNested = func() sandbox.NestingSupport { return host }
 	return driver, runner
 }
 
@@ -356,9 +357,9 @@ func nestingFlag(t *testing.T, runner *helpRunner) string {
 }
 
 func TestCreateAsksForNestingWhenPossible(t *testing.T) {
-	driver, runner := nestingDriver(t, nestedHelp, NestingSupport{Available: true})
+	driver, runner := nestingDriver(t, nestedHelp, sandbox.NestingSupport{Available: true})
 	// The zero policy allows nesting: absence is not a refusal.
-	if err := driver.Create(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
+	if err := driver.Create(context.Background(), sandbox.Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	if flag := nestingFlag(t, runner); flag != "--nested-virt" {
@@ -367,8 +368,8 @@ func TestCreateAsksForNestingWhenPossible(t *testing.T) {
 }
 
 func TestCreateRefusesNestingExplicitlyWhenDisabled(t *testing.T) {
-	driver, runner := nestingDriver(t, nestedHelp, NestingSupport{Available: true})
-	policy := Policy{Workspace: "/home/me/work", DisableVMNesting: true}
+	driver, runner := nestingDriver(t, nestedHelp, sandbox.NestingSupport{Available: true})
+	policy := sandbox.Policy{Workspace: "/home/me/work", DisableVMNesting: true}
 	if err := driver.Create(context.Background(), policy, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
@@ -385,8 +386,8 @@ func TestCreateSaysNothingAboutNestingToAnEngineThatCannot(t *testing.T) {
 	// rather than nest or refuse. The pinned 0.7.13 advertises it, so this is what keeps a
 	// stale install from breaking a workspace.
 	for _, refuse := range []bool{false, true} {
-		driver, runner := nestingDriver(t, "Options:\n      --cpus", NestingSupport{Available: true})
-		policy := Policy{Workspace: "/home/me/work", DisableVMNesting: refuse}
+		driver, runner := nestingDriver(t, "Options:\n      --cpus", sandbox.NestingSupport{Available: true})
+		policy := sandbox.Policy{Workspace: "/home/me/work", DisableVMNesting: refuse}
 		if err := driver.Create(context.Background(), policy, t.TempDir()); err != nil {
 			t.Fatal(err)
 		}
@@ -397,8 +398,8 @@ func TestCreateSaysNothingAboutNestingToAnEngineThatCannot(t *testing.T) {
 }
 
 func TestCreateTurnsNestingOffExplicitlyWhenTheMachineCannot(t *testing.T) {
-	driver, runner := nestingDriver(t, nestedHelp, Unavailable("the host kernel has nested virtualization off"))
-	if err := driver.Create(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
+	driver, runner := nestingDriver(t, nestedHelp, sandbox.Unavailable("the host kernel has nested virtualization off"))
+	if err := driver.Create(context.Background(), sandbox.Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	// On is the default, but an explicitly enabled setting fails the boot on a host that
@@ -412,7 +413,7 @@ func TestCreateTurnsNestingOffExplicitlyWhenTheMachineCannot(t *testing.T) {
 func TestNestingIsRefusedWhenTheEngineHasNoSwitch(t *testing.T) {
 	// Without the flag in the engine, the machine's own answer cannot be honored: a host
 	// that could grant nesting still has nothing to ask for it with.
-	engine, _ := nestingDriver(t, "Options:\n      --cpus", NestingSupport{Available: true})
+	engine, _ := nestingDriver(t, "Options:\n      --cpus", sandbox.NestingSupport{Available: true})
 	if support := engine.Nesting(context.Background()); support.Available ||
 		!strings.Contains(support.Reason, "no nesting switch") {
 		t.Errorf("an engine with no switch cannot nest, whatever the machine can do: %+v", support)
@@ -420,7 +421,7 @@ func TestNestingIsRefusedWhenTheEngineHasNoSwitch(t *testing.T) {
 }
 
 func TestNestingSaysWhenTheMachineRefuses(t *testing.T) {
-	machine, _ := nestingDriver(t, nestedHelp, Unavailable("this machine cannot nest"))
+	machine, _ := nestingDriver(t, nestedHelp, sandbox.Unavailable("this machine cannot nest"))
 	if support := machine.Nesting(context.Background()); support.Available || support.Reason != "this machine cannot nest" {
 		t.Errorf("the machine's own reason should come through: %+v", support)
 	}
@@ -429,7 +430,7 @@ func TestNestingSaysWhenTheMachineRefuses(t *testing.T) {
 func TestNestingIsAskedOnceAndNotBeforeInstall(t *testing.T) {
 	runner := &helpRunner{help: nestedHelp}
 	driver := NewMicrosandbox(shortTempDir(t)).WithRunner(runner)
-	driver.hostNested = func() NestingSupport { return NestingSupport{Available: true} }
+	driver.hostNested = func() sandbox.NestingSupport { return sandbox.NestingSupport{Available: true} }
 	if support := driver.Nesting(context.Background()); support.Available || !strings.Contains(support.Reason, "not installed") {
 		t.Fatalf("nesting before install = %+v", support)
 	}

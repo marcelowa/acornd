@@ -1,6 +1,6 @@
 //go:build linux
 
-package sandbox
+package microsandbox
 
 import (
 	"fmt"

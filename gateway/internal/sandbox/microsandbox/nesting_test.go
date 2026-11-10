@@ -1,6 +1,7 @@
-package sandbox
+package microsandbox
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -73,5 +74,13 @@ func TestNestedFromApple(t *testing.T) {
 				t.Errorf("reason = %q, want it to mention %q", got.Reason, test.wantReason)
 			}
 		})
+	}
+}
+
+// A parameter file that is not there is an answer this cannot read, and the zero value is how it
+// says so rather than a reason invented from nothing.
+func TestAMissingParameterIsAnEmptyAnswer(t *testing.T) {
+	if got := readFileIfPresent(filepath.Join(t.TempDir(), "nested")); got != "" {
+		t.Errorf("readFileIfPresent on a missing file = %q", got)
 	}
 }

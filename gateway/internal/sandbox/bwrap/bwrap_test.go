@@ -1,10 +1,11 @@
-package sandbox
+package bwrap
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,6 +24,7 @@ import (
 // The driver binds this executable into the sandbox and runs it with the supervisor's arguments;
 // a test binary that ignored them would start a second test run inside the sandbox instead.
 func TestMain(m *testing.M) {
+	Register()
 	// The pasta probe asks this binary to run `help`: it must exit without starting the suite,
 	// or the probe recurses into the tests it is meant to gate.
 	if len(os.Args) > 1 && os.Args[1] == "help" {
@@ -106,10 +108,10 @@ func TestBwrapRefusesWhenTheMachineWillNotMakeAUserNamespace(t *testing.T) {
 	if err == nil {
 		t.Fatal("Usable accepted a machine that refuses a user namespace")
 	}
-	if !errors.Is(err, ErrUnavailable) {
+	if !errors.Is(err, sandbox.ErrUnavailable) {
 		t.Fatalf("error is not a refusal: %v", err)
 	}
-	// The sentence names the reason and the fix, because "sandbox Unavailable" is not one.
+	// The sentence names the reason and the fix, because "sandbox sandbox.Unavailable" is not one.
 	for _, want := range []string{"user namespace", "AppArmor", "sysctl -w kernel.apparmor_restrict_unprivileged_userns=0"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q does not mention %q", err, want)
@@ -140,7 +142,7 @@ func TestBwrapCreateWritesWhatTheWorkspaceRunsUnder(t *testing.T) {
 		t.Fatal(err)
 	}
 	driver, _ := testBwrap(t, dataDir)
-	policy := Policy{
+	policy := sandbox.Policy{
 		Workspace: workspace,
 		Image:     "debian:stable-slim",
 		Egress:    false,
@@ -149,7 +151,7 @@ func TestBwrapCreateWritesWhatTheWorkspaceRunsUnder(t *testing.T) {
 	if _, err := driver.writeConfig(policy, t.TempDir()); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	raw, err := os.ReadFile(filepath.Join(driver.StateDir(), Name(workspace)+".json"))
+	raw, err := os.ReadFile(filepath.Join(driver.StateDir(), sandbox.Name(workspace)+".json"))
 	if err != nil {
 		t.Fatalf("config: %v", err)
 	}
@@ -160,13 +162,13 @@ func TestBwrapCreateWritesWhatTheWorkspaceRunsUnder(t *testing.T) {
 	if config.Workspace != workspace || config.Engine != "bwrap" {
 		t.Fatalf("config names %q on engine %q", config.Workspace, config.Engine)
 	}
-	if config.Network.Mode != NetworkOffName {
+	if config.Network.Mode != sandbox.NetworkOffName {
 		t.Fatalf("network: %q, want off", config.Network.Mode)
 	}
 	// A policy that names no idle timeout gets the default one: a sandbox nobody told about the
 	// timer would keep running after a gateway died.
-	if config.IdleTimeout != DefaultIdleTimeout {
-		t.Fatalf("idle timeout: %q, want %q", config.IdleTimeout, DefaultIdleTimeout)
+	if config.IdleTimeout != sandbox.DefaultIdleTimeout {
+		t.Fatalf("idle timeout: %q, want %q", config.IdleTimeout, sandbox.DefaultIdleTimeout)
 	}
 	// Only folders that exist are mounted: a mount that does not resolve would make every
 	// command fail, and a later-created folder is the next command's business.
@@ -204,7 +206,7 @@ func TestAPastaThatLeavesAProcessBehindIsRefusedNotHung(t *testing.T) {
 		t.Fatalf("write the fake pasta: %v", err)
 	}
 	start := time.Now()
-	if err := probePastaWithin(script, 200*time.Millisecond); err == nil {
+	if err := sandbox.ProbePastaWithin(script, 200*time.Millisecond); err == nil {
 		t.Fatal("a pasta that never answers should be refused")
 	}
 	if elapsed := time.Since(start); elapsed > 3*time.Second {
@@ -221,10 +223,10 @@ func TestBwrapCreateCarriesEgressWithPasta(t *testing.T) {
 	driver = driver.WithLookPath(func(name string) (string, error) {
 		return "/usr/bin/" + name, nil
 	})
-	if _, err := driver.writeConfig(Policy{Workspace: workspace, Egress: true}, t.TempDir()); err != nil {
+	if _, err := driver.writeConfig(sandbox.Policy{Workspace: workspace, Egress: true}, t.TempDir()); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	raw, err := os.ReadFile(filepath.Join(driver.StateDir(), Name(workspace)+".json"))
+	raw, err := os.ReadFile(filepath.Join(driver.StateDir(), sandbox.Name(workspace)+".json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +242,7 @@ func TestBwrapCreateCarriesEgressWithPasta(t *testing.T) {
 	if config.Network.Pasta != "/usr/bin/pasta" {
 		t.Fatalf("tool paths: %+v", config.Network)
 	}
-	if config.Network.Address != SandboxAddress || config.Network.Gateway != SandboxGateway {
+	if config.Network.Address != sandbox.SandboxAddress || config.Network.Gateway != sandbox.SandboxGateway {
 		t.Fatalf("address: %+v", config.Network)
 	}
 }
@@ -261,16 +263,16 @@ func TestBwrapCreateNamesWhatEgressNeeds(t *testing.T) {
 				return "", errors.New("not found")
 			})
 	}
-	_, err := withOnly("bwrap").writeConfig(Policy{Workspace: workspace, Egress: true}, t.TempDir())
+	_, err := withOnly("bwrap").writeConfig(sandbox.Policy{Workspace: workspace, Egress: true}, t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "apt install passt") {
 		t.Fatalf("no pasta: %v, want the package that provides it", err)
 	}
 	// Egress with pasta and nothing else is a complete network: no iproute2 to install.
-	if _, err := withOnly("pasta").writeConfig(Policy{Workspace: workspace, Egress: true}, t.TempDir()); err != nil {
+	if _, err := withOnly("pasta").writeConfig(sandbox.Policy{Workspace: workspace, Egress: true}, t.TempDir()); err != nil {
 		t.Fatalf("pasta alone should be enough for egress: %v", err)
 	}
 	// Without egress neither is needed: a sandbox with no network needs no network tools.
-	if _, err := withOnly("bwrap").writeConfig(Policy{Workspace: workspace}, t.TempDir()); err != nil {
+	if _, err := withOnly("bwrap").writeConfig(sandbox.Policy{Workspace: workspace}, t.TempDir()); err != nil {
 		t.Fatalf("network off should not need pasta: %v", err)
 	}
 }
@@ -279,7 +281,7 @@ func TestBwrapCreateIsIdempotent(t *testing.T) {
 	dataDir := t.TempDir()
 	workspace := t.TempDir()
 	driver, _ := testBwrap(t, dataDir)
-	policy := Policy{Workspace: workspace}
+	policy := sandbox.Policy{Workspace: workspace}
 	for i := range 2 {
 		if _, err := driver.writeConfig(policy, t.TempDir()); err != nil {
 			t.Fatalf("create %d: %v", i, err)
@@ -287,7 +289,7 @@ func TestBwrapCreateIsIdempotent(t *testing.T) {
 	}
 	// Twice is the same state, which is what makes a changed policy apply to the next
 	// command rather than to a stored copy nobody updates.
-	if _, err := os.Stat(filepath.Join(driver.StateDir(), Name(workspace)+".json")); err != nil {
+	if _, err := os.Stat(filepath.Join(driver.StateDir(), sandbox.Name(workspace)+".json")); err != nil {
 		t.Fatalf("config after two creates: %v", err)
 	}
 }
@@ -299,12 +301,12 @@ func TestBwrapRemoveDeletesTheHomeAndNotTheWorkspace(t *testing.T) {
 	// writing into the machine's own runtime folder.
 	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(t.TempDir(), "run"))
 	driver, _ := testBwrap(t, dataDir)
-	config, err := driver.writeConfig(Policy{Workspace: workspace}, t.TempDir())
+	config, err := driver.writeConfig(sandbox.Policy{Workspace: workspace}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	configPath := filepath.Join(driver.StateDir(), Name(workspace)+".json")
-	if err := driver.Remove(context.Background(), Name(workspace)); err != nil {
+	configPath := filepath.Join(driver.StateDir(), sandbox.Name(workspace)+".json")
+	if err := driver.Remove(context.Background(), sandbox.Name(workspace)); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
@@ -318,7 +320,7 @@ func TestBwrapRemoveDeletesTheHomeAndNotTheWorkspace(t *testing.T) {
 	if _, err := os.Stat(workspace); err != nil {
 		t.Fatalf("remove took the workspace with it: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(driver.StateDir(), Name(workspace))); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(driver.StateDir(), sandbox.Name(workspace))); !os.IsNotExist(err) {
 		t.Fatalf("remove left the sandbox's own folder behind: %v", err)
 	}
 	// Removing what is not there is already the wanted state.
@@ -342,10 +344,10 @@ func TestBwrapSandboxArgvIsOneSandboxPerWorkspace(t *testing.T) {
 		Bwrap:       "/usr/bin/bwrap",
 		Supervisor:  "/install/acornd",
 		Run:         "/state/ws/run",
-		GuestRun:    GuestRunDir,
-		GuestSocket: GuestSocketPath,
-		Network:     SandboxNetwork{Mode: "off"},
-		IdleTimeout: DefaultIdleTimeout,
+		GuestRun:    sandbox.GuestRunDir,
+		GuestSocket: sandbox.GuestSocketPath,
+		Network:     sandbox.SandboxNetwork{Mode: "off"},
+		IdleTimeout: sandbox.DefaultIdleTimeout,
 	}
 	argv, err := driver.sandboxArgv(config)
 	if err != nil {
@@ -370,7 +372,7 @@ func TestBwrapSandboxArgvIsOneSandboxPerWorkspace(t *testing.T) {
 		"--ro-bind /install/acornd /usr/local/bin/acornd",
 		"-- /usr/local/bin/acornd internal sandbox-supervisor --socket /run/acornd/s.sock",
 		// The same policy value the microVM engine is given: both engines answer "stop when idle"
-		// the same way, and a kept-Alive workspace asks for a timeout that never fires.
+		// the same way, and a kept-sandbox.Alive workspace asks for a timeout that never fires.
 		"--idle-timeout 30m",
 	} {
 		if !strings.Contains(joined, want) {
@@ -394,9 +396,9 @@ func TestBwrapSandboxArgvSharesPastaForEgress(t *testing.T) {
 		Bwrap:       "/usr/bin/bwrap",
 		Supervisor:  "/install/acornd",
 		Run:         "/state/ws/run",
-		GuestRun:    GuestRunDir,
-		GuestSocket: GuestSocketPath,
-		Network: SandboxNetwork{
+		GuestRun:    sandbox.GuestRunDir,
+		GuestSocket: sandbox.GuestSocketPath,
+		Network: sandbox.SandboxNetwork{
 			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
 			Pasta: "/usr/bin/pasta",
 		},
@@ -437,7 +439,7 @@ func TestBwrapRefusesASocketPathThatIsTooLong(t *testing.T) {
 	}
 	workspace := t.TempDir()
 	driver, _ := testBwrap(t, dataDir)
-	_, err := driver.writeConfig(Policy{Workspace: workspace}, t.TempDir())
+	_, err := driver.writeConfig(sandbox.Policy{Workspace: workspace}, t.TempDir())
 	if err == nil {
 		t.Skip("this machine's temp folder is short enough that the path fits")
 	}
@@ -468,8 +470,8 @@ func TestBwrapHasALifecycleLikeEveryOtherEngine(t *testing.T) {
 			}
 			return "/usr/bin/" + name, nil
 		})
-	t.Cleanup(func() { _ = driver.Remove(context.Background(), Name(workspace)) })
-	if err := driver.Create(context.Background(), Policy{Workspace: workspace}, t.TempDir()); err != nil {
+	t.Cleanup(func() { _ = driver.Remove(context.Background(), sandbox.Name(workspace)) })
+	if err := driver.Create(context.Background(), sandbox.Policy{Workspace: workspace}, t.TempDir()); err != nil {
 		if strings.Contains(err.Error(), "user namespace") {
 			t.Skipf("this machine will not make a user namespace: %v", err)
 		}
@@ -482,7 +484,7 @@ func TestBwrapHasALifecycleLikeEveryOtherEngine(t *testing.T) {
 	if len(instances) != 1 || !instances[0].Running() {
 		t.Fatalf("a created sandbox should be listed and running: %+v", instances)
 	}
-	if err := driver.Stop(context.Background(), Name(workspace)); err != nil {
+	if err := driver.Stop(context.Background(), sandbox.Name(workspace)); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
 	instances, _ = driver.List(context.Background())
@@ -490,31 +492,31 @@ func TestBwrapHasALifecycleLikeEveryOtherEngine(t *testing.T) {
 		t.Fatalf("a stopped sandbox should be listed and not running: %+v", instances)
 	}
 	// The files are the point of stopping rather than removing.
-	if _, err := os.Stat(filepath.Join(driver.StateDir(), Name(workspace), "rootfs")); err != nil {
+	if _, err := os.Stat(filepath.Join(driver.StateDir(), sandbox.Name(workspace), "rootfs")); err != nil {
 		t.Fatalf("stop took the workspace's root with it: %v", err)
 	}
-	if err := driver.Start(context.Background(), Name(workspace), nil); err != nil {
+	if err := driver.Start(context.Background(), sandbox.Name(workspace), nil); err != nil {
 		t.Fatalf("start after stop: %v", err)
 	}
 	instances, _ = driver.List(context.Background())
 	if len(instances) != 1 || !instances[0].Running() {
 		t.Fatalf("a restarted sandbox should be running: %+v", instances)
 	}
-	pid := driver.pid(Name(workspace))
-	if err := driver.Remove(context.Background(), Name(workspace)); err != nil {
+	pid := driver.pid(sandbox.Name(workspace))
+	if err := driver.Remove(context.Background(), sandbox.Name(workspace)); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 	if instances, _ := driver.List(context.Background()); len(instances) != 0 {
 		t.Fatalf("a removed sandbox is gone: %+v", instances)
 	}
-	if pid > 0 && Alive(pid) {
+	if pid > 0 && sandbox.Alive(pid) {
 		t.Fatalf("remove left the sandbox process %d running", pid)
 	}
 }
 
 func TestBwrapSubstitutesSecretsThroughItsProxy(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
-	if driver.SecretDelivery() != DeliverySubstitute {
+	if driver.SecretDelivery() != sandbox.DeliverySubstitute {
 		t.Fatalf("delivery: %v, want substitute", driver.SecretDelivery())
 	}
 	// The values stay in the proxy control runs for this workspace. A worker that held them would
@@ -522,7 +524,7 @@ func TestBwrapSubstitutesSecretsThroughItsProxy(t *testing.T) {
 	if driver.SecretEnvInWorker() {
 		t.Fatal("the worker must not carry a secret's value")
 	}
-	change, err := driver.SecretsChanged(context.Background(), "x", []Secret{{Name: "K", Value: "v", Hosts: []string{"api.example.com"}}})
+	change, err := driver.SecretsChanged(context.Background(), "x", []sandbox.Secret{{Name: "K", Value: "v", Hosts: []string{"api.example.com"}}})
 	if err != nil {
 		t.Fatalf("change: %v", err)
 	}
@@ -543,18 +545,18 @@ func TestABwrapWorkspaceWithASecretsProxyCarriesOnePortAndItsCA(t *testing.T) {
 		Bwrap:       "/usr/bin/bwrap",
 		Supervisor:  "/install/acornd",
 		Run:         "/state/ws/run",
-		GuestRun:    GuestRunDir,
-		GuestSocket: GuestSocketPath,
-		Network: SandboxNetwork{
+		GuestRun:    sandbox.GuestRunDir,
+		GuestSocket: sandbox.GuestSocketPath,
+		Network: sandbox.SandboxNetwork{
 			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
 			Pasta: "/usr/bin/pasta",
 		},
 	}
 
 	withProxy := base
-	withProxy.SecretProxy = &SandboxSecretProxy{
+	withProxy.SecretProxy = &sandbox.SandboxSecretProxy{
 		URL: "http://acornd:a-token@127.0.0.1:41234", BundleFile: "/state/ws/ca-bundle.pem",
-		Bundle: GuestCABundle, Port: 41234,
+		Bundle: sandbox.GuestCABundle, Port: 41234,
 	}
 	argv, err := driver.bootArgv(withProxy)
 	if err != nil {
@@ -564,7 +566,7 @@ func TestABwrapWorkspaceWithASecretsProxyCarriesOnePortAndItsCA(t *testing.T) {
 	if !strings.Contains(joined, "-t none -u none -T 41234 -U none") {
 		t.Errorf("pasta should carry exactly the proxy's port:\n%s", joined)
 	}
-	if !strings.Contains(joined, "--ro-bind /state/ws/ca-bundle.pem "+GuestCABundle) {
+	if !strings.Contains(joined, "--ro-bind /state/ws/ca-bundle.pem "+sandbox.GuestCABundle) {
 		t.Errorf("the bundle should be bound read-only over the image's roots:\n%s", joined)
 	}
 
@@ -588,7 +590,7 @@ func TestTheTrustBundleIsTheImagesRootsAndThisInstallsCA(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(rootfs, "etc/ssl/certs"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(rootfs, GuestCABundle), []byte("-- an image root --"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(rootfs, sandbox.GuestCABundle), []byte("-- an image root --"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	path := filepath.Join(t.TempDir(), "bundle.pem")
@@ -618,90 +620,6 @@ func TestTheTrustBundleIsTheImagesRootsAndThisInstallsCA(t *testing.T) {
 // bubblewrap installed" — which was right for as long as the runner image shipped none. The
 // 26.04 image ships one, the sweep started booting microVMs, and the boot aborted on a /dev/kvm
 // the job had no reason to make readable; the abort reached the report as a mutation survivor.
-func TestAMicroVMStartsInsideABwrapSandbox(t *testing.T) {
-	if testing.Short() {
-		t.Skip("the microVM tier")
-	}
-	if os.Getenv("ACORND_LIVE_SANDBOX") == "" {
-		t.Skip("set ACORND_LIVE_SANDBOX=1 to boot a microVM inside a bwrap sandbox")
-	}
-	if _, err := exec.LookPath("bwrap"); err != nil {
-		t.Skip("no bubblewrap on this machine")
-	}
-	// A hypervisor this user cannot open is not a skip: the engine answers it with an abort, and
-	// the report is then a crash inside the engine rather than the device that was missing.
-	device, err := os.Open("/dev/kvm")
-	if err != nil {
-		t.Fatalf("the nested microVM needs /dev/kvm, and this machine will not open it: %v%s", err, kvmHint())
-	}
-	_ = device.Close()
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip("no home folder for the engine store")
-	}
-	engine := NewMicrosandbox(filepath.Join(home, ".acornd"))
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-	if !engine.Installed() {
-		// The sandbox tier's first suite can install it; this one must not depend on that
-		// ordering, and a skip here would be a green run that booted no microVM.
-		if err := engine.Install(ctx, t.Logf); err != nil {
-			t.Fatalf("install the microsandbox engine: %v", err)
-		}
-	}
-	store := engine.StateDir()
-	if err := os.MkdirAll(store, 0o755); err != nil {
-		t.Fatalf("make the engine store: %v", err)
-	}
-	// Where the host's install and the host's store appear inside the sandbox. The root there
-	// is bubblewrap's, so where the host's install appears is this test's to choose.
-	const nestedEngine = "/engine"
-	args := []string{
-		// The sandbox's own root, not the host's. Inside a user namespace that maps one
-		// account, the host's / belongs to nobody this process can name, and 0.7.13 refuses an
-		// engine store when an ancestor could be substituted by another account — the refusal
-		// reads "catalog ancestor / permits path substitution". A root bubblewrap makes is the
-		// fix, and it is also the shape the product's own bwrap engine has: a rootfs, with what
-		// the engine needs from the host bound into it read-only.
-		"--tmpfs", "/",
-		"--ro-bind", "/usr", "/usr",
-		"--ro-bind", "/bin", "/bin",
-		"--ro-bind-try", "/sbin", "/sbin",
-		"--ro-bind", "/lib", "/lib",
-		// aarch64 Linux has no /lib64, and a missing source is an error rather than a no-op.
-		"--ro-bind-try", "/lib64", "/lib64",
-		"--ro-bind", "/etc", "/etc",
-		// The runners' /etc/resolv.conf is a link into /run, and a root without /run has a
-		// resolver that points at nothing: the first pull then fails with "error sending
-		// request", which reads like a network outage rather than a missing file.
-		"--ro-bind-try", "/run", "/run",
-		// The host's install and the host's store. The store keeps its own path, and that is not
-		// tidiness: the engine records absolute paths inside it, so a store bound somewhere else
-		// inside the sandbox leaves entries the host cannot open afterwards. Bubblewrap creates
-		// the parents inside its root, so the ancestry the engine checks is this account's.
-		"--ro-bind", engine.InstallDir(), nestedEngine,
-		"--bind", store, store,
-		"--dev", "/dev",
-		"--dev-bind", "/dev/net/tun", "/dev/net/tun",
-		"--dev-bind", "/dev/kvm", "/dev/kvm",
-		"--cap-add", "ALL",
-		"--proc", "/proc",
-		"--tmpfs", "/tmp",
-		"--unshare-all", "--share-net",
-		"--uid", "0", "--gid", "0",
-		"--", "env", "MSB_HOME=" + store, filepath.Join(nestedEngine, "bin", "msb"),
-		"run", "--net", "public",
-		"debian:stable-slim", "--", "/bin/echo", "nested-msb-ok",
-	}
-	output, err := exec.CommandContext(ctx, "bwrap", args...).CombinedOutput()
-	if err != nil {
-		t.Fatalf("the microVM did not boot inside the bwrap sandbox: %v\n%s", err, output)
-	}
-	if !strings.Contains(string(output), "nested-msb-ok") {
-		t.Fatalf("the microVM ran but its output is missing: %s", output)
-	}
-}
-
 func TestBwrapDoesNotClaimNestingWithoutKVM(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
 	support := driver.Nesting(context.Background())
@@ -715,8 +633,8 @@ func TestBwrapDoesNotClaimNestingWithoutKVM(t *testing.T) {
 
 func TestBwrapConfigRecordsNestedFromTheParent(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
-	t.Setenv(nestedEnv, "1")
-	config, err := driver.writeConfig(Policy{Workspace: t.TempDir()}, t.TempDir())
+	t.Setenv(sandbox.NestedEnv, "1")
+	config, err := driver.writeConfig(sandbox.Policy{Workspace: t.TempDir()}, t.TempDir())
 	if err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -727,7 +645,7 @@ func TestBwrapConfigRecordsNestedFromTheParent(t *testing.T) {
 
 func TestBwrapConfigRecordsAWorkspaceThatMustNotNest(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
-	config, err := driver.writeConfig(Policy{Workspace: t.TempDir(), DisableVMNesting: true}, t.TempDir())
+	config, err := driver.writeConfig(sandbox.Policy{Workspace: t.TempDir(), DisableVMNesting: true}, t.TempDir())
 	if err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -750,11 +668,11 @@ func TestBwrapClaimsNestingWhenKVMIsBound(t *testing.T) {
 
 func TestBwrapPrepareWritesTheCurrentConfig(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
-	policy := Policy{Workspace: t.TempDir(), Devices: true}
+	policy := sandbox.Policy{Workspace: t.TempDir(), Devices: true}
 	if err := driver.Prepare(context.Background(), policy, t.TempDir()); err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
-	config, err := driver.readConfig(Name(policy.Workspace))
+	config, err := driver.readConfig(sandbox.Name(policy.Workspace))
 	if err != nil {
 		t.Fatalf("read the config Prepare wrote: %v", err)
 	}
@@ -769,8 +687,8 @@ func TestBwrapPrepareWritesTheCurrentConfig(t *testing.T) {
 func TestBwrapRestartsOnlyWhenTheProxyForwardChanges(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
 	workspace := t.TempDir()
-	name := Name(workspace)
-	write := func(proxy *SandboxSecretProxy) {
+	name := sandbox.Name(workspace)
+	write := func(proxy *sandbox.SandboxSecretProxy) {
 		t.Helper()
 		raw, err := json.Marshal(bwrapConfig{Workspace: workspace, SecretProxy: proxy})
 		if err != nil {
@@ -784,28 +702,28 @@ func TestBwrapRestartsOnlyWhenTheProxyForwardChanges(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	policy := func(port int) Policy {
-		return Policy{Workspace: workspace, SecretProxy: &SecretProxy{
+	policy := func(port int) sandbox.Policy {
+		return sandbox.Policy{Workspace: workspace, SecretProxy: &sandbox.SecretProxy{
 			URL: fmt.Sprintf("http://acornd:token@127.0.0.1:%d", port),
 		}}
 	}
 
 	write(nil)
-	if restart, err := driver.RestartRequired(context.Background(), Policy{Workspace: workspace}); err != nil || restart {
+	if restart, err := driver.RestartRequired(context.Background(), sandbox.Policy{Workspace: workspace}); err != nil || restart {
 		t.Fatalf("no proxy on either side is not a restart: %v, %v", restart, err)
 	}
 	if restart, err := driver.RestartRequired(context.Background(), policy(21606)); err != nil || !restart {
 		t.Fatalf("the first proxy needs the sandbox started again: %v, %v", restart, err)
 	}
 
-	write(&SandboxSecretProxy{Port: 21606})
+	write(&sandbox.SandboxSecretProxy{Port: 21606})
 	if restart, err := driver.RestartRequired(context.Background(), policy(21606)); err != nil || restart {
 		t.Fatalf("the same forward is a live rotation: %v, %v", restart, err)
 	}
 	if restart, err := driver.RestartRequired(context.Background(), policy(21607)); err != nil || !restart {
 		t.Fatalf("a moved forward needs a new sandbox: %v, %v", restart, err)
 	}
-	if restart, err := driver.RestartRequired(context.Background(), Policy{Workspace: workspace}); err != nil || !restart {
+	if restart, err := driver.RestartRequired(context.Background(), sandbox.Policy{Workspace: workspace}); err != nil || !restart {
 		t.Fatalf("removing the last proxy needs the forward taken away: %v, %v", restart, err)
 	}
 }
@@ -820,7 +738,7 @@ func TestBwrapBindsDevicesAndGrantsNestedEnginesTheCaps(t *testing.T) {
 		}
 	}
 	driver.WithDevicePaths(tun, kvm)
-	policy := Policy{Workspace: t.TempDir(), Devices: true}
+	policy := sandbox.Policy{Workspace: t.TempDir(), Devices: true}
 	config, err := driver.writeConfig(policy, t.TempDir())
 	if err != nil {
 		t.Fatalf("write config: %v", err)
@@ -837,7 +755,7 @@ func TestBwrapBindsDevicesAndGrantsNestedEnginesTheCaps(t *testing.T) {
 		"--dev-bind " + tun + " " + tun,
 		"--dev-bind " + kvm + " " + kvm,
 		"--cap-add ALL",
-		"--setenv " + nestedEnv + " 1",
+		"--setenv " + sandbox.NestedEnv + " 1",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("argv does not contain %q: %v", want, argv)
@@ -850,14 +768,14 @@ func TestBwrapNestedEgressReusesPastaUserNamespace(t *testing.T) {
 	config := bwrapConfig{
 		Bwrap:       "/usr/bin/bwrap",
 		Rootfs:      "/rootfs",
-		Network:     SandboxNetwork{Mode: "pasta", Address: SandboxAddress, Gateway: SandboxGateway, Pasta: "/usr/bin/pasta"},
+		Network:     sandbox.SandboxNetwork{Mode: "pasta", Address: sandbox.SandboxAddress, Gateway: sandbox.SandboxGateway, Pasta: "/usr/bin/pasta"},
 		Nested:      true,
 		DataDir:     "/home",
 		Workspace:   "/work",
 		Run:         "/run",
-		GuestRun:    GuestRunDir,
+		GuestRun:    sandbox.GuestRunDir,
 		Supervisor:  "/usr/local/bin/acornd",
-		GuestSocket: GuestSocketPath,
+		GuestSocket: sandbox.GuestSocketPath,
 	}
 	argv, err := driver.sandboxArgv(config)
 	if err != nil {
@@ -886,14 +804,14 @@ func TestBwrapNestedWithoutEgressReusesTheUserNamespace(t *testing.T) {
 	config := bwrapConfig{
 		Bwrap:       "/usr/bin/bwrap",
 		Rootfs:      "/rootfs",
-		Network:     SandboxNetwork{Mode: NetworkOffName},
+		Network:     sandbox.SandboxNetwork{Mode: sandbox.NetworkOffName},
 		Nested:      true,
 		DataDir:     "/home",
 		Workspace:   "/work",
 		Run:         "/run",
-		GuestRun:    GuestRunDir,
+		GuestRun:    sandbox.GuestRunDir,
 		Supervisor:  "/usr/local/bin/acornd",
-		GuestSocket: GuestSocketPath,
+		GuestSocket: sandbox.GuestSocketPath,
 	}
 	argv, err := driver.sandboxArgv(config)
 	if err != nil {
@@ -943,7 +861,7 @@ func TestANestedSandboxWithNoEgressStartsInsidePasta(t *testing.T) {
 		t.Skipf("this machine will not make a user namespace: %v", err)
 	}
 
-	config := bwrapConfig{Nested: true, Network: SandboxNetwork{Mode: NetworkOffName}}
+	config := bwrapConfig{Nested: true, Network: sandbox.SandboxNetwork{Mode: sandbox.NetworkOffName}}
 	inner := append([]string{bwrap, "--ro-bind", "/", "/", "--proc", "/proc"}, isolationArgs(config)...)
 	inner = append(inner, "--", "/bin/sh", "-c",
 		`test "$(tail -n +3 /proc/net/dev | cut -d: -f1 | tr -d ' ')" = lo`)
@@ -968,14 +886,14 @@ func TestBwrapLeafSandboxRefusesAnotherUserNamespace(t *testing.T) {
 	config := bwrapConfig{
 		Bwrap:          "/usr/bin/bwrap",
 		Rootfs:         "/rootfs",
-		Network:        SandboxNetwork{Mode: NetworkOffName},
+		Network:        sandbox.SandboxNetwork{Mode: sandbox.NetworkOffName},
 		DisableNesting: true,
 		DataDir:        "/home",
 		Workspace:      "/work",
 		Run:            "/run",
-		GuestRun:       GuestRunDir,
+		GuestRun:       sandbox.GuestRunDir,
 		Supervisor:     "/usr/local/bin/acornd",
-		GuestSocket:    GuestSocketPath,
+		GuestSocket:    sandbox.GuestSocketPath,
 	}
 	argv, err := driver.sandboxArgv(config)
 	if err != nil {
@@ -1000,15 +918,15 @@ func TestBwrapNestedSandboxIsNotToldToDisableUserns(t *testing.T) {
 	config := bwrapConfig{
 		Bwrap:          "/usr/bin/bwrap",
 		Rootfs:         "/rootfs",
-		Network:        SandboxNetwork{Mode: "pasta"},
+		Network:        sandbox.SandboxNetwork{Mode: "pasta"},
 		Nested:         true,
 		DisableNesting: true,
 		DataDir:        "/home",
 		Workspace:      "/work",
 		Run:            "/run",
-		GuestRun:       GuestRunDir,
+		GuestRun:       sandbox.GuestRunDir,
 		Supervisor:     "/usr/local/bin/acornd",
-		GuestSocket:    GuestSocketPath,
+		GuestSocket:    sandbox.GuestSocketPath,
 	}
 	argv, err := driver.sandboxArgv(config)
 	if err != nil {
@@ -1040,7 +958,7 @@ func TestALeafSandboxRefusesAUserNamespaceInsideIt(t *testing.T) {
 		t.Skipf("this machine will not make a user namespace: %v", err)
 	}
 	run := func(disable bool) ([]byte, error) {
-		config := bwrapConfig{DisableNesting: disable, Network: SandboxNetwork{Mode: NetworkOffName}}
+		config := bwrapConfig{DisableNesting: disable, Network: sandbox.SandboxNetwork{Mode: sandbox.NetworkOffName}}
 		argv := append([]string{"--ro-bind", "/", "/", "--proc", "/proc"}, isolationArgs(config)...)
 		argv = append(argv, "--", "/bin/sh", "-c", "unshare -Ur true")
 		return exec.Command(bwrap, argv...).CombinedOutput()
@@ -1059,7 +977,7 @@ func TestAPastaThatCannotMapItsUserNamespaceIsRefused(t *testing.T) {
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := probePastaWithin(script, time.Second); err == nil {
+	if err := sandbox.ProbePastaWithin(script, time.Second); err == nil {
 		t.Fatal("pasta exited 0 but never made its user namespace; the probe must refuse it")
 	}
 }
@@ -1075,7 +993,7 @@ func TestThePastaProbeHandsPastaThisBinaryAndNotBinTrue(t *testing.T) {
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := probePastaWithin(script, time.Second); err != nil {
+	if err := sandbox.ProbePastaWithin(script, time.Second); err != nil {
 		t.Fatalf("the probe: %v", err)
 	}
 	raw, err := os.ReadFile(record)
@@ -1109,7 +1027,7 @@ func TestAPastaThatCannotStartTheProgramItIsGivenIsRefused(t *testing.T) {
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	err := probePastaWithin(script, time.Second)
+	err := sandbox.ProbePastaWithin(script, time.Second)
 	if err == nil {
 		t.Fatal("pasta could not start the supervisor; the probe must refuse it")
 	}
@@ -1130,11 +1048,11 @@ func TestBwrapIsARealEngineOfTheSeam(t *testing.T) {
 		t.Fatalf("env does not point the worker at the configs: %v", driver.Env())
 	}
 	// The seam's own list has to offer it, or a workspace cannot choose it.
-	if !ValidEngine("bwrap") {
+	if !sandbox.ValidEngine("bwrap") {
 		t.Fatal("bwrap is not a named engine")
 	}
-	if _, err := Engine(t.TempDir(), "", "bwrap"); err != nil {
-		t.Fatalf("Engine(bwrap): %v", err)
+	if _, err := sandbox.Engine(t.TempDir(), "", "bwrap"); err != nil {
+		t.Fatalf("sandbox.Engine(bwrap): %v", err)
 	}
 }
 
@@ -1167,9 +1085,9 @@ func TestBwrapBindsUpstreamResolversWhenTheMachineUsesALoopbackOne(t *testing.T)
 		t.Fatal(err)
 	}
 	driver := NewBwrap(t.TempDir())
-	driver.resolver = ResolverFiles{Host: host, Upstream: upstream}
+	driver.resolver = sandbox.ResolverFiles{Host: host, Upstream: upstream}
 	workspace := filepath.Join(dir, "state", "acornd-test")
-	got, err := resolverFileFor(driver.resolver, workspace)
+	got, err := sandbox.ResolverFileFor(driver.resolver, workspace)
 	if err != nil {
 		t.Fatalf("resolver: %v", err)
 	}
@@ -1192,8 +1110,8 @@ func TestBwrapBindsTheMachinesOwnResolverWhenItIsUsable(t *testing.T) {
 		t.Fatal(err)
 	}
 	driver := NewBwrap(t.TempDir())
-	driver.resolver = ResolverFiles{Host: host, Upstream: filepath.Join(dir, "absent")}
-	got, err := resolverFileFor(driver.resolver, filepath.Join(dir, "state", "acornd-test"))
+	driver.resolver = sandbox.ResolverFiles{Host: host, Upstream: filepath.Join(dir, "absent")}
+	got, err := sandbox.ResolverFileFor(driver.resolver, filepath.Join(dir, "state", "acornd-test"))
 	if err != nil {
 		t.Fatalf("resolver: %v", err)
 	}
@@ -1206,20 +1124,20 @@ func TestBwrapBindsTheMachinesOwnResolverWhenItIsUsable(t *testing.T) {
 	}
 }
 
-// A workspace that asked to be kept Alive keeps the value that says so: the default is only for a
+// A workspace that asked to be kept sandbox.Alive keeps the value that says so: the default is only for a
 // policy that named nothing.
 func TestBwrapKeepsTheIdleTimeoutAPolicyNames(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
 	workspace := t.TempDir()
-	if _, err := driver.writeConfig(Policy{Workspace: workspace, IdleTimeout: KeptAliveIdleTimeout}, t.TempDir()); err != nil {
+	if _, err := driver.writeConfig(sandbox.Policy{Workspace: workspace, IdleTimeout: sandbox.KeptAliveIdleTimeout}, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
-	config, err := driver.readConfig(Name(workspace))
+	config, err := driver.readConfig(sandbox.Name(workspace))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.IdleTimeout != KeptAliveIdleTimeout {
-		t.Fatalf("idle timeout: %q, want %q", config.IdleTimeout, KeptAliveIdleTimeout)
+	if config.IdleTimeout != sandbox.KeptAliveIdleTimeout {
+		t.Fatalf("idle timeout: %q, want %q", config.IdleTimeout, sandbox.KeptAliveIdleTimeout)
 	}
 }
 
@@ -1230,8 +1148,8 @@ func TestBwrapRefusesPrivateNetworksWithoutAGrant(t *testing.T) {
 	config := bwrapConfig{
 		Workspace: "/work/ws", Rootfs: "/state/ws/rootfs", DataDir: "/state/ws/home",
 		Bwrap: "/usr/bin/bwrap", Supervisor: "/install/acornd",
-		Run: "/state/ws/run", GuestRun: GuestRunDir, GuestSocket: GuestSocketPath,
-		Network: SandboxNetwork{
+		Run: "/state/ws/run", GuestRun: sandbox.GuestRunDir, GuestSocket: sandbox.GuestSocketPath,
+		Network: sandbox.SandboxNetwork{
 			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
 			Pasta: "/usr/bin/pasta",
 		},
@@ -1260,8 +1178,8 @@ func TestBwrapAGrantReachesPrivateNetworks(t *testing.T) {
 	config := bwrapConfig{
 		Workspace: "/work/ws", Rootfs: "/state/ws/rootfs", DataDir: "/state/ws/home",
 		Bwrap: "/usr/bin/bwrap", Supervisor: "/install/acornd",
-		Run: "/state/ws/run", GuestRun: GuestRunDir, GuestSocket: GuestSocketPath,
-		Network: SandboxNetwork{
+		Run: "/state/ws/run", GuestRun: sandbox.GuestRunDir, GuestSocket: sandbox.GuestSocketPath,
+		Network: sandbox.SandboxNetwork{
 			Mode: "pasta", Address: "10.0.2.15/24", Gateway: "10.0.2.2",
 			Pasta: "/usr/bin/pasta", Private: true,
 		},
@@ -1284,8 +1202,8 @@ func TestBwrapAGrantReachesPrivateNetworks(t *testing.T) {
 func TestBwrapWritesTheResolverItsNetworkCanReach(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
 	workspace := t.TempDir()
-	name := Name(workspace)
-	path, err := ResolveResolvFor(driver.workspaceDir(name), driver.resolver, "pasta", false)
+	name := sandbox.Name(workspace)
+	path, err := sandbox.ResolveResolvFor(driver.workspaceDir(name), driver.resolver, "pasta", false)
 	if err != nil {
 		t.Fatalf("resolver: %v", err)
 	}
@@ -1296,7 +1214,7 @@ func TestBwrapWritesTheResolverItsNetworkCanReach(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(content), "nameserver "+SandboxDNS) {
+	if !strings.Contains(string(content), "nameserver "+sandbox.SandboxDNS) {
 		t.Fatalf("the resolver should name pasta's forwarder, got %q", content)
 	}
 }
@@ -1326,7 +1244,7 @@ func TestBwrapEgressProbeSaysWhatToDo(t *testing.T) {
 func TestTheSandboxProcessGetsItsOwnEnvironment(t *testing.T) {
 	t.Parallel()
 	env := sandboxProcessEnv(bwrapConfig{DataDir: "/state/ws/home"})
-	want := []string{"PATH=" + ProcessPath, "HOME=/state/ws/home", "LANG=C.UTF-8"}
+	want := []string{"PATH=" + sandbox.ProcessPath, "HOME=/state/ws/home", "LANG=C.UTF-8"}
 	if !slices.Equal(env, want) {
 		t.Errorf("the sandbox's environment is %q, want %q", env, want)
 	}
@@ -1345,7 +1263,7 @@ func TestTheSandboxArgvClearsTheEnvironmentFirst(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
 	argv, err := driver.sandboxArgv(bwrapConfig{
 		Bwrap: "/usr/bin/bwrap", Workspace: "/work/ws", DataDir: "/state/ws/home",
-		Run: "/state/ws/run", GuestRun: GuestRunDir, GuestSocket: GuestSocketPath,
+		Run: "/state/ws/run", GuestRun: sandbox.GuestRunDir, GuestSocket: sandbox.GuestSocketPath,
 		Supervisor: "/install/acornd",
 	})
 	if err != nil {
@@ -1363,9 +1281,9 @@ func TestTheSandboxArgvClearsTheEnvironmentFirst(t *testing.T) {
 // "Creating new namespace failed: Operation not permitted".
 func TestANestedSandboxWithoutSysAdminKeepsAUserNamespaceOfItsOwn(t *testing.T) {
 	driver, _ := testBwrap(t, t.TempDir())
-	for _, network := range []SandboxNetwork{
-		{Mode: NetworkOffName},
-		{Mode: "pasta", Address: SandboxAddress, Gateway: SandboxGateway, Pasta: "/usr/bin/pasta"},
+	for _, network := range []sandbox.SandboxNetwork{
+		{Mode: sandbox.NetworkOffName},
+		{Mode: "pasta", Address: sandbox.SandboxAddress, Gateway: sandbox.SandboxGateway, Pasta: "/usr/bin/pasta"},
 	} {
 		config := bwrapConfig{
 			Bwrap:            "/usr/bin/bwrap",
@@ -1376,9 +1294,9 @@ func TestANestedSandboxWithoutSysAdminKeepsAUserNamespaceOfItsOwn(t *testing.T) 
 			DataDir:          "/home",
 			Workspace:        "/work",
 			Run:              "/run",
-			GuestRun:         GuestRunDir,
+			GuestRun:         sandbox.GuestRunDir,
 			Supervisor:       "/usr/local/bin/acornd",
-			GuestSocket:      GuestSocketPath,
+			GuestSocket:      sandbox.GuestSocketPath,
 		}
 		argv, err := driver.sandboxArgv(config)
 		if err != nil {
@@ -1390,11 +1308,19 @@ func TestANestedSandboxWithoutSysAdminKeepsAUserNamespaceOfItsOwn(t *testing.T) 
 				t.Errorf("a nested sandbox without CAP_SYS_ADMIN needs %q: %v", want, argv)
 			}
 		}
-		if network.Mode == NetworkOffName && strings.Contains(joined, "--share-net") {
+		if network.Mode == sandbox.NetworkOffName && strings.Contains(joined, "--share-net") {
 			t.Errorf("a sandbox with no egress must not share its parent's network: %v", argv)
 		}
-		if network.Mode != NetworkOffName && !strings.Contains(joined, "--share-net") {
+		if network.Mode != sandbox.NetworkOffName && !strings.Contains(joined, "--share-net") {
 			t.Errorf("a sandbox with egress must share pasta's network: %v", argv)
 		}
+	}
+}
+
+// bwrap substitutes through the proxy control runs for it: the placeholder is in the command's
+// environment, and control owns the listener the forward points at.
+func TestBwrapSubstitutesThroughAControlProxy(t *testing.T) {
+	if !NewBwrap(t.TempDir()).SecretProxyInControl() {
+		t.Error("bwrap substitutes through the proxy control runs for it")
 	}
 }

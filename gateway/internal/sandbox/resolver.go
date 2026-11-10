@@ -29,7 +29,7 @@ type ResolverFiles struct {
 // name still resolves.
 func ResolveResolvFor(workspaceDir string, files ResolverFiles, mode string, private bool) (string, error) {
 	if mode != "pasta" || private {
-		return resolverFileFor(files, workspaceDir)
+		return ResolverFileFor(files, workspaceDir)
 	}
 	path := filepath.Join(workspaceDir, "pasta-resolv.conf")
 	content := "# written by acornd: pasta forwards these queries to the machine's resolver\n" +
@@ -50,7 +50,7 @@ func ResolveResolvFor(workspaceDir string, files ResolverFiles, mode string, pri
 // what most distributions do — a sandbox cannot use it: 127.0.0.1 inside a sandbox is the
 // sandbox's own loopback, where nothing listens. The machine's upstream servers are in a file of
 // their own, so that is what gets bound; everything else binds the machine's file unchanged.
-func resolverFileFor(files ResolverFiles, workspaceDir string) (string, error) {
+func ResolverFileFor(files ResolverFiles, workspaceDir string) (string, error) {
 	raw, err := os.ReadFile(files.Host)
 	if err != nil {
 		// No resolver file to read: binding the machine's path is what the sandbox did before, and

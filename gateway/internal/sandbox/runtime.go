@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -84,4 +85,11 @@ func ensureOwnedDir(dir string) error {
 		return fmt.Errorf("sandbox: %s belongs to another account (%d); refusing to put a socket there", dir, *uid)
 	}
 	return nil
+}
+
+// Runner runs the engine and returns its combined output. It is an interface so that the
+// lifecycle can be recorded in tests: the ordinary test suite runs on machines with no
+// hypervisor, and a test that needs one has to say so.
+type Runner interface {
+	Run(ctx context.Context, args ...string) (string, error)
 }

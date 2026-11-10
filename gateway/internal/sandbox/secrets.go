@@ -2,6 +2,8 @@
 // engine-neutral; this is the part that is not. See docs/adr/0021-a-vault-for-tool-secrets.md.
 package sandbox
 
+import "context"
+
 // Delivery is how an engine makes a secret available to a command.
 type Delivery int
 
@@ -43,4 +45,11 @@ type Secret struct {
 // put the change into the running sandbox: the next start will have it.
 type SecretChange struct {
 	RestartRequired bool
+}
+
+// EnvRunner is the test seam for a command that needs extra environment entries. A Runner that
+// implements it can assert what a secret's value looked like on its way to the engine without the
+// test having to read the host's environment.
+type EnvRunner interface {
+	RunEnv(ctx context.Context, env []string, args ...string) (string, error)
 }

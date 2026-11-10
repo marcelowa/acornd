@@ -1,14 +1,11 @@
-package sandbox
+package microsandbox
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 	"io"
 	"net/http"
 	"os"
@@ -20,7 +17,7 @@ import (
 )
 
 // Microsandbox is the microVM engine: libkrun microVMs with a command line for the
-// lifecycle and an SDK for execution. It is one implementation of Driver; the package
+// lifecycle and an SDK for execution. It is one implementation of sandbox.Driver; the package
 // comment explains what that buys.
 type Microsandbox struct {
 	dataDir string
@@ -28,7 +25,7 @@ type Microsandbox struct {
 	// need a short path and images take a while to Fetch, so both are reasons to point it
 	// somewhere deliberate.
 	state     string
-	runner    Runner
+	runner    sandbox.Runner
 	client    *http.Client
 	installed bool
 	// base is where releases are fetched from. Set in tests to a local server, so that
@@ -36,18 +33,11 @@ type Microsandbox struct {
 	base string
 	// hostNested is the machine half of Nesting: what this computer can grant. It is a field
 	// so that tests can answer for a machine that is not this one.
-	hostNested func() NestingSupport
+	hostNested func() sandbox.NestingSupport
 	// nestingMu guards the answer below, which is taken once: a running gateway does not
 	// swap engine builds under itself.
 	nestingMu sync.Mutex
-	engine    *NestingSupport
-}
-
-// Runner runs the engine and returns its combined output. It is an interface so that the
-// lifecycle can be recorded in tests: the ordinary test suite runs on machines with no
-// hypervisor, and a test that needs one has to say so.
-type Runner interface {
-	Run(ctx context.Context, args ...string) (string, error)
+	engine    *sandbox.NestingSupport
 }
 
 // Version is the engine release acornd runs. Nesting is a switch here rather than an engine
@@ -78,7 +68,7 @@ func NewMicrosandbox(dataDir string) *Microsandbox {
 }
 
 // WithRunner replaces the engine binary, which is how the driver is tested without one.
-func (m *Microsandbox) WithRunner(runner Runner) *Microsandbox {
+func (m *Microsandbox) WithRunner(runner sandbox.Runner) *Microsandbox {
 	m.runner = runner
 	return m
 }
@@ -133,7 +123,7 @@ func (m *Microsandbox) Install(ctx context.Context, log func(string, ...any)) er
 	}
 	artifact := ArtifactFor(runtime.GOOS, runtime.GOARCH)
 	if artifact == "" {
-		return fmt.Errorf("%w: no engine release for %s/%s", ErrUnavailable, runtime.GOOS, runtime.GOARCH)
+		return fmt.Errorf("%w: no engine release for %s/%s", sandbox.ErrUnavailable, runtime.GOOS, runtime.GOARCH)
 	}
 	if log != nil {
 		log("installing the sandbox engine %s (%s)", Version, artifact)
@@ -171,19 +161,19 @@ func (m *Microsandbox) stage(ctx context.Context, artifact, staging string) erro
 	if err := os.MkdirAll(staging, 0o755); err != nil {
 		return err
 	}
-	body, err := Fetch(ctx, client, m.base+"/"+artifact)
+	body, err := sandbox.Fetch(ctx, client, m.base+"/"+artifact)
 	if err != nil {
 		return err
 	}
 	defer body.Close()
-	if err := UnpackVerified(body, want, staging); err != nil {
+	if err := sandbox.UnpackVerified(body, want, staging); err != nil {
 		return err
 	}
 	if err := layOut(staging); err != nil {
 		return err
 	}
 	if _, err := os.Stat(filepath.Join(staging, "bin", "msb")); err != nil {
-		return fmt.Errorf("%w: %s did not contain bin/msb", ErrUnavailable, artifact)
+		return fmt.Errorf("%w: %s did not contain bin/msb", sandbox.ErrUnavailable, artifact)
 	}
 	return nil
 }
@@ -213,23 +203,23 @@ func (m *Microsandbox) Usable() error {
 			return nil
 		}
 		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("%w: /dev/kvm is missing: the kernel needs KVM and the container or VM must pass it through", ErrUnavailable)
+			return fmt.Errorf("%w: /dev/kvm is missing: the kernel needs KVM and the container or VM must pass it through", sandbox.ErrUnavailable)
 		}
 		if errors.Is(err, os.ErrPermission) {
-			return fmt.Errorf("%w: /dev/kvm is not readable by %s%s", ErrUnavailable, os.Getenv("USER"), kvmHint())
+			return fmt.Errorf("%w: /dev/kvm is not readable by %s%s", sandbox.ErrUnavailable, os.Getenv("USER"), kvmHint())
 		}
-		return fmt.Errorf("%w: /dev/kvm: %w", ErrUnavailable, err)
+		return fmt.Errorf("%w: /dev/kvm: %w", sandbox.ErrUnavailable, err)
 	case "darwin":
 		out, err := exec.Command("sysctl", "-n", "kern.hv_support").Output()
 		if err != nil {
-			return fmt.Errorf("%w: cannot ask macOS whether it supports a hypervisor: %w", ErrUnavailable, err)
+			return fmt.Errorf("%w: cannot ask macOS whether it supports a hypervisor: %w", sandbox.ErrUnavailable, err)
 		}
 		if strings.TrimSpace(string(out)) != "1" {
-			return fmt.Errorf("%w: macOS reports no hypervisor support (kern.hv_support)", ErrUnavailable)
+			return fmt.Errorf("%w: macOS reports no hypervisor support (kern.hv_support)", sandbox.ErrUnavailable)
 		}
 		return nil
 	default:
-		return fmt.Errorf("%w: no hypervisor for %s", ErrUnavailable, runtime.GOOS)
+		return fmt.Errorf("%w: no hypervisor for %s", sandbox.ErrUnavailable, runtime.GOOS)
 	}
 }
 
@@ -251,9 +241,9 @@ func currentOwner() owner {
 // Render is the sparse sandbox configuration the engine reads: sandbox.yaml, the whole
 // policy for one sandbox. The engine says which fields it accepts; this writes only the
 // ones we mean.
-func (p Policy) Render() []byte { return p.render(currentOwner()) }
+func render(p sandbox.Policy) []byte { return renderWithOwner(p, currentOwner()) }
 
-func (p Policy) render(o owner) []byte {
+func renderWithOwner(p sandbox.Policy, o owner) []byte {
 	p = p.WithDefaults()
 	var b strings.Builder
 	fmt.Fprintf(&b, "image: %s\n", yamlString(p.Image))
@@ -265,7 +255,7 @@ func (p Policy) render(o owner) []byte {
 		b.WriteString("network: none\n")
 	}
 	b.WriteString("mounts:\n")
-	b.WriteString("  - " + yamlString(p.mount(o)) + "\n")
+	b.WriteString("  - " + yamlString(mountSpec(p, o)) + "\n")
 	for _, path := range p.Global {
 		// `ro` is the decision, not a detail: the agent reads its instructions and runs their
 		// scripts, and editing them from inside would be self-modification.
@@ -297,7 +287,7 @@ func (p Policy) render(o owner) []byte {
 
 // mount is the workspace mount: the folder at its own path, so that a path in the model's
 // world and in the user's world are the same string.
-func (p Policy) mount(o owner) string {
+func mountSpec(p sandbox.Policy, o owner) string {
 	spec := p.Workspace + ":" + p.Workspace
 	if o.mapFiles {
 		spec += fmt.Sprintf(":uid=%d,gid=%d", o.uid, o.gid)
@@ -338,7 +328,7 @@ func (m *Microsandbox) Egress() error { return nil }
 // agree: the engine has to offer the switch and the machine has to be able to grant what it
 // asks for (nested virtualization on the host). The switch exists in the pinned release; it
 // is asked for rather than assumed because an install can be older than the build.
-func (m *Microsandbox) Nesting(ctx context.Context) NestingSupport {
+func (m *Microsandbox) Nesting(ctx context.Context) sandbox.NestingSupport {
 	engine := m.engineNesting(ctx)
 	if !engine.Available {
 		return engine
@@ -349,9 +339,9 @@ func (m *Microsandbox) Nesting(ctx context.Context) NestingSupport {
 // engineNesting answers the engine half: whether this build of it offers nesting at all. It
 // is asked once and kept — except while the engine is not installed yet, which is a state
 // the first workspace to need it changes.
-func (m *Microsandbox) engineNesting(ctx context.Context) NestingSupport {
+func (m *Microsandbox) engineNesting(ctx context.Context) sandbox.NestingSupport {
 	if !m.Installed() {
-		return Unavailable("the engine is not installed")
+		return sandbox.Unavailable("the engine is not installed")
 	}
 	m.nestingMu.Lock()
 	defer m.nestingMu.Unlock()
@@ -362,42 +352,42 @@ func (m *Microsandbox) engineNesting(ctx context.Context) NestingSupport {
 	return *m.engine
 }
 
-func (m *Microsandbox) detectEngineNesting(ctx context.Context) NestingSupport {
+func (m *Microsandbox) detectEngineNesting(ctx context.Context) sandbox.NestingSupport {
 	help, err := m.run(ctx, "create", "--help")
 	if err != nil {
-		return Unavailable("cannot ask engine %s whether it can nest: %v", Version, err)
+		return sandbox.Unavailable("cannot ask engine %s whether it can nest: %v", Version, err)
 	}
 	if !strings.Contains(help, "--nested-virt") {
-		return Unavailable("engine %s has no nesting switch: its guests cannot nest", Version)
+		return sandbox.Unavailable("engine %s has no nesting switch: its guests cannot nest", Version)
 	}
-	return NestingSupport{Available: true}
+	return sandbox.NestingSupport{Available: true}
 }
 
 // hostNesting is the machine half, with the test seam applied.
-func (m *Microsandbox) hostNesting() NestingSupport {
+func (m *Microsandbox) hostNesting() sandbox.NestingSupport {
 	if m.hostNested != nil {
 		return m.hostNested()
 	}
 	return hostNestedSupport()
 }
-func (m *Microsandbox) Create(ctx context.Context, policy Policy, policyDir string) error {
+func (m *Microsandbox) Create(ctx context.Context, policy sandbox.Policy, policyDir string) error {
 	if strings.TrimSpace(policyDir) == "" {
 		return errors.New("sandbox: no directory for the policy file")
 	}
 	if len(m.StateDir()) > statePathLimit {
 		return fmt.Errorf(
 			"%w: the sandbox state folder is %d characters (%s) and the engine's sockets need %d or fewer, so acornd cannot be installed this deep: use a shorter --data-dir",
-			ErrUnavailable, len(m.StateDir()), m.StateDir(), statePathLimit,
+			sandbox.ErrUnavailable, len(m.StateDir()), m.StateDir(), statePathLimit,
 		)
 	}
 	if err := os.MkdirAll(policyDir, 0o755); err != nil {
 		return err
 	}
 	path := filepath.Join(policyDir, "sandbox.yaml")
-	if err := os.WriteFile(path, policy.Render(), 0o644); err != nil {
+	if err := os.WriteFile(path, render(policy), 0o644); err != nil {
 		return err
 	}
-	args := []string{"create", "--conf", path, "--name", Name(policy.Workspace), "--label", "acornd"}
+	args := []string{"create", "--conf", path, "--name", sandbox.Name(policy.Workspace), "--label", "acornd"}
 	args = append(args, networkArgs(policy)...)
 	args = append(args, m.nestingArgs(ctx, policy)...)
 	_, err := m.runEnv(ctx, secretEnvValues(policy.Secrets), args...)
@@ -417,7 +407,7 @@ func (m *Microsandbox) Create(ctx context.Context, policy Policy, policyDir stri
 // a default must not cost anybody their workspace. That machine is told `false` anyway: the
 // engine is never left to its own default, and what happens is what the state reports.
 // docs/adr/0018-disable-vm-nesting.md owns the three cases and the reasons.
-func (m *Microsandbox) nestingArgs(ctx context.Context, policy Policy) []string {
+func (m *Microsandbox) nestingArgs(ctx context.Context, policy sandbox.Policy) []string {
 	if !m.engineNesting(ctx).Available {
 		// An engine that predates the flag has nothing to hear, and an unknown flag would
 		// fail the create: the pin is not assumed to be what is installed.
@@ -440,7 +430,7 @@ func (m *Microsandbox) nestingArgs(ctx context.Context, policy Policy) []string 
 // So: the default is deny, public and DNS are allowed, and the private grant is the only thing
 // added for a workspace that has one. Egress off is the rendered `network: none`, which is a whole
 // policy on its own.
-func networkArgs(policy Policy) []string {
+func networkArgs(policy sandbox.Policy) []string {
 	if !policy.Egress {
 		return nil
 	}
@@ -455,7 +445,7 @@ func networkArgs(policy Policy) []string {
 	return args
 }
 
-func (m *Microsandbox) Start(ctx context.Context, name string, secrets []Secret) error {
+func (m *Microsandbox) Start(ctx context.Context, name string, secrets []sandbox.Secret) error {
 	// The stored config references a host variable per secret. The engine reads it at start,
 	// so the values ride the start process's environment, never the config.
 	_, err := m.runEnv(ctx, startSecretEnv(secrets), "start", name)
@@ -476,7 +466,7 @@ func (m *Microsandbox) Remove(ctx context.Context, name string) error {
 // List asks the engine for every sandbox it knows. The structured form is used because the
 // human table is not a contract, and because `status` reports a missing sandbox as success,
 // which is a trap to build on.
-func (m *Microsandbox) List(ctx context.Context) ([]Instance, error) {
+func (m *Microsandbox) List(ctx context.Context) ([]sandbox.Instance, error) {
 	out, err := m.run(ctx, "list", "--format", "json")
 	if err != nil {
 		return nil, err
@@ -485,9 +475,9 @@ func (m *Microsandbox) List(ctx context.Context) ([]Instance, error) {
 	if trimmed == "" {
 		return nil, nil
 	}
-	var instances []Instance
+	var instances []sandbox.Instance
 	if err := json.Unmarshal([]byte(trimmed), &instances); err != nil {
-		return nil, fmt.Errorf("%w: cannot read the engine's sandbox list: %w", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: cannot read the engine's sandbox list: %w", sandbox.ErrUnavailable, err)
 	}
 	return instances, nil
 }
@@ -503,13 +493,13 @@ func (m *Microsandbox) run(ctx context.Context, args ...string) (string, error) 
 // the engine without being written to the policy file or passed in argv.
 func (m *Microsandbox) runEnv(ctx context.Context, extra []string, args ...string) (string, error) {
 	if m.runner != nil {
-		if runner, ok := m.runner.(EnvRunner); ok {
+		if runner, ok := m.runner.(sandbox.EnvRunner); ok {
 			return runner.RunEnv(ctx, extra, args...)
 		}
 		return m.runner.Run(ctx, args...)
 	}
 	if !m.Installed() {
-		return "", fmt.Errorf("%w: %s is missing", ErrUnavailable, m.binary())
+		return "", fmt.Errorf("%w: %s is missing", sandbox.ErrUnavailable, m.binary())
 	}
 	if err := os.MkdirAll(m.StateDir(), 0o755); err != nil {
 		return "", err
@@ -522,7 +512,7 @@ func (m *Microsandbox) runEnv(ctx context.Context, extra []string, args ...strin
 		if text == "" {
 			text = commandErr.Error()
 		}
-		return text, fmt.Errorf("sandbox engine %s: %s", strings.Join(args, " "), FirstLine(text))
+		return text, fmt.Errorf("sandbox engine %s: %s", strings.Join(args, " "), sandbox.FirstLine(text))
 	}
 	return text, nil
 }
@@ -584,16 +574,16 @@ func bundleParts(entries []os.DirEntry) (string, error) {
 			binarySeen = true
 		case libraryName(name):
 			if library != "" {
-				return "", fmt.Errorf("%w: the release bundle holds more than one libkrunfw", ErrUnavailable)
+				return "", fmt.Errorf("%w: the release bundle holds more than one libkrunfw", sandbox.ErrUnavailable)
 			}
 			library = name
 		}
 	}
 	if !binarySeen {
-		return "", fmt.Errorf("%w: the release bundle has no msb", ErrUnavailable)
+		return "", fmt.Errorf("%w: the release bundle has no msb", sandbox.ErrUnavailable)
 	}
 	if library == "" {
-		return "", fmt.Errorf("%w: the release bundle has no libkrunfw for %s", ErrUnavailable, runtime.GOOS)
+		return "", fmt.Errorf("%w: the release bundle has no libkrunfw for %s", sandbox.ErrUnavailable, runtime.GOOS)
 	}
 	return library, nil
 }
@@ -668,7 +658,7 @@ func loadNames(library string) map[string]string {
 // file covers every platform, so an artifact missing from it is an error rather than a
 // reason to skip verification.
 func fetchChecksum(ctx context.Context, client *http.Client, url, artifact string) (string, error) {
-	body, err := Fetch(ctx, client, url)
+	body, err := sandbox.Fetch(ctx, client, url)
 	if err != nil {
 		return "", err
 	}
@@ -683,125 +673,5 @@ func fetchChecksum(ctx context.Context, client *http.Client, url, artifact strin
 			return strings.ToLower(fields[0]), nil
 		}
 	}
-	return "", fmt.Errorf("%w: %s is not in the release checksums", ErrUnavailable, artifact)
-}
-
-func Fetch(ctx context.Context, client *http.Client, url string) (io.ReadCloser, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %w", ErrUnavailable, url, err)
-	}
-	if response.StatusCode != http.StatusOK {
-		_ = response.Body.Close()
-		return nil, fmt.Errorf("%w: %s: %s", ErrUnavailable, url, response.Status)
-	}
-	return response.Body, nil
-}
-
-// UnpackVerified unpacks a release tarball, refusing to write anything that would land
-// outside the destination. The archive is only as trustworthy as its checksum, which is why
-// both checks happen: a verified download of a hostile archive would still be hostile.
-func UnpackVerified(body io.Reader, want, dest string) error {
-	digest := sha256.New()
-	reader, err := gzip.NewReader(io.TeeReader(body, digest))
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrUnavailable, err)
-	}
-	defer reader.Close()
-	archive := tar.NewReader(reader)
-	for {
-		header, err := archive.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("%w: %w", ErrUnavailable, err)
-		}
-		if err := extractEntry(archive, header, dest); err != nil {
-			return err
-		}
-	}
-	if got := hex.EncodeToString(digest.Sum(nil)); want != "" && got != want {
-		return fmt.Errorf("%w: checksum mismatch: got %s, want %s", ErrUnavailable, got, want)
-	}
-	return nil
-}
-
-// extractEntry writes one archive member. Directories, files and symlinks are the three shapes a
-// release takes; anything else is skipped rather than guessed at.
-func extractEntry(archive *tar.Reader, header *tar.Header, dest string) error {
-	target, err := safeJoin(dest, header.Name)
-	if err != nil {
-		return err
-	}
-	switch header.Typeflag {
-	case tar.TypeDir:
-		return os.MkdirAll(target, 0o755)
-	case tar.TypeReg:
-		return extractFile(archive, header, target)
-	case tar.TypeSymlink:
-		return extractSymlink(header, target)
-	}
-	return nil
-}
-
-func extractFile(archive *tar.Reader, header *tar.Header, target string) error {
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
-	}
-	// The owner-write bit is added because an archive member read-only in the release would
-	// otherwise leave a file this install cannot replace on the next upgrade.
-	mode := header.FileInfo().Mode().Perm() | 0o200
-	file, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(file, archive); err != nil {
-		// The copy's error is the one to report; the close of a file already known to be bad
-		// would only say the same thing twice.
-		_ = file.Close()
-		return err
-	}
-	return file.Close()
-}
-
-func extractSymlink(header *tar.Header, target string) error {
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
-	}
-	// The link's own destination has to stay inside the tree too: a symlink to /etc is how an
-	// archive reaches a path that the file entries cannot.
-	if _, err := safeJoin(filepath.Dir(target), header.Linkname); err != nil {
-		return err
-	}
-	// A later layer replaces an earlier one, and the removal is allowed to find nothing there.
-	_ = os.Remove(target)
-	return os.Symlink(header.Linkname, target)
-}
-
-// safeJoin resolves an archive member inside a destination, refusing absolute paths and
-// escapes. A tar entry named ../../.ssh/authorized_keys is otherwise a way to write outside.
-func safeJoin(dest, name string) (string, error) {
-	if filepath.IsAbs(name) || strings.HasPrefix(name, "/") {
-		return "", fmt.Errorf("%w: archive member %q is absolute", ErrUnavailable, name)
-	}
-	target := filepath.Join(dest, name)
-	relative, err := filepath.Rel(dest, target)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("%w: archive member %q escapes the destination", ErrUnavailable, name)
-	}
-	return target, nil
-}
-
-// FirstLine keeps one engine complaint rather than a wall of them: the first is the cause,
-// the rest are usually consequences.
-func FirstLine(text string) string {
-	if before, _, ok := strings.Cut(text, "\n"); ok {
-		return before
-	}
-	return text
+	return "", fmt.Errorf("%w: %s is not in the release checksums", sandbox.ErrUnavailable, artifact)
 }

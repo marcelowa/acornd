@@ -244,3 +244,11 @@ func (p Policy) Stage(step string) {
 		p.OnStage(step)
 	}
 }
+
+// HostDevices is where the host's tun and KVM nodes are. A path that is empty, missing, or not a
+// device is simply not bound: a workspace still opens, and the engine says why it cannot nest
+// instead of failing the boot.
+type HostDevices struct {
+	Tun string
+	KVM string
+}

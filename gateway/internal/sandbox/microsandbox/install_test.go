@@ -1,8 +1,9 @@
-package sandbox
+package microsandbox
 
 import (
 	"context"
 	"errors"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -33,8 +34,8 @@ func TestAnArtifactMissingFromTheChecksumsIsRefused(t *testing.T) {
 	if err == nil {
 		t.Fatal("an artifact with no checksum should be refused")
 	}
-	if !errors.Is(err, ErrUnavailable) {
-		t.Errorf("it should be the Unavailable kind of error: %v", err)
+	if !errors.Is(err, sandbox.ErrUnavailable) {
+		t.Errorf("it should be the sandbox.Unavailable kind of error: %v", err)
 	}
 	if !strings.Contains(err.Error(), "acornd-linux-amd64") {
 		t.Errorf("the refusal should name the artifact: %v", err)
@@ -54,18 +55,18 @@ func TestAChecksumLineIsReadTheWayTheFileWritesIt(t *testing.T) {
 	}
 }
 
-// A download that is not a 200 is an Unavailable engine, not a crash: the status is in the words,
+// A download that is not a 200 is an sandbox.Unavailable engine, not a crash: the status is in the words,
 // so a 404 for a release that was pulled is something a person can act on.
 func TestADownloadThatIsNotOKIsUnavailable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "gone", http.StatusNotFound)
 	}))
 	defer server.Close()
-	_, err := Fetch(context.Background(), server.Client(), server.URL+"/artifact")
+	_, err := sandbox.Fetch(context.Background(), server.Client(), server.URL+"/artifact")
 	if err == nil {
 		t.Fatal("a 404 should be an error")
 	}
-	if !errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "404") {
+	if !errors.Is(err, sandbox.ErrUnavailable) || !strings.Contains(err.Error(), "404") {
 		t.Errorf("answered %v", err)
 	}
 }
@@ -93,12 +94,12 @@ func TestAnEngineThatIsNotInstalledSaysSo(t *testing.T) {
 	engine := &Microsandbox{base: "http://registry.invalid", dataDir: t.TempDir()}
 	if _, err := engine.runEnv(context.Background(), nil, "version"); err == nil {
 		t.Fatal("a missing engine should not be run")
-	} else if !errors.Is(err, ErrUnavailable) {
-		t.Errorf("it should be the Unavailable kind: %v", err)
+	} else if !errors.Is(err, sandbox.ErrUnavailable) {
+		t.Errorf("it should be the sandbox.Unavailable kind: %v", err)
 	}
 }
 
-// plainRunner implements Runner and nothing else, which is what the fallback is for.
+// plainRunner implements sandbox.Runner and nothing else, which is what the fallback is for.
 type plainRunner struct{ args []string }
 
 func (p *plainRunner) Run(_ context.Context, args ...string) (string, error) {

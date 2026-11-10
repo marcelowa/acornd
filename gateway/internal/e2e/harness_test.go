@@ -34,6 +34,7 @@ import (
 
 	"github.com/marcelowa/acornd/gateway/internal/identity"
 	"github.com/marcelowa/acornd/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox/microsandbox"
 	"github.com/marcelowa/acornd/gateway/internal/sandbox/youki"
 )
 
@@ -114,7 +115,7 @@ func TestMain(m *testing.M) {
 		// ask for one: the fast tier's host-engine tests never touch the microVM engine.
 		if !testing.Short() && sandboxUnavailable() == "" {
 			shared := filepath.Join(dir, "engine")
-			if err := sandbox.NewMicrosandbox(shared).Install(context.Background(), nil); err != nil {
+			if err := microsandbox.NewMicrosandbox(shared).Install(context.Background(), nil); err != nil {
 				engineHome = ""
 			} else {
 				engineHome = shared
@@ -136,7 +137,7 @@ func sandboxStateDir() string {
 	if state := os.Getenv("ACORND_SANDBOX_STATE"); state != "" {
 		return state
 	}
-	return filepath.Join(os.TempDir(), "acornd-e2e-sandboxes-"+sandbox.EngineVersion())
+	return filepath.Join(os.TempDir(), "acornd-e2e-sandboxes-"+microsandbox.EngineVersion())
 }
 
 func which(name string) string {

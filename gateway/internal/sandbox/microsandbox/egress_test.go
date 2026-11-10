@@ -1,7 +1,8 @@
-package sandbox
+package microsandbox
 
 import (
 	"context"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,24 +21,24 @@ import (
 func TestTheEgressPolicyIsWrittenForEveryCase(t *testing.T) {
 	cases := []struct {
 		why    string
-		policy Policy
+		policy sandbox.Policy
 		want   []string
 		absent []string
 	}{
 		{
 			why:    "egress off says nothing: the rendered config is `network: none`, which is a whole policy",
-			policy: Policy{Workspace: "/w", Egress: false, PrivateEgress: true},
+			policy: sandbox.Policy{Workspace: "/w", Egress: false, PrivateEgress: true},
 			want:   nil,
 		},
 		{
 			why:    "egress on with no grant allows public and DNS, and the default is deny",
-			policy: Policy{Workspace: "/w", Egress: true},
+			policy: sandbox.Policy{Workspace: "/w", Egress: true},
 			want:   []string{"--net-default", "deny", "--net-rule", "allow@public", "--net-rule", "allow@dns"},
 			absent: []string{"allow@private"},
 		},
 		{
 			why:    "egress on with the grant adds private and keeps the rest",
-			policy: Policy{Workspace: "/w", Egress: true, PrivateEgress: true},
+			policy: sandbox.Policy{Workspace: "/w", Egress: true, PrivateEgress: true},
 			want: []string{
 				"--net-default", "deny",
 				"--net-rule", "allow@public",
@@ -84,7 +85,7 @@ func TestCreatePassesTheEgressPolicyToTheEngine(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = os.RemoveAll(short) })
 		engine := &Microsandbox{runner: runner, state: short, installed: true}
-		policy := Policy{Workspace: t.TempDir(), Egress: true, PrivateEgress: one.priv}
+		policy := sandbox.Policy{Workspace: t.TempDir(), Egress: true, PrivateEgress: one.priv}
 		if err := engine.Create(context.Background(), policy, t.TempDir()); err != nil {
 			t.Fatalf("%s: %v", one.why, err)
 		}
@@ -107,11 +108,11 @@ func TestCreatePassesTheEgressPolicyToTheEngine(t *testing.T) {
 // The rendered config says `network: none` for a workspace with egress off, and says nothing about
 // the network otherwise: the policy lives in the arguments, where it is one decision.
 func TestTheRenderedConfigLeavesTheNetworkToTheArguments(t *testing.T) {
-	off := string(Policy{Workspace: "/w", Egress: false}.Render())
+	off := string(render(sandbox.Policy{Workspace: "/w", Egress: false}))
 	if !strings.Contains(off, "network: none") {
 		t.Errorf("egress off should render network: none:\n%s", off)
 	}
-	on := string(Policy{Workspace: "/w", Egress: true}.Render())
+	on := string(render(sandbox.Policy{Workspace: "/w", Egress: true}))
 	if strings.Contains(on, "network:") {
 		t.Errorf("egress on should leave the network to the arguments:\n%s", on)
 	}

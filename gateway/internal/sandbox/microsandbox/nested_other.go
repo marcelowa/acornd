@@ -1,10 +1,12 @@
 //go:build !linux && !darwin
 
-package sandbox
+package microsandbox
+
+import "github.com/marcelowa/acornd/gateway/internal/sandbox"
 
 // hostNestedSupport is unknown where acornd has no check. The refusal is the honest
 // answer: a machine nobody asked is not a machine that can nest, and a sandbox that never
 // gets the flag still boots.
-func hostNestedSupport() NestingSupport {
-	return Unavailable("nested virtualization is not checked on this platform")
+func hostNestedSupport() sandbox.NestingSupport {
+	return sandbox.Unavailable("nested virtualization is not checked on this platform")
 }
