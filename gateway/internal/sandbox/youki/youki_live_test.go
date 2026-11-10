@@ -42,7 +42,9 @@ func liveYouki(t *testing.T) (*Youki, context.Context) {
 	if err := os.MkdirAll(cgroupDir(parent), 0o755); err != nil {
 		t.Skipf("this machine does not delegate a cgroup to the sandbox, so youki cannot create its cgroup: %v", err)
 	}
-	t.Cleanup(func() { _ = os.Remove(cgroupDir(parent)) })
+	// The parent slice stays: a rootless run cannot recreate it at the cgroup root, and it is
+	// the delegation the next test in this process uses. The driver removes each sandbox's
+	// child cgroup when it stops.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	t.Cleanup(cancel)
 	driver := NewYouki(t.TempDir())

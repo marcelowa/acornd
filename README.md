@@ -190,11 +190,12 @@ workspace refuses its tools, and `acornd doctor` says what each engine is missin
 - A bwrap workspace gets a root of its own over the shared image base, so `apt install` works
   inside it and the machine's own tools are never touched. The image is unpacked once per machine;
   a workspace pays only for what it changes. A machine that cannot overlay gets a copy instead.
-  A command costs about 1.1 ms.
+  A command costs about 1.1 ms. The overlay works rootless when the kernel allows user namespaces.
 - A youki workspace has a policy file: capabilities, devices, rlimits and read-only/masked paths
   are stated in its OCI config, `memory`/`cpus` are a cgroup budget, and a secret reaches an API
   through the proxy without the guest holding the value. Its root is an overlay over the shared
-  image base too, mounted in a private namespace before the runtime creates its devices.
+  image base too, mounted in a private namespace before the runtime creates its devices, and it
+  works rootless when the kernel allows a user namespace.
 - A bwrap workspace can run another acornd with its own sandbox and network. It needs `/dev/kvm`
   and `/dev/net/tun` from the machine, and a workspace can withdraw those with `--no-devices`.
 - A workspace can run a hypervisor inside its sandbox when the machine allows it. `--no-vm-nesting`

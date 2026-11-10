@@ -122,9 +122,10 @@ youki uses the same base/upper/work layout, with one difference in how the mount
 OCI `createRuntime` hook runs after the runtime has created the default devices in the rootfs, so
 mounting the overlay there hides `/dev/null` and the container fails; a private mount namespace
 around `youki create` (and `youki run` when pasta is in front) mounts the overlay before those
-devices exist and the runtime keeps it. The wrapper is `acornd internal overlay-run`; a gateway
-that cannot make a private mount namespace (a non-root user without CAP_SYS_ADMIN) keeps the copy,
-and the probe says so before a workspace is created.
+devices exist and the runtime keeps it. The wrapper is `acornd internal overlay-run`, and it asks
+for a user namespace first: a normal account has the mount power inside that bubble, so the
+overlay works rootless. A kernel that refuses the user namespace keeps the copy, and the probe
+says so before a workspace is created.
 
 Tests added by the build: `TestTwoWorkspacesShareOneImageBase`,
 `TestBwrapOverlayRootMountsTheBaseAndUpper`, `TestBwrapRemoveTakesTheUpperAndLeavesTheBase`,

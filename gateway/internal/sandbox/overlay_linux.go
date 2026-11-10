@@ -11,8 +11,8 @@ import (
 	"syscall"
 )
 
-// MountOverlay mounts the overlay a youki sandbox's root is made from. It is called by the
-// createRuntime hook, in the runtime's mount namespace before the container's rootfs is prepared.
+// MountOverlay mounts the overlay a youki sandbox's root is made from. It is called by
+// overlay-run in a private mount namespace before the runtime prepares the container's rootfs.
 // The userxattr form is what overlayfs needs inside a user namespace; a machine that refuses it
 // (a privileged mount, some kernels) gets the plain form, and both failing is the error.
 func MountOverlay(base, upper, work, root string) error {
@@ -98,6 +98,14 @@ func OverlayRunCommand(argv []string) error {
 	child := exec.Command(self, append([]string{"internal", "overlay-run"}, argv...)...)
 	child.Env = append(os.Environ(), "ACORND_OVERLAY_CHILD=1")
 	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
-	child.SysProcAttr = &syscall.SysProcAttr{Cloneflags: syscall.CLONE_NEWNS}
+	// A user namespace first: a normal account has no CAP_SYS_ADMIN to mount with, but the
+	// namespace gives it that power inside its own bubble. The uid mapping is 0 to this account, so
+	// the overlay files it creates are this account's.
+	child.SysProcAttr = &syscall.SysProcAttr{
+		Cloneflags:                 syscall.CLONE_NEWUSER | syscall.CLONE_NEWNS,
+		UidMappings:                []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getuid(), Size: 1}},
+		GidMappings:                []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getgid(), Size: 1}},
+		GidMappingsEnableSetgroups: false,
+	}
 	return child.Run()
 }

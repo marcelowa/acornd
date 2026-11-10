@@ -344,3 +344,27 @@ func TestYoukiMemorySizesAreBytes(t *testing.T) {
 		}
 	}
 }
+
+// The overlay wrapper runs the runtime inside a user namespace where this account is root. The
+// container therefore maps 0 to 0, not to the account outside it; a copy runs directly and maps
+// 0 to the account, as it always did.
+func TestAnOverlaySpecMapsTheContainerRootToTheWrapperRoot(t *testing.T) {
+	config := testYoukiConfig()
+	config.RootMode = "overlay"
+	config.Base = "/state/images/image/base"
+	config.Upper = "/state/ws/upper"
+	config.Work = "/state/ws/work"
+	spec := mustYoukiSpec(t, config)
+	if got := spec.Linux.UIDMappings[0].HostID; got != 0 {
+		t.Errorf("overlay uid mapping host id = %d, want 0 inside the wrapper", got)
+	}
+	if got := spec.Linux.GIDMappings[0].HostID; got != 0 {
+		t.Errorf("overlay gid mapping host id = %d, want 0 inside the wrapper", got)
+	}
+
+	plain := testYoukiConfig()
+	spec = mustYoukiSpec(t, plain)
+	if got := spec.Linux.UIDMappings[0].HostID; got != uint32(os.Getuid()) {
+		t.Errorf("copy uid mapping host id = %d, want this account %d", got, os.Getuid())
+	}
+}

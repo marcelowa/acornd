@@ -13,12 +13,12 @@
 #
 # The split is a move, not a loss: the parent's 389 was one sweep over the shared package and its
 # driver subdirectories because gremlins walks a tree. Each row below is one of those packages
-# with its own tests; 231 + 80 + 112 + 172 = 595, and the four sweeps run in parallel.
+# with its own tests; 231 + 80 + 112 + 174 = 597, and the four sweeps run in parallel.
 internal/control     88  347
 internal/sandbox      100  231
 internal/sandbox/bwrap 100 80
 internal/sandbox/microsandbox 89 112
-internal/sandbox/youki 100  172
+internal/sandbox/youki 100  174
 internal/supervise   85   47
 internal/update      90  258
 internal/vault       95  117
