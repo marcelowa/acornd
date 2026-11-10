@@ -38,11 +38,15 @@ func hostDeviceEntry(path string) (ociDevice, bool) {
 
 // deviceMajor and deviceMinor split a Linux dev_t the way makedev(3) packs it. The syscall
 // package stopped carrying Major and Minor, and the OCI configuration needs the two numbers
-// rather than the packed one.
+// rather than the packed one. Both fields are masked to the width the kernel gives them before
+// the conversion: the high bits of a dev_t are not part of the number, and an int64 holds the
+// masked value without an overflow.
 func deviceMajor(dev uint64) int64 {
-	return int64((dev>>8)&0xfff | (dev>>32)&^0xfff)
+	// #nosec G115 -- the masks leave at most 32 bits; an int64 holds them.
+	return int64((dev>>8)&0xfff | (dev>>32)&0xfffff000)
 }
 
 func deviceMinor(dev uint64) int64 {
-	return int64(dev&0xff | (dev>>12)&^0xff)
+	// #nosec G115 -- the masks leave at most 20 bits; an int64 holds them.
+	return int64(dev&0xff | (dev>>12)&0xfff00)
 }
