@@ -32,22 +32,15 @@ func liveYouki(t *testing.T) (*Youki, context.Context) {
 	if runtime.GOOS != "linux" {
 		t.Skip("youki is a Linux runtime")
 	}
-	// The cgroup is where a create fails first on a machine that has not delegated one. A
-	// plain /sys/fs/cgroup is not a cgroup: the bwrap workspace this suite can run in has no
-	// /sys mount at all, and a directory the test makes there is not what youki looks for.
-	if _, err := os.Stat(filepath.Join(cgroupMount, "cgroup.controllers")); err != nil {
-		t.Skipf("this machine has no cgroup v2 mount, so youki cannot create its cgroup: %v", err)
-	}
-	parent := cgroupParentPath()
-	if err := os.MkdirAll(cgroupDir(parent), 0o755); err != nil {
-		t.Skipf("this machine does not delegate a cgroup to the sandbox, so youki cannot create its cgroup: %v", err)
-	}
-	// The parent slice stays: a rootless run cannot recreate it at the cgroup root, and it is
-	// the delegation the next test in this process uses. The driver removes each sandbox's
-	// child cgroup when it stops.
+	// The cgroup is where a create fails first on a machine that has not delegated one. The
+	// probe chooses the delegated parent (the user's slice on systemd, the root otherwise) and
+	// records it for the record and the runtime.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	t.Cleanup(cancel)
 	driver := NewYouki(t.TempDir())
+	if err := driver.cgroup(); err != nil {
+		t.Skipf("this machine does not delegate a cgroup to the sandbox, so youki cannot create its cgroup: %v", err)
+	}
 	if err := driver.Install(ctx, t.Logf); err != nil {
 		t.Fatalf("install the pinned runtime: %v", err)
 	}
