@@ -47,11 +47,15 @@ function flooredPackages() {
 	return names;
 }
 
-/** A file in the gateway belongs to the first two path segments: `internal/control`, `cmd/acornd`. */
-function packageOf(path) {
+/** The floored package a file belongs to: the longest path prefix `.mutationfloors` names. */
+function packageOf(path, floored) {
 	const parts = path.split("/");
 	if (parts[0] !== "gateway" || parts.length < 3) return undefined;
-	return `${parts[1]}/${parts[2]}`;
+	for (let end = parts.length - 1; end >= 2; end--) {
+		const name = parts.slice(1, end).join("/");
+		if (floored.has(name)) return name;
+	}
+	return undefined;
 }
 
 let diff;
@@ -68,7 +72,7 @@ for (const line of diff.split("\n")) {
 	if (line.trim() === "") continue;
 	const [added, removed, path] = line.split("\t");
 	if (path === undefined) continue;
-	const name = packageOf(path);
+	const name = packageOf(path, floored);
 	if (name === undefined || !floored.has(name)) continue;
 	// A binary change reports "-" for both counts: it still changed the package.
 	const changed = Number(added) + Number(removed);
