@@ -1,7 +1,8 @@
 # ADR 0031 — A proxy for bwrap secrets
 
 Status: accepted, built — the proxy, its delivery through pasta, the sandbox's trust store, and a
-live rotation; the resolver and the DNS pin are not built
+live rotation; the resolver and the DNS pin are not built. Amended 2026-11-10: youki uses the
+same proxy.
 Date: 2026-10-29
 
 ## Context
@@ -233,3 +234,17 @@ can read every secret", which is the failure the vault was built to end.
   that is running with a network off has neither.
 - **A pinned client is excluded from a secret's host**, by design, and gets a handshake failure there
   rather than a substitution. That is the same trade the microVM engine made.
+
+## Amendment — 2026-11-10: youki uses the same proxy
+
+The engine was built after the ADR, and it does not need a second one. `Youki.SecretDelivery` is
+`substitute`, `SecretEnvInWorker` is false, and `SecretProxyInControl` is true, so control starts
+the same workspace proxy and hands the driver its URL and CA. The record carries them in the same
+keys a bwrap sandbox uses; pasta's `-T <port>` forwards the sandbox's loopback to the host
+listener, and the OCI configuration binds the trust bundle over the image's roots. `SecretsChanged`
+answers no restart: a value or host rotation is a grant swap under the running proxy. Adding the
+first proxy, removing the last one, or moving the port does restart, because the forward is part
+of the container's boot; `Youki.RestartRequired` is the check that decides it.
+
+`TestAYoukiWorkspaceSubstitutesASecretAtItsProxy` is the live proof — a real youki workspace
+holds the placeholder, the upstream sees the value, and the guest never does.

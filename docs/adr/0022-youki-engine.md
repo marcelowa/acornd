@@ -234,6 +234,12 @@ writes the map. Without that, the nested bwrap dies at "Creating new namespace f
 not permitted". `TestANestedAcornRunsInYoukiAndPicksItsEngine` boots the inner gateway, asks its
 console, and runs a command in the inner sandbox.
 
+The substitution proxy from ADR 0031 is built for youki as well. The driver reports `substitute`
+delivery, its record carries the proxy URL, port and trust bundle, pasta's `-T` forwards that one
+port, and the OCI configuration binds the bundle over the image's roots. A value or host rotation
+is a live grant swap; adding the first proxy, removing the last one, or moving the port restarts
+the sandbox, because the forward is baked into its boot.
+
 ## What this does not settle
 
 - **Whether youki is the engine.** bwrap (smaller still, no cgroups of its own, `--proc`

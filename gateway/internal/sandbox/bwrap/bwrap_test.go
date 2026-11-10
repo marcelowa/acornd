@@ -594,7 +594,7 @@ func TestTheTrustBundleIsTheImagesRootsAndThisInstallsCA(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 	path := filepath.Join(t.TempDir(), "bundle.pem")
-	if err := writeTrustBundle(path, imageRoots(rootfs), []byte("-- this install's CA --")); err != nil {
+	if err := sandbox.WriteTrustBundle(path, sandbox.ImageRoots(rootfs), []byte("-- this install's CA --")); err != nil {
 		t.Fatalf("bundle: %v", err)
 	}
 	bundle, err := os.ReadFile(path)

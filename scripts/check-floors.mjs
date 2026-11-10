@@ -91,7 +91,7 @@ function compare(kind, name, was, now, violations, raises) {
 	else raises.push(`${name}: ${moved}`);
 }
 
-function judge(kind, base, head, violations, raises, splits, exists) {
+function judge(kind, base, head, violations, raises, splits, moves, exists) {
 	let compared = 0;
 	for (const [name, was] of base) {
 		compared += 1;
@@ -113,9 +113,32 @@ function judge(kind, base, head, violations, raises, splits, exists) {
 				continue;
 			}
 		}
+		// Code can also move up: a helper lifted out of a driver into the shared package brings
+		// its tests and mutants with it. A child's fall is covered when its parent's killed
+		// count rose by at least the same amount.
+		if (kind === "mutation" && now[1] < was[1]) {
+			const parent = ancestorFloor(name, base);
+			if (parent !== undefined) {
+				const wasParent = base.get(parent), nowParent = head.get(parent);
+				if (wasParent && nowParent && nowParent[1] - wasParent[1] >= was[1] - now[1]) {
+					moves.push(`${name}: ${was.join("/")} -> ${now.join("/")}, ${parent} rose ${wasParent[1]} -> ${nowParent[1]} (mutation)`);
+					continue;
+				}
+			}
+		}
 		compare(kind, name, was, now, violations, raises);
 	}
 	return compared;
+}
+
+/** The nearest package above name that has a floor: where a moved helper would land. */
+function ancestorFloor(name, base) {
+	const parts = name.split("/");
+	for (let end = parts.length - 1; end >= 1; end -= 1) {
+		const candidate = parts.slice(0, end).join("/");
+		if (base.has(candidate)) return candidate;
+	}
+	return undefined;
 }
 
 /** Whether a package gained a subpackage floor in this tree: the shape of a split. */
@@ -157,8 +180,9 @@ const inTree = (name) => existsSync(join("gateway", name));
 const violations = [];
 const raises = [];
 const splits = [];
-const coverageCount = judge("coverage", baseCoverage, headCoverage, violations, raises, splits, inTree);
-const mutationCount = judge("mutation", baseMutation, headMutation, violations, raises, splits, inTree);
+const moves = [];
+const coverageCount = judge("coverage", baseCoverage, headCoverage, violations, raises, splits, moves, inTree);
+const mutationCount = judge("mutation", baseMutation, headMutation, violations, raises, splits, moves, inTree);
 
 if (violations.length > 0) {
 	console.error(`floors in ${COVERAGE} and ${MUTATION} may only move up (standards.md S10):`);
@@ -172,7 +196,8 @@ if (violations.length > 0) {
 
 const raiseText = raises.length === 0 ? "none moved" : `${raises.length} raised`;
 console.log(
-	`floors: ${coverageCount} coverage and ${mutationCount} mutation packages, compared with ${base}, ${raiseText}${splits.length === 0 ? "" : `, ${splits.length} split`}`,
+	`floors: ${coverageCount} coverage and ${mutationCount} mutation packages, compared with ${base}, ${raiseText}${splits.length === 0 ? "" : `, ${splits.length} split`}${moves.length === 0 ? "" : `, ${moves.length} move`}`,
 );
 for (const raise of raises) console.log(`  raised  ${raise}`);
 for (const split of splits) console.log(`  split   ${split}`);
+for (const move of moves) console.log(`  moved   ${move}`);
