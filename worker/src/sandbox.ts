@@ -9,7 +9,7 @@ import type { Files } from "./files.ts";
  * the machine holds nothing else of ours. See docs/adr/0012-sandbox.md.
  *
  * This file is the contract, and it names no engine. An engine is one module implementing
- * `SandboxClient` plus a way to open one — `microsandbox.ts` and `host.ts` today, which are
+ * `SandboxClient` plus a way to open one — `microsandbox.ts`, `bwrap.ts`, `youki.ts`, and `host.ts` today, which are
  * also where the engine-specific code lives. Control picks the engine and passes its name to
  * the worker, so both sides of one install use the same one; a second engine is a second file
  * here and a second `Driver` in gateway/internal/sandbox.

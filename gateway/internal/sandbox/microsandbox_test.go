@@ -120,14 +120,14 @@ func TestInstallRefusesAnUnlistedArtifact(t *testing.T) {
 // refuse members that would land outside the destination.
 func TestUnpackRefusesAPathThatEscapes(t *testing.T) {
 	payload := archive(t, map[string]string{"../escape": "owned\n"})
-	if err := unpackVerified(bytes.NewReader(payload), "", t.TempDir()); !errors.Is(err, ErrUnavailable) {
+	if err := UnpackVerified(bytes.NewReader(payload), "", t.TempDir()); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("want a refusal, got %v", err)
 	}
 }
 
 func TestUnpackRefusesAnAbsolutePath(t *testing.T) {
 	payload := archive(t, map[string]string{"/etc/passwd": "owned\n"})
-	if err := unpackVerified(bytes.NewReader(payload), "", t.TempDir()); !errors.Is(err, ErrUnavailable) {
+	if err := UnpackVerified(bytes.NewReader(payload), "", t.TempDir()); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("want a refusal, got %v", err)
 	}
 }
@@ -143,7 +143,7 @@ func TestUnpackKeepsRelativeSymlinks(t *testing.T) {
 	writer.Close()
 
 	dest := t.TempDir()
-	if err := unpackVerified(bytes.NewReader(buffer.Bytes()), "", dest); err != nil {
+	if err := UnpackVerified(bytes.NewReader(buffer.Bytes()), "", dest); err != nil {
 		t.Fatal(err)
 	}
 	target, err := os.Readlink(filepath.Join(dest, "lib", "libkrunfw.so.1"))
@@ -397,7 +397,7 @@ func TestCreateSaysNothingAboutNestingToAnEngineThatCannot(t *testing.T) {
 }
 
 func TestCreateTurnsNestingOffExplicitlyWhenTheMachineCannot(t *testing.T) {
-	driver, runner := nestingDriver(t, nestedHelp, unavailable("the host kernel has nested virtualization off"))
+	driver, runner := nestingDriver(t, nestedHelp, Unavailable("the host kernel has nested virtualization off"))
 	if err := driver.Create(context.Background(), Policy{Workspace: "/home/me/work"}, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +420,7 @@ func TestNestingIsRefusedWhenTheEngineHasNoSwitch(t *testing.T) {
 }
 
 func TestNestingSaysWhenTheMachineRefuses(t *testing.T) {
-	machine, _ := nestingDriver(t, nestedHelp, unavailable("this machine cannot nest"))
+	machine, _ := nestingDriver(t, nestedHelp, Unavailable("this machine cannot nest"))
 	if support := machine.Nesting(context.Background()); support.Available || support.Reason != "this machine cannot nest" {
 		t.Errorf("the machine's own reason should come through: %+v", support)
 	}

@@ -14,11 +14,11 @@ import (
 func hostNestedSupport() NestingSupport {
 	brand, err := systemOutput("sysctl", "-n", "machdep.cpu.brand_string")
 	if err != nil {
-		return unavailable("cannot ask the machine about nesting: %v", err)
+		return Unavailable("cannot ask the machine about nesting: %v", err)
 	}
 	version, err := systemOutput("sw_vers", "-productVersion")
 	if err != nil {
-		return unavailable("cannot ask the machine about nesting: %v", err)
+		return Unavailable("cannot ask the machine about nesting: %v", err)
 	}
 	return nestedFromApple(brand, version)
 }

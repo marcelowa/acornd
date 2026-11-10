@@ -26,7 +26,7 @@ import (
 // engine artifact for the platform, a hypervisor that is not usable, or an install that
 // failed. It exists to be refused on, loudly, rather than worked around: an agent that
 // silently ran unconfined would be worse than one that did not run.
-var ErrUnavailable = errors.New("sandbox unavailable")
+var ErrUnavailable = errors.New("sandbox Unavailable")
 
 // Driver is one sandbox engine. Everything above it — the workspace lifecycle, the state
 // frames, the worker's flags — is engine-neutral; everything specific to how one engine is

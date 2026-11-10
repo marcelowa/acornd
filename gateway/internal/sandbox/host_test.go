@@ -16,7 +16,7 @@ func TestTheHostEngineNeedsNothing(t *testing.T) {
 		t.Errorf("engine name = %q, want host", host.Name())
 	}
 	if !host.Installed() {
-		t.Error("the host engine is always installed; there is nothing to fetch")
+		t.Error("the host engine is always installed; there is nothing to Fetch")
 	}
 	if err := host.Usable(); err != nil {
 		t.Errorf("the host engine is always usable: %v", err)

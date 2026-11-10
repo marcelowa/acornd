@@ -34,7 +34,7 @@ func TestAnArtifactMissingFromTheChecksumsIsRefused(t *testing.T) {
 		t.Fatal("an artifact with no checksum should be refused")
 	}
 	if !errors.Is(err, ErrUnavailable) {
-		t.Errorf("it should be the unavailable kind of error: %v", err)
+		t.Errorf("it should be the Unavailable kind of error: %v", err)
 	}
 	if !strings.Contains(err.Error(), "acornd-linux-amd64") {
 		t.Errorf("the refusal should name the artifact: %v", err)
@@ -54,14 +54,14 @@ func TestAChecksumLineIsReadTheWayTheFileWritesIt(t *testing.T) {
 	}
 }
 
-// A download that is not a 200 is an unavailable engine, not a crash: the status is in the words,
+// A download that is not a 200 is an Unavailable engine, not a crash: the status is in the words,
 // so a 404 for a release that was pulled is something a person can act on.
 func TestADownloadThatIsNotOKIsUnavailable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "gone", http.StatusNotFound)
 	}))
 	defer server.Close()
-	_, err := fetch(context.Background(), server.Client(), server.URL+"/artifact")
+	_, err := Fetch(context.Background(), server.Client(), server.URL+"/artifact")
 	if err == nil {
 		t.Fatal("a 404 should be an error")
 	}
@@ -94,7 +94,7 @@ func TestAnEngineThatIsNotInstalledSaysSo(t *testing.T) {
 	if _, err := engine.runEnv(context.Background(), nil, "version"); err == nil {
 		t.Fatal("a missing engine should not be run")
 	} else if !errors.Is(err, ErrUnavailable) {
-		t.Errorf("it should be the unavailable kind: %v", err)
+		t.Errorf("it should be the Unavailable kind: %v", err)
 	}
 }
 

@@ -100,7 +100,7 @@ func TestStartingASandboxThatAnswersIsANoOp(t *testing.T) {
 	// A config that names a socket this test is listening on: the engine dials it, hears an answer,
 	// and stops before booting anything.
 	socket := answerPings(t)
-	config := bwrapConfig{Socket: socket, Network: bwrapNetwork{Mode: "off"}}
+	config := bwrapConfig{Socket: socket, Network: SandboxNetwork{Mode: "off"}}
 	payload, err := json.Marshal(config)
 	if err != nil {
 		t.Fatal(err)
@@ -122,12 +122,12 @@ func TestStartingASandboxThatAnswersIsANoOp(t *testing.T) {
 func TestOnlyGlobalsThatExistAreMounted(t *testing.T) {
 	present := t.TempDir()
 	missing := filepath.Join(t.TempDir(), "not-here")
-	globals := readonlyGlobals(Policy{Global: []string{missing, present}})
+	globals := ReadonlyGlobals(Policy{Global: []string{missing, present}})
 	if len(globals) != 1 || globals[0] != present {
 		t.Errorf("globals = %v, want only the one that exists", globals)
 	}
 	later := t.TempDir()
-	sorted := readonlyGlobals(Policy{Global: []string{present, later}})
+	sorted := ReadonlyGlobals(Policy{Global: []string{present, later}})
 	if len(sorted) != 2 || sorted[0] > sorted[1] {
 		t.Errorf("globals should be sorted: %v", sorted)
 	}

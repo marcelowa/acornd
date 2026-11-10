@@ -188,6 +188,8 @@ async function sandboxEngine(name: string): Promise<SandboxEngine | undefined> {
 			return await import("./microsandbox.ts");
 		case "bwrap":
 			return await import("./bwrap.ts");
+		case "youki":
+			return await import("./youki.ts");
 		case "host":
 			return await import("./host.ts");
 		default:

@@ -21,18 +21,49 @@ func RuntimeDir() (string, error) {
 	return filepath.Join(os.TempDir(), "acornd-"+strconv.Itoa(os.Getuid())), nil
 }
 
-// socketDir is the folder one sandbox's socket goes in: per install and per workspace, because two
-// installs on one machine can run the same workspace path and must not share a socket.
-func (b *Bwrap) socketDir(workspace string) (string, error) {
+// Where the supervisor lives inside a sandbox, and where its socket does. The guest paths are
+// short on purpose: a Unix socket address is limited, and the host side of the same socket
+// carries the workspace's name. Both container engines run the same supervisor, so the paths
+// are the same on both sides of either engine's bind.
+const (
+	GuestSupervisor = "/usr/local/bin/acornd"
+	GuestRunDir     = "/run/acornd"
+	GuestSocketPath = GuestRunDir + "/s.sock"
+)
+
+// socketLimit is the length a Unix socket path may have (Linux allows 107 characters and a
+// terminator). Both sides of one socket have to fit, and the host side is the long one, which is
+// why the folder is named by a short hash rather than by the sandbox's whole name.
+const socketLimit = 106
+
+func socketDirFor(dataDir, workspace string) (string, error) {
 	runtime, err := RuntimeDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(runtime, shortHash(b.dataDir+"\x00"+workspace))
+	dir := filepath.Join(runtime, shortHash(dataDir+"\x00"+workspace))
 	if err := ensureOwnedDir(dir); err != nil {
 		return "", err
 	}
 	return dir, nil
+}
+
+// SandboxSocketPaths is the session's runtime folder and the two sockets in it. The socket lives
+// there rather than in the store because a Unix socket path has a hard length and this way the
+// length is the same wherever the install lives; the limit is checked here because the failure
+// without it is a supervisor that never answers. ADR 0024 lost a day to that limit.
+func SandboxSocketPaths(dataDir, workspace string) (run, socket string, err error) {
+	run, err = socketDirFor(dataDir, workspace)
+	if err != nil {
+		return "", "", err
+	}
+	socket = filepath.Join(run, "s.sock")
+	for _, path := range []string{socket, GuestSocketPath} {
+		if len(path) > socketLimit {
+			return "", "", fmt.Errorf("sandbox: the supervisor's socket path is too long for a Unix socket: %s is %d characters and %d is the limit (shorten XDG_RUNTIME_DIR, or the workspace name)", path, len(path), socketLimit)
+		}
+	}
+	return run, socket, nil
 }
 
 // ensureOwnedDir creates a folder that only this user owns and can enter. A directory in a shared

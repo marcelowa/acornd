@@ -24,7 +24,7 @@ func (m *Microsandbox) SecretEnvInWorker() bool { return false }
 
 // substitutedSecrets are the ones this engine can deliver: a secret with no allowed host has
 // nowhere to be substituted, so it is not put in the policy. The control reports it as
-// unavailable rather than booting a sandbox that cannot use it.
+// Unavailable rather than booting a sandbox that cannot use it.
 func substitutedSecrets(secrets []Secret) []Secret {
 	out := make([]Secret, 0, len(secrets))
 	for _, secret := range secrets {

@@ -18,8 +18,8 @@ type NestingSupport struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
-// unavailable is the shape every refusal takes.
-func unavailable(reason string, args ...any) NestingSupport {
+// Unavailable is the shape every refusal takes.
+func Unavailable(reason string, args ...any) NestingSupport {
 	return NestingSupport{Reason: fmt.Sprintf(reason, args...)}
 }
 
@@ -53,12 +53,12 @@ func nestedFromKVMParameters(intel, amd string) NestingSupport {
 		disabled = append(disabled, parameter.module)
 	}
 	if len(disabled) > 0 {
-		return unavailable(
+		return Unavailable(
 			"the host kernel has nested virtualization off (%s.nested=0): turn it on and restart",
 			strings.Join(disabled, ", "),
 		)
 	}
-	return unavailable("the host kernel does not report nested virtualization support")
+	return Unavailable("the host kernel does not report nested virtualization support")
 }
 
 // appleNestedPattern matches the chips that can nest: Apple's hardware-assisted nested
@@ -70,18 +70,18 @@ var appleNestedPattern = regexp.MustCompile(`^Apple M(\d+)`)
 func nestedFromApple(brand, version string) NestingSupport {
 	chip := appleNestedPattern.FindStringSubmatch(strings.TrimSpace(brand))
 	if chip == nil {
-		return unavailable("nested virtualization needs an Apple Silicon M3 or later, and this machine reports %q", strings.TrimSpace(brand))
+		return Unavailable("nested virtualization needs an Apple Silicon M3 or later, and this machine reports %q", strings.TrimSpace(brand))
 	}
 	generation, err := strconv.Atoi(chip[1])
 	if err != nil || generation < 3 {
-		return unavailable("nested virtualization needs an Apple Silicon M3 or later")
+		return Unavailable("nested virtualization needs an Apple Silicon M3 or later")
 	}
 	major, err := strconv.Atoi(strings.SplitN(strings.TrimSpace(version), ".", 2)[0])
 	if err != nil {
-		return unavailable("cannot tell the macOS version from %q; nested virtualization needs macOS 15 or later", version)
+		return Unavailable("cannot tell the macOS version from %q; nested virtualization needs macOS 15 or later", version)
 	}
 	if major < 15 {
-		return unavailable("nested virtualization needs macOS 15 or later, and this machine reports %s", version)
+		return Unavailable("nested virtualization needs macOS 15 or later, and this machine reports %s", version)
 	}
 	return NestingSupport{Available: true}
 }

@@ -64,7 +64,7 @@ func (h *Host) Egress() error { return nil }
 // run on the machine itself, with all of it. The refusal is the honest one — a badge saying
 // "nested" over an unconfined run would be worse than useless.
 func (h *Host) Nesting(context.Context) NestingSupport {
-	return unavailable("the host engine is not a sandbox: commands already run on the machine itself")
+	return Unavailable("the host engine is not a sandbox: commands already run on the machine itself")
 }
 
 // List reports nothing: there are no sandboxes to list. Each workspace is its own folder.
@@ -98,19 +98,10 @@ func (h *Host) Remove(context.Context, string) error          { return nil }
 // the list rather than answered with another engine — a run that meant microsandbox and got the
 // host would be a security change nobody asked for.
 func Engine(dataDir, state, name string) (Driver, error) {
+	if make, ok := driverFactories[name]; ok {
+		return make(dataDir, state), nil
+	}
 	switch name {
-	case "microsandbox":
-		driver := NewMicrosandbox(dataDir)
-		if state != "" {
-			driver = driver.WithStateDir(state)
-		}
-		return driver, nil
-	case "bwrap":
-		driver := NewBwrap(dataDir)
-		if state != "" {
-			driver = driver.WithStateDir(state)
-		}
-		return driver, nil
 	case "host":
 		if !HostEnabled() {
 			return nil, fmt.Errorf("sandbox: the host engine is off: it isolates nothing, so only automated tests enable it (%s=1)", TestHostEnv)
@@ -124,13 +115,17 @@ func Engine(dataDir, state, name string) (Driver, error) {
 	}
 }
 
-// EngineNames are the engines this build runs, in the order a machine prefers them: bubblewrap
-// first because it needs no hypervisor, no root, and no device — then the microVM, which is the
+// EngineNames are the engines this build offers a workspace, in the order a machine prefers
+// them: bubblewrap first because it needs no hypervisor, no root, and no device — then youki,
+// which is the same boundary with a policy file — then the microVM, which is the
 // stronger boundary when a machine can give it one — then the host, which isolates nothing and
-// is last for that reason. It is the order a chooser shows too (ADR 0026), and only the first
-// two may be a machine's default: see defaultEngines. The host is off unless this process was
-// told to have it: see ChoosableEngines.
-func EngineNames() []string { return []string{"bwrap", "microsandbox", "host"} }
+// is last for that reason. It is the order a chooser shows too (ADR 0026). The host is off
+// unless this process was told to have it: see ChoosableEngines.
+//
+// The default order is not this list: youki is selectable per workspace, and it stays out of
+// the default until its tier is green on a machine with and without systemd (issue #47 R12).
+// See defaultEngines.
+func EngineNames() []string { return []string{"bwrap", "youki", "microsandbox", "host"} }
 
 // ChoosableEngines are the engines an install may name or offer, in preference order: every
 // engine this build has, minus the host engine unless this process was told to have one. It is

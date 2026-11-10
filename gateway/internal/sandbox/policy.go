@@ -11,6 +11,7 @@ package sandbox
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -117,7 +118,7 @@ const (
 	KeptAliveIdleTimeout = "720h"
 )
 
-func (p Policy) withDefaults() Policy {
+func (p Policy) WithDefaults() Policy {
 	if strings.TrimSpace(p.Image) == "" {
 		p.Image = DefaultImage
 	}
@@ -221,6 +222,19 @@ func slugify(value string) string {
 		return "ws"
 	}
 	return out
+}
+
+// ValidateWorkspace refuses a policy before anything is created for it. Every engine that roots
+// a sandbox at a workspace needs the same check, and the sentence is what a person acts on.
+func ValidateWorkspace(policy Policy) error {
+	if strings.TrimSpace(policy.Workspace) == "" {
+		return errors.New("sandbox: policy has no workspace")
+	}
+	info, err := os.Stat(policy.Workspace)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("sandbox: no workspace folder at %s", policy.Workspace)
+	}
+	return nil
 }
 
 // Stage reports a step that takes time. It is nil-safe: a policy built by a caller with no

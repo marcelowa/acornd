@@ -37,7 +37,7 @@ func TestAWorkspaceBodyRefusesWhatThisBuildDoesNotHave(t *testing.T) {
 		{
 			"an engine this build does not implement",
 			workspaceBody{Engine: text("firecracker")},
-			"sandbox engine is one of bwrap, microsandbox",
+			"sandbox engine is one of bwrap, youki, microsandbox",
 		},
 	}
 	for _, test := range cases {

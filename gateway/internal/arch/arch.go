@@ -24,6 +24,7 @@ var Allowed = map[string][]string{
 		"internal/remote",
 		"internal/ready",
 		"internal/sandbox",
+		"internal/sandbox/youki",
 		"internal/supervise",
 		"internal/update",
 		"internal/vault",
@@ -44,6 +45,7 @@ var Allowed = map[string][]string{
 	"internal/e2e": {
 		"internal/identity",
 		"internal/sandbox",
+		"internal/sandbox/youki",
 	},
 
 	// The edge translates HTTP into domain calls. It must not learn what an engine is: asking
@@ -84,10 +86,15 @@ var Allowed = map[string][]string{
 	// One workspace's secrets proxy: loopback, the vault's grants handed in, nothing of this
 	// project imported. It is a leaf on purpose — the package that knows the vault stays control.
 	"internal/secretsproxy": {},
-	"internal/sandbox":      {"internal/supervise"},
-	"internal/supervise":    {},
-	"internal/update":       {},
-	"internal/vault":        {},
-	"internal/workerpool":   {"internal/protocol"},
-	"web":                   {},
+	// The engines and their drivers. It reaches netns for the test binary's netns helper, which
+	// runs the same configuration the product's acornd runs before a sandbox's first process
+	// (ADR 0025); the alternative was a second copy of the refused ranges in the test.
+	"internal/sandbox":             {"internal/netns", "internal/sandbox/sandboxtest", "internal/supervise"},
+	"internal/sandbox/sandboxtest": {},
+	"internal/sandbox/youki":       {"internal/netns", "internal/sandbox", "internal/sandbox/sandboxtest", "internal/supervise"},
+	"internal/supervise":           {},
+	"internal/update":              {},
+	"internal/vault":               {},
+	"internal/workerpool":          {"internal/protocol"},
+	"web":                          {},
 }

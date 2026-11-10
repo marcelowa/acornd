@@ -134,7 +134,7 @@ func TestTheDefaultIsTheFirstEngineThatCanRun(t *testing.T) {
 				if slices.Contains(tc.can, name) {
 					return nil
 				}
-				return errors.New("unavailable")
+				return errors.New("Unavailable")
 			})
 			if err != nil {
 				t.Fatalf("default: %v", err)
@@ -188,5 +188,25 @@ func TestOnlyImplementedEnginesAreValidForAWorkspace(t *testing.T) {
 		if ValidEngine(name) {
 			t.Fatalf("%q should not be valid", name)
 		}
+	}
+}
+
+// youki is selectable per workspace once its client exists, but the default order does not move
+// until its tier is green on a machine with and without systemd (issue #47 R12).
+func TestYoukiIsChoosableButNotADefaultYet(t *testing.T) {
+	if !slices.Contains(EngineNames(), "youki") || !ValidEngine("youki") {
+		t.Fatal("youki should be an engine a workspace may name")
+	}
+	if slices.Contains(defaultEngines(), "youki") {
+		t.Fatalf("youki is in the default order before its tier is green: %v", defaultEngines())
+	}
+	engine, err := defaultEngine(func(name string) error {
+		if name == "youki" {
+			return nil
+		}
+		return errors.New("Unavailable")
+	})
+	if engine != "" || !errors.Is(err, ErrNoEngine) {
+		t.Fatalf("a machine with only youki must not hand it out as a default: %q %v", engine, err)
 	}
 }

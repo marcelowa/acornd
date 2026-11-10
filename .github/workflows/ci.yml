@@ -113,7 +113,7 @@ jobs:
     # ran on every push without being able to stop a merge — a green `verify` over a red
     # `sandbox` is the gate saying the thing it was asked not to.
     if: always()
-    needs: [static, go, worker, browser, commits, floors, mutations, sandbox, bwrap]
+    needs: [static, go, worker, browser, commits, floors, mutation-targets, mutations, sandbox, bwrap]
     runs-on: ubuntu-26.04
     steps:
       - name: Every job has to have passed
@@ -124,12 +124,19 @@ jobs:
           BROWSER: ${{ needs.browser.result }}
           COMMITS: ${{ needs.commits.result }}
           FLOORS: ${{ needs.floors.result }}
+          TARGETS: ${{ needs.mutation-targets.outputs.packages }}
           MUTATIONS: ${{ needs.mutations.result }}
           SANDBOX: ${{ needs.sandbox.result }}
           BWRAP: ${{ needs.bwrap.result }}
         run: |
           echo "static=$STATIC go=$GO worker=$WORKER browser=$BROWSER commits=$COMMITS"
-          echo "floors=$FLOORS mutations=$MUTATIONS sandbox=$SANDBOX bwrap=$BWRAP"
+          echo "floors=$FLOORS mutations=$MUTATIONS targets=$TARGETS sandbox=$SANDBOX bwrap=$BWRAP"
+          # A diff that touches no floored package leaves the matrix empty and the sweep
+          # skipped. That is a pass: there was nothing to sweep.
+          if [ "$MUTATIONS" = "skipped" ] && [ "$TARGETS" = "[]" ]; then
+            echo "mutations: nothing to sweep"
+            MUTATIONS=success
+          fi
           for result in "$STATIC" "$GO" "$WORKER" "$BROWSER" "$COMMITS" \
                         "$FLOORS" "$MUTATIONS" "$SANDBOX" "$BWRAP"; do
             [ "$result" = "success" ] || exit 1
@@ -188,17 +195,51 @@ jobs:
         run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
       - run: make floors
 
-  mutations:
+  mutation-targets:
     # Mutation testing on the packages a change touches. It was the weekly report and nothing
     # else, so a pull request that deleted an assertion was green until Monday and then filed an
     # issue. Now the diff decides which packages are swept, `--max` bounds the cost at two of
     # them, and a survivor fails the run: an assertion that stopped distinguishing is exactly the
     # standard going down quietly.
     #
+    # The list is its own job because a matrix has to be known before the sweep starts. One job
+    # per package, each on its own runner, pays the slowest package instead of the sum: the
+    # sandbox's 5m47s plus youki's 2m12s became 5m47s.
+    runs-on: ubuntu-26.04
+    outputs:
+      packages: ${{ steps.targets.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Fetch the base branch
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+      - name: Decide what to sweep
+        id: targets
+        run: |
+          list=$(bun scripts/mutation-targets.mjs --base origin/main --max 2)
+          packages=$(printf '%s\n' "$list" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "packages=$packages" >> "$GITHUB_OUTPUT"
+          echo "sweeping: ${list:-nothing}"
+
+  mutations:
+    # One job per package. The loop this replaces paid the sum of the sweeps; the matrix pays
+    # the slowest, because each package gets its own runner. `--max 2` still bounds the cost.
+    #
     # The timeout coefficient is gremlins' per-mutant allowance multiplied by the coverage run's
     # wall time, and a mutant that spins costs all of it. At the default 500 one identity mutant
     # held this job for an hour; 100 caps that at a couple of minutes and still leaves 30x headroom
     # over the coverage run (workspace note MUTATIONS-SLOWDOWN.md, §4).
+    needs: mutation-targets
+    if: needs.mutation-targets.outputs.packages != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.mutation-targets.outputs.packages) }}
+    name: mutations (${{ matrix.package }})
     timeout-minutes: 30
     runs-on: ubuntu-26.04
     steps:
@@ -210,23 +251,10 @@ jobs:
           tools: true
       - name: Fetch the base branch
         run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
-      - name: Decide what to sweep
-        id: targets
-        run: |
-          list=$(bun scripts/mutation-targets.mjs --base origin/main --max 2)
-          echo "value=$(echo "$list" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
-          echo "sweeping: ${list:-nothing}"
-      - name: Mutate what changed
-        if: steps.targets.outputs.value != ''
+      - name: Mutate the package
         env:
-          TARGETS: ${{ steps.targets.outputs.value }}
           MUTATION_TIMEOUT: "100"
-        run: |
-          for pkg in $TARGETS; do
-            echo "::group::make mutations PKG=$pkg"
-            make mutations PKG="$pkg" || exit 1
-            echo "::endgroup::"
-          done
+        run: make mutations PKG="${{ matrix.package }}"
 
   sandbox:
     # `make test-sandbox` boots real microVMs. A hosted runner has /dev/kvm owned by root:kvm at
