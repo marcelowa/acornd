@@ -166,7 +166,9 @@ running, it installs to disk and takes effect at the next start.
 
 A workspace runs its tools on one engine. The engine is chosen when the workspace is created and
 kept with its record. A new workspace gets the first engine this machine can run: bwrap, then
-microsandbox. A machine that can run neither has no default: the console still works, every
+microsandbox. youki is a third engine a workspace can ask for with `--sandbox youki`; it stays out
+of the default order until its tier has passed on a machine without systemd (issue #47 R12). A
+machine that can run neither has no default: the console still works, every
 workspace refuses its tools, and `acornd doctor` says what each engine is missing. The unisolated
 `host` engine is reached only by asking for it.
 
@@ -174,6 +176,7 @@ workspace refuses its tools, and `acornd doctor` says what each engine is missin
 |---|---|---|
 | `microsandbox` | One microVM (a small virtual machine) per workspace. The strongest boundary. | A hypervisor: `/dev/kvm` on Linux, the system hypervisor on macOS. It fetches a 72 MB engine on first use. |
 | `bwrap` | The workspace's own image in one long-lived bubblewrap sandbox. Beta. | Linux, a user namespace, and pasta for its network: `apt install bubblewrap passt`. No KVM. On Ubuntu 26.04 and later, pasta's AppArmor profile has to be off, which `acornd setup` does. |
+| `youki` | The workspace's own image in an OCI container, with a policy file and a cgroup budget. Selectable per workspace; not a default yet. | Linux, a user namespace, a delegated cgroup v2 for its budget, and pasta for its network. It fetches a 7.8 MB runtime on first use. |
 
 - The workspace folder is mounted read-write at its own path. The global resource folders
   (`~/.agents`, the install's agents, skills, prompts, commands) are read-only at their own paths.
@@ -186,7 +189,9 @@ workspace refuses its tools, and `acornd doctor` says what each engine is missin
   the dialog's **private networks** toggle.
 - A bwrap workspace gets its own copy of its image, so `apt install` works inside it and the
   machine's own tools are never touched. A command costs about 1.1 ms, and a workspace costs about
-  82 MB of disk.
+  82 MB of disk. A youki workspace is the same shape with a policy file: capabilities, devices,
+  rlimits and read-only/masked paths are stated in its OCI config, and `memory`/`cpus` are a
+  cgroup budget.
 - A bwrap workspace can run another acornd with its own sandbox and network. It needs `/dev/kvm`
   and `/dev/net/tun` from the machine, and a workspace can withdraw those with `--no-devices`.
 - A workspace can run a hypervisor inside its sandbox when the machine allows it. `--no-vm-nesting`
@@ -484,6 +489,7 @@ release would have downloaded, and a dev build never fetches one.
 | `make test` | The gate: lint, the coverage and mutation minimums, the unit tests, then the feature suite. |
 | `make test-sandbox` | The microVM boundary: live driver, SDK, and four end-to-end tests. Needs `/dev/kvm`. |
 | `make test-bwrap` | The bubblewrap engine end to end. Fetches an image, so `make test` skips it. |
+| `make test-youki` | The youki engine end to end. Fetches its runtime and an image; needs user namespaces and a delegated cgroup v2. |
 | `make ui` | Drives the real console in headless Chromium. Needs a running gateway. |
 | `make ui-check` | The browser suite. Builds, starts its own gateway, stops it after. |
 | `make modernize` | The Go idiom analyzer. A daily workflow runs it; the gate does not. |
