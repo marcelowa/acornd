@@ -335,12 +335,18 @@ type bwrapConfig struct {
 	// Devices is whether this sandbox received the host's /dev/net/tun and /dev/kvm.
 	Devices bool `json:"devices,omitempty"`
 	// Nested is whether this sandbox was created inside another bwrap workspace. A nested
-	// sandbox reuses pasta's user namespace instead of trying to make one more inside it.
+	// sandbox reuses pasta's user namespace instead of trying to make one more inside it, when
+	// the parent can make namespaces at all.
 	Nested bool `json:"nested,omitempty"`
+	// OwnUserNamespace is set when the sandbox is nested but its parent cannot make the
+	// namespaces bubblewrap needs: a youki container holds CAP_SETFCAP and not CAP_SYS_ADMIN.
+	// The sandbox is still nested; only where its user namespace comes from changes.
+	OwnUserNamespace bool `json:"ownUserNamespace,omitempty"`
 	// DisableNesting is whether this sandbox must not nest at all. A sandbox with a user
 	// namespace of its own is told to refuse another one inside it, which is what the policy
-	// that disables nesting means. A nested sandbox cannot carry it: it has no user namespace
-	// of its own to disable, and its parent's policy is the one that decided.
+	// that disables nesting means. A nested sandbox that reuses its parent's namespace cannot
+	// carry it: it has no user namespace of its own to disable, and its parent's policy is the
+	// one that decided.
 	DisableNesting bool `json:"disableNesting,omitempty"`
 	// Beta notes what this shape does not do yet, so the file does not read as a promise.
 	Beta string `json:"beta"`
@@ -586,6 +592,7 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 	if err != nil {
 		return bwrapConfig{}, err
 	}
+	nested := NestedFromProcess()
 	config := bwrapConfig{
 		Engine:      b.Name(),
 		Workspace:   policy.Workspace,
@@ -605,22 +612,28 @@ func (b *Bwrap) writeConfig(policy Policy, dir string) (bwrapConfig, error) {
 		IdleTimeout: IdleTimeoutOrDefault(policy.IdleTimeout),
 		SecretProxy: secretProxy,
 		Devices:     policy.Devices,
-		Nested:      NestedFromProcess(),
+		Nested:      nested,
+		// A pasta parent can make the namespaces a nested sandbox needs; a youki container holds
+		// CAP_SETFCAP and not CAP_SYS_ADMIN, so the sandbox asks for one of its own.
+		OwnUserNamespace: ownUserNamespace(nested),
 		// A workspace that disables VM nesting means a leaf: no hypervisor, no container, no
 		// user namespace. The argv enforces it where the sandbox has a namespace of its own.
 		DisableNesting: policy.DisableVMNesting,
 		Beta:           "one sandbox per workspace, held by this binary as its first process",
 	}
-	data, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return bwrapConfig{}, err
-	}
 	// A directory the workspace may be created under, kept for the person who reads it.
 	_ = dir
-	if err := os.WriteFile(b.configPath(Name(policy.Workspace)), append(data, '\n'), 0o600); err != nil {
-		return bwrapConfig{}, err
+	return config, b.saveConfig(Name(policy.Workspace), config)
+}
+
+// saveConfig writes one workspace's record, whole and 0600: a half-written file is a sandbox
+// nobody can start.
+func (b *Bwrap) saveConfig(name string, config bwrapConfig) error {
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
 	}
-	return config, nil
+	return os.WriteFile(b.configPath(name), append(data, '\n'), 0o600)
 }
 
 // Start boots the workspace's sandbox: one bubblewrap holding the mounts, with this binary as its
@@ -1086,15 +1099,21 @@ func (b *Bwrap) mountArgs(config bwrapConfig) []string {
 		"--ro-bind", config.Supervisor, GuestSupervisor)
 }
 
-// isolationArgs is what the sandbox is separated from. A nested sandbox shares the user
-// namespace it was made in, because asking bubblewrap for a third one inside it cannot write its
-// uid map: a parent that made a namespace for pasta holds CAP_SYS_ADMIN, CAP_NET_ADMIN and
-// CAP_NET_BIND_SERVICE and no CAP_SETUID, so the uid map write is refused while the namespaces
-// that still separate the command work. That is true with and without a network, so the nested
-// case never asks for a user namespace; "off" unshares the network, which is an empty namespace
-// rather than the parent's egress. A sandbox outside a parent keeps a user namespace of its own.
+// ownUserNamespace says whether a nested sandbox must ask bubblewrap for a user namespace of its
+// own: a parent with CAP_SYS_ADMIN can make the namespaces a nested sandbox needs, and one with
+// only CAP_SETFCAP cannot.
+func ownUserNamespace(nested bool) bool { return nested && !holdsSysAdmin() }
+
+// isolationArgs is what the sandbox is separated from. A nested sandbox whose parent can make
+// namespaces shares the user namespace it was made in, because asking bubblewrap for a third one
+// inside it cannot write its uid map: a parent that made a namespace for pasta holds CAP_SYS_ADMIN,
+// CAP_NET_ADMIN and CAP_NET_BIND_SERVICE and no CAP_SETUID, so the uid map write is refused while
+// the namespaces that still separate the command work. That is true with and without a network, so
+// this case never asks for a user namespace; "off" unshares the network, which is an empty
+// namespace rather than the parent's egress. A sandbox outside a parent, and a nested one whose
+// parent holds only CAP_SETFCAP (a youki container), keeps a user namespace of its own.
 func isolationArgs(config bwrapConfig) []string {
-	if config.Nested {
+	if config.Nested && !config.OwnUserNamespace {
 		argv := []string{"--unshare-pid", "--unshare-uts", "--unshare-ipc", "--unshare-cgroup"}
 		if config.Network.Mode == NetworkOffName {
 			return append(argv, "--unshare-net")
@@ -1115,8 +1134,8 @@ func isolationArgs(config bwrapConfig) []string {
 		// --disable-userns is refused without an explicit --unshare-user: it checks the flag,
 		// not the --unshare-all bundle. --assert-userns-disabled turns a kernel that cannot
 		// install the filter into a failed boot, so the promise is kept or the sandbox does
-		// not exist. A nested sandbox is not given these: it has no namespace of its own, and
-		// bubblewrap refuses the flag without one.
+		// not exist. A nested sandbox that reuses its parent's namespace has no namespace of
+		// its own to disable, and bubblewrap refuses the flag without one.
 		argv = append(argv, "--unshare-user", "--disable-userns", "--assert-userns-disabled")
 	}
 	if config.Network.Mode != NetworkOffName {

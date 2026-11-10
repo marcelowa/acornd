@@ -1355,3 +1355,46 @@ func TestTheSandboxArgvClearsTheEnvironmentFirst(t *testing.T) {
 		t.Fatalf("the sandbox's argv should clear the environment before anything sets one: %q", argv)
 	}
 }
+
+// A youki container is nested but cannot make namespaces: it holds CAP_SETFCAP for the uid map and
+// no CAP_SYS_ADMIN for anything else. The sandbox still records itself as nested (the worker reads
+// that), but bubblewrap asks for a user namespace of its own, which is the one thing that
+// capability makes possible. Without this a nested acornd in a youki workspace dies at
+// "Creating new namespace failed: Operation not permitted".
+func TestANestedSandboxWithoutSysAdminKeepsAUserNamespaceOfItsOwn(t *testing.T) {
+	driver, _ := testBwrap(t, t.TempDir())
+	for _, network := range []SandboxNetwork{
+		{Mode: NetworkOffName},
+		{Mode: "pasta", Address: SandboxAddress, Gateway: SandboxGateway, Pasta: "/usr/bin/pasta"},
+	} {
+		config := bwrapConfig{
+			Bwrap:            "/usr/bin/bwrap",
+			Rootfs:           "/rootfs",
+			Network:          network,
+			Nested:           true,
+			OwnUserNamespace: true,
+			DataDir:          "/home",
+			Workspace:        "/work",
+			Run:              "/run",
+			GuestRun:         GuestRunDir,
+			Supervisor:       "/usr/local/bin/acornd",
+			GuestSocket:      GuestSocketPath,
+		}
+		argv, err := driver.sandboxArgv(config)
+		if err != nil {
+			t.Fatalf("argv: %v", err)
+		}
+		joined := strings.Join(argv, " ")
+		for _, want := range []string{"--unshare-all", "--uid 0", "--gid 0"} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("a nested sandbox without CAP_SYS_ADMIN needs %q: %v", want, argv)
+			}
+		}
+		if network.Mode == NetworkOffName && strings.Contains(joined, "--share-net") {
+			t.Errorf("a sandbox with no egress must not share its parent's network: %v", argv)
+		}
+		if network.Mode != NetworkOffName && !strings.Contains(joined, "--share-net") {
+			t.Errorf("a sandbox with egress must share pasta's network: %v", argv)
+		}
+	}
+}
