@@ -218,6 +218,22 @@ Short list, because the rest is done:
    another youki sandbox without a cgroup of its own, so bwrap is still what a nested acornd
    picks — and that is the case the amendment measures.
 
+## Amendment — 2026-11-10: the cgroup parent is chosen, not assumed
+
+The absolute `cgroupsPath` is still what selects the cgroupfs manager, but `/acornd.slice` is
+the cgroup root, and a normal user cannot write it. A rootless systemd user's process lives in a
+service or a session scope under their own slice, and that slice is delegated: `acornd.slice`
+belongs beside the service, not at `/`. The driver now probes the candidates in order — the
+sibling `acornd.slice` under the current cgroup's parent (the delegated user slice), a child of
+the current cgroup, then `/acornd.slice` for a non-systemd root that can write it — enables
+`+memory +cpu` in the parent and the child, and records the chosen parent in the spec. It also
+probes from `Prepare`: a direct `Create` does not go through the manager's `Usable`, and a record
+written with the fallback path is a runtime that fails opening its `cpu.max` after creating the
+container. Measured as `marcelo` on acornd-1 inside `systemd-run --user --scope`: the full youki
+tier and the W18–W23 e2e rows pass, including the budget. The engine list offers youki
+before the runtime is installed: the runtime is fetched by the first workspace, so only the
+cgroup and user-namespace facts are report-only probes.
+
 ## Amendment — 2026-11-10: R7 is built
 
 The spike's last item above is wrong, and issue #47 §2 has the measurement that replaced it. A

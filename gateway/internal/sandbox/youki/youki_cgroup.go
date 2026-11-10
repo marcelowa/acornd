@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -14,25 +15,28 @@ import (
 // cgroup.subtree_control by whoever owns it. The probe is real — it creates the parent and
 // enables the controllers — because a cgroup that exists without the memory controller is a
 // budget that does not bind, which is the failure this release exists to stop.
+var cgroupMount = "/sys/fs/cgroup"
+
 const (
-	cgroupMount = "/sys/fs/cgroup"
-	// cgroupChild is the cgroup the sandboxes are children of, at the cgroup root. An absolute
-	// cgroupsPath selects youki's cgroupfs manager; a relative one selects systemd and needs a
-	// session bus a sandbox does not have (ADR 0022 §2 rule 3). The root is the one a process
-	// that can write /sys/fs/cgroup owns; a non-delegated systemd user cannot write it, and
-	// Usable refuses with the reason rather than failing inside youki.
+	// cgroupChild is the cgroup the sandboxes are children of. An absolute cgroupsPath selects
+	// youki's cgroupfs manager; a relative one selects systemd and needs a session bus a sandbox
+	// does not have (ADR 0022 §2 rule 3).
 	cgroupChild = "acornd.slice"
 )
 
-// cgroupParentPath is the cgroup the sandboxes are children of. It is absolute; the runtime's
-// cgroupsPath is this plus the sandbox's name.
+// cgroupParentPath is the cgroup the sandboxes are children of before the probe has chosen one.
+// It is absolute; the runtime's cgroupsPath is this plus the sandbox's name.
 func cgroupParentPath() string {
 	return path.Join("/", cgroupChild)
 }
 
 // cgroupPathFor is the absolute cgroupsPath one sandbox's runtime creates.
-func cgroupPathFor(name string) string {
-	return path.Join(cgroupParentPath(), name)
+func (y *Youki) cgroupPathFor(name string) string {
+	parent := y.cgroupParent
+	if parent == "" {
+		parent = cgroupParentPath()
+	}
+	return path.Join(parent, name)
 }
 
 // cgroupDir is a cgroup path as the filesystem sees it.
@@ -40,21 +44,79 @@ func cgroupDir(cgroupPath string) string {
 	return filepath.Join(cgroupMount, strings.TrimPrefix(cgroupPath, "/"))
 }
 
-// probeCgroup answers whether this machine lets a youki sandbox have a budget. On a systemd host
-// a non-delegated user cannot write cgroup.subtree_control; the refusal names the missing
-// capability rather than failing later inside youki with a sentence about a cgroup setup.
-func probeCgroup() error {
+// currentCgroup is this process's cgroup v2 path, or "" when it cannot be read. A cgroup
+// namespace reports "/" for a delegated root, which is the right answer inside it.
+func currentCgroup() string {
+	raw, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return ""
+	}
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "0::")
+		if !ok {
+			continue
+		}
+		return path.Clean(strings.TrimSpace(rest))
+	}
+	return ""
+}
+
+// currentCgroupPath is what the probe reads. It is a variable so a test can answer for a machine
+// whose cgroup differs from this process's, without a cgroup namespace.
+var currentCgroupPath = currentCgroup
+
+// cgroupCandidates is where a sandbox's parent can live, best first. The first is the delegated
+// cgroup above this process: on a systemd user service the process is the service itself or its
+// `init` subgroup, and the sibling `acornd.slice` under the service's slice is the one the user
+// owns. The second is a child of the current cgroup, for a delegated cgroup that has no
+// processes. The root is the last answer, for a non-systemd machine where acornd can write it.
+func cgroupCandidates(current string) []string {
+	var candidates []string
+	add := func(candidate string) {
+		if candidate == "" || slices.Contains(candidates, candidate) {
+			return
+		}
+		candidates = append(candidates, candidate)
+	}
+	if current != "" && current != "/" && current != "." {
+		add(path.Join(path.Dir(current), cgroupChild))
+		add(path.Join(current, cgroupChild))
+	}
+	add(path.Join("/", cgroupChild))
+	return candidates
+}
+
+// probeCgroup answers whether this machine lets a youki sandbox have a budget, and records the
+// parent it found. On a systemd host a non-delegated user cannot write cgroup.subtree_control; the
+// refusal names every candidate it tried rather than failing later inside youki.
+func (y *Youki) probeCgroup() error {
 	if _, err := os.Stat(filepath.Join(cgroupMount, "cgroup.controllers")); err != nil {
 		return fmt.Errorf("this machine has no cgroup v2 mount, so a youki sandbox cannot have a budget: %w", err)
 	}
-	dir := cgroupDir(cgroupParentPath())
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("this machine does not let the sandbox create its cgroup at %s: %w (a systemd host gives a user a delegated unit, not the cgroup root; run acornd where it can write this path, or delegate a cgroup at the root)", dir, err)
+	var failures []string
+	for _, parent := range cgroupCandidates(currentCgroupPath()) {
+		if err := prepareCgroup(parent); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", parent, err))
+			continue
+		}
+		y.cgroupParent = parent
+		return nil
 	}
-	if err := enableControllers(dir, "memory", "cpu"); err != nil {
-		return fmt.Errorf("this machine does not delegate the memory and cpu controllers to %s: %w (a systemd host gives a user a delegated unit, not the cgroup root; run acornd where it can write this path, or delegate a cgroup at the root)", dir, err)
+	return fmt.Errorf("this machine does not delegate a cgroup to the sandbox, so a youki sandbox cannot have a budget (tried %s); on systemd run acornd in a unit with Delegate=yes and DelegateSubgroup=init, or in a non-systemd cgroup root you own", strings.Join(failures, "; "))
+}
+
+// prepareCgroup makes one candidate usable: the controllers are enabled in its parent, then in
+// the candidate itself. Enabling a controller that is already on is a read, because writing it
+// twice is not a no-op on every kernel.
+func prepareCgroup(parent string) error {
+	base := path.Dir(parent)
+	if err := enableControllers(cgroupDir(base), "memory", "cpu"); err != nil {
+		return fmt.Errorf("the parent %s: %w", base, err)
 	}
-	return nil
+	if err := os.MkdirAll(cgroupDir(parent), 0o755); err != nil {
+		return err
+	}
+	return enableControllers(cgroupDir(parent), "memory", "cpu")
 }
 
 // enableControllers turns on the controllers a child cgroup needs, and only the ones that are

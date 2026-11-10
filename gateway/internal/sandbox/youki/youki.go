@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -57,8 +58,9 @@ type Youki struct {
 	// that has neither without making the suite depend on this one.
 	devices sandbox.HostDevices
 	// cgroup answers whether this machine lets a sandbox have a budget. It is a field so a test
-	// can answer for a machine that is not this one.
-	cgroup func() error
+	// can answer for a machine that is not this one; the answer records the parent it found.
+	cgroup       func() error
+	cgroupParent string
 	// overlay answers whether this machine can mount an overlay root in the container's user
 	// namespace. It is a field so a test can answer without one.
 	overlay     func() bool
@@ -113,17 +115,18 @@ func youkiArtifact(goos, goarch string) string {
 // NewYouki builds the driver. The runtime is installed on first use, as the microVM engine is.
 func NewYouki(dataDir string) *Youki {
 	driver := &Youki{
-		dataDir:  dataDir,
-		state:    filepath.Join(dataDir, "sandboxes", "youki"),
-		base:     youkiReleaseBase + "/v" + youkiVersion,
-		checksum: youkiSHA256,
-		look:     exec.LookPath,
-		pull:     sandbox.PullImage,
-		resolver: sandbox.ResolverFiles{Host: "/etc/resolv.conf", Upstream: "/run/systemd/resolve/resolv.conf"},
-		devices:  sandbox.HostDevices{Tun: "/dev/net/tun", KVM: "/dev/kvm"},
-		cgroup:   probeCgroup,
+		dataDir:      dataDir,
+		state:        filepath.Join(dataDir, "sandboxes", "youki"),
+		base:         youkiReleaseBase + "/v" + youkiVersion,
+		checksum:     youkiSHA256,
+		look:         exec.LookPath,
+		pull:         sandbox.PullImage,
+		resolver:     sandbox.ResolverFiles{Host: "/etc/resolv.conf", Upstream: "/run/systemd/resolve/resolv.conf"},
+		devices:      sandbox.HostDevices{Tun: "/dev/net/tun", KVM: "/dev/kvm"},
+		cgroupParent: path.Join("/", cgroupChild),
 	}
 	driver.overlay = driver.overlaySupported
+	driver.cgroup = driver.probeCgroup
 	return driver
 }
 
@@ -310,7 +313,9 @@ func (y *Youki) Usable() error {
 		return fmt.Errorf("%w: youki is a Linux runtime, and this machine is %s", sandbox.ErrUnavailable, runtime.GOOS)
 	}
 	if !y.Installed() {
-		return fmt.Errorf("%w: the youki runtime is not installed at %s (acornd fetches the pinned release on first use)", sandbox.ErrUnavailable, y.binary())
+		// The runtime is fetched on first use. The machine facts below are what a report-only
+		// probe can answer without it; the first workspace installs, then asks again.
+		return y.cgroup()
 	}
 	dir, err := os.MkdirTemp("", "acornd-youki-probe-")
 	if err != nil {
@@ -503,6 +508,14 @@ const youkiBeta = "one user id is mapped (0 ↔ the user): chown to another id f
 // anything. Produce calls it for an existing sandbox so a changed policy is written for the next
 // start; the running container keeps the shape it booted with.
 func (y *Youki) Prepare(_ context.Context, policy sandbox.Policy, _ string) error {
+	// The cgroup parent is chosen before the record names it: a direct Create does not go
+	// through the manager's Usable probe, and a record written with the fallback path is a
+	// runtime that later fails to open its cpu.max.
+	if y.cgroup != nil {
+		if err := y.cgroup(); err != nil {
+			return err
+		}
+	}
 	_, err := y.writeConfig(policy)
 	return err
 }
@@ -1062,7 +1075,7 @@ func (y *Youki) record(policy sandbox.Policy) (youkiConfig, string, error) {
 		Youki:          y.binary(),
 		Supervisor:     supervisor,
 		Spec:           filepath.Join(workspaceDir, "config.json"),
-		CgroupPath:     cgroupPathFor(name),
+		CgroupPath:     y.cgroupPathFor(name),
 		Socket:         socket,
 		GuestSocket:    sandbox.GuestSocketPath,
 		Run:            run,

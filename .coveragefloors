@@ -28,7 +28,7 @@ internal/ready       83
 internal/sandbox                  84
 internal/sandbox/bwrap            65  -- live tests skip where bubblewrap is not installed; the local observation is 69.2
 internal/sandbox/microsandbox     80
-internal/sandbox/youki            66
+internal/sandbox/youki            68
 internal/secretsproxy                91  -- what is left is crypto/rand, x509 and os failures, with no seam worth inventing to reach 95
 internal/supervise   84
 internal/update                    79

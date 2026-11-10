@@ -176,7 +176,7 @@ workspace refuses its tools, and `acornd doctor` says what each engine is missin
 |---|---|---|
 | `microsandbox` | One microVM (a small virtual machine) per workspace. The strongest boundary. | A hypervisor: `/dev/kvm` on Linux, the system hypervisor on macOS. It fetches a 72 MB engine on first use. |
 | `bwrap` | The workspace's own image in one long-lived bubblewrap sandbox, over a shared image base. Beta. | Linux, a user namespace, and pasta for its network: `apt install bubblewrap passt`. No KVM. On Ubuntu 26.04 and later, pasta's AppArmor profile has to be off, which `acornd setup` does. |
-| `youki` | The workspace's own image in an OCI container, over a shared image base, with a policy file, a cgroup budget and secrets through the gateway's proxy. Selectable per workspace; not a default yet. | Linux, a user namespace, a delegated cgroup v2 for its budget, and pasta for its network. It fetches a 7.8 MB runtime on first use. |
+| `youki` | The workspace's own image in an OCI container, over a shared image base, with a policy file, a cgroup budget and secrets through the gateway's proxy. Selectable per workspace; not a default yet. | Linux, a user namespace, a delegated cgroup v2 for its budget (on systemd the user's own slice works; no root needed), and pasta for its network. It fetches a 7.8 MB runtime on first use, and the chooser offers it before that. |
 
 - The workspace folder is mounted read-write at its own path. The global resource folders
   (`~/.agents`, the install's agents, skills, prompts, commands) are read-only at their own paths.
@@ -493,7 +493,7 @@ release would have downloaded, and a dev build never fetches one.
 | `make test` | The gate: lint, the coverage and mutation minimums, the unit tests, then the feature suite. |
 | `make test-sandbox` | The microVM boundary: live driver, SDK, and four end-to-end tests. Needs `/dev/kvm`. |
 | `make test-bwrap` | The bubblewrap engine end to end. Fetches an image, so `make test` skips it. |
-| `make test-youki` | The youki engine end to end. Fetches its runtime and an image; needs user namespaces and a delegated cgroup v2. |
+| `make test-youki` | The youki engine end to end. Fetches its runtime and an image; needs user namespaces and a delegated cgroup v2 (a systemd user's slice is delegated; run it in a `systemd-run --user --scope` or a service). |
 | `make ui` | Drives the real console in headless Chromium. Needs a running gateway. |
 | `make ui-check` | The browser suite. Builds, starts its own gateway, stops it after. |
 | `make modernize` | The Go idiom analyzer. A daily workflow runs it; the gate does not. |
