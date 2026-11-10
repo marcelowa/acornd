@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeDriver stands in for an engine: the lifecycle is ours, so it is tested without one.
@@ -358,5 +359,31 @@ func TestOnlyAnEngineWithAControlProxySaysSo(t *testing.T) {
 	manager := openWith(t, &fakeDriver{})
 	if manager.SecretProxyInControl() {
 		t.Error("the fake engine substitutes nowhere, so it should not claim a control proxy")
+	}
+}
+
+// A probe that fails once is not a machine that cannot sandbox. The manager remembers the
+// failure for a moment, then asks again: the workspace's next start is the retry, and a
+// transient cgroup or user-manager failure does not become permanent.
+func TestATransientProbeFailureIsRetried(t *testing.T) {
+	driver := &fakeDriver{usable: fmt.Errorf("%w: the cgroup was busy", ErrUnavailable)}
+	manager := openWith(t, driver)
+	policy := Policy{Workspace: "/home/me/work"}
+	if _, err := manager.Produce(context.Background(), policy, t.TempDir()); err == nil {
+		t.Fatal("the first probe should fail")
+	}
+	if manager.Problem() == nil {
+		t.Fatal("the failure should be reportable while it is current")
+	}
+
+	driver.usable = nil
+	manager.mu.Lock()
+	manager.failedAt = time.Now().Add(-ensureRetry)
+	manager.mu.Unlock()
+	if _, err := manager.Produce(context.Background(), policy, t.TempDir()); err != nil {
+		t.Fatalf("the next attempt should ask the machine again: %v", err)
+	}
+	if problem := manager.Problem(); problem != nil {
+		t.Fatalf("a recovered engine is not a problem: %v", problem)
 	}
 }

@@ -165,13 +165,24 @@ func (c *Control) workerArgs(base []string) []string {
 // sandboxArgs names the sandbox the worker must use, and the engine it is on: the worker
 // attaches with that engine's SDK, so naming it is how two sides of one install cannot
 // disagree about which engine is in use.
+//
+// A sandbox control could not prepare is still named, with the reason. The worker then has an
+// engine and a name, so its first tool call can ask control to try again (the wake path in
+// ADR 0037); starting it with no name would leave it with nothing to wake and no way back.
 func (c *Control) sandboxArgs(state SandboxState) []string {
-	if !state.Tools {
-		return nil
+	driver := c.sandboxDriver()
+	if driver == nil {
+		if state.Problem == "" {
+			return nil
+		}
+		return []string{"--sandbox-problem", state.Problem}
 	}
-	args := []string{"--sandbox", sandbox.Name(c.opts.Workspace.Path)}
-	if driver := c.sandboxDriver(); driver != nil {
-		args = append(args, "--sandbox-engine", driver.Name())
+	args := []string{
+		"--sandbox", sandbox.Name(c.opts.Workspace.Path),
+		"--sandbox-engine", driver.Name(),
+	}
+	if state.Problem != "" {
+		args = append(args, "--sandbox-problem", state.Problem)
 	}
 	return args
 }

@@ -4,11 +4,13 @@ import { hostFiles, routingFiles, type Files } from "../src/files.ts";
 import { SandboxExecutionEnv } from "../src/sandbox-env.ts";
 import type { SecretInfo } from "../src/secrets.ts";
 import {
+	deferredSandbox,
 	refusedSandbox,
 	type DirEntry,
 	type ExecOptions,
 	type ExecResult,
 	type SandboxClient,
+	type SandboxEngine,
 	type WriteSink,
 } from "../src/sandbox.ts";
 
@@ -30,6 +32,8 @@ class FakeSandbox implements SandboxClient {
 	};
 	/** What a command streams before it exits, for the streaming and spill tests. */
 	stream: string[] = [];
+	/** An error a read should throw, for the tool's error mapping. */
+	readError?: string;
 
 	async exec(command: string | readonly string[], options: ExecOptions): Promise<ExecResult> {
 		this.execs.push({ command, options });
@@ -44,6 +48,7 @@ class FakeSandbox implements SandboxClient {
 	}
 
 	async read(path: string): Promise<string | null> {
+		if (this.readError !== undefined) throw new Error(this.readError);
 		const bytes = this.files.get(path);
 		return bytes === undefined ? null : new TextDecoder().decode(bytes);
 	}
@@ -174,6 +179,7 @@ test("the host filesystem answers for everything outside the workspace", async (
 
 test("a missing sandbox reads nothing and refuses everything else", async () => {
 	const sandbox = refusedSandbox("this workspace has no sandbox: tool execution is disabled");
+	expect(sandbox.unavailable).toBe("this workspace has no sandbox: tool execution is disabled");
 	expect(await sandbox.read("/work/AGENTS.md")).toBeNull();
 	expect(await sandbox.list("/work")).toEqual([]);
 	expect(await sandbox.stat("/work")).toBeNull();
@@ -184,6 +190,85 @@ test("a missing sandbox reads nothing and refuses everything else", async () => 
 		(error: unknown) => (error instanceof Error ? error.message : String(error)),
 	);
 	expect(refused).toContain("no sandbox");
+});
+
+// The report that prompted this: with no sandbox, a tool read of /etc/os-release said
+// "No such file or directory", which reads like a filesystem that vanished. The answer is the
+// refusal, not ENOENT.
+test("a tool read says why the workspace has no sandbox", async () => {
+	const reason = "this workspace has no sandbox: tool execution is disabled";
+	const env = new SandboxExecutionEnv(refusedSandbox(reason), "/work");
+	const result = await env.readTextFile("/etc/os-release", CONTEXT);
+	expect(result.ok).toBe(false);
+	expect(!result.ok && result.error.code).toBe("not_supported");
+	expect(!result.ok && result.error.message).toBe(reason);
+});
+
+// A read the sandbox refuses is a FileError, not a thrown string that escapes the contract.
+test("a read the sandbox refuses keeps its reason and code", async () => {
+	const sandbox = new FakeSandbox();
+	sandbox.readError = "Is a directory: /work";
+	const result = await new SandboxExecutionEnv(sandbox, "/work").readTextFile("/work", CONTEXT);
+	expect(result.ok).toBe(false);
+	expect(!result.ok && result.error.code).toBe("is_directory");
+	expect(!result.ok && result.error.message).toContain("Is a directory");
+});
+
+// A sandbox control could not prepare is retried on the first tool call, through the wake
+// control owns (ADR 0037). A second call reuses the client the first one opened.
+test("a deferred sandbox wakes control once and then runs the tool", async () => {
+	const inner = new FakeSandbox();
+	const calls: string[] = [];
+	const engine: SandboxEngine = {
+		engineName: () => "fake",
+		openSandbox: async () => {
+			calls.push("open");
+			return inner;
+		},
+	};
+	let wakes = 0;
+	const deferred = deferredSandbox(
+		engine,
+		"acornd-fake-0000",
+		"/work",
+		async () => {
+			wakes += 1;
+			calls.push("wake");
+		},
+		"the cgroup was busy",
+	);
+	expect(await deferred.read("/work/AGENTS.md")).toBeNull();
+	expect(await deferred.read("/work/AGENTS.md")).toBeNull();
+	expect(wakes).toBe(1);
+	expect(calls).toEqual(["wake", "open"]);
+});
+
+// A wake that does not land is the tool's error, in control's words, and the next call asks
+// again rather than staying refused forever.
+test("a deferred sandbox retries a wake that did not land", async () => {
+	const inner = new FakeSandbox();
+	const engine: SandboxEngine = {
+		engineName: () => "fake",
+		openSandbox: async () => inner,
+	};
+	let attempts = 0;
+	const deferred = deferredSandbox(
+		engine,
+		"acornd-fake-0000",
+		"/work",
+		async () => {
+			attempts += 1;
+			if (attempts === 1) throw new Error("the cgroup was busy");
+		},
+		"the cgroup was busy",
+	);
+	const first = await deferred.read("/work/AGENTS.md").then(
+		() => "it read",
+		(error: unknown) => (error instanceof Error ? error.message : String(error)),
+	);
+	expect(first).toContain("the cgroup was busy");
+	expect(await deferred.read("/work/AGENTS.md")).toBeNull();
+	expect(attempts).toBe(2);
 });
 
 // -- running commands ----------------------------------------------------------------

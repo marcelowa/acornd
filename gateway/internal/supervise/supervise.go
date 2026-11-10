@@ -38,9 +38,9 @@ import (
 
 // Request is one line from a client.
 type Request struct {
-	// Type is "run", "kill", "shutdown", "ping", or "keepalive". A ping asks whether the
-	// sandbox is up; a keepalive says the client is still attached and nothing has run for a
-	// while, which is a different fact and the one the idle timer cares about.
+	// Type is "run", "kill", "shutdown", "ping", "keepalive", or one of the file verbs. A
+	// ping asks whether the sandbox is up; a keepalive says the client is still attached and
+	// nothing has run for a while, which is a different fact and the one the idle timer cares about.
 	Type string `json:"type"`
 	// ID names a command, is chosen by the client, and is what events carry.
 	ID string `json:"id,omitempty"`
@@ -51,6 +51,34 @@ type Request struct {
 	Env map[string]string `json:"env,omitempty"`
 	// Dir is the working directory inside the sandbox.
 	Dir string `json:"dir,omitempty"`
+	// Path is the file or directory a file verb names, on the sandbox's side of the boundary.
+	Path string `json:"path,omitempty"`
+	// To is the destination of a rename, again on the sandbox's side.
+	To string `json:"to,omitempty"`
+	// Content is the bytes a write carries. JSON encodes a []byte as base64, which is what the
+	// chunk stream already does with a command's output.
+	Content []byte `json:"content,omitempty"`
+	// Append extends a write at the end of the file instead of replacing it.
+	Append bool `json:"append,omitempty"`
+	// Recursive and Force are remove's options: a directory tree, and a missing path that is
+	// already the wanted state.
+	Recursive bool `json:"recursive,omitempty"`
+	Force     bool `json:"force,omitempty"`
+}
+
+// FileEntry is one entry a directory listing returns.
+type FileEntry struct {
+	Name      string `json:"name"`
+	Directory bool   `json:"directory"`
+	Size      int64  `json:"size"`
+	MtimeMs   int64  `json:"mtimeMs"`
+}
+
+// FileInfo is what stat says about one path.
+type FileInfo struct {
+	Directory bool  `json:"directory"`
+	Size      int64 `json:"size"`
+	MtimeMs   int64 `json:"mtimeMs"`
 }
 
 // Event is one line to a client.
@@ -67,6 +95,14 @@ type Event struct {
 	Error   string `json:"error,omitempty"`
 	// Version is what "ready" answers, so a client can tell a live supervisor from a stale one.
 	Version string `json:"version,omitempty"`
+	// Content is a file's bytes, or the bytes a write acknowledged.
+	Content []byte `json:"content,omitempty"`
+	// Missing says a read, list, or stat found no such path, which is an answer rather than an
+	// error: every caller already has a word for "there is no file here".
+	Missing bool `json:"missing,omitempty"`
+	// Entries is a directory listing, and Info is a stat's answer.
+	Entries []FileEntry `json:"entries,omitempty"`
+	Info    *FileInfo   `json:"info,omitempty"`
 }
 
 // Server is the supervisor. It owns the sandbox's processes for as long as the sandbox lives.
@@ -296,26 +332,39 @@ func (s *Server) serveConn(connection *conn) {
 			connection.send(Event{Type: "error", Error: err.Error()})
 			return
 		}
-		switch request.Type {
-		case "ping":
-			connection.send(Event{Type: "ready", Version: s.version})
-		case "keepalive":
-			// A client that is attached but idle, which is not the same as a sandbox nobody
-			// needs. Nothing runs, so nothing is sent back beyond the acknowledgement.
-			s.touch()
-			connection.send(Event{Type: "ready", Version: s.version})
-		case "run":
-			s.start(connection, request)
-		case "kill":
-			s.killRequested(connection, request)
-		case "shutdown":
-			connection.send(Event{Type: "ready", Version: s.version})
-			s.Shutdown()
+		if s.handleRequest(connection, request) {
 			return
-		default:
-			connection.send(Event{Type: "error", ID: request.ID, Error: "unknown request " + request.Type})
 		}
 	}
+}
+
+// handleRequest answers one decoded line. It says whether the connection should stop, which is
+// the one verb — shutdown — that ends the server as well as its answer.
+func (s *Server) handleRequest(connection *conn, request Request) (stop bool) {
+	if isFileVerb(request.Type) {
+		s.fileRequest(connection, request)
+		return false
+	}
+	switch request.Type {
+	case "ping":
+		connection.send(Event{Type: "ready", Version: s.version})
+	case "keepalive":
+		// A client that is attached but idle, which is not the same as a sandbox nobody
+		// needs. Nothing runs, so nothing is sent back beyond the acknowledgement.
+		s.touch()
+		connection.send(Event{Type: "ready", Version: s.version})
+	case "run":
+		s.start(connection, request)
+	case "kill":
+		s.killRequested(connection, request)
+	case "shutdown":
+		connection.send(Event{Type: "ready", Version: s.version})
+		s.Shutdown()
+		return true
+	default:
+		connection.send(Event{Type: "error", ID: request.ID, Error: "unknown request " + request.Type})
+	}
+	return false
 }
 
 // killRequested stops one command by id, and says so when there is none. It is out of the

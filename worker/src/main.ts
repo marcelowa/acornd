@@ -85,8 +85,13 @@ import {
 	log,
 } from "./protocol.ts";
 import { loadSkills, skillsExtension } from "./skills.ts";
-import { routingFiles } from "./files.ts";
-import { refusedSandbox, type SandboxClient, type SandboxEngine } from "./sandbox.ts";
+import { routingFiles, tolerantFiles, type Files } from "./files.ts";
+import {
+	deferredSandbox,
+	refusedSandbox,
+	type SandboxClient,
+	type SandboxEngine,
+} from "./sandbox.ts";
 import { SandboxExecutionEnv } from "./sandbox-env.ts";
 import {
 	expandCommand,
@@ -113,6 +118,12 @@ interface Args {
 	sandbox: string;
 	/** Which engine that sandbox belongs to. The name is control's, and the two must agree. */
 	sandboxEngine: string;
+	/**
+	 * Why control could not prepare the sandbox, when it could not. A worker started with this
+	 * set asks control to try again on the first tool call instead of staying dead: the failure
+	 * may have been a moment's, and the worker outlives the moment.
+	 */
+	sandboxProblem: string;
 	/** The workspace's delivered secrets, names and descriptions only. */
 	secrets: SecretInfo[];
 }
@@ -142,6 +153,7 @@ function parseArgs(argv: readonly string[]): Args {
 		credentials,
 		sandbox: values.get("sandbox") ?? "",
 		sandboxEngine: values.get("sandbox-engine") ?? "microsandbox",
+		sandboxProblem: values.get("sandbox-problem") ?? "",
 		secrets: parseSecrets(values.get("secrets")),
 	};
 }
@@ -151,6 +163,46 @@ await mkdir(dirname(args.storage), { recursive: true });
 
 const credentials = new FileCredentialStore(args.credentials);
 const models = builtinModels({ credentials });
+
+interface SandboxWake {
+	resolve: () => void;
+	reject: (error: Error) => void;
+	timer: ReturnType<typeof setTimeout>;
+}
+
+/**
+ * Wakes waiting for control's answer, by the frame id that asked. A stopped sandbox is
+ * started by control, not here: a substitute secret's stored config names a host variable
+ * whose value lives in the gateway's vault, and this process never has it (issue #13).
+ *
+ * It is declared before the sandbox is opened: a worker whose sandbox could not be prepared
+ * gets a deferred client, and the first thing a tool does with it is ask for a wake.
+ */
+const sandboxWakes = new Map<string, SandboxWake>();
+
+/** Ask control to start the stopped sandbox and wait for it to say the start landed. */
+function wakeSandbox(): Promise<void> {
+	const id = crypto.randomUUID();
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			sandboxWakes.delete(id);
+			reject(new Error("the gateway did not answer the sandbox wake"));
+		}, SANDBOX_WAKE_TIMEOUT_MS);
+		timer.unref?.();
+		sandboxWakes.set(id, { resolve, reject, timer });
+		emit({ type: "sandbox_wake", id });
+	});
+}
+
+/** Settle the wake control answered. A reason is a start that did not land, so the call fails closed. */
+function answerSandboxWake(replyTo: string, reason: string | undefined): void {
+	const pending = sandboxWakes.get(replyTo);
+	if (pending === undefined) return;
+	sandboxWakes.delete(replyTo);
+	clearTimeout(pending.timer);
+	if (reason !== undefined && reason !== "") pending.reject(new Error(reason));
+	else pending.resolve();
+}
 
 /**
  * The sandbox this workspace runs in — the only way this process touches the workspace.
@@ -164,12 +216,28 @@ const sandbox: SandboxClient = await openSandboxForWorkspace(args);
 
 async function openSandboxForWorkspace(options: Args): Promise<SandboxClient> {
 	if (options.sandbox === "") {
-		return refusedSandbox("this workspace has no sandbox: tool execution is disabled");
+		return refusedSandbox(
+			options.sandboxProblem === ""
+				? "this workspace has no sandbox: tool execution is disabled"
+				: options.sandboxProblem,
+		);
 	}
 	const engine = await sandboxEngine(options.sandboxEngine);
 	if (engine === undefined) {
 		return refusedSandbox(
 			`this workspace's sandbox belongs to engine ${options.sandboxEngine}, which this build does not support`,
+		);
+	}
+	if (options.sandboxProblem !== "") {
+		// Control could not prepare the sandbox before starting this worker. The engine is still
+		// named, so the first tool call can ask control to try again through the wake path
+		// (ADR 0037) instead of the workspace staying dead until a gateway restart.
+		return deferredSandbox(
+			engine,
+			options.sandbox,
+			options.workspace,
+			wakeSandbox,
+			options.sandboxProblem,
 		);
 	}
 	return await engine
@@ -203,7 +271,16 @@ async function sandboxEngine(name: string): Promise<SandboxEngine | undefined> {
 // The workspace's own files live inside the sandbox and the user's live on the host, so reads
 // are routed per path: there is one door to the workspace, and this is it.
 const roots = layerRoots({ home: args.home, workspace: args.workspace });
-const files = routingFiles(args.workspace, sandbox);
+// A sandbox that is only waiting for control's next start answers resource reads with nothing
+// rather than waking: the first line of a worker must not wait two minutes for a sandbox, and a
+// workspace with fewer skills at this start is a smaller workspace, not a dead one.
+const emptyFiles: Files = {
+	read: async () => null,
+	list: async () => [],
+	stat: async () => null,
+};
+const resourceFiles = sandbox.pending === true ? emptyFiles : tolerantFiles(sandbox);
+const files = routingFiles(args.workspace, resourceFiles);
 const discoveredSkills = await loadSkills(resourceFolders(roots, ["skills"]), files);
 
 // The overlay, the workspace's rules, and its commands. All reloaded on demand, so
@@ -762,43 +839,6 @@ function reportUnknownKeys(catalog: Catalog): void {
 			);
 		}
 	}
-}
-
-interface SandboxWake {
-	resolve: () => void;
-	reject: (error: Error) => void;
-	timer: ReturnType<typeof setTimeout>;
-}
-
-/**
- * Wakes waiting for control's answer, by the frame id that asked. A stopped sandbox is
- * started by control, not here: a substitute secret's stored config names a host variable
- * whose value lives in the gateway's vault, and this process never has it (issue #13).
- */
-const sandboxWakes = new Map<string, SandboxWake>();
-
-/** Ask control to start the stopped sandbox and wait for it to say the start landed. */
-function wakeSandbox(): Promise<void> {
-	const id = crypto.randomUUID();
-	return new Promise((resolve, reject) => {
-		const timer = setTimeout(() => {
-			sandboxWakes.delete(id);
-			reject(new Error("the gateway did not answer the sandbox wake"));
-		}, SANDBOX_WAKE_TIMEOUT_MS);
-		timer.unref?.();
-		sandboxWakes.set(id, { resolve, reject, timer });
-		emit({ type: "sandbox_wake", id });
-	});
-}
-
-/** Settle the wake control answered. A reason is a start that did not land, so the call fails closed. */
-function answerSandboxWake(replyTo: string, reason: string | undefined): void {
-	const pending = sandboxWakes.get(replyTo);
-	if (pending === undefined) return;
-	sandboxWakes.delete(replyTo);
-	clearTimeout(pending.timer);
-	if (reason !== undefined && reason !== "") pending.reject(new Error(reason));
-	else pending.resolve();
 }
 
 async function main(): Promise<void> {

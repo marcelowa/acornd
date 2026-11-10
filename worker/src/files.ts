@@ -66,3 +66,17 @@ export function routingFiles(root: string, sandbox: Files): Files {
 		stat: (path) => (inside(path) ? sandbox : hostFiles).stat(path),
 	};
 }
+
+/**
+ * The same reads, with a failure treated as an empty answer. Resource loading runs at worker
+ * startup and must not turn a sandbox that is not there yet into a worker that does not
+ * start: a workspace with fewer skills is a smaller workspace, not a dead one. The tools do
+ * not use this wrapper; they ask the sandbox directly and report its reason.
+ */
+export function tolerantFiles(files: Files): Files {
+	return {
+		read: async (path) => await files.read(path).catch(() => null),
+		list: async (path) => await files.list(path).catch(() => []),
+		stat: async (path) => await files.stat(path).catch(() => null),
+	};
+}

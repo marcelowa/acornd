@@ -4,11 +4,9 @@ import { hostFiles, type DirEntry, type FileStat } from "./files.ts";
 import type { WriteSink } from "./sandbox.ts";
 
 /**
- * The file operations of an engine whose sandbox sees the host's paths unchanged: the host
- * engine, and bubblewrap, which binds a folder at the same path it already has.
- *
- * An engine that translates paths — a guest with its own root — implements these itself. This
- * exists so that the two that do not translate them cannot drift apart.
+ * The file operations of the host engine: the one engine whose sandbox is the machine, so a
+ * path means the same thing on both sides of it. The engines with a root of their own — bwrap
+ * and youki — answer file questions through their supervisor, inside the sandbox.
  */
 export class WorkspaceFiles {
 	read(path: string): Promise<string | null> {

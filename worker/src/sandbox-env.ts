@@ -211,7 +211,16 @@ export class SandboxExecutionEnv implements ExecutionEnv {
 
 	async readTextFile(path: string, _context: Context): Promise<Result<string, FileError>> {
 		const resolved = resolvePath(this.cwd, path);
-		const contents = await this.sandbox.read(resolved);
+		const unavailable = this.unavailable(resolved);
+		if (unavailable !== undefined) return err(unavailable);
+		let contents: string | null;
+		try {
+			contents = await this.sandbox.read(resolved);
+		} catch (error) {
+			// A directory, a permission denial, a socket that is gone: the tool reports what the
+			// sandbox said, rather than letting a thrown string escape the Result contract.
+			return err(new FileError(codeFor(message(error)), message(error), resolved));
+		}
 		if (contents === null)
 			return err(
 				new FileError("not_found", `No such file or directory: ${resolved}`, resolved),
@@ -276,6 +285,8 @@ export class SandboxExecutionEnv implements ExecutionEnv {
 	): Promise<Result<BinaryReader, FileError>> {
 		const resolved = resolvePath(this.cwd, path);
 		if (isAborted(context)) return err(abortedFileError(resolved));
+		const unavailable = this.unavailable(resolved);
+		if (unavailable !== undefined) return err(unavailable);
 		const info = await this.sandbox.stat(resolved);
 		if (info === null)
 			return err(
@@ -553,6 +564,8 @@ export class SandboxExecutionEnv implements ExecutionEnv {
 
 	async fileInfo(path: string, _context: Context): Promise<Result<FileInfo, FileError>> {
 		const resolved = resolvePath(this.cwd, path);
+		const unavailable = this.unavailable(resolved);
+		if (unavailable !== undefined) return err(unavailable);
 		const info = await this.sandbox.stat(resolved);
 		if (info === null)
 			return err(
@@ -569,6 +582,8 @@ export class SandboxExecutionEnv implements ExecutionEnv {
 
 	async listDir(path: string, _context: Context): Promise<Result<FileInfo[], FileError>> {
 		const resolved = resolvePath(this.cwd, path);
+		const unavailable = this.unavailable(resolved);
+		if (unavailable !== undefined) return err(unavailable);
 		const info = await this.sandbox.stat(resolved);
 		if (info === null)
 			return err(new FileError("not_found", `No such directory: ${resolved}`, resolved));
@@ -599,7 +614,10 @@ export class SandboxExecutionEnv implements ExecutionEnv {
 	}
 
 	async exists(path: string, _context: Context): Promise<Result<boolean, FileError>> {
-		return ok((await this.sandbox.stat(resolvePath(this.cwd, path))) !== null);
+		const resolved = resolvePath(this.cwd, path);
+		const unavailable = this.unavailable(resolved);
+		if (unavailable !== undefined) return err(unavailable);
+		return ok((await this.sandbox.stat(resolved)) !== null);
 	}
 
 	async createDir(
@@ -608,6 +626,8 @@ export class SandboxExecutionEnv implements ExecutionEnv {
 		_context: Context,
 	): Promise<Result<void, FileError>> {
 		const resolved = resolvePath(this.cwd, path);
+		const unavailable = this.unavailable(resolved);
+		if (unavailable !== undefined) return err(unavailable);
 		if (options?.recursive !== true) {
 			const parent = dirName(resolved);
 			if ((await this.sandbox.stat(parent)) === null) {
@@ -625,6 +645,8 @@ export class SandboxExecutionEnv implements ExecutionEnv {
 		_context: Context,
 	): Promise<Result<void, FileError>> {
 		const resolved = resolvePath(this.cwd, path);
+		const unavailable = this.unavailable(resolved);
+		if (unavailable !== undefined) return err(unavailable);
 		const info = await this.sandbox.stat(resolved);
 		if (info === null) {
 			if (options?.force === true) return ok(undefined);
@@ -683,6 +705,12 @@ export class SandboxExecutionEnv implements ExecutionEnv {
 	}
 
 	/** Wrap a file operation the way the harness expects: failures returned, never thrown. */
+	/** A tool asking a workspace with no sandbox gets the reason, not a missing file. */
+	private unavailable(path: string): FileError | undefined {
+		const reason = this.sandbox.unavailable;
+		return reason === undefined ? undefined : new FileError("not_supported", reason, path);
+	}
+
 	private async attempt<T>(
 		path: string,
 		operation: () => Promise<T>,

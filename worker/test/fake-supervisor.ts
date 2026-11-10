@@ -6,6 +6,7 @@
  * should not need a sandbox to carry it.
  */
 import { createServer, type Server, type Socket } from "node:net";
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export interface Captured {
@@ -15,11 +16,24 @@ export interface Captured {
 	dir: string;
 }
 
+interface FileRequest {
+	type: string;
+	id: string;
+	path: string;
+	to?: string;
+	content?: string;
+	append?: boolean;
+	recursive?: boolean;
+	force?: boolean;
+}
+
 export interface Fake {
 	socket: string;
 	captured: Captured[];
 	/** Every keepalive the client sent, so a test can see that an attached worker says so. */
 	keepalives: { type: string }[];
+	/** Every file request the client sent, so a test can see it did not use the host's files. */
+	files: { type: string; path: string }[];
 	children: Map<string, ReturnType<typeof Bun.spawn>>;
 	close: () => Promise<void>;
 }
@@ -29,6 +43,7 @@ export function fakeSupervisor(dir: string, options: { ignoreKill?: boolean } = 
 	const socket = join(dir, "supervisor.sock");
 	const captured: Captured[] = [];
 	const keepalives: { type: string }[] = [];
+	const fileRequests: { type: string; path: string }[] = [];
 	const children = new Map<string, ReturnType<typeof Bun.spawn>>();
 	const server: Server = createServer((connection: Socket) => {
 		let buffered = "";
@@ -76,6 +91,82 @@ export function fakeSupervisor(dir: string, options: { ignoreKill?: boolean } = 
 				send({ type: "error", id: request.id, error: (error as Error).message });
 			}
 		};
+		const files = async (request: FileRequest): Promise<void> => {
+			fileRequests.push({ type: request.type, path: request.path });
+			try {
+				switch (request.type) {
+					case "read": {
+						const data = await readFile(request.path);
+						send({ type: "file", id: request.id, content: data.toString("base64") });
+						return;
+					}
+					case "write": {
+						await writeFile(
+							request.path,
+							Buffer.from(request.content ?? "", "base64"),
+							{
+								flag: request.append === true ? "a" : "w",
+							},
+						);
+						send({ type: "file", id: request.id });
+						return;
+					}
+					case "list": {
+						const entries = await readdir(request.path, { withFileTypes: true });
+						const answer = [];
+						for (const entry of entries) {
+							const info = await stat(join(request.path, entry.name)).catch(
+								() => null,
+							);
+							answer.push({
+								name: entry.name,
+								directory: entry.isDirectory(),
+								size: info?.size ?? 0,
+								mtimeMs: info?.mtimeMs ?? 0,
+							});
+						}
+						send({ type: "file", id: request.id, entries: answer });
+						return;
+					}
+					case "stat": {
+						const info = await stat(request.path);
+						send({
+							type: "file",
+							id: request.id,
+							info: {
+								directory: info.isDirectory(),
+								size: info.size,
+								mtimeMs: info.mtimeMs,
+							},
+						});
+						return;
+					}
+					case "mkdir":
+						await mkdir(request.path, { recursive: true });
+						send({ type: "file", id: request.id });
+						return;
+					case "remove":
+						await rm(request.path, {
+							recursive: request.recursive === true,
+							force: request.force === true,
+						});
+						send({ type: "file", id: request.id });
+						return;
+					case "rename":
+						await rename(request.path, request.to ?? "");
+						send({ type: "file", id: request.id });
+						return;
+				}
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+					if (request.type === "list")
+						send({ type: "file", id: request.id, entries: [] });
+					else send({ type: "file", id: request.id, missing: true });
+					return;
+				}
+				send({ type: "error", id: request.id, error: (error as Error).message });
+			}
+		};
 		connection.on("data", (data: Buffer) => {
 			buffered += data.toString("utf8");
 			let newline = buffered.indexOf("\n");
@@ -86,6 +177,12 @@ export function fakeSupervisor(dir: string, options: { ignoreKill?: boolean } = 
 				if (line.trim() === "") continue;
 				const request = JSON.parse(line) as { type: string; id?: string };
 				if (request.type === "run") void run(request as unknown as Captured);
+				if (
+					["read", "write", "list", "stat", "mkdir", "remove", "rename"].includes(
+						request.type,
+					)
+				)
+					void files(request as unknown as FileRequest);
 				if (request.type === "keepalive") {
 					keepalives.push({ type: request.type });
 					send({ type: "ready" });
@@ -113,6 +210,7 @@ export function fakeSupervisor(dir: string, options: { ignoreKill?: boolean } = 
 				socket,
 				captured,
 				keepalives,
+				files: fileRequests,
 				children,
 				close: () =>
 					new Promise<void>((done) => {

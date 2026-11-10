@@ -17,7 +17,7 @@ export function engineName(): string {
 export async function openSandbox(
 	name: string,
 	workspace: string,
-	_wake?: () => Promise<void>,
+	wake?: () => Promise<void>,
 ): Promise<SandboxClient> {
 	const state = process.env.ACORND_YOUKI_STATE;
 	if (state === undefined || state === "") {
@@ -32,5 +32,5 @@ export async function openSandbox(
 		// folder, which is the one mistake worth refusing loudly.
 		throw new Error(`${path} is not the config for ${workspace}`);
 	}
-	return new SupervisorClient(config, "youki");
+	return new SupervisorClient(config, "youki", wake);
 }
