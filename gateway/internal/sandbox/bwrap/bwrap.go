@@ -302,22 +302,7 @@ func (b *Bwrap) RestartRequired(_ context.Context, policy sandbox.Policy) (bool,
 		}
 		return false, err
 	}
-	return proxyForwardChanged(running.SecretProxy, policy.SecretProxy), nil
-}
-
-// proxyForwardChanged is whether the running sandbox and the policy disagree about the one port
-// pasta forwards. A rotation keeps the listener and its derived port, so it does not restart
-// anything; adding the first proxy, removing the last one, or moving the port does.
-func proxyForwardChanged(running *sandbox.SandboxSecretProxy, wanted *sandbox.SecretProxy) bool {
-	if running == nil || wanted == nil {
-		return running != nil || wanted != nil
-	}
-	_, port, err := net.SplitHostPort(wanted.Addr())
-	if err != nil {
-		return true
-	}
-	number, err := strconv.Atoi(port)
-	return err != nil || running.Port != number
+	return sandbox.ProxyNeedsRestart(running.SecretProxy, policy.SecretProxy), nil
 }
 
 // writeConfig is Create without the boot: what the workspace runs under, written where a person
@@ -419,7 +404,7 @@ func (b *Bwrap) writeConfig(policy sandbox.Policy, dir string) (bwrapConfig, err
 	if err != nil {
 		return bwrapConfig{}, err
 	}
-	secretProxy, err := b.secretProxyFor(policy, sandbox.Name(policy.Workspace), rootfs)
+	secretProxy, err := sandbox.SecretProxyFor(&policy, b.workspaceDir(sandbox.Name(policy.Workspace)), rootfs)
 	if err != nil {
 		return bwrapConfig{}, err
 	}
@@ -620,80 +605,6 @@ func (b *Bwrap) Remove(ctx context.Context, name string) error {
 		_ = os.RemoveAll(run)
 	}
 	return os.RemoveAll(b.workspaceDir(name))
-}
-
-// secretProxyFor assembles what a sandbox needs to trust and reach the workspace's proxy: the port
-// pasta forwards, the URL a command puts in HTTPS_PROXY, and a trust bundle built from the image's
-// own roots plus this install's CA.
-//
-// The bundle is the image's roots *and* ours on purpose. Binding only ours would work for a secret
-// and break every other TLS connection a command makes, which is a sandbox that cannot install a
-// package; binding only the image's is a proxy nobody trusts.
-func (b *Bwrap) secretProxyFor(policy sandbox.Policy, name, rootfs string) (*sandbox.SandboxSecretProxy, error) {
-	if policy.SecretProxy == nil {
-		return nil, nil
-	}
-	addr := policy.SecretProxy.Addr()
-	_, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return nil, fmt.Errorf("sandbox: the secrets proxy has no usable address (%q): %w", policy.SecretProxy.URL, err)
-	}
-	number, err := strconv.Atoi(port)
-	if err != nil || number <= 0 || number > 65535 {
-		return nil, fmt.Errorf("sandbox: the secrets proxy port %q is not a port", port)
-	}
-	ca, err := os.ReadFile(policy.SecretProxy.CAFile)
-	if err != nil {
-		return nil, fmt.Errorf("sandbox: reading the secrets proxy's CA: %w", err)
-	}
-	bundleFile := filepath.Join(b.workspaceDir(name), "ca-bundle.pem")
-	if err := writeTrustBundle(bundleFile, imageRoots(rootfs), ca); err != nil {
-		return nil, err
-	}
-	return &sandbox.SandboxSecretProxy{
-		URL:        policy.SecretProxy.URL,
-		BundleFile: bundleFile,
-		Bundle:     sandbox.GuestCABundle,
-		Port:       number,
-	}, nil
-}
-
-// imageRoots is the roots a sandbox would have trusted before this install's CA was added: its own
-// image's bundle, or the machine's when the workspace binds the host root read-only.
-func imageRoots(rootfs string) []byte {
-	paths := []string{sandbox.GuestCABundle}
-	if rootfs != "" {
-		paths = append([]string{filepath.Join(rootfs, sandbox.GuestCABundle)}, paths...)
-	}
-	for _, path := range paths {
-		if data, err := os.ReadFile(path); err == nil {
-			return data
-		}
-	}
-	return nil
-}
-
-// writeTrustBundle writes the image's roots followed by the install's CA, each on its own lines so
-// a PEM reader sees two blocks rather than one concatenated blob.
-func writeTrustBundle(path string, roots, ca []byte) error {
-	bundle := make([]byte, 0, len(roots)+len(ca)+2)
-	bundle = appendBlock(bundle, roots)
-	bundle = appendBlock(bundle, ca)
-	if err := os.WriteFile(path, bundle, 0o644); err != nil {
-		return fmt.Errorf("sandbox: writing the trust bundle: %w", err)
-	}
-	return nil
-}
-
-func appendBlock(bundle, block []byte) []byte {
-	if len(block) == 0 {
-		return bundle
-	}
-	bundle = append(bundle, block...)
-	if !strings.HasSuffix(string(block), "\n") {
-		bundle = append(bundle, '\n')
-	}
-	return bundle
 }
 
 // workspaceDir is a path inside this workspace's sandbox folder.

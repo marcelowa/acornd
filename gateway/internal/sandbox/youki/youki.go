@@ -458,8 +458,9 @@ type youkiConfig struct {
 	// IdleTimeout stops a sandbox nothing has run in for a while. It is the same policy value
 	// the other engines are given, so every engine answers the question the same way.
 	IdleTimeout string `json:"idleTimeout"`
-	// SecretProxy is phase 2 (ADR 0031). The record keeps the key the worker reads; this build
-	// delivers secrets as environment values and writes no proxy.
+	// SecretProxy is where this sandbox's commands send a placeholder: the URL a command puts in
+	// HTTPS_PROXY, the trust bundle it has to trust, and the port pasta forwards. Absent when the
+	// workspace has no secrets, or its network is off and there is nothing to substitute.
 	SecretProxy *sandbox.SandboxSecretProxy `json:"secretProxy,omitempty"`
 	// Devices is whether this sandbox received the host's /dev/net/tun and /dev/kvm, and
 	// DeviceNodes is what the runtime creates for them. The numbers come from the host's own
@@ -702,9 +703,15 @@ func (y *Youki) pastaArgv(config youkiConfig, name string) ([]string, error) {
 	if !ok || address == "" || prefix == "" {
 		return nil, fmt.Errorf("sandbox: the record's network address %q is not an address with a prefix", config.Network.Address)
 	}
+	forwards := sandbox.NoForwarding
+	if config.SecretProxy != nil {
+		// pasta forwards the sandbox's own loopback to the host proxy on this port; the
+		// workspace's loopback is still refused for every other port.
+		forwards = strconv.Itoa(config.SecretProxy.Port)
+	}
 	argv := []string{
 		config.Network.Pasta, "-q",
-		"-t", "none", "-u", "none", "-T", sandbox.NoForwarding, "-U", "none",
+		"-t", "none", "-u", "none", "-T", forwards, "-U", "none",
 		"--no-map-gw",
 	}
 	if !config.Network.Private {
@@ -881,19 +888,38 @@ func (y *Youki) runtimeState(ctx context.Context, name string) string {
 	return state.Status
 }
 
-// SecretDelivery is the environment: phase 1 of ADR 0021's container row. A value reaches the
-// command's environment and nothing else; the substitution proxy is ADR 0031 and is not this
-// release.
-func (y *Youki) SecretDelivery() sandbox.Delivery { return sandbox.DeliveryEnvironment }
+// SecretDelivery is substitution: the guest holds a placeholder, and the proxy this install runs
+// for the workspace swaps in the value for the hosts the secret names. See ADR 0031.
+func (y *Youki) SecretDelivery() sandbox.Delivery { return sandbox.DeliverySubstitute }
 
-// SecretEnvInWorker is true: the value has to be in the worker's process for the supervisor to
-// start a command with it. The sandbox's own record never carries it.
-func (y *Youki) SecretEnvInWorker() bool { return true }
+// SecretProxyInControl is true: the proxy control starts for this workspace is the thing that
+// substitutes, so the policy carries its address and its CA.
+func (y *Youki) SecretProxyInControl() bool { return true }
 
-// SecretsChanged cannot change a running process's environment. The worker is restarted, which
-// reads the new set on the way up.
+// SecretEnvInWorker is false: the worker never receives a value, so nothing it spawns — a command,
+// a hook, a crash report — can inherit one.
+func (y *Youki) SecretEnvInWorker() bool { return false }
+
+// SecretsChanged needs no restart. The grants live in the proxy control started for this
+// workspace, and it swaps them under the running sandbox; a workspace with no proxy has no values
+// to change either.
 func (y *Youki) SecretsChanged(context.Context, string, []sandbox.Secret) (sandbox.SecretChange, error) {
-	return sandbox.SecretChange{RestartRequired: true}, nil
+	return sandbox.SecretChange{}, nil
+}
+
+// RestartRequired reports whether the running sandbox's pasta argv already carries the secrets
+// proxy this policy needs. pasta's forward and the CA bundle are baked into the container's boot,
+// so a sandbox that booted without them cannot be given them by refreshing the record: every
+// command would be handed a proxy URL that nothing forwards, which reads as connection refused.
+func (y *Youki) RestartRequired(_ context.Context, policy sandbox.Policy) (bool, error) {
+	running, err := y.readConfig(sandbox.Name(policy.Workspace))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return sandbox.ProxyNeedsRestart(running.SecretProxy, policy.SecretProxy), nil
 }
 
 // writeConfig is the record and the OCI configuration, both written for a person to read and for
@@ -924,6 +950,34 @@ func (y *Youki) writeConfig(policy sandbox.Policy) (youkiConfig, error) {
 	return config, nil
 }
 
+// supervisorPath is the binary the sandbox runs as its first process: the one a caller named, or
+// this binary, which is the gateway.
+func (y *Youki) supervisorPath() (string, error) {
+	if y.supervisor != "" {
+		return y.supervisor, nil
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("sandbox: cannot find this binary to run the sandbox's supervisor: %w", err)
+	}
+	return executable, nil
+}
+
+// recordPaths is the three paths the record and the OCI configuration share: this workspace's
+// folder, the resolver it can reach, and the proxy bundle it trusts.
+func (y *Youki) recordPaths(policy *sandbox.Policy, name, rootfs string, network sandbox.SandboxNetwork) (workspaceDir, resolvConf string, proxy *sandbox.SandboxSecretProxy, err error) {
+	workspaceDir = y.workspaceDir(name)
+	resolvConf, err = sandbox.ResolveResolvFor(workspaceDir, y.resolver, network.Mode, network.Private)
+	if err != nil {
+		return "", "", nil, err
+	}
+	proxy, err = sandbox.SecretProxyFor(policy, workspaceDir, rootfs)
+	if err != nil {
+		return "", "", nil, err
+	}
+	return workspaceDir, resolvConf, proxy, nil
+}
+
 // record resolves the policy into everything the configuration needs, without writing either
 // file: the paths, the network, the resolver, the socket and the supervisor.
 func (y *Youki) record(policy sandbox.Policy) (youkiConfig, string, error) {
@@ -943,8 +997,7 @@ func (y *Youki) record(policy sandbox.Policy) (youkiConfig, string, error) {
 	if err != nil {
 		return youkiConfig{}, "", err
 	}
-	workspaceDir := y.workspaceDir(name)
-	resolvConf, err := sandbox.ResolveResolvFor(workspaceDir, y.resolver, network.Mode, network.Private)
+	workspaceDir, resolvConf, secretProxy, err := y.recordPaths(&policy, name, rootfs, network)
 	if err != nil {
 		return youkiConfig{}, "", err
 	}
@@ -952,12 +1005,9 @@ func (y *Youki) record(policy sandbox.Policy) (youkiConfig, string, error) {
 	if err != nil {
 		return youkiConfig{}, "", err
 	}
-	supervisor := y.supervisor
-	if supervisor == "" {
-		supervisor, err = os.Executable()
-		if err != nil {
-			return youkiConfig{}, "", fmt.Errorf("sandbox: cannot find this binary to run the sandbox's supervisor: %w", err)
-		}
+	supervisor, err := y.supervisorPath()
+	if err != nil {
+		return youkiConfig{}, "", err
 	}
 	return youkiConfig{
 		Engine:         y.Name(),
@@ -979,6 +1029,7 @@ func (y *Youki) record(policy sandbox.Policy) (youkiConfig, string, error) {
 		Run:            run,
 		GuestRun:       sandbox.GuestRunDir,
 		IdleTimeout:    sandbox.IdleTimeoutOrDefault(policy.IdleTimeout),
+		SecretProxy:    secretProxy,
 		Devices:        policy.Devices,
 		DeviceNodes:    y.deviceNodes(policy.Devices),
 		DisableNesting: policy.DisableVMNesting,

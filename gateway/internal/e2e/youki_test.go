@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The youki engine, end to end: a workspace that chose it runs its tools inside the workspace's
@@ -211,5 +212,65 @@ func TestYoukiWorkspaceInstallsIntoItsOwnImage(t *testing.T) {
 	// Nothing of this reached the host: the workspace's root is its own copy in the engine store.
 	if _, err := os.Stat(filepath.Join(s.DataDir, "sandboxes", "youki")); err != nil {
 		t.Fatalf("the engine's folder should hold the image and the workspace's copy: %v", err)
+	}
+}
+
+// A youki workspace's secret reaches an API without the guest ever holding it: the environment
+// holds the placeholder, the proxy the gateway runs for the workspace swaps in the value for the
+// host the secret names, and the sandbox trusts that proxy because its bundle was installed over
+// the image's roots. This is the youki twin of the bwrap row, and the proof that pasta's forward,
+// the OCI bind and the worker's environment are wired to each other.
+func TestAYoukiWorkspaceSubstitutesASecretAtItsProxy(t *testing.T) {
+	t.Parallel()
+	youkiEngine(t)
+	const value = "e2e-youki-proxy-value"
+	const placeholder = "$MSB_E2E_TOKEN"
+	s := start(t,
+		withSetup(func(t *testing.T, s *system) {
+			writeVault(t, s.DataDir, []map[string]any{{
+				"name":         "E2E_TOKEN",
+				"description":  "a token a command uses",
+				"scope":        "global",
+				"value":        value,
+				"hosts":        []string{"httpbin.org"},
+				"substitution": map[string]bool{"headers": true},
+				"allowEnv":     false,
+				"rotatedAt":    time.Now().UTC().Format(time.RFC3339Nano),
+			}})
+		}),
+		withScript(
+			scriptRule{
+				Match: "use the token",
+				Tools: []scriptTool{{Name: "bash", Args: map[string]any{
+					// The first printf is what the guest holds; the request is what the proxy does
+					// with it. httpbin echoes the headers it received, so the answer is the proof
+					// that the upstream saw the value and the guest never did.
+					"command": `printf 'in-the-sandbox:[%s] ' "$E2E_TOKEN"; ` +
+						`(command -v curl >/dev/null 2>&1 || (` +
+						`apt-get -o Acquire::http::Proxy="DIRECT" update -qq >/dev/null 2>&1 && ` +
+						`apt-get -o Acquire::http::Proxy="DIRECT" install -y -qq curl >/dev/null 2>&1)); ` +
+						`curl -sS --max-time 30 -H "Authorization: Bearer $E2E_TOKEN" https://httpbin.org/headers | tr -d '\n'`,
+				}}},
+				Reply: "the request ran",
+			},
+		),
+	)
+	c := s.client()
+	root := c.waitForConversation("personal")
+
+	c.prompt("personal", root, "use the token")
+	got := c.waitForText("personal", root, "the request ran")
+	output := got.lastToolResult()
+
+	if !strings.Contains(output, "in-the-sandbox:["+placeholder+"]") {
+		t.Fatalf("the guest should hold the placeholder, got %q", output)
+	}
+	if !strings.Contains(output, value) {
+		t.Fatalf("the upstream should have received the value, got %q", output)
+	}
+	for _, failure := range []string{"Connection refused", "proxy connect", "Could not resolve", "certificate"} {
+		if strings.Contains(output, failure) {
+			t.Fatalf("the request should have reached the upstream, got %q", output)
+		}
 	}
 }

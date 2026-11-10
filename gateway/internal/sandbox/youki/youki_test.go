@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -638,6 +639,18 @@ func TestYoukiPastaArgvKeepsTheMachinesLoopbackOut(t *testing.T) {
 		}
 	}
 
+	// A proxy turns pasta's one forwarding slot on for the proxy's port and nothing else.
+	config.SecretProxy = &sandbox.SandboxSecretProxy{Port: 18443}
+	argv, err = driver.pastaArgv(config, "acornd-ws-12345678")
+	if err != nil {
+		t.Fatalf("pasta argv with a proxy: %v", err)
+	}
+	joined = strings.Join(argv, " ")
+	if !strings.Contains(joined, "-T 18443") || strings.Contains(joined, "-T none") {
+		t.Errorf("pasta should forward exactly the proxy port:\n%s", joined)
+	}
+	config.SecretProxy = nil
+
 	// A workspace with the grant reads the machine's resolver and has no refused ranges.
 	config.Network.Private = true
 	argv, err = driver.pastaArgv(config, "acornd-ws-12345678")
@@ -689,5 +702,116 @@ func TestYoukiRunsTheSupervisorItIsGiven(t *testing.T) {
 	}
 	if config.Supervisor != "/opt/acornd" {
 		t.Fatalf("the supervisor is %q, want the binary this caller named", config.Supervisor)
+	}
+}
+
+// Substitution is the delivery this engine gets from ADR 0031: the guest holds a placeholder and
+// the proxy control runs for the workspace swaps in the value. The worker never receives it.
+func TestYoukiSecretsAreDeliveredByTheProxy(t *testing.T) {
+	driver, _ := testYouki(t, t.TempDir())
+	if got := driver.SecretDelivery(); got != sandbox.DeliverySubstitute {
+		t.Errorf("delivery = %v, want substitute", got)
+	}
+	if driver.SecretEnvInWorker() {
+		t.Error("the worker must not hold a value the proxy is supposed to keep")
+	}
+	if !driver.SecretProxyInControl() {
+		t.Error("control has to start the listener this engine forwards into")
+	}
+	change, err := driver.SecretsChanged(context.Background(), "acornd-ws-12345678", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if change.RestartRequired {
+		t.Error("a rotation is a grant swap under the running sandbox, not a restart")
+	}
+}
+
+// The record is what the worker reads, so the proxy's URL and bundle have to be there in the same
+// keys a bwrap sandbox uses. The bundle is the image's roots plus this install's CA: binding only
+// ours breaks every other TLS connection a command makes.
+func TestYoukiRecordCarriesTheSecretsProxy(t *testing.T) {
+	dataDir := t.TempDir()
+	driver, _ := testYouki(t, dataDir)
+	workspace := filepath.Join(t.TempDir(), "work")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ca := filepath.Join(t.TempDir(), "ca.pem")
+	const certificate = "-----BEGIN CERTIFICATE-----\nthe install's CA\n-----END CERTIFICATE-----\n"
+	if err := os.WriteFile(ca, []byte(certificate), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	policy := sandbox.Policy{
+		Workspace: workspace,
+		Image:     "debian:stable-slim",
+		Egress:    true,
+		SecretProxy: &sandbox.SecretProxy{
+			URL:    "http://acornd:token@127.0.0.1:18443",
+			CAFile: ca,
+		},
+	}
+	if err := driver.Prepare(context.Background(), policy, t.TempDir()); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	config, err := driver.readConfig(sandbox.Name(workspace))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.SecretProxy == nil {
+		t.Fatal("the record has no secrets proxy")
+	}
+	if config.SecretProxy.URL != policy.SecretProxy.URL || config.SecretProxy.Port != 18443 {
+		t.Errorf("proxy = %+v, want the policy's URL and port", config.SecretProxy)
+	}
+	if config.SecretProxy.Bundle != sandbox.GuestCABundle {
+		t.Errorf("bundle = %q, want %q", config.SecretProxy.Bundle, sandbox.GuestCABundle)
+	}
+	raw, err := os.ReadFile(config.SecretProxy.BundleFile)
+	if err != nil {
+		t.Fatalf("the trust bundle: %v", err)
+	}
+	if !strings.Contains(string(raw), "the install's CA") {
+		t.Errorf("the bundle does not carry the install's CA:\n%s", raw)
+	}
+}
+
+// A sandbox that booted without the forward cannot be given it by refreshing the record: pasta's
+// argv already says nothing is forwarded. The same restart is owed when the port moves or the
+// last proxy goes away; a rotation at the same port is not.
+func TestYoukiRestartsOnlyWhenTheProxyForwardChanges(t *testing.T) {
+	driver, _ := testYouki(t, t.TempDir())
+	workspace := filepath.Join(t.TempDir(), "work")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ca := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(ca, []byte("-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	policy := func(port int) sandbox.Policy {
+		return sandbox.Policy{
+			Workspace: workspace,
+			Image:     "debian:stable-slim",
+			Egress:    true,
+			SecretProxy: &sandbox.SecretProxy{
+				URL:    "http://acornd:token@127.0.0.1:" + strconv.Itoa(port),
+				CAFile: ca,
+			},
+		}
+	}
+	if err := driver.Prepare(context.Background(), policy(18443), t.TempDir()); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if restart, err := driver.RestartRequired(context.Background(), policy(18443)); err != nil || restart {
+		t.Fatalf("a rotation at the same port restarts: %v %v", restart, err)
+	}
+	if restart, err := driver.RestartRequired(context.Background(), policy(18444)); err != nil || !restart {
+		t.Fatalf("a moved port should restart: %v %v", restart, err)
+	}
+	without := policy(18443)
+	without.SecretProxy = nil
+	if restart, err := driver.RestartRequired(context.Background(), without); err != nil || !restart {
+		t.Fatalf("removing the proxy should restart: %v %v", restart, err)
 	}
 }

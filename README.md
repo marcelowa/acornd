@@ -176,7 +176,7 @@ workspace refuses its tools, and `acornd doctor` says what each engine is missin
 |---|---|---|
 | `microsandbox` | One microVM (a small virtual machine) per workspace. The strongest boundary. | A hypervisor: `/dev/kvm` on Linux, the system hypervisor on macOS. It fetches a 72 MB engine on first use. |
 | `bwrap` | The workspace's own image in one long-lived bubblewrap sandbox. Beta. | Linux, a user namespace, and pasta for its network: `apt install bubblewrap passt`. No KVM. On Ubuntu 26.04 and later, pasta's AppArmor profile has to be off, which `acornd setup` does. |
-| `youki` | The workspace's own image in an OCI container, with a policy file and a cgroup budget. Selectable per workspace; not a default yet. | Linux, a user namespace, a delegated cgroup v2 for its budget, and pasta for its network. It fetches a 7.8 MB runtime on first use. |
+| `youki` | The workspace's own image in an OCI container, with a policy file, a cgroup budget and secrets through the gateway's proxy. Selectable per workspace; not a default yet. | Linux, a user namespace, a delegated cgroup v2 for its budget, and pasta for its network. It fetches a 7.8 MB runtime on first use. |
 
 - The workspace folder is mounted read-write at its own path. The global resource folders
   (`~/.agents`, the install's agents, skills, prompts, commands) are read-only at their own paths.
@@ -190,8 +190,8 @@ workspace refuses its tools, and `acornd doctor` says what each engine is missin
 - A bwrap workspace gets its own copy of its image, so `apt install` works inside it and the
   machine's own tools are never touched. A command costs about 1.1 ms, and a workspace costs about
   82 MB of disk. A youki workspace is the same shape with a policy file: capabilities, devices,
-  rlimits and read-only/masked paths are stated in its OCI config, and `memory`/`cpus` are a
-  cgroup budget.
+  rlimits and read-only/masked paths are stated in its OCI config, `memory`/`cpus` are a cgroup
+  budget, and a secret reaches an API through the proxy without the guest holding the value.
 - A bwrap workspace can run another acornd with its own sandbox and network. It needs `/dev/kvm`
   and `/dev/net/tun` from the machine, and a workspace can withdraw those with `--no-devices`.
 - A workspace can run a hypervisor inside its sandbox when the machine allows it. `--no-vm-nesting`
