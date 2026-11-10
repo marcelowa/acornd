@@ -335,7 +335,8 @@ test-suite: ## the Go suites, unit and feature, no hypervisor needed and no stat
 		cd gateway && ACORND_NO_SANDBOX=1 go test -short -race -count=1 -shuffle=on -parallel $(TEST_PARALLEL) ./...; \
 	fi
 
-test-bwrap: ## the bubblewrap engine end to end: it fetches an image, so it is not part of `make test`	# A bwrap workspace gets its own copy of its image and carries egress with pasta; both are
+test-bwrap: ## the bubblewrap engine end to end: it fetches an image, so it is not part of `make test`	# A bwrap workspace gets a root of its own — an overlay over the shared image base, or a copy
+	# when the machine cannot overlay — and carries egress with pasta; both are
 	# why this is its own tier, the same way the microVM tier needs /dev/kvm. Needs bubblewrap,
 	# passt installed: the namespace's address and routes are set over netlink by the gateway
 	# itself, so there is nothing else to install. The client and driver tests run in the fast
@@ -347,7 +348,7 @@ test-bwrap: ## the bubblewrap engine end to end: it fetches an image, so it is n
 	cd gateway && env -u ACORND_NO_SANDBOX ACORND_BWRAP_ONLY=1 ACORND_IMAGE_TEST=1 go test -count=1 -shuffle=on ./internal/e2e/ -run 'Bwrap|TwoEngines|KeepsTheEngine'
 	# The one driver test that needs the host set up: a nested sandbox under pasta, where the
 	# parent holds CAP_SYS_ADMIN and no CAP_SETUID. The fast tier skips it.
-	cd gateway && env -u ACORND_NO_SANDBOX ACORND_BWRAP_ONLY=1 go test -count=1 ./internal/sandbox/ -run 'TestANestedSandboxWithNoEgressStartsInsidePasta|TestALeafSandboxRefusesAUserNamespaceInsideIt|TestBwrapHasALifecycleLikeEveryOtherEngine'
+	cd gateway && env -u ACORND_NO_SANDBOX ACORND_BWRAP_ONLY=1 go test -count=1 ./internal/sandbox/bwrap/ -run 'TestANestedSandboxWithNoEgressStartsInsidePasta|TestALeafSandboxRefusesAUserNamespaceInsideIt|TestBwrapHasALifecycleLikeEveryOtherEngine|TestBwrapOverlaysOnThisMachine'
 
 test-youki: ## the youki engine end to end: it fetches the runtime and an image
 	# The live driver test boots a real container whose first process is the supervisor, the e2e

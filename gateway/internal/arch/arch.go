@@ -94,7 +94,7 @@ var Allowed = map[string][]string{
 	// The engines and their drivers. It reaches netns for the test binary's netns helper, which
 	// runs the same configuration the product's acornd runs before a sandbox's first process
 	// (ADR 0025); the alternative was a second copy of the refused ranges in the test.
-	"internal/sandbox":              {},
+	"internal/sandbox":              {"internal/sandbox/sandboxtest"},
 	"internal/sandbox/bwrap":        {"internal/netns", "internal/sandbox", "internal/sandbox/sandboxtest", "internal/supervise"},
 	"internal/sandbox/microsandbox": {"internal/sandbox"},
 	"internal/sandbox/sandboxtest":  {},

@@ -49,6 +49,11 @@ type Bwrap struct {
 	// devices are the host paths a sandbox may be given. They are fields so a test can
 	// answer for a machine that has neither without making the suite depend on this one.
 	devices sandbox.HostDevices
+	// overlay answers whether this machine can mount an overlay root inside a user namespace.
+	// It is a field so a test can answer without one, and it is asked once per driver.
+	overlay     func(string) bool
+	overlayOnce sync.Once
+	overlayOK   bool
 
 	once    sync.Once
 	version string
@@ -57,7 +62,7 @@ type Bwrap struct {
 // NewBwrap builds the driver. Unlike the microVM engine it installs nothing: bubblewrap is a
 // distribution package, and installing one is the operator's business, not a gateway's.
 func NewBwrap(dataDir string) *Bwrap {
-	return &Bwrap{
+	driver := &Bwrap{
 		dataDir:  dataDir,
 		state:    filepath.Join(dataDir, "sandboxes", "bwrap"),
 		look:     exec.LookPath,
@@ -65,6 +70,49 @@ func NewBwrap(dataDir string) *Bwrap {
 		resolver: sandbox.ResolverFiles{Host: "/etc/resolv.conf", Upstream: "/run/systemd/resolve/resolv.conf"},
 		devices:  sandbox.HostDevices{Tun: "/dev/net/tun", KVM: "/dev/kvm"},
 	}
+	driver.overlay = driver.overlaySupported
+	return driver
+}
+
+// overlayEnabled is the probe's answer, taken once: the kernel, the filesystem, and the installed
+// bubblewrap either can mount an overlay inside a user namespace or they cannot, and the answer
+// does not change under a running gateway.
+func (b *Bwrap) overlayEnabled(image string) bool {
+	if b.overlay == nil {
+		return false
+	}
+	b.overlayOnce.Do(func() { b.overlayOK = b.overlay(image) })
+	return b.overlayOK
+}
+
+// overlaySupported mounts a throwaway overlay with the installed bubblewrap, exactly the shape a
+// workspace's root would have. Reading /proc/filesystems would say overlayfs exists; only a mount
+// inside the user namespace says this machine can use it. A failure is the copy fallback, not a
+// broken sandbox.
+func (b *Bwrap) overlaySupported(image string) bool {
+	if err := os.MkdirAll(b.StateDir(), 0o700); err != nil {
+		return false
+	}
+	base, err := sandbox.ImageBase(b.StateDir(), image, b.pull)
+	if err != nil {
+		return false
+	}
+	dir, err := os.MkdirTemp(b.StateDir(), "overlay-probe-")
+	if err != nil {
+		return false
+	}
+	defer os.RemoveAll(dir)
+	upper := filepath.Join(dir, "upper")
+	work := filepath.Join(dir, "work")
+	for _, path := range []string{upper, work} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			return false
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err = b.run(ctx, "--unshare-all", "--overlay-src", base, "--overlay", upper, work, "/", "--", "/bin/true")
+	return err == nil
 }
 
 // WithDevicePaths answers "does this machine have them" for a test, which must not depend on
@@ -208,10 +256,17 @@ type bwrapConfig struct {
 	// Network is how a command reaches the network: a namespace with no interfaces, or one whose
 	// traffic pasta forwards through the host. See sandbox.SandboxNetwork.
 	Network sandbox.SandboxNetwork `json:"network"`
-	// Rootfs is the workspace's own unpacked copy of its image, bound as `/`. It is where an
-	// install inside the sandbox lands and stays: the host never sees it, and removing the
-	// sandbox removes it.
-	Rootfs   string   `json:"rootfs,omitempty"`
+	// Rootfs is the workspace's own unpacked copy of its image, bound as `/`, when RootMode is
+	// "copy". In overlay mode Rootfs is empty and Base, Upper and Work name the overlay instead.
+	Rootfs string `json:"rootfs,omitempty"`
+	// RootMode is "overlay" or "copy": which shape this workspace's root has. A config from
+	// before ADR 0039 has no mode and is a copy, which is what Rootfs says.
+	RootMode string `json:"rootMode,omitempty"`
+	// Base is the shared image base (the lower), Upper is this workspace's writable layer and Work
+	// is overlayfs's own scratch dir. They are set only in overlay mode.
+	Base     string   `json:"base,omitempty"`
+	Upper    string   `json:"upper,omitempty"`
+	Work     string   `json:"work,omitempty"`
 	DataDir  string   `json:"home"`
 	Hidden   string   `json:"hidden"`
 	ReadOnly []string `json:"readOnly,omitempty"`
@@ -392,7 +447,8 @@ func (b *Bwrap) writeConfig(policy sandbox.Policy, dir string) (bwrapConfig, err
 	if err != nil {
 		return bwrapConfig{}, err
 	}
-	rootfs, err := sandbox.WorkspaceRootfs(policy, b.StateDir(), sandbox.Name(policy.Workspace), image, b.pull)
+	name := sandbox.Name(policy.Workspace)
+	root, err := sandbox.WorkspaceRoot(policy, b.StateDir(), name, image, b.pull, b.overlayEnabled(image))
 	if err != nil {
 		return bwrapConfig{}, err
 	}
@@ -404,7 +460,7 @@ func (b *Bwrap) writeConfig(policy sandbox.Policy, dir string) (bwrapConfig, err
 	if err != nil {
 		return bwrapConfig{}, err
 	}
-	secretProxy, err := sandbox.SecretProxyFor(&policy, b.workspaceDir(sandbox.Name(policy.Workspace)), rootfs)
+	secretProxy, err := sandbox.SecretProxyFor(&policy, b.workspaceDir(name), root.ImageRootsPath())
 	if err != nil {
 		return bwrapConfig{}, err
 	}
@@ -414,7 +470,11 @@ func (b *Bwrap) writeConfig(policy sandbox.Policy, dir string) (bwrapConfig, err
 		Workspace:   policy.Workspace,
 		Image:       image,
 		Network:     network,
-		Rootfs:      rootfs,
+		Rootfs:      root.Rootfs,
+		RootMode:    root.Mode,
+		Base:        root.Base,
+		Upper:       root.Upper,
+		Work:        root.Work,
 		DataDir:     dataDir,
 		Hidden:      b.dataDir,
 		ReadOnly:    sandbox.ReadonlyGlobals(policy),
@@ -800,11 +860,23 @@ func (b *Bwrap) sandboxArgv(config bwrapConfig) ([]string, error) {
 	return argv, nil
 }
 
+// hasRoot reports whether this sandbox gets an image root, either a copy or an overlay. It is
+// the question the uid mapping and the guest home are about; the machine's own root is the other
+// answer.
+func (config bwrapConfig) hasRoot() bool {
+	return config.Rootfs != "" || config.RootMode == "overlay"
+}
+
 // mountArgs is everything the sandbox can see: the root, the devices it was granted, the
 // workspace, its private home, the resource folders, and the supervisor.
 func (b *Bwrap) mountArgs(config bwrapConfig) []string {
 	var argv []string
-	if config.Rootfs != "" {
+	if config.RootMode == "overlay" {
+		// The base is read-only in practice and shared by every workspace on this image; the
+		// upper is what an install touches and lives beside this workspace's home. ADR 0039.
+		argv = append(argv, "--overlay-src", config.Base, "--overlay", config.Upper, config.Work, "/",
+			"--ro-bind", resolverOrHost(config), "/etc/resolv.conf")
+	} else if config.Rootfs != "" {
 		argv = append(argv, "--bind", config.Rootfs, "/",
 			// A root of its own still needs the machine's resolver, or its upstreams.
 			"--ro-bind", resolverOrHost(config), "/etc/resolv.conf")
@@ -853,7 +925,7 @@ func isolationArgs(config bwrapConfig) []string {
 		return append(argv, "--share-net")
 	}
 	var argv []string
-	if config.Rootfs != "" {
+	if config.hasRoot() {
 		// Root inside a single mapping, so files written by root land owned by the user.
 		argv = append(argv, "--uid", "0", "--gid", "0")
 	}
@@ -880,7 +952,7 @@ func isolationArgs(config bwrapConfig) []string {
 // guestHome is where the private home appears inside the sandbox: the root's own home when there
 // is an image, and its real path when the machine's root is the root.
 func guestHome(config bwrapConfig) string {
-	if config.Rootfs == "" {
+	if !config.hasRoot() {
 		return config.DataDir
 	}
 	return "/root"
