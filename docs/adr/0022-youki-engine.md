@@ -1,8 +1,10 @@
 # ADR 0022 — youki as a sandbox engine
 
-Status: spike done, not built — bwrap shipped first ([ADR 0023](0023-bwrap-engine.md),
-[ADR 0024](0024-one-lifecycle.md)); what youki still needs is at the end of this record
+Status: accepted, built — bwrap shipped first ([ADR 0023](0023-bwrap-engine.md),
+[ADR 0024](0024-one-lifecycle.md)); youki followed in issue #47. The body below is the spike's
+record; the amendment at the end says what measurement changed.
 Date: 2026-10-26
+Amended: 2026-11-10 — R7 is built; the "cannot nest" verdict was wrong
 
 ## Why this exists
 
@@ -211,9 +213,26 @@ Short list, because the rest is done:
 4. **Our own record is the truth, not `youki list`.** Rootless youki's own `ps`, `list`, and
    `exec` were all unreliable in the spike; the config, the pid, and the socket are what control
    trusts.
-5. **It still cannot nest.** A youki sandbox cannot hold another youki sandbox (measured: the
-   kernel refuses the inner procfs mount). The outer engine decides that, and bwrap is the answer
-   there.
+5. **It still cannot nest.** *Superseded by the amendment at the end of this record:* the
+   kernel refusal was youki's own `/proc` masks, not nesting itself. A youki sandbox cannot hold
+   another youki sandbox without a cgroup of its own, so bwrap is still what a nested acornd
+   picks — and that is the case the amendment measures.
+
+## Amendment — 2026-11-10: R7 is built
+
+The spike's last item above is wrong, and issue #47 §2 has the measurement that replaced it. A
+youki container nests when it holds `CAP_SETFCAP` (the uid map names the parent's 0), has no
+`maskedPaths`/`readonlyPaths` under `/proc` (those are what made the inner procfs mount fail),
+and carries an absolute `linux.cgroupsPath` (which selects the cgroupfs manager instead of
+systemd). The engine was built on that correction.
+
+R7 — a second acornd inside a youki workspace — is the row that makes the nesting claim a fact.
+The inner acornd is not told it is nested: it reads its own uid map, and the engine it picks is
+bwrap. A youki container holds `CAP_SETFCAP` and not `CAP_SYS_ADMIN`, so the bwrap driver asks
+for a user namespace of its own instead of reusing the container's; `CAP_SETFCAP` is exactly what
+writes the map. Without that, the nested bwrap dies at "Creating new namespace failed: Operation
+not permitted". `TestANestedAcornRunsInYoukiAndPicksItsEngine` boots the inner gateway, asks its
+console, and runs a command in the inner sandbox.
 
 ## What this does not settle
 

@@ -344,8 +344,9 @@ test-bwrap: ## the bubblewrap engine end to end: it fetches an image, so it is n
 	cd gateway && env -u ACORND_NO_SANDBOX ACORND_BWRAP_ONLY=1 go test -count=1 ./internal/sandbox/ -run 'TestANestedSandboxWithNoEgressStartsInsidePasta|TestALeafSandboxRefusesAUserNamespaceInsideIt|TestBwrapHasALifecycleLikeEveryOtherEngine'
 
 test-youki: ## the youki engine end to end: it fetches the runtime and an image
-	# The live driver test boots a real container whose first process is the supervisor, and the
-	# e2e row drives a workspace's commands through the worker's socket client. The runtime is
+	# The live driver test boots a real container whose first process is the supervisor, the e2e
+	# rows drive a workspace's commands through the worker's socket client, and the nested row
+	# boots a second acornd inside the container and runs a sandbox of its own. The runtime is
 	# vendored and fetched on first use, and the image comes from a registry, so this is not part
 	# of `make test`.
 	#
@@ -353,7 +354,7 @@ test-youki: ## the youki engine end to end: it fetches the runtime and an image
 	# without a delegated cgroup skips with its reason, and a skip nobody sees is a green run
 	# that booted nothing.
 	cd gateway && env -u ACORND_NO_SANDBOX ACORND_YOUKI_ONLY=1 ACORND_IMAGE_TEST=1 go test -count=1 -v ./internal/sandbox/youki/ -run 'TestYouki'
-	cd gateway && env -u ACORND_NO_SANDBOX ACORND_YOUKI_ONLY=1 ACORND_IMAGE_TEST=1 go test -count=1 -shuffle=on ./internal/e2e/ -run 'Youki'
+	cd gateway && env -u ACORND_NO_SANDBOX ACORND_YOUKI_ONLY=1 ACORND_IMAGE_TEST=1 go test -count=1 -shuffle=on ./internal/e2e/ -run 'Youki|ANestedAcorn'
 
 test-sandbox: sandbox-preflight ## the engine boundary: live driver, SDK client, and its e2e tests
 	# env -u so a shell that exported the fast tier's switch cannot silently turn this into a

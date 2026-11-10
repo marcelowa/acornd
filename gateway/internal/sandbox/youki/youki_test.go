@@ -651,3 +651,43 @@ func TestYoukiPastaArgvKeepsTheMachinesLoopbackOut(t *testing.T) {
 		}
 	}
 }
+
+// The sandbox's first process is the gateway that made it. A caller that is not the gateway — this
+// suite's end-to-end tests drive the engine from their own binary — names the binary it built, and
+// the record says so; without this the sandbox would run the test binary and the socket would
+// never appear.
+func TestYoukiRunsTheSupervisorItIsGiven(t *testing.T) {
+	dataDir := t.TempDir()
+	driver, _ := testYouki(t, dataDir)
+	workspace := filepath.Join(t.TempDir(), "work")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	policy := sandbox.Policy{Workspace: workspace, Image: "debian:stable-slim"}
+	name := sandbox.Name(workspace)
+	if err := driver.Prepare(context.Background(), policy, t.TempDir()); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	config, err := driver.readConfig(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thisBinary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Supervisor != thisBinary {
+		t.Fatalf("the default supervisor is %q, want this process %q", config.Supervisor, thisBinary)
+	}
+	driver.WithSupervisor("/opt/acornd")
+	if err := driver.Prepare(context.Background(), policy, t.TempDir()); err != nil {
+		t.Fatalf("prepare with a named supervisor: %v", err)
+	}
+	config, err = driver.readConfig(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Supervisor != "/opt/acornd" {
+		t.Fatalf("the supervisor is %q, want the binary this caller named", config.Supervisor)
+	}
+}

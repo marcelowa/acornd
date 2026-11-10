@@ -57,6 +57,10 @@ type Youki struct {
 	// cgroup answers whether this machine lets a sandbox have a budget. It is a field so a test
 	// can answer for a machine that is not this one.
 	cgroup func() error
+	// supervisor is the program the sandbox runs as its first process. Empty means this binary,
+	// which is the gateway; a test that drives the engine from its own binary names the gateway
+	// binary it built instead, because the test binary is not the program a sandbox should run.
+	supervisor string
 }
 
 // youkiVersion is the release this build runs. A newer runtime is a new measurement, not a bump:
@@ -117,6 +121,13 @@ func NewYouki(dataDir string) *Youki {
 // WithStateDir moves the engine's folder, as the other engines' drivers do.
 func (y *Youki) WithStateDir(state string) *Youki {
 	y.state = filepath.Join(state, "youki")
+	return y
+}
+
+// WithSupervisor runs the sandbox's first process from path. The driver defaults to the process
+// that called it, which is the gateway; a caller that is not the gateway names the binary here.
+func (y *Youki) WithSupervisor(path string) *Youki {
+	y.supervisor = path
 	return y
 }
 
@@ -941,9 +952,12 @@ func (y *Youki) record(policy sandbox.Policy) (youkiConfig, string, error) {
 	if err != nil {
 		return youkiConfig{}, "", err
 	}
-	supervisor, err := os.Executable()
-	if err != nil {
-		return youkiConfig{}, "", fmt.Errorf("sandbox: cannot find this binary to run the sandbox's supervisor: %w", err)
+	supervisor := y.supervisor
+	if supervisor == "" {
+		supervisor, err = os.Executable()
+		if err != nil {
+			return youkiConfig{}, "", fmt.Errorf("sandbox: cannot find this binary to run the sandbox's supervisor: %w", err)
+		}
 	}
 	return youkiConfig{
 		Engine:         y.Name(),
