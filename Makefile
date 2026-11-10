@@ -184,14 +184,20 @@ floors: ## the ratchet: coverage and mutation floors may only move up (BASE=orig
 	@# not against the file's own promise.
 	bun scripts/check-floors.mjs --base $(BASE)
 
+# Gremlins walks a directory tree, so a package with driver subpackages would sweep them again
+# here and in their own jobs. The package's own files are the ones whose tests this run owns; a
+# subdirectory has its own row and its own sweep.
 mutations: ## mutation testing for one package (PKG=./internal/control), against its floors
 	@pkg=$${PKG#./}; \
 	efficacy=$$(awk -v p="$$pkg" '$$1==p {print $$2}' .mutationfloors); \
 	killed=$$(awk -v p="$$pkg" '$$1==p {print $$3}' .mutationfloors); \
 	if [ ! -x "$(GREMLINS)" ]; then echo "gremlins: not installed (make tools)"; exit 0; fi; \
+	subdirs=$$(cd gateway/$$pkg 2>/dev/null && find . -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | paste -sd'|' -); \
+	exclude=""; [ -n "$$subdirs" ] && exclude="--exclude-files=^($$subdirs)/"; \
+	echo "mutations: $$pkg$${subdirs:+ (excluding $$subdirs)}"; \
 	out=$$(mktemp); \
 	(cd gateway && $(GREMLINS) unleash --workers $(MUTATIONS_WORKERS) --timeout-coefficient $(MUTATION_TIMEOUT) \
-		$${efficacy:+--threshold-efficacy $$efficacy} $(PKG)) > $$out 2>&1; \
+		$${efficacy:+--threshold-efficacy $$efficacy} $$exclude $(PKG)) > $$out 2>&1; \
 	status=$$?; cat $$out; \
 	got=$$(sed -n 's/^Killed: \([0-9]*\).*/\1/p' $$out); rm -f $$out; \
 	if [ -n "$$killed" ] && [ -n "$$got" ] && [ "$$got" -lt "$$killed" ]; then \
@@ -241,7 +247,7 @@ commits: ## check commit messages (RANGE=origin/main..HEAD by default)
 
 # The engine release both suites run, read from the Go source the pin lives in (the house-rules
 # check keeps the worker's copy equal to it).
-ENGINE_VERSION := $(shell awk -F'"' '/const Version = /{print $$2; exit}' gateway/internal/sandbox/microsandbox.go)
+ENGINE_VERSION := $(shell awk -F'"' '/const Version = /{print $$2; exit}' gateway/internal/sandbox/microsandbox/microsandbox.go)
 
 # The slow tier's image cache, shared across runs and across both the Go and worker suites so
 # an image is pulled once per machine. Nothing may delete it: a fresh state directory per run

@@ -1,22 +1,16 @@
-package sandbox
+package microsandbox
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 	"slices"
 	"strings"
 )
 
-// EnvRunner is the test seam for a command that needs extra environment entries. A Runner
-// that implements it can assert what a secret's value looked like on its way to the engine
-// without the test having to read the host's environment.
-type EnvRunner interface {
-	RunEnv(ctx context.Context, env []string, args ...string) (string, error)
-}
-
 // SecretDelivery is host-side substitution: the value never enters the guest.
-func (m *Microsandbox) SecretDelivery() Delivery { return DeliverySubstitute }
+func (m *Microsandbox) SecretDelivery() sandbox.Delivery { return sandbox.DeliverySubstitute }
 
 // SecretEnvInWorker is false: the worker attaches to the guest, which holds the placeholder,
 // and never needs the value.
@@ -24,9 +18,9 @@ func (m *Microsandbox) SecretEnvInWorker() bool { return false }
 
 // substitutedSecrets are the ones this engine can deliver: a secret with no allowed host has
 // nowhere to be substituted, so it is not put in the policy. The control reports it as
-// Unavailable rather than booting a sandbox that cannot use it.
-func substitutedSecrets(secrets []Secret) []Secret {
-	out := make([]Secret, 0, len(secrets))
+// sandbox.Unavailable rather than booting a sandbox that cannot use it.
+func substitutedSecrets(secrets []sandbox.Secret) []sandbox.Secret {
+	out := make([]sandbox.Secret, 0, len(secrets))
 	for _, secret := range secrets {
 		if len(secret.Hosts) == 0 {
 			continue
@@ -43,7 +37,7 @@ func secretEnvVar(index int) string { return fmt.Sprintf("ACORND_SECRET_%d", ind
 
 // secretEnvValues are the create process's extra environment entries. The values exist only
 // here and in the engine's memory; the policy file holds source references.
-func secretEnvValues(secrets []Secret) []string {
+func secretEnvValues(secrets []sandbox.Secret) []string {
 	values := []string{}
 	for index, secret := range substitutedSecrets(secrets) {
 		values = append(values, secretEnvVar(index)+"="+secret.Value)
@@ -54,7 +48,7 @@ func secretEnvValues(secrets []Secret) []string {
 // startSecretEnv carries both source spellings: a config created from sandbox.yaml uses the
 // ACORND_SECRET_<n> source, while one changed by `msb modify --secret NAME@HOST` stores
 // the guest name as its source. The start process has to satisfy whichever is stored.
-func startSecretEnv(secrets []Secret) []string {
+func startSecretEnv(secrets []sandbox.Secret) []string {
 	values := append([]string(nil), secretEnvValues(secrets)...)
 	for _, secret := range substitutedSecrets(secrets) {
 		values = append(values, secret.Name+"="+secret.Value)
@@ -136,7 +130,7 @@ func (m *Microsandbox) inspect(ctx context.Context, name string) (engineInspect,
 // sameSecretPolicy compares the engine's entries to the desired ones by the fields the
 // engine stores. Values are absent on purpose: a rotation cannot be seen here, only assumed
 // when the policy matches and the engine accepted the live change.
-func sameSecretPolicy(current []engineSecret, desired []Secret) bool {
+func sameSecretPolicy(current []engineSecret, desired []sandbox.Secret) bool {
 	wanted := substitutedSecrets(desired)
 	if len(current) != len(wanted) {
 		return false
@@ -214,18 +208,18 @@ func wantedHosts(hosts []string) []string {
 // and so does a metadata change it will not take while running. In those cases the stored
 // config is updated for the next start and RestartRequired says so. A sandbox that does not
 // exist yet gets the set when it is created.
-func (m *Microsandbox) SecretsChanged(ctx context.Context, name string, secrets []Secret) (SecretChange, error) {
+func (m *Microsandbox) SecretsChanged(ctx context.Context, name string, secrets []sandbox.Secret) (sandbox.SecretChange, error) {
 	running, found, err := m.runningState(ctx, name)
 	if err != nil {
-		return SecretChange{}, err
+		return sandbox.SecretChange{}, err
 	}
 	if !found {
 		// A sandbox that does not exist yet gets the set when it is created.
-		return SecretChange{}, nil
+		return sandbox.SecretChange{}, nil
 	}
 	inspect, err := m.inspect(ctx, name)
 	if err != nil {
-		return SecretChange{}, err
+		return sandbox.SecretChange{}, err
 	}
 	active := inspect.ActiveConfig.secrets()
 	persisted := inspect.Config.secrets()
@@ -248,20 +242,20 @@ func (m *Microsandbox) applyLive(
 	ctx context.Context,
 	name string,
 	active, persisted []engineSecret,
-	desired []Secret,
-) (SecretChange, error) {
+	desired []sandbox.Secret,
+) (sandbox.SecretChange, error) {
 	if err := m.applySecretSet(ctx, name, active, desired, false); err != nil {
 		if !restartHint(err) {
-			return SecretChange{}, err
+			return sandbox.SecretChange{}, err
 		}
 		return m.restartForSecrets(ctx, name, persisted, desired)
 	}
 	after, err := m.inspect(ctx, name)
 	if err != nil {
-		return SecretChange{}, err
+		return sandbox.SecretChange{}, err
 	}
 	if sameSecretPolicy(after.ActiveConfig.secrets(), desired) {
-		return SecretChange{}, nil
+		return sandbox.SecretChange{}, nil
 	}
 	return m.restartForSecrets(ctx, name, persisted, desired)
 }
@@ -282,16 +276,16 @@ func (m *Microsandbox) runningState(ctx context.Context, name string) (running, 
 
 // restartForSecrets stores the set for the next start and reports that one is owed. It is the
 // answer to every "this cannot be applied live", which is most changes.
-func (m *Microsandbox) restartForSecrets(ctx context.Context, name string, persisted []engineSecret, desired []Secret) (SecretChange, error) {
+func (m *Microsandbox) restartForSecrets(ctx context.Context, name string, persisted []engineSecret, desired []sandbox.Secret) (sandbox.SecretChange, error) {
 	if err := m.applySecretSet(ctx, name, persisted, desired, true); err != nil {
-		return SecretChange{}, err
+		return sandbox.SecretChange{}, err
 	}
-	return SecretChange{RestartRequired: true}, nil
+	return sandbox.SecretChange{RestartRequired: true}, nil
 }
 
 // applySecretSet makes the engine's stored or running set match desired. nextStart writes the
 // config for the next boot; otherwise it applies to the running sandbox.
-func (m *Microsandbox) applySecretSet(ctx context.Context, name string, current []engineSecret, desired []Secret, nextStart bool) error {
+func (m *Microsandbox) applySecretSet(ctx context.Context, name string, current []engineSecret, desired []sandbox.Secret, nextStart bool) error {
 	if err := m.removeSecrets(ctx, name, current, desired, nextStart); err != nil {
 		return err
 	}
@@ -300,7 +294,7 @@ func (m *Microsandbox) applySecretSet(ctx context.Context, name string, current 
 
 // removeSecrets drops the names the vault no longer has. A removal is a modify like any other,
 // and it goes to the same target the addition below will.
-func (m *Microsandbox) removeSecrets(ctx context.Context, name string, current []engineSecret, desired []Secret, nextStart bool) error {
+func (m *Microsandbox) removeSecrets(ctx context.Context, name string, current []engineSecret, desired []sandbox.Secret, nextStart bool) error {
 	wanted := map[string]bool{}
 	for _, secret := range substitutedSecrets(desired) {
 		wanted[secret.Name] = true
@@ -322,7 +316,7 @@ func (m *Microsandbox) removeSecrets(ctx context.Context, name string, current [
 
 // addSecrets writes the set the vault has. The engine reads each value from the host environment
 // variable named by the secret, never from argv.
-func (m *Microsandbox) addSecrets(ctx context.Context, name string, desired []Secret, nextStart bool) error {
+func (m *Microsandbox) addSecrets(ctx context.Context, name string, desired []sandbox.Secret, nextStart bool) error {
 	for _, secret := range substitutedSecrets(desired) {
 		args := []string{"modify", name, "--secret", secretSpec(secret)}
 		if nextStart {
@@ -348,7 +342,7 @@ func restartHint(err error) bool {
 	return strings.Contains(message, "restart") || strings.Contains(message, "no changes were applied")
 }
 
-func secretSpec(secret Secret) string {
+func secretSpec(secret sandbox.Secret) string {
 	options := []string{}
 	if !secret.Headers {
 		options = append(options, "no-headers")

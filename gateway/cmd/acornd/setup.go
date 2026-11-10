@@ -14,7 +14,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/marcelowa/acornd/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox/bwrap"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox/microsandbox"
 )
 
 // setupCommand answers "can this machine run a workspace, and if not, what does it need" — and
@@ -324,14 +325,14 @@ type setupReport struct {
 // gatherSetup asks the drivers, which is the same code a start would run: a check here that
 // passes while a start fails would be worse than no check.
 func gatherSetup(dataDir string) setupReport {
-	bwrap := sandbox.NewBwrap(dataDir)
-	hypervisor := sandbox.NewMicrosandbox(dataDir)
+	bubblewrap := bwrap.NewBwrap(dataDir)
+	hypervisor := microsandbox.NewMicrosandbox(dataDir)
 	report := setupReport{
 		PackageManager:   packageManager(),
-		BwrapPath:        bwrap.InstallDir(),
-		BwrapVersion:     bwrap.Version(),
-		BwrapErr:         bwrap.Usable(),
-		PastaErr:         bwrap.Egress(),
+		BwrapPath:        bubblewrap.InstallDir(),
+		BwrapVersion:     bubblewrap.Version(),
+		BwrapErr:         bubblewrap.Usable(),
+		PastaErr:         bubblewrap.Egress(),
 		TunErr:           tunDevice(),
 		UsernsRestricted: usernsRestricted(),
 		PastaProfile:     pastaProfilePresent(),

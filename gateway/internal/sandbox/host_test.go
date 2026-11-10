@@ -43,8 +43,9 @@ func TestTheHostEngineNeedsNothing(t *testing.T) {
 // Isolation is what the microVM engine is for and what the host engine cannot offer; every
 // surface that describes a sandbox reports this, so it is pinned.
 func TestIsolationSaysWhichEngineSeparatesFromTheHost(t *testing.T) {
-	if !NewMicrosandbox(t.TempDir()).Isolated() {
-		t.Error("a microVM separates commands from the host")
+	driver, err := Engine(t.TempDir(), "", "microsandbox")
+	if err != nil || !driver.Isolated() {
+		t.Errorf("a microVM separates commands from the host: %v", err)
 	}
 	if NewHost().Isolated() {
 		t.Error("the host engine is not isolated, and the report must not claim it is")

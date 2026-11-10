@@ -3,8 +3,6 @@ package sandbox
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -112,35 +110,6 @@ func TestSecretsAreRefusedWhenSandboxesCannotRunHere(t *testing.T) {
 	}
 	if !driver.ran("secrets") {
 		t.Error("the engine should be asked once the machine can sandbox")
-	}
-}
-
-// The supervisor's last words are what a failed start is explained with, and only the last few:
-// a log that grows for days should not be pasted into an error.
-func TestTheSupervisorsLastWordsAreTheLastFewLines(t *testing.T) {
-	dir := t.TempDir()
-	bwrap := NewBwrap(dir).WithStateDir(dir)
-	if got := bwrap.logTail("missing"); got != "" {
-		t.Errorf("a workspace with no log has no last words, got %q", got)
-	}
-	workspace := bwrap.workspaceDir("ws")
-	if err := os.MkdirAll(workspace, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	lines := "one\ntwo\nthree\nfour\nfive\n"
-	if err := os.WriteFile(filepath.Join(workspace, "supervisor.log"), []byte(lines), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if got := bwrap.logTail("ws"); got != "three; four; five" {
-		t.Errorf("logTail = %q", got)
-	}
-}
-
-// A parameter file that is not there is an answer this cannot read, and the zero value is how it
-// says so rather than a reason invented from nothing.
-func TestAMissingParameterIsAnEmptyAnswer(t *testing.T) {
-	if got := readFileIfPresent(filepath.Join(t.TempDir(), "nested")); got != "" {
-		t.Errorf("readFileIfPresent on a missing file = %q", got)
 	}
 }
 

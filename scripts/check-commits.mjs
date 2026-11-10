@@ -26,10 +26,19 @@ function defaultRange() {
 	}
 }
 
+// A force-push range can include the base branch after a rebase, and a base commit is not
+// this branch's history to answer for. Leave everything already on origin/main out.
 const range = process.argv[2] ?? defaultRange();
+const args = ["rev-list", "--no-merges", range];
+try {
+	git(["rev-parse", "--verify", "origin/main"]);
+	args.push("--not", "origin/main");
+} catch {
+	// A checkout with no origin/main has no base to exclude.
+}
 let shas;
 try {
-	shas = git(["rev-list", "--no-merges", range]).split("\n").filter((line) => line !== "");
+	shas = git(args).split("\n").filter((line) => line !== "");
 } catch (error) {
 	console.error(`cannot read commits in ${range}: ${error.message.split("\n")[0]}`);
 	process.exit(1);

@@ -1,11 +1,14 @@
-package sandbox
+package microsandbox
 
 import (
 	"context"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // liveDriver is the real engine, with its state directory shared when the environment names
@@ -33,14 +36,14 @@ func TestLiveProduceAndStop(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "hello.txt"), []byte("from the host\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	manager, err := Open(context.Background(), Options{DataDir: dataDir, Driver: liveDriver(dataDir), Log: t.Logf})
+	manager, err := sandbox.Open(context.Background(), sandbox.Options{DataDir: dataDir, Driver: liveDriver(dataDir), Log: t.Logf})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if problem := manager.Problem(); problem != nil {
 		t.Fatalf("no sandbox on this machine: %v", problem)
 	}
-	name, err := manager.Produce(context.Background(), Policy{Workspace: ws, Image: "debian:stable-slim", Egress: true}, filepath.Join(dataDir, "state"))
+	name, err := manager.Produce(context.Background(), sandbox.Policy{Workspace: ws, Image: "debian:stable-slim", Egress: true}, filepath.Join(dataDir, "state"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +77,7 @@ func TestALiveSandboxNestsOnlyWhenTheWorkspaceAllowsIt(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
 	driver := liveDriver(dataDir)
-	manager, err := Open(ctx, Options{DataDir: dataDir, Driver: driver, Log: t.Logf})
+	manager, err := sandbox.Open(ctx, sandbox.Options{DataDir: dataDir, Driver: driver, Log: t.Logf})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +96,7 @@ func TestALiveSandboxNestsOnlyWhenTheWorkspaceAllowsIt(t *testing.T) {
 			if err := os.MkdirAll(workspace, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			policy := Policy{Workspace: workspace, Image: "debian:stable-slim", DisableVMNesting: test.disable}
+			policy := sandbox.Policy{Workspace: workspace, Image: "debian:stable-slim", DisableVMNesting: test.disable}
 			name, err := manager.Produce(ctx, policy, filepath.Join(dataDir, "state"))
 			if err != nil {
 				t.Fatalf("the create call did not take the nesting argument: %v", err)
@@ -129,5 +132,88 @@ func TestALiveSandboxNestsOnlyWhenTheWorkspaceAllowsIt(t *testing.T) {
 				t.Errorf("this machine can nest and the workspace allows it, so the guest should have /dev/kvm, got %q", got)
 			}
 		})
+	}
+}
+func TestAMicroVMStartsInsideABwrapSandbox(t *testing.T) {
+	if testing.Short() {
+		t.Skip("the microVM tier")
+	}
+	if os.Getenv("ACORND_LIVE_SANDBOX") == "" {
+		t.Skip("set ACORND_LIVE_SANDBOX=1 to boot a microVM inside a bwrap sandbox")
+	}
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("no bubblewrap on this machine")
+	}
+	// A hypervisor this user cannot open is not a skip: the engine answers it with an abort, and
+	// the report is then a crash inside the engine rather than the device that was missing.
+	device, err := os.Open("/dev/kvm")
+	if err != nil {
+		t.Fatalf("the nested microVM needs /dev/kvm, and this machine will not open it: %v%s", err, kvmHint())
+	}
+	_ = device.Close()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home folder for the engine store")
+	}
+	engine := NewMicrosandbox(filepath.Join(home, ".acornd"))
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	if !engine.Installed() {
+		// The sandbox tier's first suite can install it; this one must not depend on that
+		// ordering, and a skip here would be a green run that booted no microVM.
+		if err := engine.Install(ctx, t.Logf); err != nil {
+			t.Fatalf("install the microsandbox engine: %v", err)
+		}
+	}
+	store := engine.StateDir()
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatalf("make the engine store: %v", err)
+	}
+	// Where the host's install and the host's store appear inside the sandbox. The root there
+	// is bubblewrap's, so where the host's install appears is this test's to choose.
+	const nestedEngine = "/engine"
+	args := []string{
+		// The sandbox's own root, not the host's. Inside a user namespace that maps one
+		// account, the host's / belongs to nobody this process can name, and 0.7.13 refuses an
+		// engine store when an ancestor could be substituted by another account — the refusal
+		// reads "catalog ancestor / permits path substitution". A root bubblewrap makes is the
+		// fix, and it is also the shape the product's own bwrap engine has: a rootfs, with what
+		// the engine needs from the host bound into it read-only.
+		"--tmpfs", "/",
+		"--ro-bind", "/usr", "/usr",
+		"--ro-bind", "/bin", "/bin",
+		"--ro-bind-try", "/sbin", "/sbin",
+		"--ro-bind", "/lib", "/lib",
+		// aarch64 Linux has no /lib64, and a missing source is an error rather than a no-op.
+		"--ro-bind-try", "/lib64", "/lib64",
+		"--ro-bind", "/etc", "/etc",
+		// The runners' /etc/resolv.conf is a link into /run, and a root without /run has a
+		// resolver that points at nothing: the first pull then fails with "error sending
+		// request", which reads like a network outage rather than a missing file.
+		"--ro-bind-try", "/run", "/run",
+		// The host's install and the host's store. The store keeps its own path, and that is not
+		// tidiness: the engine records absolute paths inside it, so a store bound somewhere else
+		// inside the sandbox leaves entries the host cannot open afterwards. Bubblewrap creates
+		// the parents inside its root, so the ancestry the engine checks is this account's.
+		"--ro-bind", engine.InstallDir(), nestedEngine,
+		"--bind", store, store,
+		"--dev", "/dev",
+		"--dev-bind", "/dev/net/tun", "/dev/net/tun",
+		"--dev-bind", "/dev/kvm", "/dev/kvm",
+		"--cap-add", "ALL",
+		"--proc", "/proc",
+		"--tmpfs", "/tmp",
+		"--unshare-all", "--share-net",
+		"--uid", "0", "--gid", "0",
+		"--", "env", "MSB_HOME=" + store, filepath.Join(nestedEngine, "bin", "msb"),
+		"run", "--net", "public",
+		"debian:stable-slim", "--", "/bin/echo", "nested-msb-ok",
+	}
+	output, err := exec.CommandContext(ctx, "bwrap", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("the microVM did not boot inside the bwrap sandbox: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "nested-msb-ok") {
+		t.Fatalf("the microVM ran but its output is missing: %s", output)
 	}
 }

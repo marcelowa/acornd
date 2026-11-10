@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/marcelowa/acornd/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox/microsandbox"
 )
 
 // Where workspaces live is a decision someone makes, not one to guess.
@@ -209,7 +210,7 @@ func TestTheEngineListNoticesAnEngineInstalledWhileRunning(t *testing.T) {
 		t.Fatal("nothing installs the engine before a workspace first asks for it")
 	}
 	// First use puts the pinned binary where the driver looks for it.
-	binary := filepath.Join(dir, "tools", "microsandbox", sandbox.Version, "bin", "msb")
+	binary := filepath.Join(dir, "tools", "microsandbox", microsandbox.Version, "bin", "msb")
 	if err := os.MkdirAll(filepath.Dir(binary), 0o755); err != nil {
 		t.Fatalf("engine folder: %v", err)
 	}

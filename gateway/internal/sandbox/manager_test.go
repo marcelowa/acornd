@@ -359,8 +359,4 @@ func TestOnlyAnEngineWithAControlProxySaysSo(t *testing.T) {
 	if manager.SecretProxyInControl() {
 		t.Error("the fake engine substitutes nowhere, so it should not claim a control proxy")
 	}
-	bwrap := NewBwrap(t.TempDir())
-	if !bwrap.SecretProxyInControl() {
-		t.Error("bwrap substitutes through the proxy control runs for it")
-	}
 }

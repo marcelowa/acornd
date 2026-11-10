@@ -1,8 +1,9 @@
-package sandbox
+package microsandbox
 
 import (
 	"context"
 	"encoding/json"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,16 +12,16 @@ import (
 )
 
 func TestPolicyRenderKeepsSecretValuesOut(t *testing.T) {
-	policy := Policy{
+	policy := sandbox.Policy{
 		Workspace: "/home/me/work",
 		Egress:    true,
-		Secrets: []Secret{{
+		Secrets: []sandbox.Secret{{
 			Name: "GITHUB_TOKEN", Description: "release token", Value: "value-must-not-be-here",
 			Hosts:   []string{"api.github.com", "*.githubusercontent.com"},
 			Headers: true, Query: false, Body: false,
 		}},
 	}
-	rendered := string(policy.Render())
+	rendered := string(render(policy))
 	if strings.Contains(rendered, "value-must-not-be-here") {
 		t.Fatalf("the policy file must not hold a value:\n%s", rendered)
 	}
@@ -60,10 +61,10 @@ func TestCreatePassesSecretValuesInTheProcessEnvironment(t *testing.T) {
 	driver := NewMicrosandbox(shortTempDir(t)).WithRunner(recorder)
 	driver.installed = true
 	dir := t.TempDir()
-	policy := Policy{
+	policy := sandbox.Policy{
 		Workspace: "/home/me/work",
 		Egress:    true,
-		Secrets: []Secret{{
+		Secrets: []sandbox.Secret{{
 			Name: "GITHUB_TOKEN", Value: "ghp-value", Hosts: []string{"api.github.com"},
 			Headers: true,
 		}},
@@ -95,12 +96,12 @@ func contains(values []string, want string) bool {
 
 func TestSecretSpecUsesTheEngineSpelling(t *testing.T) {
 	cases := []struct {
-		secret Secret
+		secret sandbox.Secret
 		want   string
 	}{
-		{secret: Secret{Name: "TOKEN", Hosts: []string{"api.example.com"}, Headers: true}, want: "TOKEN@api.example.com"},
-		{secret: Secret{Name: "TOKEN", Hosts: []string{"api.example.com", "*.example.org"}, Headers: true, Query: true}, want: "TOKEN:query@api.example.com,*.example.org"},
-		{secret: Secret{Name: "TOKEN", Hosts: []string{"api.example.com"}, Query: true, Body: true}, want: "TOKEN:no-headers,query,body@api.example.com"},
+		{secret: sandbox.Secret{Name: "TOKEN", Hosts: []string{"api.example.com"}, Headers: true}, want: "TOKEN@api.example.com"},
+		{secret: sandbox.Secret{Name: "TOKEN", Hosts: []string{"api.example.com", "*.example.org"}, Headers: true, Query: true}, want: "TOKEN:query@api.example.com,*.example.org"},
+		{secret: sandbox.Secret{Name: "TOKEN", Hosts: []string{"api.example.com"}, Query: true, Body: true}, want: "TOKEN:no-headers,query,body@api.example.com"},
 	}
 	for _, test := range cases {
 		if got := secretSpec(test.secret); got != test.want {
@@ -122,7 +123,7 @@ func TestMergeEnvLastWins(t *testing.T) {
 }
 
 func TestSameSecretPolicyComparesHostsAndSubstitution(t *testing.T) {
-	desired := []Secret{{
+	desired := []sandbox.Secret{{
 		Name: "TOKEN", Hosts: []string{"api.example.com", "*.example.org"},
 		Headers: true, Query: true,
 	}}
@@ -313,9 +314,9 @@ func engineToken() engineSecret {
 
 func TestSecretsChangedRotatesLive(t *testing.T) {
 	workspace := "/home/me/work"
-	engine := &fakeEngine{name: Name(workspace), status: "Running", active: []engineSecret{engineToken()}, persisted: []engineSecret{engineToken()}}
+	engine := &fakeEngine{name: sandbox.Name(workspace), status: "Running", active: []engineSecret{engineToken()}, persisted: []engineSecret{engineToken()}}
 	driver := secretDriverFor(t, engine)
-	change, err := driver.SecretsChanged(context.Background(), engine.name, []Secret{{
+	change, err := driver.SecretsChanged(context.Background(), engine.name, []sandbox.Secret{{
 		Name: "TOKEN", Value: "new-value", Hosts: []string{"api.example.com"}, Headers: true,
 	}})
 	if err != nil {
@@ -336,9 +337,9 @@ func TestSecretsChangedRotatesLive(t *testing.T) {
 
 func TestSecretsChangedAddsAtNextStart(t *testing.T) {
 	workspace := "/home/me/work"
-	engine := &fakeEngine{name: Name(workspace), status: "Running"}
+	engine := &fakeEngine{name: sandbox.Name(workspace), status: "Running"}
 	driver := secretDriverFor(t, engine)
-	change, err := driver.SecretsChanged(context.Background(), engine.name, []Secret{{
+	change, err := driver.SecretsChanged(context.Background(), engine.name, []sandbox.Secret{{
 		Name: "TOKEN", Value: "v", Hosts: []string{"api.example.com"}, Headers: true,
 	}})
 	if err != nil {
@@ -357,7 +358,7 @@ func TestSecretsChangedAddsAtNextStart(t *testing.T) {
 }
 
 func TestSecretsChangedRemovesAtNextStart(t *testing.T) {
-	engine := &fakeEngine{name: Name("/home/me/work"), status: "Running", active: []engineSecret{engineToken()}, persisted: []engineSecret{engineToken()}}
+	engine := &fakeEngine{name: sandbox.Name("/home/me/work"), status: "Running", active: []engineSecret{engineToken()}, persisted: []engineSecret{engineToken()}}
 	driver := secretDriverFor(t, engine)
 	change, err := driver.SecretsChanged(context.Background(), engine.name, nil)
 	if err != nil {
@@ -373,9 +374,9 @@ func TestSecretsChangedRemovesAtNextStart(t *testing.T) {
 }
 
 func TestSecretsChangedStoppedStoresIt(t *testing.T) {
-	engine := &fakeEngine{name: Name("/home/me/work"), status: "Stopped", persisted: []engineSecret{engineToken()}}
+	engine := &fakeEngine{name: sandbox.Name("/home/me/work"), status: "Stopped", persisted: []engineSecret{engineToken()}}
 	driver := secretDriverFor(t, engine)
-	change, err := driver.SecretsChanged(context.Background(), engine.name, []Secret{{
+	change, err := driver.SecretsChanged(context.Background(), engine.name, []sandbox.Secret{{
 		Name: "TOKEN", Value: "new", Hosts: []string{"api.example.com"}, Headers: true,
 	}})
 	if err != nil {
@@ -393,7 +394,7 @@ func TestSecretsChangedStoppedStoresIt(t *testing.T) {
 func TestSecretsChangedAbsentDoesNothing(t *testing.T) {
 	engine := &fakeEngine{}
 	driver := secretDriverFor(t, engine)
-	change, err := driver.SecretsChanged(context.Background(), Name("/home/me/work"), []Secret{{
+	change, err := driver.SecretsChanged(context.Background(), sandbox.Name("/home/me/work"), []sandbox.Secret{{
 		Name: "TOKEN", Value: "v", Hosts: []string{"api.example.com"}, Headers: true,
 	}})
 	if err != nil {
@@ -406,12 +407,12 @@ func TestSecretsChangedAbsentDoesNothing(t *testing.T) {
 
 func TestSecretsChangedFallsBackWhenLiveIsRefused(t *testing.T) {
 	engine := &fakeEngine{
-		name: Name("/home/me/work"), status: "Running",
+		name: sandbox.Name("/home/me/work"), status: "Running",
 		active: []engineSecret{engineToken()}, persisted: []engineSecret{engineToken()},
 		refuseLive: true,
 	}
 	driver := secretDriverFor(t, engine)
-	change, err := driver.SecretsChanged(context.Background(), engine.name, []Secret{{
+	change, err := driver.SecretsChanged(context.Background(), engine.name, []sandbox.Secret{{
 		Name: "TOKEN", Value: "v", Hosts: []string{"api.example.com"}, Headers: true,
 	}})
 	if err != nil {

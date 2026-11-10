@@ -5,11 +5,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -119,24 +116,6 @@ func TestShortDigestKeepsAPrefix(t *testing.T) {
 	}
 }
 
-func TestRestartHintReadsWhatTheEngineSaid(t *testing.T) {
-	cases := []struct {
-		err  error
-		want bool
-	}{
-		{errors.New("this change needs a restart"), true},
-		{errors.New("no changes were applied"), true},
-		{errors.New("RESTART REQUIRED"), true},
-		{errors.New("sandbox not found"), false},
-		{errors.New(""), false},
-	}
-	for _, test := range cases {
-		if got := restartHint(test.err); got != test.want {
-			t.Errorf("restartHint(%q) = %v, want %v", test.err, got, test.want)
-		}
-	}
-}
-
 func TestFirstLineKeepsTheCause(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"one\ntwo\nthree", "one"},
@@ -146,34 +125,6 @@ func TestFirstLineKeepsTheCause(t *testing.T) {
 	for _, test := range cases {
 		if got := FirstLine(test.in); got != test.want {
 			t.Errorf("FirstLine(%q) = %q, want %q", test.in, got, test.want)
-		}
-	}
-}
-
-func TestHostsCompareInTheEnginesVocabulary(t *testing.T) {
-	pattern := func(shape map[string]string) json.RawMessage {
-		encoded, err := json.Marshal(shape)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return encoded
-	}
-	cases := []struct {
-		name string
-		raw  []json.RawMessage
-		want []string
-		same bool
-	}{
-		{"exact, in any case", []json.RawMessage{pattern(map[string]string{"exact": "api.example.com"})}, []string{"API.example.com"}, true},
-		{"a wildcard is not an exact host", []json.RawMessage{pattern(map[string]string{"wildcard": "*.example.com"})}, []string{"api.example.com"}, false},
-		{"one wildcard for another", []json.RawMessage{pattern(map[string]string{"wildcard": "*.example.com"})}, []string{"*.example.com"}, true},
-		{"any is a shape of its own", []json.RawMessage{pattern(map[string]string{"any": "true"})}, []string{"example.com"}, false},
-		{"nothing against nothing", nil, nil, true},
-		{"a pattern this build cannot read is a change", []json.RawMessage{[]byte(`"not-an-object"`)}, nil, false},
-	}
-	for _, test := range cases {
-		if got := sameHosts(test.raw, test.want); got != test.same {
-			t.Errorf("%s: sameHosts = %v, want %v", test.name, got, test.same)
 		}
 	}
 }
@@ -193,29 +144,5 @@ func TestTheEnvironmentEngineTakesEverythingLive(t *testing.T) {
 	}
 	if !(&Host{}).SecretEnvInWorker() {
 		t.Error("the host engine delivers through the worker's environment")
-	}
-}
-
-func TestStateDirIsTheOneItWasGiven(t *testing.T) {
-	dir := t.TempDir()
-	// The engine keeps its own folder under whatever it is given, so two engines never share one.
-	if got := NewBwrap("data").WithStateDir(dir).StateDir(); got != filepath.Join(dir, "bwrap") {
-		t.Errorf("state dir = %q, want %q", got, filepath.Join(dir, "bwrap"))
-	}
-	if got := EngineVersion(); !strings.Contains(got, ".") {
-		t.Errorf("the engine version is a release: %q", got)
-	}
-}
-
-func TestBwrapRefusesAPolicyWithNoWorkspace(t *testing.T) {
-	err := NewBwrap(t.TempDir()).validatePolicy(Policy{})
-	if err == nil {
-		t.Fatal("a policy with no workspace should be refused")
-	}
-	// And one whose folder is not there: the sandbox mounts it, so a missing folder is a
-	// sandbox that would start empty.
-	err = NewBwrap(t.TempDir()).validatePolicy(Policy{Workspace: filepath.Join(t.TempDir(), "gone")})
-	if err == nil || !strings.Contains(err.Error(), "no workspace folder") {
-		t.Fatalf("a missing folder should be named, got %v", err)
 	}
 }

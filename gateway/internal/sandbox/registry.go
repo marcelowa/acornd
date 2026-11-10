@@ -1,29 +1,15 @@
 package sandbox
 
 // DriverFactory builds an engine's driver from the install folder and the state folder a caller
-// named. It is the seam a driver in another package registers through: the youki driver imports
+// named. It is the seam a driver in another package registers through: a driver package imports
 // this package for the types it implements, so this package cannot import it back.
 type DriverFactory func(dataDir, state string) Driver
 
-// driverFactories is every engine this package builds itself. The youki engine is added by its
-// package's init; a binary that offers it imports that package.
-var driverFactories = map[string]DriverFactory{
-	"microsandbox": func(dataDir, state string) Driver {
-		driver := NewMicrosandbox(dataDir)
-		if state != "" {
-			driver = driver.WithStateDir(state)
-		}
-		return driver
-	},
-	"bwrap": func(dataDir, state string) Driver {
-		driver := NewBwrap(dataDir)
-		if state != "" {
-			driver = driver.WithStateDir(state)
-		}
-		return driver
-	},
-}
+// driverFactories is every engine a binary has registered. Each driver package exports Register
+// and the binary calls it before anything can choose an engine; nothing is registered here, so
+// this package does not depend on any driver.
+var driverFactories = map[string]DriverFactory{}
 
-// RegisterDriver adds an engine to Engine's table. An engine package calls it from init, and the
-// binary that offers the engine imports that package for the side effect.
+// RegisterDriver adds an engine to Engine's table. It is idempotent: a binary that registers the
+// same engine twice still has one factory.
 func RegisterDriver(name string, make DriverFactory) { driverFactories[name] = make }

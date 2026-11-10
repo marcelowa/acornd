@@ -1,8 +1,9 @@
-package sandbox
+package bwrap
 
 import (
 	"context"
 	"encoding/json"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 	"net"
 	"os"
 	"path/filepath"
@@ -20,12 +21,12 @@ func TestAPolicyNeedsAWorkspaceThatExists(t *testing.T) {
 	engine := NewBwrap(t.TempDir())
 	for _, one := range []struct {
 		why    string
-		policy Policy
+		policy sandbox.Policy
 		says   string
 	}{
-		{"no workspace named", Policy{}, "no workspace"},
-		{"a folder that is not there", Policy{Workspace: filepath.Join(t.TempDir(), "missing")}, "no workspace folder"},
-		{"a file where the folder should be", Policy{Workspace: writeAFile(t)}, "no workspace folder"},
+		{"no workspace named", sandbox.Policy{}, "no workspace"},
+		{"a folder that is not there", sandbox.Policy{Workspace: filepath.Join(t.TempDir(), "missing")}, "no workspace folder"},
+		{"a file where the folder should be", sandbox.Policy{Workspace: writeAFile(t)}, "no workspace folder"},
 	} {
 		if err := engine.validatePolicy(one.policy); err == nil {
 			t.Errorf("%s: should be refused", one.why)
@@ -35,7 +36,7 @@ func TestAPolicyNeedsAWorkspaceThatExists(t *testing.T) {
 	}
 
 	// And a real folder passes.
-	if err := engine.validatePolicy(Policy{Workspace: t.TempDir()}); err != nil {
+	if err := engine.validatePolicy(sandbox.Policy{Workspace: t.TempDir()}); err != nil {
 		t.Errorf("a folder that exists should be accepted: %v", err)
 	}
 }
@@ -55,7 +56,7 @@ func writeAFile(t *testing.T) string {
 func TestTheStateFoldersAreMadePrivateAndReportedWhenTheyCannotBe(t *testing.T) {
 	dataDir := t.TempDir()
 	engine := NewBwrap(dataDir)
-	home, err := engine.stateDirs(Policy{Workspace: t.TempDir()})
+	home, err := engine.stateDirs(sandbox.Policy{Workspace: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +73,7 @@ func TestTheStateFoldersAreMadePrivateAndReportedWhenTheyCannotBe(t *testing.T) 
 		t.Fatal(err)
 	}
 	broken := NewBwrap(t.TempDir()).WithStateDir(blocked)
-	if _, err := broken.stateDirs(Policy{Workspace: t.TempDir()}); err == nil {
+	if _, err := broken.stateDirs(sandbox.Policy{Workspace: t.TempDir()}); err == nil {
 		t.Fatal("a state folder under a file should be reported")
 	}
 }
@@ -100,7 +101,7 @@ func TestStartingASandboxThatAnswersIsANoOp(t *testing.T) {
 	// A config that names a socket this test is listening on: the engine dials it, hears an answer,
 	// and stops before booting anything.
 	socket := answerPings(t)
-	config := bwrapConfig{Socket: socket, Network: SandboxNetwork{Mode: "off"}}
+	config := bwrapConfig{Socket: socket, Network: sandbox.SandboxNetwork{Mode: "off"}}
 	payload, err := json.Marshal(config)
 	if err != nil {
 		t.Fatal(err)
@@ -122,12 +123,12 @@ func TestStartingASandboxThatAnswersIsANoOp(t *testing.T) {
 func TestOnlyGlobalsThatExistAreMounted(t *testing.T) {
 	present := t.TempDir()
 	missing := filepath.Join(t.TempDir(), "not-here")
-	globals := ReadonlyGlobals(Policy{Global: []string{missing, present}})
+	globals := sandbox.ReadonlyGlobals(sandbox.Policy{Global: []string{missing, present}})
 	if len(globals) != 1 || globals[0] != present {
 		t.Errorf("globals = %v, want only the one that exists", globals)
 	}
 	later := t.TempDir()
-	sorted := ReadonlyGlobals(Policy{Global: []string{present, later}})
+	sorted := sandbox.ReadonlyGlobals(sandbox.Policy{Global: []string{present, later}})
 	if len(sorted) != 2 || sorted[0] > sorted[1] {
 		t.Errorf("globals should be sorted: %v", sorted)
 	}

@@ -14,9 +14,8 @@ import (
 // that fails leaves nothing behind, and a folder that cannot be made says so before any bytes move.
 
 func TestAnImageThatIsAlreadyThereIsNotFetchedAgain(t *testing.T) {
-	engine := NewBwrap(t.TempDir())
 	pulls := 0
-	engine.pull = func(context.Context, string, string, func(string, ...any)) error {
+	pull := func(context.Context, string, string, func(string, ...any)) error {
 		pulls++
 		return nil
 	}
@@ -24,13 +23,13 @@ func TestAnImageThatIsAlreadyThereIsNotFetchedAgain(t *testing.T) {
 	base := filepath.Join(dir, "base")
 	complete := filepath.Join(dir, "complete")
 
-	if err := pullToDir(dir, base, complete, "debian:stable-slim", engine.pull); err != nil {
+	if err := pullToDir(dir, base, complete, "debian:stable-slim", pull); err != nil {
 		t.Fatal(err)
 	}
 	if pulls != 1 {
 		t.Fatalf("the first pull should Fetch once, got %d", pulls)
 	}
-	if err := pullToDir(dir, base, complete, "debian:stable-slim", engine.pull); err != nil {
+	if err := pullToDir(dir, base, complete, "debian:stable-slim", pull); err != nil {
 		t.Fatal(err)
 	}
 	if pulls != 1 {
@@ -49,8 +48,7 @@ func TestAnImageThatIsAlreadyThereIsNotFetchedAgain(t *testing.T) {
 // A pull that fails leaves nothing that looks finished: the marker is written last, so a half
 // unpacked folder can never be mistaken for an image installs run from.
 func TestAFailedPullLeavesNoMarker(t *testing.T) {
-	engine := NewBwrap(t.TempDir())
-	engine.pull = func(_ context.Context, _ string, staging string, _ func(string, ...any)) error {
+	pull := func(_ context.Context, _ string, staging string, _ func(string, ...any)) error {
 		// Half a tree, then a failure: what a dropped connection looks like.
 		if err := os.WriteFile(filepath.Join(staging, "half"), []byte("x"), 0o600); err != nil {
 			return err
@@ -61,7 +59,7 @@ func TestAFailedPullLeavesNoMarker(t *testing.T) {
 	base := filepath.Join(dir, "base")
 	complete := filepath.Join(dir, "complete")
 
-	err := pullToDir(dir, base, complete, "debian:stable-slim", engine.pull)
+	err := pullToDir(dir, base, complete, "debian:stable-slim", pull)
 	if err == nil {
 		t.Fatal("a failed pull should be reported")
 	}
@@ -101,36 +99,20 @@ func TestWithNoImageSourceAPullSaysSo(t *testing.T) {
 // The folder for an image is named from the reference, so two images do not share one, and a
 // reference this build cannot read is refused before anything is fetched.
 func TestAnImageIsNamedByItsReference(t *testing.T) {
-	engine := NewBwrap(t.TempDir())
-	engine.pull = func(context.Context, string, string, func(string, ...any)) error { return nil }
-	first, err := imageBase(engine.StateDir(), "debian:stable-slim", engine.pull)
+	store := t.TempDir()
+	pull := func(context.Context, string, string, func(string, ...any)) error { return nil }
+	first, err := imageBase(store, "debian:stable-slim", pull)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := imageBase(engine.StateDir(), "golang:1.24", engine.pull)
+	second, err := imageBase(store, "golang:1.24", pull)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first == second {
 		t.Errorf("two images share the folder %q", first)
 	}
-	if _, err := imageBase(engine.StateDir(), "::not a reference::", engine.pull); err == nil {
+	if _, err := imageBase(store, "::not a reference::", pull); err == nil {
 		t.Error("a reference this build cannot read should be refused")
-	}
-}
-
-// On a machine with /dev/kvm, the hint explains how to get into the group — or, when the account is
-// already in it, that the bits are what is wrong. It is the message somebody reads after losing an
-// afternoon, so it has to say one of the two.
-func TestTheKVMHintSaysWhatToDo(t *testing.T) {
-	if _, err := os.Stat("/dev/kvm"); err != nil {
-		t.Skip("this machine has no /dev/kvm to explain")
-	}
-	hint := kvmHint()
-	if hint == "" {
-		t.Fatal("with /dev/kvm present the hint should say something")
-	}
-	if !strings.Contains(hint, "group") && !strings.Contains(hint, "permission bits") {
-		t.Errorf("the hint should name the fix: %q", hint)
 	}
 }

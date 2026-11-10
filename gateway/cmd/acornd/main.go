@@ -23,6 +23,8 @@ import (
 	"github.com/marcelowa/acornd/gateway/internal/ready"
 	"github.com/marcelowa/acornd/gateway/internal/remote"
 	"github.com/marcelowa/acornd/gateway/internal/sandbox"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox/bwrap"
+	"github.com/marcelowa/acornd/gateway/internal/sandbox/microsandbox"
 	"github.com/marcelowa/acornd/gateway/internal/sandbox/youki"
 	"github.com/marcelowa/acornd/gateway/internal/update"
 	"github.com/marcelowa/acornd/gateway/internal/vault"
@@ -30,6 +32,8 @@ import (
 )
 
 func main() {
+	bwrap.Register()
+	microsandbox.Register()
 	youki.Register()
 	// One place configures logging, and it is the entry point: a package that sets global
 	// logger state when it is imported decides something the program did not ask for.

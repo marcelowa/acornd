@@ -1,8 +1,9 @@
 //go:build darwin
 
-package sandbox
+package microsandbox
 
 import (
+	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 	"os/exec"
 	"strings"
 )
@@ -11,14 +12,14 @@ import (
 // later, on macOS 15 or later, which is where hardware-assisted nested virtualization (EL2)
 // exists. The engine's own check is the authority; this only decides where it is worth
 // asking.
-func hostNestedSupport() NestingSupport {
+func hostNestedSupport() sandbox.NestingSupport {
 	brand, err := systemOutput("sysctl", "-n", "machdep.cpu.brand_string")
 	if err != nil {
-		return Unavailable("cannot ask the machine about nesting: %v", err)
+		return sandbox.Unavailable("cannot ask the machine about nesting: %v", err)
 	}
 	version, err := systemOutput("sw_vers", "-productVersion")
 	if err != nil {
-		return Unavailable("cannot ask the machine about nesting: %v", err)
+		return sandbox.Unavailable("cannot ask the machine about nesting: %v", err)
 	}
 	return nestedFromApple(brand, version)
 }

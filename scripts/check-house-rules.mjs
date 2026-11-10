@@ -53,7 +53,7 @@ for (const rule of rules) {
 // SDK share the store, including its migrations, so a drift migrates the catalog
 // past what the other side reads (2026-10-11: 0.7.7 rowed it forward, 0.7.6 blind).
 const pinFiles = [
-	["gateway/internal/sandbox/microsandbox.go", /const Version = "(\d+\.\d+\.\d+)"/],
+	["gateway/internal/sandbox/microsandbox/microsandbox.go", /const Version = "(\d+\.\d+\.\d+)"/],
 	["worker/src/microsandbox.ts", /export const ENGINE_VERSION = "(\d+\.\d+\.\d+)"/],
 ];
 const pins = new Map();
