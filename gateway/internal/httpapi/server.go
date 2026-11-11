@@ -268,7 +268,7 @@ func (s *Server) listing() map[string]any {
 func (s *Server) listingFor(caller control.Caller) map[string]any {
 	return map[string]any{
 		"workspacesDir": s.workspaces.Dir(),
-		"workspaces":    control.Views(s.workspaces.ListFor(caller), s.workspaces.Progress),
+		"workspaces":    control.ViewsFor(s.workspaces.ListFor(caller), caller, s.workspaces.Progress),
 		// Every engine this build can run and whether this machine can: the chooser shows all
 		// of them, with the sentence that says why one cannot be used here.
 		"engines": s.workspaces.Engines(),

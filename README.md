@@ -351,6 +351,7 @@ Every command answers `-h`. `acornd` with no arguments lists them.
 | `setup` | Check this machine, and make it able to run sandboxes. |
 | `setup-code` | Print, rotate, or remove the code that claims a fresh install. |
 | `doctor` | Report what the sandbox engines can do here. Changes nothing. |
+| `support` | Preview or collect a redacted bundle for a bug report. Local file; no upload. |
 | `workspace` | List, add, forget, and purge workspaces. |
 | `secret` | List, add, show, rotate, and remove secrets. |
 | `provider` | List, add, and remove model provider keys. |
@@ -360,6 +361,29 @@ Every command answers `-h`. `acornd` with no arguments lists them.
 | `token` | Print the token that proves you own this install. |
 | `update` | Check for a release, and install it. |
 | `version` | Print the running version. |
+
+### Support bundle
+
+When a workspace fails and the logs do not say why, make a support bundle:
+
+```
+acornd support preview --workspace NAME
+acornd support bundle  --workspace NAME --out acornd-support.tar.gz
+```
+
+The preview lists every file and redaction before anything is written. The bundle is a local
+`.tar.gz`; acornd does not upload it. It contains the workspace and sandbox records, the small
+sandbox files, the sandbox log, the gateway's lifecycle lines, and the process groups and cgroup files
+around the sandbox.
+
+It does not contain secret values, credentials, provider keys, conversation text, workspace
+files, or environment values. Exact vault values, token-shaped strings, URL credentials, email
+addresses, and the home path are replaced. Redaction is best effort: review the manifest before
+sharing the file.
+
+The console has the same action under a workspace's **Sandbox** dialog. It is shown to the
+install admin and the room's owner; a guest cannot make a bundle, because it carries the
+machine's logs and process groups.
 
 ### Not built yet
 

@@ -67,6 +67,7 @@ var commands = map[string]func([]string){
 	"status":    statusCommand,
 	"setup":     setupCommand,
 	"doctor":    doctorCommand,
+	"support":   supportCommand,
 	"workspace": workspaceCommand,
 	"secret":    secretCommand,
 	"provider":  providers,
@@ -125,6 +126,7 @@ func usage(w io.Writer) {
   setup      check this machine, and make it able to run sandboxes
   setup-code print, rotate, or remove the code that claims a fresh install
   doctor     report what the sandbox engines can do here; changes nothing
+  support    preview or collect a redacted bundle for a bug report
   workspace  list, add, forget, and purge workspaces
   secret     list, add, show, rotate, and remove secrets
   provider   list, add, and remove model provider keys

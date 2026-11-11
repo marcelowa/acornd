@@ -14,12 +14,15 @@ import {
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Text } from "@/components/typography/text";
+import { SupportBundleDialog } from "./support-bundle-dialog";
 
 export interface SandboxDialogProps {
 	/** The workspace whose sandbox this is, when the dialog is open. */
 	workspace?: WorkspaceSummary | undefined;
 	/** The last thing the server refused, in its own words. */
 	failure?: string | undefined;
+	/** This caller owns the room or the install, so a support bundle is theirs to make. */
+	canAdminister?: boolean | undefined;
 	onSave: (
 		name: string,
 		change: {
@@ -42,7 +45,13 @@ export interface SandboxDialogProps {
  * The image commits from its own button and says where it landed; the network applies as it is
  * chosen. Both take effect at the next sandbox, which the line under them says.
  */
-export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDialogProps) {
+export function SandboxDialog({
+	workspace,
+	failure,
+	canAdminister,
+	onSave,
+	onClose,
+}: SandboxDialogProps) {
 	const [image, setImage] = useState(workspace?.image ?? "");
 	const [network, setNetwork] = useState(workspace?.network ?? "on");
 	const [keepAlive, setKeepAlive] = useState(workspace?.keepAlive === true);
@@ -51,6 +60,11 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 	const [devices, setDevices] = useState(workspace?.disableDevices !== true);
 	/** The value the field last sent, so the outcome belongs to this field's own commit. */
 	const [attempt, setAttempt] = useState<string | undefined>(undefined);
+	const [supportOpen, setSupportOpen] = useState(false);
+
+	useEffect(() => {
+		setSupportOpen(false);
+	}, [workspace?.name]);
 
 	// The form belongs to the workspace whose menu opened it.
 	useEffect(() => {
@@ -264,11 +278,23 @@ export function SandboxDialog({ workspace, failure, onSave, onClose }: SandboxDi
 					</Text>
 				</div>
 				<DialogFooter>
+					{canAdminister === true && workspace !== undefined ? (
+						<Button type="button" variant="ghost" onClick={() => setSupportOpen(true)}>
+							Support bundle
+						</Button>
+					) : null}
 					<Button type="button" variant="outline" onClick={onClose}>
 						Close
 					</Button>
 				</DialogFooter>
 			</DialogContent>
+			{workspace === undefined ? null : (
+				<SupportBundleDialog
+					workspace={workspace.name}
+					open={supportOpen}
+					onOpenChange={setSupportOpen}
+				/>
+			)}
 		</Dialog>
 	);
 }

@@ -58,6 +58,8 @@ export interface WireWorkspace {
 	stage?: string | undefined;
 	/** Why it failed, when it failed. */
 	error?: string | undefined;
+	/** This caller owns the room or the install, so the support bundle is theirs to make. */
+	can_administer?: boolean | undefined;
 }
 
 /** One workspace's start, as the status endpoint answers it: a cheap question that never starts

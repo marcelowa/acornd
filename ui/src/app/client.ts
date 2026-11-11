@@ -1068,3 +1068,35 @@ export async function cancelSecretRequest(
 		{ cancelled: true },
 	);
 }
+
+/* ---------- support bundle ---------- */
+
+/** What the console shows before a support bundle is downloaded. */
+export interface SupportPreview {
+	workspace: string;
+	created: string;
+	files: { name: string; size: number }[];
+	redactions: string[];
+	warnings: string[];
+}
+
+/** The owner's or admin's preview: names, sizes, and what was redacted, never file contents. */
+export async function fetchSupportPreview(workspace: string): Promise<SupportPreview> {
+	const response = await request(workspacePath(workspace, "/support/preview"));
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	return (await response.json()) as SupportPreview;
+}
+
+/** Download the redacted bundle. The browser saves it; acornd does not upload it. */
+export async function downloadSupportBundle(
+	workspace: string,
+): Promise<{ blob: Blob; filename: string }> {
+	const response = await request(workspacePath(workspace, "/support/bundle"));
+	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+	const disposition = response.headers.get("content-disposition") ?? "";
+	const match = /filename="?([^";]+)"?/.exec(disposition);
+	return {
+		blob: await response.blob(),
+		filename: match?.[1] ?? "acornd-support.tar.gz",
+	};
+}

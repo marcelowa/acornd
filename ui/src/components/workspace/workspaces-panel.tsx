@@ -219,6 +219,7 @@ export function WorkspacesPanel({
 			<SandboxDialog
 				workspace={sandboxFor}
 				failure={failure}
+				canAdminister={sandboxFor?.canAdminister}
 				onSave={onUpdateSandbox}
 				onClose={() => setSandboxFor(undefined)}
 			/>
