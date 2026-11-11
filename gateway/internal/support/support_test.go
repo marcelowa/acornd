@@ -64,6 +64,21 @@ func fixture(t *testing.T) Options {
 	if err := os.WriteFile(filepath.Join(pidDir, "status"), []byte("Name:\tyouki\nUid:\t0\t0\t0\t0\nGroups:\t0\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	child := os.Getpid() + 1000
+	task := filepath.Join(pidDir, "task", strconv.Itoa(os.Getpid()))
+	if err := os.MkdirAll(task, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(task, "children"), []byte(strconv.Itoa(child)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	childDir := filepath.Join(proc, strconv.Itoa(child))
+	if err := os.MkdirAll(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(childDir, "cgroup"), []byte("0::/user.slice/test.scope\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	cgroups := t.TempDir()
 	expected := filepath.Join(cgroups, "user.slice", "test.scope", "acornd.slice", name)
 	for _, dir := range []string{expected, filepath.Join(cgroups, "user.slice", "test.scope")} {
@@ -103,6 +118,9 @@ func TestBundleCarriesTheCgroupAndRemovesSecrets(t *testing.T) {
 	}
 	files := map[string]string{}
 	for _, file := range bundle.Files {
+		if _, seen := files[file.Name]; seen {
+			t.Errorf("bundle has %s twice", file.Name)
+		}
 		files[file.Name] = string(file.Data)
 	}
 	for _, want := range []string{
@@ -125,6 +143,9 @@ func TestBundleCarriesTheCgroupAndRemovesSecrets(t *testing.T) {
 				t.Errorf("%s contains %q", name, secret)
 			}
 		}
+	}
+	if !strings.Contains(files["proc/"+strconv.Itoa(os.Getpid()+1000)+"/cgroup"], "test.scope") {
+		t.Fatalf("the process tree should carry the child cgroup: %v", keys(files))
 	}
 	if strings.Contains(files["logs/acornd.log"], "private prompt") || strings.Contains(files["logs/acornd.log"], "tool output") {
 		t.Fatalf("the gateway log leaked a conversation or a tool output: %q", files["logs/acornd.log"])

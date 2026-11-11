@@ -494,6 +494,7 @@ func (b *Bundle) readPids(opts Options, dir string, add func(string, []byte), ac
 			continue
 		}
 		b.pid(opts, dir, name, pid, add, actual)
+		b.procTree(opts, pid, add, actual, map[int]bool{pid: true}, 0)
 	}
 }
 
@@ -520,7 +521,6 @@ func (b *Bundle) procCgroup(opts Options, dir, name string, pid int, add func(st
 			continue
 		}
 		actual[cgroup] = true
-		b.snapshotCgroup(opts, cgroup, "actual", add)
 	}
 }
 
@@ -668,4 +668,28 @@ func systemdSession() []byte {
 		}
 	}
 	return []byte(out.String())
+}
+
+// procTree follows the process tree from a pid the record names. The pid in a runtime's own
+// pid file can be the container's namespace pid; the host pid of the supervisor is a child of
+// the runtime, and its cgroup is what a diagnosis needs.
+func (b *Bundle) procTree(opts Options, pid int, add func(string, []byte), actual map[string]bool, seen map[int]bool, depth int) {
+	if depth >= 5 {
+		return
+	}
+	children, err := os.ReadFile(filepath.Join(opts.ProcRoot, strconv.Itoa(pid), "task", strconv.Itoa(pid), "children"))
+	if err != nil {
+		return
+	}
+	add(filepath.Join("proc", strconv.Itoa(pid), "children"), children)
+	for _, field := range strings.Fields(string(children)) {
+		child, err := strconv.Atoi(field)
+		if err != nil || child <= 0 || seen[child] {
+			continue
+		}
+		seen[child] = true
+		b.procCgroup(opts, "process tree", "child", child, add, actual)
+		b.procFiles(opts, child, add)
+		b.procTree(opts, child, add, actual, seen, depth+1)
+	}
 }
