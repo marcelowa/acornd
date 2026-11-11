@@ -58,7 +58,7 @@ func parseSupportArgs(argv []string) (supportArgs, bool) {
 		os.Exit(2)
 	}
 	if *workspace == "" {
-		log.Fatalf("acornd support %s: --workspace is required", verb)
+		log.Fatal("acornd support: --workspace is required")
 	}
 	dir, err := resolveDataDir(*dataDir)
 	if err != nil {
