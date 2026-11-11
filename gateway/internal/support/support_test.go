@@ -191,6 +191,25 @@ func TestBundleIsATarGzWithTheManifest(t *testing.T) {
 	}
 }
 
+// A preview with nothing in a list still carries the list. The console reads `.length` on
+// every one of them, so a null is an uncaught TypeError in the middle of a render rather than
+// an empty section — the crash that made the bundle unreachable the day it shipped.
+func TestPreviewListsAreArraysEvenWhenEmpty(t *testing.T) {
+	raw, err := json.Marshal(PreviewOf(&Bundle{Workspace: "room"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"files", "redactions", "warnings"} {
+		if _, ok := decoded[field].([]any); !ok {
+			t.Errorf("%s = %v, want a list: the console reads its length", field, decoded[field])
+		}
+	}
+}
+
 func keys(values map[string]string) []string {
 	out := make([]string, 0, len(values))
 	for key := range values {

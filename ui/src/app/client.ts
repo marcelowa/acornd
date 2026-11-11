@@ -1084,7 +1084,15 @@ export interface SupportPreview {
 export async function fetchSupportPreview(workspace: string): Promise<SupportPreview> {
 	const response = await request(workspacePath(workspace, "/support/preview"));
 	if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
-	return (await response.json()) as SupportPreview;
+	const preview = (await response.json()) as SupportPreview;
+	// The dialog reads `.length` on every list, so a null here is a crash in the middle of a
+	// render instead of an empty section. The gateway sends arrays; this is the second belt.
+	return {
+		...preview,
+		files: preview.files ?? [],
+		redactions: preview.redactions ?? [],
+		warnings: preview.warnings ?? [],
+	};
 }
 
 /** Download the redacted bundle. The browser saves it; acornd does not upload it. */
