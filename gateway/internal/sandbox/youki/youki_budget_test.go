@@ -106,27 +106,27 @@ func TestYoukiKeepsASandboxWithoutTheSwapBelt(t *testing.T) {
 		t.Fatal(err)
 	}
 	driver := NewYouki(t.TempDir())
-	if err := driver.enforceBudget("/acornd.slice/sandbox"); err != nil {
+	if err := driver.enforceBudget(youkiConfig{CgroupPath: "/acornd.slice/sandbox", Memory: "256M", CPUs: 1}, 0); err != nil {
 		t.Fatalf("a missing swap belt must not fail the sandbox: %v", err)
 	}
 }
 
 // Without memory.max nothing bounds the sandbox, so the refusal has to stay.
-func TestYoukiRefusesABudgetWithNoMemoryController(t *testing.T) {
+func TestYoukiWritesTheBudgetTheRuntimeLeftOut(t *testing.T) {
 	oldMount := cgroupMount
 	cgroupMount = t.TempDir()
 	t.Cleanup(func() { cgroupMount = oldMount })
-	leaf := filepath.Join(cgroupMount, "acornd.slice", "sandbox")
-	if err := os.MkdirAll(leaf, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(leaf, "missing-dir", "missing"), filepath.Join(leaf, "memory.swap.max")); err != nil {
-		t.Fatal(err)
-	}
 	driver := NewYouki(t.TempDir())
-	err := driver.enforceBudget("/acornd.slice/sandbox")
-	if err == nil || !strings.Contains(err.Error(), "memory.max") {
-		t.Fatalf("no memory controller must be an error that names it: %v", err)
+	config := youkiConfig{CgroupPath: "/acornd.slice/sandbox", Memory: "256M", CPUs: 1}
+	if err := driver.enforceBudget(config, 0); err != nil {
+		t.Fatalf("enforce: %v", err)
+	}
+	dir := cgroupDir(config.CgroupPath)
+	if got, err := os.ReadFile(filepath.Join(dir, "memory.max")); err != nil || strings.TrimSpace(string(got)) != "268435456" {
+		t.Fatalf("memory.max = %q, %v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "cpu.max")); err != nil || strings.TrimSpace(string(got)) != "100000 100000" {
+		t.Fatalf("cpu.max = %q, %v", got, err)
 	}
 }
 
@@ -163,5 +163,35 @@ func TestYoukiRepreparesTheBudgetParentBeforeAStart(t *testing.T) {
 		if !strings.Contains(string(raw), "memory") || !strings.Contains(string(raw), "cpu") {
 			t.Errorf("%s = %q, want memory and cpu", path, raw)
 		}
+	}
+}
+
+// The defect the support bundle found: youki creates the leaf and writes its limits, but the
+// sandbox's supervisor stays in the gateway's cgroup. Moving the host pid the supervisor
+// reports is what makes the budget bind.
+func TestYoukiMovesTheSupervisorIntoItsCgroup(t *testing.T) {
+	oldMount := cgroupMount
+	cgroupMount = t.TempDir()
+	t.Cleanup(func() { cgroupMount = oldMount })
+	leaf := filepath.Join(cgroupMount, "acornd.slice", "sandbox")
+	if err := os.MkdirAll(leaf, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(leaf, "memory.max"), []byte("268435456"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(leaf, "cgroup.procs"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	driver := NewYouki(t.TempDir())
+	if err := driver.enforceBudget(youkiConfig{CgroupPath: "/acornd.slice/sandbox", Memory: "256M", CPUs: 1}, os.Getpid()); err != nil {
+		t.Fatalf("enforce: %v", err)
+	}
+	procs, err := os.ReadFile(filepath.Join(leaf, "cgroup.procs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(procs), strconv.Itoa(os.Getpid())) {
+		t.Fatalf("the supervisor is not in the cgroup: %q", procs)
 	}
 }

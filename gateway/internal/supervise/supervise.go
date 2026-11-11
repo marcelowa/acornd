@@ -338,6 +338,13 @@ func (s *Server) serveConn(connection *conn) {
 	}
 }
 
+// readyEvent answers a live supervisor, and carries the host pid of the process inside the
+// sandbox. A driver that has to place that process in a cgroup cannot use the runtime's pid
+// file: rootless youki writes the namespace pid there, which is not a host pid.
+func (s *Server) readyEvent() Event {
+	return Event{Type: "ready", Version: s.version, PID: os.Getpid()}
+}
+
 // handleRequest answers one decoded line. It says whether the connection should stop, which is
 // the one verb — shutdown — that ends the server as well as its answer.
 func (s *Server) handleRequest(connection *conn, request Request) (stop bool) {
@@ -347,18 +354,18 @@ func (s *Server) handleRequest(connection *conn, request Request) (stop bool) {
 	}
 	switch request.Type {
 	case "ping":
-		connection.send(Event{Type: "ready", Version: s.version})
+		connection.send(s.readyEvent())
 	case "keepalive":
 		// A client that is attached but idle, which is not the same as a sandbox nobody
 		// needs. Nothing runs, so nothing is sent back beyond the acknowledgement.
 		s.touch()
-		connection.send(Event{Type: "ready", Version: s.version})
+		connection.send(s.readyEvent())
 	case "run":
 		s.start(connection, request)
 	case "kill":
 		s.killRequested(connection, request)
 	case "shutdown":
-		connection.send(Event{Type: "ready", Version: s.version})
+		connection.send(s.readyEvent())
 		s.Shutdown()
 		return true
 	default:
@@ -608,11 +615,18 @@ func dirOf(path string) string {
 // WaitForReady connects until the socket answers, or the deadline passes. The driver uses it so
 // that a sandbox is only reported running when something on the other end actually answers.
 func WaitForReady(ctx context.Context, socket string, timeout time.Duration) error {
+	_, err := WaitForReadyPID(ctx, socket, timeout)
+	return err
+}
+
+// WaitForReadyPID is WaitForReady with the supervisor's host pid, which is what a cgroup has
+// to be given. A ready event with no pid is still an answer, and the caller sees zero.
+func WaitForReadyPID(ctx context.Context, socket string, timeout time.Duration) (int, error) {
 	deadline := time.Now().Add(timeout)
 	var last error
 	for time.Now().Before(deadline) {
 		if err := ctx.Err(); err != nil {
-			return err
+			return 0, err
 		}
 		connection, err := net.DialTimeout("unix", socket, time.Second)
 		if err == nil {
@@ -624,7 +638,7 @@ func WaitForReady(ctx context.Context, socket string, timeout time.Duration) err
 			decodeErr := decoder.Decode(&event)
 			_ = connection.Close()
 			if decodeErr == nil && event.Type == "ready" {
-				return nil
+				return event.PID, nil
 			}
 			if decodeErr != nil {
 				last = decodeErr
@@ -637,5 +651,5 @@ func WaitForReady(ctx context.Context, socket string, timeout time.Duration) err
 	if last == nil {
 		last = errors.New("no answer")
 	}
-	return fmt.Errorf("supervisor at %s did not answer: %w", socket, last)
+	return 0, fmt.Errorf("supervisor at %s did not answer: %w", socket, last)
 }

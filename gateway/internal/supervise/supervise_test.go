@@ -429,3 +429,16 @@ func TestAnUnknownRequestIsRefused(t *testing.T) {
 		t.Fatalf("event: %+v", event)
 	}
 }
+
+// The ready answer carries the host pid of the supervisor. A youki sandbox's own pid file
+// contains the container's namespace pid, which is not a pid a host cgroup can accept.
+func TestReadyAnswersTheSupervisorsHostPID(t *testing.T) {
+	_, socket := startServer(t)
+	pid, err := WaitForReadyPID(context.Background(), socket, 3*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pid != os.Getpid() {
+		t.Fatalf("ready pid = %d, want the supervisor's %d", pid, os.Getpid())
+	}
+}
