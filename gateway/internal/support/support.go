@@ -580,7 +580,7 @@ func (b *Bundle) snapshotCgroup(opts Options, cgroup, kind string, add func(stri
 
 func (b *Bundle) cgroupListing(full, name string, info os.FileInfo, add func(string, []byte)) {
 	var listing strings.Builder
-	fmt.Fprintf(&listing, "%s\n", info.Mode().String())
+	fmt.Fprintf(&listing, "%s\n", owned(info))
 	entries, err := os.ReadDir(full)
 	if err != nil {
 		add(filepath.Join(name, "listing.txt"), []byte(listing.String()))
@@ -591,9 +591,18 @@ func (b *Bundle) cgroupListing(full, name string, info os.FileInfo, add func(str
 		if err != nil {
 			continue
 		}
-		fmt.Fprintf(&listing, "%s %10d %s\n", child.Mode().String(), child.Size(), entry.Name())
+		fmt.Fprintf(&listing, "%s %10d %s\n", owned(child), child.Size(), entry.Name())
 	}
 	add(filepath.Join(name, "listing.txt"), []byte(listing.String()))
+}
+
+// owned is a cgroup file's mode with the account it belongs to. A cgroup file answers to the
+// credentials of whoever created the cgroup, and whether this user may write the *common
+// ancestor* of two cgroups is what decides a refused move — so the owner is the first fact a
+// "permission denied" on cgroup.procs is read for, and the one the listing left out.
+func owned(info os.FileInfo) string {
+	uid, gid := ownerOf(info)
+	return fmt.Sprintf("%d:%d %s", uid, gid, info.Mode().String())
 }
 
 func (b *Bundle) cgroupFiles(full, name string, add func(string, []byte)) {
@@ -617,6 +626,11 @@ func (b *Bundle) cgroupAncestors(opts Options, cgroup, name string, add func(str
 		ancestor := "/" + strings.Join(parts[:i], "/")
 		ancestorDir := filepath.Join(opts.CgroupRoot, strings.TrimPrefix(ancestor, "/"))
 		fmt.Fprintf(&ancestors, "== %s ==\n", ancestor)
+		if info, err := os.Stat(ancestorDir); err == nil {
+			fmt.Fprintf(&ancestors, "owner: %s\n", owned(info))
+		} else {
+			fmt.Fprintf(&ancestors, "owner: %v\n", err)
+		}
 		for _, file := range []string{"cgroup.controllers", "cgroup.subtree_control"} {
 			raw, err := os.ReadFile(filepath.Join(ancestorDir, file))
 			if err != nil {

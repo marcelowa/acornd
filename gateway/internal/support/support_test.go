@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -233,4 +234,28 @@ func bundleWorkspace(t *testing.T, bundle *Bundle) string {
 	}
 	t.Fatal("no workspace record")
 	return ""
+}
+
+// Whether a process may be moved into a cgroup turns on who owns the *common ancestor* of the
+// two, not on the leaf's own limits: a "permission denied" on cgroup.procs is read for the
+// owner first. The listing and the ancestor chain have to carry it.
+func TestBundleNamesTheCgroupOwner(t *testing.T) {
+	bundle, err := Collect(fixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{}
+	for _, file := range bundle.Files {
+		files[file.Name] = string(file.Data)
+	}
+	base := "cgroup/expected/user.slice/test.scope/acornd.slice/" + sandbox.Name(bundleWorkspace(t, bundle))
+	listing := files[base+"/listing.txt"]
+	owner := regexp.MustCompile(`(?m)^\d+:\d+ `)
+	if got := len(owner.FindAllString(listing, -1)); got < 2 {
+		t.Fatalf("every line of the listing should carry the account that owns it: %q", listing)
+	}
+	ancestors := files[base+"/ancestors.txt"]
+	if !strings.Contains(ancestors, "owner: ") {
+		t.Fatalf("the ancestor chain should say who owns each cgroup: %q", ancestors)
+	}
 }
