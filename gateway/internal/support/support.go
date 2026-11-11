@@ -168,9 +168,16 @@ func PreviewOf(b *Bundle) Preview {
 		Workspace:  b.Workspace,
 		Created:    b.Created,
 		Files:      infos,
-		Redactions: append([]string(nil), b.Redactions...),
-		Warnings:   append([]string(nil), b.Warnings...),
+		Redactions: listOf(b.Redactions),
+		Warnings:   listOf(b.Warnings),
 	}
+}
+
+// listOf is a JSON array even when there is nothing in it. The console reads `.length` on
+// every list the preview carries, so a null there is an uncaught TypeError mid-render instead
+// of an empty section — which is how the bundle shipped unreachable.
+func listOf(values []string) []string {
+	return append([]string{}, values...)
 }
 
 // TarGz writes the bundle as one file a person can attach to a report.
@@ -215,7 +222,7 @@ func (b *Bundle) finish(add func(string, []byte), addJSON func(string, any), red
 		"created":    b.Created,
 		"files":      b.Preview.Files,
 		"redactions": b.Redactions,
-		"warnings":   b.Warnings,
+		"warnings":   listOf(b.Warnings),
 		"acornd":     map[string]string{"version": b.version(), "go": runtime.Version()},
 	})
 	add("README.txt", []byte(b.readme()))

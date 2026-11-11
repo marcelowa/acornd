@@ -16,6 +16,11 @@ import {
 
 const CONTEXT = BACKGROUND_CONTEXT;
 
+/** A thrown value as the sentence a tool result would carry. */
+function message(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
 /** An in-memory sandbox: the engine contract without a hypervisor. */
 class FakeSandbox implements SandboxClient {
 	readonly name = "acornd-fake-0000";
@@ -269,6 +274,41 @@ test("a deferred sandbox retries a wake that did not land", async () => {
 	expect(first).toContain("the cgroup was busy");
 	expect(await deferred.read("/work/AGENTS.md")).toBeNull();
 	expect(attempts).toBe(2);
+});
+
+// One fault, one sentence: a start that failed for the reason the sandbox was deferred said the
+// cause twice, and the second copy read like a second fault.
+test("a deferred sandbox says its reason once when the start failed for it", async () => {
+	const reason = "the sandbox's cgroup has no memory.max, so its budget cannot bind";
+	const engine: SandboxEngine = {
+		engineName: () => "fake",
+		openSandbox: async () => new FakeSandbox(),
+	};
+	const same = deferredSandbox(
+		engine,
+		"acornd-fake-0000",
+		"/work",
+		async () => {
+			throw new Error(reason);
+		},
+		reason,
+	);
+	expect(await same.read("/work/AGENTS.md").catch((error: unknown) => message(error))).toBe(
+		`the sandbox could not be prepared: ${reason}`,
+	);
+
+	const other = deferredSandbox(
+		engine,
+		"acornd-fake-0000",
+		"/work",
+		async () => {
+			throw new Error("the runtime is not installed");
+		},
+		reason,
+	);
+	expect(await other.read("/work/AGENTS.md").catch((error: unknown) => message(error))).toBe(
+		`the sandbox could not be prepared: the runtime is not installed (it was: ${reason})`,
+	);
 });
 
 // -- running commands ----------------------------------------------------------------
