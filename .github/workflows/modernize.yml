@@ -26,7 +26,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.27.3"
+          # The same version the suite runs on, read from the place that pins it.
+          go-version-file: gateway/go.mod
           # No module cache, on purpose. It buys this job seconds — `go install @latest` and
           # `go vet` are a minute on a cold machine and four seconds on a fresh one either way —
           # and the post step that saves it hung for ten minutes on two dispatched runs in a row
