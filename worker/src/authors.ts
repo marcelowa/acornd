@@ -14,7 +14,7 @@
  * - The composition joins messages to entries by what both sides have: the stamp the harness took when it
  *   placed the entry, and the words it stored. A request carries messages, not entries.
  */
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Message, UserMessage } from "@earendil-works/pi-ai";
 import { defineExtension, GenerationTask, hook, type InputEntry } from "@earendil-works/pi-durable";
 import type { StateDeps } from "./delegation.ts";

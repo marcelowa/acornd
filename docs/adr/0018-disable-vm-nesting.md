@@ -26,7 +26,7 @@ enabled setting". It was blocked on
 [libkrunfw#32](https://github.com/superradcompany/libkrunfw/pull/32), and no release carried
 it — v0.7.8, the latest, still had no flag. 0.7.6 was pinned on purpose, not left behind: a
 sandbox nested meanwhile, while the switch that would make it a choice was still upstream.
-v0.7.9 (2026-10-22) shipped #823, and the pin has followed it since: 0.7.13 is the release
+v0.7.9 (2026-10-22) shipped #823, and the pin has followed it since: 0.7.14 is the release
 acornd runs.
 
 This surfaced from use, not from theory: acornd is developed inside an acornd workspace,
@@ -95,10 +95,11 @@ direction. The engine's own check remains the authority once the flag is passed.
   nesting now gets a sandbox that cannot nest, which is the half 0.7.6 could not honor.
   `doctor` and the state report `nested: true` where the host half agrees, and the reason
   where it does not.
-- Nesting is still not in the generated policy file, and cannot be: 0.7.13's `sandbox.yaml`
-  refuses unknown fields and has no nesting key. `microsandbox.go` renders it into the create
-  call instead, beside `network: none`, and a person reading the policy file will not find it
-  there. "Explicit, never a default" is a rule about the create call for this setting.
+- Nesting is still not in the generated policy file, and cannot be: the pinned engine's
+  `sandbox.yaml` refuses unknown fields and has no nesting key. `microsandbox.go` renders it
+  into the create call instead, beside `network: none`, and a person reading the policy file
+  will not find it there. "Explicit, never a default" is a rule about the create call for this
+  setting.
 - `acornd doctor` grows a nesting line, text and JSON; the state frame grows two fields.
 - The install-wide switch is gone (it was `--disable-vm-nesting`): a workspace decides, and
   a refusal is recorded on the workspace rather than on the machine. The remaining difference

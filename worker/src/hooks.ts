@@ -12,7 +12,7 @@
  * things that matter for an assistant with a shell: do not run this command, and do not
  * write outside the workspace.
  */
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { AgentDoc, defineExtension, hook, ToolTask } from "@earendil-works/pi-durable";
 import { resolveAgent, type Guard } from "./config.ts";
 import { definitionOf, type StateDeps } from "./delegation.ts";
