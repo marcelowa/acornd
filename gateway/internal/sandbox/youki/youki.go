@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -580,6 +581,10 @@ func (y *Youki) boot(ctx context.Context, name string, config youkiConfig) error
 	// can leave the budget's leaf behind. The runtime creates the cgroup named by the record,
 	// and an existing one is a create that fails on a path that should have been empty.
 	y.removeCgroup(config.CgroupPath)
+	// An idle stop can take the parent slice's controller distribution with it. Re-establish it
+	// on the record's own parent immediately before the runtime creates the leaf: a leaf created
+	// under a parent that no longer distributes memory has no memory.swap.max.
+	_ = prepareCgroup(path.Dir(config.CgroupPath))
 	if err := y.launch(ctx, name, config); err != nil {
 		return err
 	}
@@ -736,10 +741,28 @@ func (y *Youki) create(ctx context.Context, name string) error {
 // memory.max bind. It runs after create and before start, so the first command is already
 // bounded.
 func (y *Youki) enforceBudget(cgroupPath string) error {
-	path := filepath.Join(cgroupDir(cgroupPath), "memory.swap.max")
-	if err := os.WriteFile(path, []byte("0"), 0o644); err != nil {
-		return fmt.Errorf("the sandbox's swap limit at %s: %w", path, err)
+	dir := cgroupDir(cgroupPath)
+	swap := filepath.Join(dir, "memory.swap.max")
+	if err := os.WriteFile(swap, []byte("0"), 0o644); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("the sandbox's swap limit at %s: %w", swap, err)
 	}
+	// The leaf may predate the parent's distribution of the memory controller. Ask for it again;
+	// the kernel materialises the controller files in an existing child when the parent starts
+	// distributing it.
+	_ = prepareCgroup(path.Dir(cgroupPath))
+	if err := os.WriteFile(swap, []byte("0"), 0o644); err == nil {
+		return nil
+	}
+	// A cgroup with memory.max but no memory.swap.max is a host without swap accounting, or a
+	// leaf the kernel will not give the belt. The memory limit is the budget that has to bind;
+	// tearing down a running sandbox over the belt leaves a healthy supervisor unreachable.
+	// Refuse only when the memory controller itself is absent, because then nothing binds.
+	if _, err := os.Stat(filepath.Join(dir, "memory.max")); err != nil {
+		return fmt.Errorf("the sandbox's cgroup %s has no memory.max, so its budget cannot bind: %w", dir, err)
+	}
+	log.Printf("sandbox youki: %s has no memory.swap.max; the memory limit applies without the swap belt", dir)
 	return nil
 }
 
