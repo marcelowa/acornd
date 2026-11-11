@@ -157,9 +157,7 @@ export function deferredSandbox(
 				async () => await engine.openSandbox(name, workspace, wake),
 				(error: unknown) => {
 					opening = undefined;
-					throw new Error(
-						`the sandbox could not be prepared: ${error instanceof Error ? error.message : String(error)} (it was: ${reason})`,
-					);
+					throw new Error(prepareFailure(error, reason));
 				},
 			);
 			opening.catch(() => {
@@ -182,6 +180,19 @@ export function deferredSandbox(
 		remove: async (path, options) => (await client()).remove(path, options),
 		rename: async (from, to) => (await client()).rename(from, to),
 	};
+}
+
+/**
+ * The deferred sandbox's failure in one sentence: what control answered to the wake, and the
+ * reason the worker started without a sandbox only when it says something else.
+ *
+ * A start that failed for the reason it was deferred said the same sentence twice, the second
+ * time inside `(it was: ...)`, which reads as two faults and hides that there is one.
+ */
+function prepareFailure(error: unknown, reason: string): string {
+	const said = error instanceof Error ? error.message : String(error);
+	const prefix = "the sandbox could not be prepared: ";
+	return said === reason ? prefix + said : `${prefix}${said} (it was: ${reason})`;
 }
 
 export function concatChunks(chunks: readonly Uint8Array[]): Uint8Array {
