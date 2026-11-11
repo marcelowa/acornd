@@ -81,6 +81,8 @@ export interface WorkspaceSummary {
 	stage?: string | undefined;
 	/** Why it failed, when it failed. */
 	error?: string | undefined;
+	/** This caller owns the room or the install, so the support bundle is theirs to make. */
+	canAdminister?: boolean | undefined;
 }
 
 /** One sandbox engine the create form offers. */

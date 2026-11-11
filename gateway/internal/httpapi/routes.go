@@ -138,6 +138,10 @@ func (s *Server) workspaceRoutes(mux *http.ServeMux) {
 	// address is checked against people.json here and not in control (ADR 0002).
 	mux.HandleFunc("POST /api/workspaces/{ws}/members", s.addMember)
 	mux.HandleFunc("DELETE /api/workspaces/{ws}/members/{email}", s.removeMember)
+	// A support bundle carries the machine's cgroups and logs, so it is the room owner's
+	// or the install admin's act. Control checks it: a guest can read the room, not the host.
+	mux.HandleFunc("GET /api/workspaces/{ws}/support/preview", s.supportPreview)
+	mux.HandleFunc("GET /api/workspaces/{ws}/support/bundle", s.supportBundle)
 }
 
 // pageRoutes are the interface's own screens: /c/<workspace>/<conversation> is a conversation,

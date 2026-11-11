@@ -123,6 +123,9 @@ type WorkspaceState struct {
 	// which is the default, and a choice of its own otherwise. True withholds them.
 	DisableDevices *bool `json:"disable_devices,omitempty"`
 	Running        bool  `json:"running"`
+	// CanAdminister is whether this caller owns the room or the install: the support bundle is
+	// the owner's act, not every member's.
+	CanAdminister bool `json:"can_administer,omitempty"`
 	// Status is stopped, opening, ready, or failed; Stage is the step an opening workspace is on,
 	// in the words of the code doing it. They are separate from Running because a workspace that
 	// is opening has no worker yet, and "not running" would say nothing about why.
@@ -477,7 +480,7 @@ func (c *Control) workspaceList(caller Caller) []WorkspaceState {
 			visible = append(visible, workspace)
 		}
 	}
-	return Views(visible, c.opts.Progress)
+	return ViewsFor(visible, caller, c.opts.Progress)
 }
 
 // SetWorkspace applies a changed record: a folder that moved, or trust being granted.
@@ -845,4 +848,14 @@ func (c *Control) persist() {
 		return
 	}
 	_ = os.Rename(temp, c.opts.SettingsPath)
+}
+
+// ViewsFor is Views with the permission table applied per row: the rail can offer a support
+// bundle only on the rooms this caller owns (or every room, for the install's admin).
+func ViewsFor(list []Workspace, caller Caller, progress func(string) Progress) []WorkspaceState {
+	views := Views(list, progress)
+	for index := range views {
+		views[index].CanAdminister = list[index].Allows(caller) && (caller.Admin || list[index].May(caller, ActionAdminister))
+	}
+	return views
 }

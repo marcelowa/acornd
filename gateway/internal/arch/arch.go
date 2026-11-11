@@ -28,18 +28,23 @@ var Allowed = map[string][]string{
 		"internal/sandbox/microsandbox",
 		"internal/sandbox/youki",
 		"internal/supervise",
+		"internal/support",
 		"internal/update",
 		"internal/vault",
 		"web",
 	},
 
 	// The domain: it provisions the resources it owns and supervises the worker that uses them.
+	// It also asks support for a workspace diagnosis and records the running build in it; both
+	// are leaves, and neither knows how a workspace is opened.
 	"internal/control": {
 		"internal/protocol",
 		"internal/sandbox",
 		"internal/sandbox/bwrap",
 		"internal/sandbox/microsandbox",
 		"internal/secretsproxy",
+		"internal/support",
+		"internal/update",
 		"internal/vault",
 		"internal/workerpool",
 	},
@@ -67,6 +72,7 @@ var Allowed = map[string][]string{
 		"internal/people",
 		"internal/protocol",
 		"internal/ready",
+		"internal/support",
 		"internal/update",
 		"internal/vault",
 	},
@@ -100,8 +106,11 @@ var Allowed = map[string][]string{
 	"internal/sandbox/sandboxtest":  {},
 	"internal/sandbox/youki":        {"internal/netns", "internal/sandbox", "internal/sandbox/sandboxtest", "internal/supervise"},
 	"internal/supervise":            {},
-	"internal/update":               {},
-	"internal/vault":                {},
-	"internal/workerpool":           {"internal/protocol"},
-	"web":                           {},
+	// The support bundle collector: records, cgroups, and redaction. It knows the sandbox naming
+	// scheme, and nothing about control.
+	"internal/support":    {"internal/sandbox"},
+	"internal/update":     {},
+	"internal/vault":      {},
+	"internal/workerpool": {"internal/protocol"},
+	"web":                 {},
 }

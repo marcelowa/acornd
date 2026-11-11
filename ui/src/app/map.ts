@@ -293,6 +293,7 @@ export function toWorkspaces(
 			status: workspace.status,
 			stage: workspace.stage,
 			error: workspace.error,
+			canAdminister: workspace.can_administer === true,
 		};
 	});
 }
