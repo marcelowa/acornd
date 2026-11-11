@@ -13,7 +13,7 @@
  *   whose answer arrives later as a new message. The durable machinery for that is in
  *   delegation-tasks.ts; this file is the model-facing surface and the policy.
  */
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { bool, obj, oneOf, opt, str } from "@earendil-works/pi-schema";
 import {

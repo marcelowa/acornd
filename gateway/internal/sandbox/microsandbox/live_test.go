@@ -174,11 +174,11 @@ func TestAMicroVMStartsInsideABwrapSandbox(t *testing.T) {
 	const nestedEngine = "/engine"
 	args := []string{
 		// The sandbox's own root, not the host's. Inside a user namespace that maps one
-		// account, the host's / belongs to nobody this process can name, and 0.7.13 refuses an
-		// engine store when an ancestor could be substituted by another account — the refusal
-		// reads "catalog ancestor / permits path substitution". A root bubblewrap makes is the
-		// fix, and it is also the shape the product's own bwrap engine has: a rootfs, with what
-		// the engine needs from the host bound into it read-only.
+		// account, the host's / belongs to nobody this process can name, and the pinned engine
+		// refuses an engine store when an ancestor could be substituted by another account —
+		// the refusal reads "catalog ancestor / permits path substitution". A root bubblewrap
+		// makes is the fix, and it is also the shape the product's own bwrap engine has: a
+		// rootfs, with what the engine needs from the host bound into it read-only.
 		"--tmpfs", "/",
 		"--ro-bind", "/usr", "/usr",
 		"--ro-bind", "/bin", "/bin",

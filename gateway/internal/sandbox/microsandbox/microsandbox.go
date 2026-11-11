@@ -45,7 +45,7 @@ type Microsandbox struct {
 // --nested-virt`, off unless asked), and every release since has it. The SDK the worker uses
 // ships the same version, and the two share their on-disk state, so the pin stays one value
 // in two languages: the CLI, the SDK, and the store move in one commit.
-const Version = "0.7.13"
+const Version = "0.7.14"
 
 // EngineVersion is the release this build runs. The store the engine keeps carries its own
 // schema and migrates itself forward, so anything that shares that store — an image cache, a
@@ -396,11 +396,11 @@ func (m *Microsandbox) Create(ctx context.Context, policy sandbox.Policy, policy
 
 // nestingArgs is what the sandbox may do with virtualization, said out loud for every case.
 //
-// The switch is a flag, not a policy key: the engine reads sandbox.yaml strictly and 0.7.13
-// has no nesting field in it, so the generated file cannot carry this. Both directions are
-// stated instead — `--nested-virt` to turn it on, `--nested-virt=false` to turn it off — so
-// that nothing in the engine's own configuration can overrule a workspace, the way
-// `network: none` is written out rather than left to a default.
+// The switch is a flag, not a policy key: the engine reads sandbox.yaml strictly and the
+// pinned release has no nesting field in it, so the generated file cannot carry this. Both
+// directions are stated instead — `--nested-virt` to turn it on, `--nested-virt=false` to
+// turn it off — so that nothing in the engine's own configuration can overrule a workspace,
+// the way `network: none` is written out rather than left to a default.
 //
 // On is the workspace's default, and it is granted only where it can be honored: an
 // explicitly enabled setting fails the boot on a host that cannot nest (0.7.9 and later), and

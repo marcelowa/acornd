@@ -31,7 +31,7 @@ export function engineName(): string {
  * out from under the pinned binary (2026-10-11: a 0.7.7 SDK rowed the catalog
  * forward and 0.7.6 could no longer read it).
  */
-export const ENGINE_VERSION = "0.7.13";
+export const ENGINE_VERSION = "0.7.14";
 
 /**
  * Refuse a loaded SDK that is not the pinned engine: its first write would migrate

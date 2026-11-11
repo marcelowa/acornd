@@ -383,7 +383,7 @@ func TestCreateRefusesNestingExplicitlyWhenDisabled(t *testing.T) {
 func TestCreateSaysNothingAboutNestingToAnEngineThatCannot(t *testing.T) {
 	// An engine that predates the flag has nothing to hear, so neither direction is stated:
 	// the flag is not in the pinned release's help, and passing one would fail the create
-	// rather than nest or refuse. The pinned 0.7.13 advertises it, so this is what keeps a
+	// rather than nest or refuse. The pinned release advertises it, so this is what keeps a
 	// stale install from breaking a workspace.
 	for _, refuse := range []bool{false, true} {
 		driver, runner := nestingDriver(t, "Options:\n      --cpus", sandbox.NestingSupport{Available: true})

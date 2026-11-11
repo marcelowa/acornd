@@ -9,7 +9,7 @@
  * here holds onto.
  */
 import { describe, expect, test } from "bun:test";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Harness, Storage } from "@earendil-works/pi-durable";
 import { mayAddress, type StateDeps } from "../src/delegation.ts";
 

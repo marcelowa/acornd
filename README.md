@@ -444,7 +444,7 @@ remote access is configured, it listens on 127.0.0.1 only. A flag wins over `ACO
 
 ### Requirements
 
-- Go **1.27.3**. The patch matters: `gateway/go.mod` pins it, and CI reads the version from there.
+- Go **1.27.4**. The patch matters: `gateway/go.mod` pins it, and CI reads the version from there.
 - bun **1.4.4**. The runtime pins it in `gateway/internal/update/worker.go`.
 - make and gcc.
 - `unzip` for the bun installer, and `procps` for `pgrep`, which two end-to-end tests use.
