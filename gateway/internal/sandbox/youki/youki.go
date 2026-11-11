@@ -1,6 +1,7 @@
 package youki
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -547,6 +548,7 @@ func (y *Youki) Start(ctx context.Context, name string, _ []sandbox.Secret) erro
 		return err
 	}
 	if y.adopt(ctx, name, config) {
+		y.attachBudget(ctx, name, config)
 		return nil
 	}
 	return y.boot(ctx, name, config)
@@ -591,16 +593,20 @@ func (y *Youki) boot(ctx context.Context, name string, config youkiConfig) error
 	if y.runner != nil {
 		return nil
 	}
-	if err := y.waitForSupervisor(ctx, name, config); err != nil {
+	namespacePID, err := y.waitForSupervisor(ctx, name, config)
+	if err != nil {
 		return err
 	}
-	if config.Network.Mode == "pasta" {
-		// The runtime wrote memory.max and cpu.max at create; the swap limit is ours, and the
-		// worker has not attached yet, so the first command is already bounded.
-		if err := y.enforceBudget(config.CgroupPath); err != nil {
-			_ = y.Stop(context.Background(), name)
-			return fmt.Errorf("%w: %w", sandbox.ErrUnavailable, err)
-		}
+	pid := y.supervisorHostPID(name, config, namespacePID)
+	if pid > 0 {
+		_ = os.WriteFile(y.pidPath(name), []byte(strconv.Itoa(pid)), 0o600)
+	} else {
+		log.Printf("sandbox youki: %s: cannot find the supervisor's host pid", name)
+	}
+	if err := y.enforceBudget(config, pid); err != nil {
+		// A running sandbox without a budget is worse than a broken one, but not as bad as a
+		// workspace with no execution environment. Keep it, and make the reason visible.
+		log.Printf("sandbox youki: %s: budget not applied: %v", name, err)
 	}
 	return nil
 }
@@ -614,27 +620,22 @@ func (y *Youki) launch(ctx context.Context, name string, config youkiConfig) err
 	if err := y.create(ctx, name); err != nil {
 		return err
 	}
-	if y.runner == nil {
-		if err := y.enforceBudget(config.CgroupPath); err != nil {
-			_ = y.Stop(context.Background(), name)
-			return fmt.Errorf("%w: %w", sandbox.ErrUnavailable, err)
-		}
-	}
 	return y.start(ctx, name)
 }
 
 // waitForSupervisor waits for the ready frame, and stops the sandbox it just started when the
 // supervisor never answers.
-func (y *Youki) waitForSupervisor(ctx context.Context, name string, config youkiConfig) error {
-	if err := supervise.WaitForReady(ctx, config.Socket, 15*time.Second); err != nil {
+func (y *Youki) waitForSupervisor(ctx context.Context, name string, config youkiConfig) (int, error) {
+	pid, err := supervise.WaitForReadyPID(ctx, config.Socket, 15*time.Second)
+	if err != nil {
 		detail := y.logTail(y.logPath(name))
 		_ = y.Stop(context.Background(), name)
 		if detail != "" {
-			return fmt.Errorf("%w: %w: %s", sandbox.ErrUnavailable, err, detail)
+			return 0, fmt.Errorf("%w: %w: %s", sandbox.ErrUnavailable, err, detail)
 		}
-		return fmt.Errorf("%w: %w", sandbox.ErrUnavailable, err)
+		return 0, fmt.Errorf("%w: %w", sandbox.ErrUnavailable, err)
 	}
-	return nil
+	return pid, nil
 }
 
 // Stop ends the sandbox and keeps every file: the runtime's delete kills the processes, and
@@ -735,35 +736,91 @@ func (y *Youki) create(ctx context.Context, name string) error {
 	return nil
 }
 
-// enforceBudget writes the one limit the runtime did not: youki 0.7.0 left memory.swap.max at
-// "max" in the measured run, and with swap available a 400 MB allocation in a 256 M workspace
-// survived by swapping. memory.max and cpu.max are the runtime's; this is the belt that makes
-// memory.max bind. It runs after create and before start, so the first command is already
-// bounded.
-func (y *Youki) enforceBudget(cgroupPath string) error {
-	dir := cgroupDir(cgroupPath)
+// attachBudget brings an adopted sandbox's process into the cgroup its record names. A
+// gateway restart finds the runtime running; the supervisor is already answering, so there is
+// no start to hang the placement on.
+func (y *Youki) attachBudget(ctx context.Context, name string, config youkiConfig) {
+	if y.runner != nil {
+		return
+	}
+	namespacePID, err := supervise.WaitForReadyPID(ctx, config.Socket, 2*time.Second)
+	if err != nil || namespacePID <= 0 {
+		log.Printf("sandbox youki: %s: cannot find the supervisor for its budget: %v", name, err)
+		return
+	}
+	pid := y.supervisorHostPID(name, config, namespacePID)
+	if pid <= 0 {
+		log.Printf("sandbox youki: %s: cannot find the supervisor's host pid", name)
+		return
+	}
+	_ = os.WriteFile(y.pidPath(name), []byte(strconv.Itoa(pid)), 0o600)
+	if err := y.enforceBudget(config, pid); err != nil {
+		log.Printf("sandbox youki: %s: budget not applied: %v", name, err)
+	}
+}
+
+// enforceBudget moves the sandbox's supervisor into the cgroup the record names and sets the
+// one limit the runtime did not. Youki creates and configures the leaf, but rootless it writes
+// the container's namespace pid to its pid file and does not place the process; the leaf can
+// exist, with memory.max, and have no processes in it. The memory limit is the budget that has
+// to bind; a sandbox that cannot get one is kept and reported, not stopped.
+func (y *Youki) enforceBudget(config youkiConfig, supervisorPID int) error {
+	dir := cgroupDir(config.CgroupPath)
+	// The leaf may predate the parent's distribution of the memory controller. Ask for it
+	// again, then make the leaf if the runtime did not.
+	_ = prepareCgroup(path.Dir(config.CgroupPath))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("the sandbox's cgroup %s: %w", dir, err)
+	}
+	if supervisorPID > 0 {
+		procs := filepath.Join(dir, "cgroup.procs")
+		if err := writeCgroupPID(procs, supervisorPID); err != nil {
+			return fmt.Errorf("moving supervisor %d into %s: %w", supervisorPID, dir, err)
+		}
+		raw, err := os.ReadFile(procs)
+		if err != nil || !containsPID(raw, supervisorPID) {
+			return fmt.Errorf("supervisor %d is not in %s after the move", supervisorPID, dir)
+		}
+	}
+	if err := writeMemoryMax(dir, config.Memory); err != nil {
+		return err
+	}
+	if err := writeCPUMax(dir, config.CPUs); err != nil {
+		return err
+	}
 	swap := filepath.Join(dir, "memory.swap.max")
-	if err := os.WriteFile(swap, []byte("0"), 0o644); err == nil {
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("the sandbox's swap limit at %s: %w", swap, err)
+	if err := os.WriteFile(swap, []byte("0"), 0o644); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("the sandbox's swap limit at %s: %w", swap, err)
+		}
+		log.Printf("sandbox youki: %s has no memory.swap.max; the memory limit applies without the swap belt", dir)
 	}
-	// The leaf may predate the parent's distribution of the memory controller. Ask for it again;
-	// the kernel materialises the controller files in an existing child when the parent starts
-	// distributing it.
-	_ = prepareCgroup(path.Dir(cgroupPath))
-	if err := os.WriteFile(swap, []byte("0"), 0o644); err == nil {
-		return nil
-	}
-	// A cgroup with memory.max but no memory.swap.max is a host without swap accounting, or a
-	// leaf the kernel will not give the belt. The memory limit is the budget that has to bind;
-	// tearing down a running sandbox over the belt leaves a healthy supervisor unreachable.
-	// Refuse only when the memory controller itself is absent, because then nothing binds.
-	if _, err := os.Stat(filepath.Join(dir, "memory.max")); err != nil {
-		return fmt.Errorf("the sandbox's cgroup %s has no memory.max, so its budget cannot bind: %w", dir, err)
-	}
-	log.Printf("sandbox youki: %s has no memory.swap.max; the memory limit applies without the swap belt", dir)
 	return nil
+}
+
+// writeCgroupPID writes one pid without O_TRUNC: cgroup.procs is a command file, not a file
+// whose contents are replaced.
+func writeCgroupPID(path string, pid int) error {
+	file, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	_, writeErr := file.WriteString(strconv.Itoa(pid) + "\n")
+	closeErr := file.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	return closeErr
+}
+
+func containsPID(raw []byte, pid int) bool {
+	want := strconv.Itoa(pid)
+	for _, field := range strings.Fields(string(raw)) {
+		if field == want {
+			return true
+		}
+	}
+	return false
 }
 
 // pastaArgv is the boot command for a workspace with egress: pasta makes the network namespace
@@ -1236,4 +1293,162 @@ func (y *Youki) workspaceRoot(policy sandbox.Policy, name string) (string, sandb
 		return "", sandbox.Root{}, err
 	}
 	return rootfs, root, nil
+}
+
+// supervisorHostPID finds the host pid of the process inside the sandbox. The runtime's own
+// pid file is the container's namespace pid, which no host cgroup accepts. The supervisor is a
+// descendant of pasta, or — when there is no pasta — a host process whose NSpid ends in the
+// namespace pid the supervisor reported.
+func (y *Youki) supervisorHostPID(name string, config youkiConfig, namespacePID int) int {
+	if pid := y.supervisorFromRuntime(name); pid > 0 {
+		return pid
+	}
+	if namespacePID <= 0 {
+		return 0
+	}
+	return hostPIDForNamespace(namespacePID, config.Socket)
+}
+
+func (y *Youki) supervisorFromRuntime(name string) int {
+	raw, err := os.ReadFile(y.runtimePidPath(name))
+	if err != nil {
+		return 0
+	}
+	root, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || root <= 0 || !sandbox.Alive(root) {
+		return 0
+	}
+	return findSupervisor(root, map[int]bool{}, 0)
+}
+
+func findSupervisor(pid int, seen map[int]bool, depth int) int {
+	if depth >= 6 || seen[pid] {
+		return 0
+	}
+	seen[pid] = true
+	children, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "task", strconv.Itoa(pid), "children"))
+	if err != nil {
+		return 0
+	}
+	for _, field := range strings.Fields(string(children)) {
+		child, err := strconv.Atoi(field)
+		if err != nil || child <= 0 {
+			continue
+		}
+		cmdline, _ := os.ReadFile(filepath.Join("/proc", strconv.Itoa(child), "cmdline"))
+		if bytes.Contains(cmdline, []byte("sandbox-supervisor")) {
+			return child
+		}
+		if found := findSupervisor(child, seen, depth+1); found > 0 {
+			return found
+		}
+	}
+	return 0
+}
+
+// hostPIDForNamespace scans the host's proc for the process whose NSpid ends in the
+// container's pid. The supervisor is the one whose command line says so; the socket filter
+// keeps two sandboxes with the same namespace pid apart.
+func hostPIDForNamespace(namespacePID int, socket string) int {
+	want := strconv.Itoa(namespacePID)
+	socketLink := socketInode(socket)
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return 0
+	}
+	fallback := 0
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 0 || !isSupervisorPID(pid, want) {
+			continue
+		}
+		if socketLink != "" && hasSocket(pid, socketLink) {
+			return pid
+		}
+		if fallback == 0 {
+			fallback = pid
+		}
+	}
+	return fallback
+}
+
+func isSupervisorPID(pid int, want string) bool {
+	status, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "status"))
+	if err != nil || !nsPIDEndsIn(status, want) {
+		return false
+	}
+	cmdline, _ := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "cmdline"))
+	return bytes.Contains(cmdline, []byte("sandbox-supervisor"))
+}
+
+func nsPIDEndsIn(status []byte, want string) bool {
+	for _, line := range strings.Split(string(status), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "NSpid:" {
+			return fields[len(fields)-1] == want
+		}
+	}
+	return false
+}
+
+func socketInode(path string) string {
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return ""
+	}
+	return "socket:[" + strconv.FormatUint(stat.Ino, 10) + "]"
+}
+
+func hasSocket(pid int, link string) bool {
+	entries, err := os.ReadDir(filepath.Join("/proc", strconv.Itoa(pid), "fd"))
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		target, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), "fd", entry.Name()))
+		if err == nil && target == link {
+			return true
+		}
+	}
+	return false
+}
+
+// writeMemoryMax writes the policy's memory limit even if the runtime did not. Youki writes it
+// on create; a leaf created by an idle stop or an adopted container can be missing it.
+func writeMemoryMax(dir, value string) error {
+	limit, err := parseMemoryBytes(value)
+	if err != nil {
+		return fmt.Errorf("the sandbox's memory limit %q: %w", value, err)
+	}
+	path := filepath.Join(dir, "memory.max")
+	current, _ := os.ReadFile(path)
+	want := strconv.FormatInt(limit, 10)
+	if strings.TrimSpace(string(current)) == want {
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(want+"\n"), 0o644); err != nil {
+		return fmt.Errorf("the sandbox's memory limit at %s: %w", path, err)
+	}
+	return nil
+}
+
+// writeCPUMax writes the policy's CPU quota, in the cgroup's quota/period form.
+func writeCPUMax(dir string, cpus int) error {
+	if cpus <= 0 {
+		return nil
+	}
+	path := filepath.Join(dir, "cpu.max")
+	current, _ := os.ReadFile(path)
+	want := fmt.Sprintf("%d %d", cpus*100000, 100000)
+	if strings.TrimSpace(string(current)) == want {
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(want+"\n"), 0o644); err != nil {
+		return fmt.Errorf("the sandbox's cpu limit at %s: %w", path, err)
+	}
+	return nil
 }

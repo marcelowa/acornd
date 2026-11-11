@@ -70,6 +70,10 @@ func TestYoukiLifecycleAgainstTheRealRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the record: %v", err)
 	}
+	procs, err := os.ReadFile(filepath.Join(cgroupDir(config.CgroupPath), "cgroup.procs"))
+	if err != nil || strings.TrimSpace(string(procs)) == "" {
+		t.Fatalf("the supervisor is not in its cgroup %s: %q, %v", config.CgroupPath, procs, err)
+	}
 	if got, code := runInSupervisor(t, config.Socket, "printf youki-socket-ok"); code != 0 || got != "youki-socket-ok" {
 		t.Fatalf("the supervisor should run a command in the sandbox, got %q (exit %d)", got, code)
 	}
