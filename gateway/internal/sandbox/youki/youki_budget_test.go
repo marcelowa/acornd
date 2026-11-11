@@ -85,3 +85,83 @@ func oomKills(events []byte) int {
 	}
 	return 0
 }
+
+// A cgroup with memory.max but no memory.swap.max is a host that does not account swap, or a
+// leaf the kernel will not give the belt. The budget that has to bind is memory.max; a running
+// sandbox must not be torn down because the belt is absent.
+func TestYoukiKeepsASandboxWithoutTheSwapBelt(t *testing.T) {
+	oldMount := cgroupMount
+	cgroupMount = t.TempDir()
+	t.Cleanup(func() { cgroupMount = oldMount })
+	leaf := filepath.Join(cgroupMount, "acornd.slice", "sandbox")
+	if err := os.MkdirAll(leaf, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(leaf, "memory.max"), []byte("268435456"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A dangling link makes the write fail with ENOENT while memory.max is still there, which
+	// is the shape a cgroup without swap accounting has.
+	if err := os.Symlink(filepath.Join(leaf, "missing-dir", "missing"), filepath.Join(leaf, "memory.swap.max")); err != nil {
+		t.Fatal(err)
+	}
+	driver := NewYouki(t.TempDir())
+	if err := driver.enforceBudget("/acornd.slice/sandbox"); err != nil {
+		t.Fatalf("a missing swap belt must not fail the sandbox: %v", err)
+	}
+}
+
+// Without memory.max nothing bounds the sandbox, so the refusal has to stay.
+func TestYoukiRefusesABudgetWithNoMemoryController(t *testing.T) {
+	oldMount := cgroupMount
+	cgroupMount = t.TempDir()
+	t.Cleanup(func() { cgroupMount = oldMount })
+	leaf := filepath.Join(cgroupMount, "acornd.slice", "sandbox")
+	if err := os.MkdirAll(leaf, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(leaf, "missing-dir", "missing"), filepath.Join(leaf, "memory.swap.max")); err != nil {
+		t.Fatal(err)
+	}
+	driver := NewYouki(t.TempDir())
+	err := driver.enforceBudget("/acornd.slice/sandbox")
+	if err == nil || !strings.Contains(err.Error(), "memory.max") {
+		t.Fatalf("no memory controller must be an error that names it: %v", err)
+	}
+}
+
+// The parent's controller distribution can be lost with an idle stop. Preparing the record's
+// own parent again before a start is what lets the runtime create a leaf with the controllers.
+func TestYoukiRepreparesTheBudgetParentBeforeAStart(t *testing.T) {
+	oldMount := cgroupMount
+	cgroupMount = t.TempDir()
+	t.Cleanup(func() { cgroupMount = oldMount })
+	base := filepath.Join(cgroupMount, "app.slice")
+	parent := filepath.Join(base, "acornd.slice")
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		filepath.Join(base, "cgroup.subtree_control"),
+		filepath.Join(parent, "cgroup.subtree_control"),
+	} {
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := prepareCgroup("/app.slice/acornd.slice"); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(base, "cgroup.subtree_control"),
+		filepath.Join(parent, "cgroup.subtree_control"),
+	} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), "memory") || !strings.Contains(string(raw), "cpu") {
+			t.Errorf("%s = %q, want memory and cpu", path, raw)
+		}
+	}
+}
