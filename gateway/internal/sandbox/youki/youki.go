@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -775,7 +776,7 @@ func (y *Youki) enforceBudget(config youkiConfig, supervisorPID int) error {
 	if supervisorPID > 0 {
 		procs := filepath.Join(dir, "cgroup.procs")
 		if err := writeCgroupPID(procs, supervisorPID); err != nil {
-			return fmt.Errorf("moving supervisor %d into %s: %w", supervisorPID, dir, err)
+			return fmt.Errorf("moving supervisor %d into %s: %w%s", supervisorPID, dir, err, delegationHint(err))
 		}
 		raw, err := os.ReadFile(procs)
 		if err != nil || !containsPID(raw, supervisorPID) {
@@ -796,6 +797,20 @@ func (y *Youki) enforceBudget(config youkiConfig, supervisorPID int) error {
 		log.Printf("sandbox youki: %s has no memory.swap.max; the memory limit applies without the swap belt", dir)
 	}
 	return nil
+}
+
+// delegationHint is what a refused move means when the kernel says EACCES. cgroup v2's
+// "Delegation Containment" lets a process with a non-root euid move another only if the mover
+// may write the cgroup.procs of the source's and destination's *common ancestor*; a gateway
+// started from a login session is in a session scope systemd does not delegate, so the common
+// ancestor with the user manager's app.slice is a slice the user cannot write and every
+// candidate is refused. Where acornd starts is the fix, so the error says so instead of
+// leaving "permission denied" to be read as a bug in the leaf.
+func delegationHint(err error) string {
+	if !errors.Is(err, fs.ErrPermission) {
+		return ""
+	}
+	return fmt.Sprintf("; the kernel moves a process only inside a delegated subtree, and the common ancestor of this gateway's cgroup (%s) and the sandbox's is not delegated to this user: start acornd in a delegated cgroup (a user unit, or systemd-run --user --scope) and the budget can bind", currentCgroupPath())
 }
 
 // writeCgroupPID writes one pid without O_TRUNC: cgroup.procs is a command file, not a file

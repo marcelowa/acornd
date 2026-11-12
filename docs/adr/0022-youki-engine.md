@@ -271,3 +271,44 @@ the sandbox, because the forward is baked into its boot.
   Debian 13 with no gate. It would have to be detected and refused with a sentence, like
   every other missing capability.
 - **macOS.** Refused by name: the engine is Linux-only, as the seam already allows.
+
+## Amendment — 2026-11-11: the gateway's own cgroup decides whether a budget can bind
+
+The amendment above says the parent is chosen and measured it on a gateway started inside
+`systemd-run --user --scope`. A desktop install starts acornd from the login session instead,
+and there the budget does not bind. The bundle from v0.34.3 says it plainly: the leaf
+`…/user@1000.service/app.slice/acornd.slice/acornd-acornd-youki-e1daa66a` carries
+`memory.max 2147483648` and `cpu.max 200000 100000` — the policy, written by the runtime — and
+`cgroup.procs` is **empty**; the supervisor, `youki run`, `overlay-run` and pasta are all in
+`/user.slice/user-1000.slice/session-c1.scope`. The move is refused:
+
+```
+sandbox youki: …: budget not applied: moving supervisor 2027954 into
+/sys/fs/cgroup/…/app.slice/acornd.slice/acornd-acornd-youki-e1daa66a/cgroup.procs:
+permission denied
+```
+
+`app.slice` is writable — the probe creates `acornd.slice` there and enables its controllers —
+which is why the old probe called the machine usable. The kernel asks a different question.
+cgroup v2's [delegation containment](https://docs.kernel.org/admin-guide/cgroup-v2.html#delegation-containment)
+lets a process with a non-root euid move another only if it may write the `cgroup.procs` of
+**the common ancestor of the source and the destination**. The source is a session scope
+systemd does not delegate and the destination is under `user@1000.service`; their common
+ancestor is `user-1000.slice`, which the system manager owns. No candidate parent fixes that,
+because the refusal is about where the mover already is.
+
+So a youki workspace on a session-started gateway runs with no budget: the sandbox is kept (a
+workspace with no execution environment is the worse failure), and the reason is logged. The
+capability the probe reports is therefore "a cgroup can be made here", which is not the same
+as "a process can be placed here"; the refusal now carries that second fact and the rule
+behind it, and the bundle records the owner and group of every cgroup file and ancestor,
+which is the fact a refused move is read for.
+
+What would make it bind, in order of cost:
+
+1. Start acornd in a delegated cgroup — a user unit, or `systemd-run --user --scope`. Measured,
+   documented above, and the only path anyone has run the budget on.
+2. Start the sandbox's own process tree through the user manager (`systemd-run --user --scope
+   -p MemoryMax=… -p CPUQuota=…` around the runtime start), so the placement is systemd's and
+   there is no move to refuse. This needs a machine with systemd to measure; CI has none, so it
+   is designed, not built.

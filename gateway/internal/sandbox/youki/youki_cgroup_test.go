@@ -251,3 +251,22 @@ func TestYoukiProbeUsesTheUserManagerAppSliceForALoginSession(t *testing.T) {
 		t.Fatalf("parent = %q, want %q", y.cgroupParent, want)
 	}
 }
+
+// The move the kernel refused on a login session is not a bug in the leaf: the common ancestor
+// of the session scope and the sandbox's app.slice is a slice systemd did not delegate, so no
+// budget can bind until acornd itself starts inside one. The error has to say both.
+func TestYoukiNamesTheDelegationRuleWhenTheMoveIsRefused(t *testing.T) {
+	oldCurrent := currentCgroupPath
+	currentCgroupPath = func() string { return "/user.slice/user-1000.slice/session-c1.scope" }
+	t.Cleanup(func() { currentCgroupPath = oldCurrent })
+
+	hint := delegationHint(os.ErrPermission)
+	for _, want := range []string{"delegated subtree", "session-c1.scope", "systemd-run --user --scope"} {
+		if !strings.Contains(hint, want) {
+			t.Errorf("a refused move should name %q, got %q", want, hint)
+		}
+	}
+	if hint := delegationHint(errors.New("no such file or directory")); hint != "" {
+		t.Errorf("a move refused for another reason gets no delegation hint, got %q", hint)
+	}
+}
