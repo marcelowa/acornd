@@ -84,9 +84,7 @@ func TestTwoPullsOfOneImageDoNotInterleave(t *testing.T) {
 	var wg sync.WaitGroup
 	errors := make(chan error, 2)
 	for range 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			base, err := ImageBase(store, image, pull)
 			if err == nil {
 				entries, readErr := os.ReadDir(filepath.Join(base, "usr", "lib"))
@@ -97,7 +95,7 @@ func TestTwoPullsOfOneImageDoNotInterleave(t *testing.T) {
 				}
 			}
 			errors <- err
-		}()
+		})
 	}
 	wg.Wait()
 	close(errors)
