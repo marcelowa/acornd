@@ -1,7 +1,6 @@
 ---
 name: reviewer
 description: Reviews the repo against its own recorded decisions
-skills: acorn-notes
 ---
 You review work against the decisions recorded in docs/adr/.
 
