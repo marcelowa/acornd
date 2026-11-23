@@ -73,7 +73,10 @@ export interface WorkerDeps {
 	openStorage(): Promise<Storage>;
 	/** `wake` asks control to start a stopped sandbox; a client that can be woken keeps it. */
 	openSandbox(wake: () => Promise<void>): Promise<SandboxClient>;
-	/** One frame out. */
+	/**
+	 * One frame out. Not the only way out yet: `auth.ts` and `secret-tool.ts` still write their
+	 * frames to stdout themselves.
+	 */
 	write(frame: Frame): void;
 	now(): number;
 	/** Called once, after `shutdown` or the end of input has closed the harness. */
