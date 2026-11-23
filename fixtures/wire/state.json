@@ -1,0 +1,311 @@
+{
+	"workspace": {
+		"name": "home",
+		"path": "/home/ada/work",
+		"title": "Home",
+		"personal": true,
+		"kind": "personal",
+		"members": [
+			{
+				"email": "ada@example.com",
+				"role": "owner"
+			}
+		],
+		"image": "alpine",
+		"network": "open",
+		"private": true,
+		"keep_alive": true,
+		"engine": "bwrap",
+		"disable_vm_nesting": true,
+		"disable_devices": true,
+		"running": true,
+		"can_administer": true,
+		"status": "ready",
+		"stage": "attaching",
+		"error": "none yet"
+	},
+	"workspaces": [
+		{
+			"name": "home",
+			"path": "/home/ada/work",
+			"title": "Home",
+			"personal": true,
+			"kind": "personal",
+			"members": [
+				{
+					"email": "ada@example.com",
+					"role": "owner"
+				}
+			],
+			"image": "alpine",
+			"network": "open",
+			"private": true,
+			"keep_alive": true,
+			"engine": "bwrap",
+			"disable_vm_nesting": true,
+			"disable_devices": true,
+			"running": true,
+			"can_administer": true,
+			"status": "ready",
+			"stage": "attaching",
+			"error": "none yet"
+		}
+	],
+	"workspacesDir": "/home/ada/work",
+	"engines": [
+		{
+			"name": "bwrap",
+			"default": true,
+			"isolated": true,
+			"installed": true,
+			"version": "0.11",
+			"substitutes": true,
+			"problem": "none"
+		}
+	],
+	"harness": "pi",
+	"capabilities": {
+		"steer": true,
+		"subagents": true,
+		"sandbox": "bwrap"
+	},
+	"conversation": {
+		"id": "7",
+		"title": "First",
+		"root": true,
+		"hidden": true,
+		"running": true,
+		"lastEntryId": "12",
+		"updatedAt": 1700000000000,
+		"tokens": 10,
+		"cost": 0.5,
+		"parent": "1",
+		"children": [
+			"8"
+		],
+		"model": "anthropic/claude-sonnet-5-5",
+		"thinking": "high",
+		"createdBy": "1"
+	},
+	"conversations": [
+		{
+			"id": "7",
+			"title": "First",
+			"root": true,
+			"hidden": true,
+			"running": true,
+			"lastEntryId": "12",
+			"updatedAt": 1700000000000,
+			"tokens": 10,
+			"cost": 0.5,
+			"parent": "1",
+			"children": [
+				"8"
+			],
+			"model": "anthropic/claude-sonnet-5-5",
+			"thinking": "high",
+			"createdBy": "1"
+		}
+	],
+	"agent": {
+		"provider": "anthropic",
+		"modelId": "claude-sonnet-5-5",
+		"thinkingLevel": "high",
+		"thinkingRequested": "xhigh",
+		"instructions": "Be brief.",
+		"definition": "general"
+	},
+	"resolved": {
+		"name": "general",
+		"description": "d",
+		"source": "built-in",
+		"model": "m",
+		"thinking": "high",
+		"instructions": "i",
+		"skills": [
+			"s"
+		],
+		"allowTools": [
+			"read"
+		],
+		"denyTools": [
+			"bash"
+		],
+		"guards": [
+			{
+				"tool": "bash",
+				"arg": "command",
+				"pattern": "rm",
+				"outside": true,
+				"reason": "no"
+			}
+		],
+		"layers": [
+			{
+				"layer": "global",
+				"path": "/etc/acornd/defaults.json",
+				"contributes": {
+					"model": "x"
+				}
+			}
+		]
+	},
+	"defaultModel": {
+		"provider": "anthropic",
+		"modelId": "claude-sonnet-5-5",
+		"thinkingLevel": "high",
+		"thinkingRequested": "xhigh",
+		"instructions": "Be brief.",
+		"definition": "general"
+	},
+	"defaultThinking": "high",
+	"defaultAgent": "general",
+	"defaultsOrigin": {
+		"model": "install",
+		"thinking": "workspace",
+		"agent": "install"
+	},
+	"workspaceDefaults": {
+		"model": {
+			"provider": "anthropic",
+			"modelId": "claude-sonnet-5-5",
+			"thinkingLevel": "high",
+			"thinkingRequested": "xhigh",
+			"instructions": "Be brief.",
+			"definition": "general"
+		},
+		"thinking": "high",
+		"agent": "general"
+	},
+	"installDefaults": {
+		"model": {
+			"provider": "anthropic",
+			"modelId": "claude-sonnet-5-5",
+			"thinkingLevel": "high",
+			"thinkingRequested": "xhigh",
+			"instructions": "Be brief.",
+			"definition": "general"
+		},
+		"thinking": "high",
+		"agent": "general"
+	},
+	"inherited": {
+		"model": true,
+		"thinking": true,
+		"agent": true
+	},
+	"subagent": true,
+	"policy": {
+		"canAsk": true
+	},
+	"draft": {
+		"text": "half",
+		"attachments": [
+			{
+				"id": "a1",
+				"name": "n.txt",
+				"size": 3,
+				"mime": "text/plain"
+			}
+		],
+		"updatedAt": 1700000000001
+	},
+	"can": {
+		"makeRoom": true,
+		"create": true,
+		"fork": true,
+		"hide": true,
+		"rename": true,
+		"model": true,
+		"administer": true
+	},
+	"role": "owner",
+	"admin": true,
+	"workerUp": true,
+	"workerError": "died",
+	"sandbox": {
+		"engine": "bwrap",
+		"version": "0.11",
+		"status": "ready",
+		"tools": true,
+		"isolated": true,
+		"problem": "none",
+		"nested": true,
+		"nestedReason": "ok",
+		"secrets": [
+			{
+				"name": "TOKEN",
+				"description": "d",
+				"scope": "workspace",
+				"hosts": [
+					"github.com"
+				],
+				"delivery": "substitute",
+				"status": "ok",
+				"placeholder": "ph"
+			}
+		],
+		"secretsRestart": true,
+		"secretsProblem": "locked"
+	},
+	"update": {
+		"current": "1.0.0",
+		"latest": "1.1.0",
+		"available": true,
+		"failed": "x",
+		"restartRequired": true
+	},
+	"agents": [
+		{
+			"name": "general",
+			"description": "d",
+			"source": "built-in",
+			"layer": "global",
+			"resolved": {
+				"name": "general",
+				"skills": [],
+				"layers": []
+			}
+		}
+	],
+	"skills": [
+		{
+			"name": "s",
+			"description": "d"
+		}
+	],
+	"defaults": [
+		{
+			"layer": "global",
+			"path": "/etc/acornd/defaults.json",
+			"contributes": {
+				"model": "x"
+			}
+		}
+	],
+	"providers": [
+		{
+			"id": "anthropic",
+			"name": "Anthropic",
+			"authenticated": true,
+			"source": "env",
+			"authType": "api_key",
+			"authTypes": [
+				"api_key",
+				"oauth"
+			],
+			"models": [
+				{
+					"id": "m",
+					"name": "M",
+					"contextWindow": 200000,
+					"thinkingLevels": [
+						"off",
+						"high"
+					]
+				}
+			]
+		}
+	],
+	"seq": 9
+}

@@ -1,0 +1,158 @@
+{
+	"auth_auth_url": {
+		"type": "auth",
+		"authId": "l1",
+		"event": {
+			"kind": "auth_url",
+			"url": "https://example.com/login",
+			"instructions": "open it"
+		}
+	},
+	"auth_device_code": {
+		"type": "auth",
+		"authId": "l1",
+		"event": {
+			"kind": "device_code",
+			"userCode": "ABCD",
+			"verificationUri": "https://example.com/device",
+			"intervalSeconds": 5,
+			"expiresInSeconds": 900
+		}
+	},
+	"auth_done": {
+		"type": "auth",
+		"authId": "l1",
+		"event": {
+			"kind": "done",
+			"providerId": "anthropic"
+		}
+	},
+	"auth_error": {
+		"type": "auth",
+		"authId": "l1",
+		"event": {
+			"kind": "error",
+			"message": "denied"
+		}
+	},
+	"auth_info": {
+		"type": "auth",
+		"authId": "l1",
+		"event": {
+			"kind": "info",
+			"message": "hello",
+			"links": [
+				{
+					"url": "https://example.com",
+					"label": "docs"
+				}
+			]
+		}
+	},
+	"auth_progress": {
+		"type": "auth",
+		"authId": "l1",
+		"event": {
+			"kind": "progress",
+			"message": "waiting"
+		}
+	},
+	"auth_prompt": {
+		"type": "auth",
+		"authId": "l1",
+		"event": {
+			"kind": "prompt",
+			"promptId": "p1",
+			"promptType": "select",
+			"message": "Pick one",
+			"placeholder": "code",
+			"options": [
+				{
+					"id": "a",
+					"label": "A",
+					"description": "first"
+				}
+			]
+		}
+	},
+	"auth_prompt_cancelled": {
+		"type": "auth",
+		"authId": "l1",
+		"event": {
+			"kind": "prompt_cancelled",
+			"promptId": "p1"
+		}
+	},
+	"response_error": {
+		"type": "response",
+		"id": "c1",
+		"error": "no such conversation"
+	},
+	"response_ok": {
+		"type": "response",
+		"id": "c1",
+		"ok": true,
+		"data": {
+			"provider": "pi"
+		}
+	},
+	"sandbox_wake": {
+		"type": "sandbox_wake",
+		"id": "f3"
+	},
+	"secret_event": {
+		"type": "secret",
+		"conversationId": "7",
+		"secret": {
+			"kind": "request",
+			"requestId": "s1",
+			"conversationId": "7",
+			"name": "TOKEN",
+			"description": "for gh",
+			"hosts": [
+				"github.com"
+			],
+			"scope": "workspace",
+			"restartRequired": true,
+			"reason": "declined"
+		}
+	},
+	"secret_list": {
+		"type": "secret_list",
+		"id": "f2",
+		"conversationId": "7"
+	},
+	"secret_request": {
+		"type": "secret_request",
+		"id": "f1",
+		"conversationId": "7",
+		"name": "TOKEN",
+		"description": "for gh",
+		"hosts": [
+			"github.com"
+		]
+	},
+	"submission": {
+		"type": "submission",
+		"conversationId": "7",
+		"submissionId": "u1",
+		"status": "accepted"
+	},
+	"view": {
+		"type": "view",
+		"conversationId": "7",
+		"seq": 3,
+		"value": {
+			"entries": []
+		},
+		"acornd": {
+			"senders": {
+				"8": {
+					"conversationId": "8",
+					"name": "helper",
+					"kind": "ask"
+				}
+			}
+		}
+	}
+}
