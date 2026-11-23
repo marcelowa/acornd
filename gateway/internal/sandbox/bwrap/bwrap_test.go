@@ -992,21 +992,7 @@ func TestAPastaThatCannotMapItsUserNamespaceIsRefused(t *testing.T) {
 // AppArmor profile for pasta allows, so a probe that ran it said the network worked while every
 // sandbox with one refused to start the supervisor. This asks for the same binary a sandbox does.
 func TestThePastaProbeHandsPastaThisBinaryAndNotBinTrue(t *testing.T) {
-	dir := t.TempDir()
-	record := filepath.Join(dir, "argv")
-	script := filepath.Join(dir, "pasta")
-	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + record + "\nexit 0\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := sandbox.ProbePastaWithin(script, time.Second); err != nil {
-		t.Fatalf("the probe: %v", err)
-	}
-	raw, err := os.ReadFile(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	args := probePastaArgs(t)
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -1028,6 +1014,14 @@ func TestThePastaProbeHandsPastaThisBinaryAndNotBinTrue(t *testing.T) {
 // The probe makes the same interface a sandbox does. On a machine whose default interface is not
 // eth0, a probe without -I would pass while every sandbox failed to find eth0 (issue 87).
 func TestThePastaProbeNamesTheInterfaceEth0(t *testing.T) {
+	if joined := strings.Join(probePastaArgs(t), " "); !strings.Contains(joined, "-I eth0 ") {
+		t.Errorf("the probe should name pasta's interface eth0: %s", joined)
+	}
+}
+
+// probePastaArgs runs the probe against a pasta that only writes down what it was given.
+func probePastaArgs(t *testing.T) []string {
+	t.Helper()
 	dir := t.TempDir()
 	record := filepath.Join(dir, "argv")
 	script := filepath.Join(dir, "pasta")
@@ -1042,9 +1036,7 @@ func TestThePastaProbeNamesTheInterfaceEth0(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if joined := strings.ReplaceAll(strings.TrimSpace(string(raw)), "\n", " "); !strings.Contains(joined, "-I eth0 ") {
-		t.Errorf("the probe should name pasta's interface eth0: %s", joined)
-	}
+	return strings.Split(strings.TrimSpace(string(raw)), "\n")
 }
 
 // pasta refusing to start the program it was given is its own sentence, and exit 0 does not make
