@@ -59,32 +59,7 @@ func Save(dir string, setup Setup, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	payload = append(payload, '\n')
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	temp, err := os.CreateTemp(dir, ".remote-*")
-	if err != nil {
-		return err
-	}
-	path := temp.Name()
-	defer func() { _ = os.Remove(path) }()
-	if err := temp.Chmod(0o600); err != nil {
-		_ = temp.Close()
-		return err
-	}
-	if _, err := temp.Write(payload); err != nil {
-		_ = temp.Close()
-		return err
-	}
-	if err := temp.Sync(); err != nil {
-		_ = temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(path, layout.Remote(dir))
+	return layout.WriteFile(layout.Remote(dir), append(payload, '\n'))
 }
 
 // Env is the identity configuration a run needs once this setup is applied: the four values the assertion

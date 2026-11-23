@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 )
 
 func book(t *testing.T) *Book {
@@ -171,7 +173,7 @@ func TestTheBookIsWrittenWholeAndUnreadableByOthers(t *testing.T) {
 		t.Fatalf("readdir: %v", err)
 	}
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".people-") {
+		if strings.HasPrefix(entry.Name(), ".people.json-") {
 			t.Errorf("a temporary file was left behind: %s", entry.Name())
 		}
 	}
@@ -489,7 +491,7 @@ func TestAWedgedLockIsRefusedRatherThanWaitedOn(t *testing.T) {
 	if !strings.Contains(err.Error(), "another acornd process") {
 		t.Errorf("the refusal does not say what is happening: %v", err)
 	}
-	if waited := time.Since(start); waited > 3*lockBudget {
+	if waited := time.Since(start); waited > 3*layout.LockBudget {
 		t.Errorf("it waited %s, which is longer than the budget it was given", waited)
 	}
 }

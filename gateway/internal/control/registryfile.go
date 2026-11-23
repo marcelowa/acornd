@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"syscall"
-	"time"
 
 	"github.com/marcelowa/acornd/gateway/internal/layout"
 )
@@ -64,7 +62,10 @@ func (r Registry) Load() (RegistryFile, error) {
 // Change reads the registry under the lock, lets change edit it, and writes the result before the lock goes. An
 // error from change writes nothing.
 func (r Registry) Change(change func(*RegistryFile) error) error {
-	release, err := r.lock()
+	if err := os.MkdirAll(filepath.Dir(r.path), 0o700); err != nil {
+		return err
+	}
+	release, err := layout.Lock(r.path)
 	if err != nil {
 		return err
 	}
@@ -79,66 +80,14 @@ func (r Registry) Change(change func(*RegistryFile) error) error {
 	return r.save(registry)
 }
 
-// save writes the registry atomically and privately. The temp file's name is its own: with one shared name, two
-// writers would write into the same file and one would rename the other's half-written bytes into place.
+// save writes the registry atomically and privately.
 func (r Registry) save(registry RegistryFile) error {
 	sort.Slice(registry.Workspaces, func(i, j int) bool { return registry.Workspaces[i].Name < registry.Workspaces[j].Name })
 	payload, err := json.MarshalIndent(registry, "", "  ")
 	if err != nil {
 		return err
 	}
-	temp, err := os.CreateTemp(filepath.Dir(r.path), filepath.Base(r.path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	// After a rename this finds nothing; before one, it is the half-written file nobody else will clean up.
-	defer func() { _ = os.Remove(temp.Name()) }()
-	if _, err := temp.Write(append(payload, '\n')); err != nil {
-		_ = temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temp.Name(), r.path)
-}
-
-// The wait for another process is bounded, as the vault's and the book's are: flock is released when its holder
-// ends, so a wait longer than a write means the other process is wedged, and saying so beats hanging.
-const (
-	registryLockBudget = 2 * time.Second
-	registryLockRetry  = 25 * time.Millisecond
-)
-
-// lock takes the registry's lock file, beside it. The lock file holds nothing; it exists to be locked.
-func (r Registry) lock() (func(), error) {
-	if err := os.MkdirAll(filepath.Dir(r.path), 0o700); err != nil {
-		return nil, err
-	}
-	file, err := os.OpenFile(r.path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	release := func() {
-		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-		_ = file.Close()
-	}
-	deadline := time.Now().Add(registryLockBudget)
-	for {
-		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			return release, nil
-		}
-		if !errors.Is(err, syscall.EWOULDBLOCK) {
-			_ = file.Close()
-			return nil, err
-		}
-		if time.Now().After(deadline) {
-			_ = file.Close()
-			return nil, fmt.Errorf("another acornd process has been writing %s for over %s: try again", r.path, registryLockBudget)
-		}
-		time.Sleep(registryLockRetry)
-	}
+	return layout.WriteFile(r.path, append(payload, '\n'))
 }
 
 // droppedKeys reports whether the file on disk mentions a key this build no longer writes.

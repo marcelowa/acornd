@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 )
 
 func openTemp(t *testing.T) (*Store, string) {
@@ -376,7 +378,7 @@ func TestAHeldLockIsRefusedWithinTheBudget(t *testing.T) {
 	if !strings.Contains(err.Error(), "another acornd process") {
 		t.Errorf("the refusal does not say what is happening: %v", err)
 	}
-	if waited := time.Since(start); waited > 3*lockBudget {
+	if waited := time.Since(start); waited > 3*layout.LockBudget {
 		t.Errorf("it waited %s, which is longer than the budget it was given", waited)
 	}
 	// Released, the store works again: the refusal is about the moment, not about the file.

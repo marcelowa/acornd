@@ -221,7 +221,7 @@ func TestAWriteThatWaitedForTheLockCarriesTheNewerRecord(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- workspaces.persist("team") }()
 	// Long enough for the write to start and wait on the lock; well inside its budget.
-	time.Sleep(4 * registryLockRetry)
+	time.Sleep(100 * time.Millisecond)
 	workspaces.mu.Lock()
 	newer := workspaces.registry["team"]
 	newer.Path = "/new"

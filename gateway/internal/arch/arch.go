@@ -38,7 +38,7 @@ var Allowed = map[string][]string{
 	// The domain: it provisions the resources it owns and supervises the worker that uses them.
 	// It also asks support for a workspace diagnosis and records the running build in it; both
 	// are leaves, and neither knows how a workspace is opened. It asks layout where the registry, the install's
-	// settings and each workspace's state folder are, rather than spelling the file names itself.
+	// settings and each workspace's state folder are, and writes the registry with layout's lock and write.
 	"internal/control": {
 		"internal/layout",
 		"internal/protocol",
@@ -95,8 +95,9 @@ var Allowed = map[string][]string{
 	"internal/layout": {},
 	"internal/netns":  {},
 	// Who may use the install: a list of people, a file, and the rule that nobody unnamed gets in. A
-	// leaf: it knows nothing about a workspace or an engine (ADR 0032 §3).
-	"internal/people":   {},
+	// leaf: it knows nothing about a workspace or an engine (ADR 0032 §3). It locks and writes its file with
+	// layout's lock and write, which the vault and the registry share.
+	"internal/people":   {"internal/layout"},
 	"internal/protocol": {},
 	"internal/ready":    {"internal/update"},
 	// What carries a browser to the console: the tunnel, its record, and the Access application that admits the
@@ -120,8 +121,9 @@ var Allowed = map[string][]string{
 	// It asks layout where the registry is, to copy one workspace's record.
 	"internal/support": {"internal/layout", "internal/sandbox"},
 	// It asks layout which files a backup copies and which secret stores it scrubs.
-	"internal/update":     {"internal/layout"},
-	"internal/vault":      {},
+	"internal/update": {"internal/layout"},
+	// It locks and writes secrets.json with layout's lock and write.
+	"internal/vault":      {"internal/layout"},
 	"internal/workerpool": {"internal/protocol"},
 	"web":                 {},
 }

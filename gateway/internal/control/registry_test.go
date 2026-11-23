@@ -206,8 +206,8 @@ func TestAWedgedRegistryLockIsRefusedRatherThanWaitedOn(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "another acornd process") {
 		t.Fatalf("a held lock should refuse the write and say why, got %v", err)
 	}
-	if waited := time.Since(start); waited < registryLockBudget || waited > 3*registryLockBudget {
-		t.Errorf("it waited %s, want the budget of %s", waited, registryLockBudget)
+	if waited := time.Since(start); waited < layout.LockBudget || waited > 3*layout.LockBudget {
+		t.Errorf("it waited %s, want the budget of %s", waited, layout.LockBudget)
 	}
 	if _, err := os.Stat(layout.Registry(dataDir)); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("the refused write wrote the file: %v", err)
