@@ -64,11 +64,6 @@ func SetProviderModels(dataDir, provider string, models []string) (map[string][]
 	if key == "" {
 		return nil, fmt.Errorf("a provider is needed: write it as the id the console shows")
 	}
-	path := layout.Settings(dataDir)
-	defaults, err := LoadDefaults(path)
-	if err != nil {
-		return nil, err
-	}
 	cleaned := make([]string, 0, len(models))
 	for _, model := range models {
 		name := strings.TrimSpace(model)
@@ -77,15 +72,18 @@ func SetProviderModels(dataDir, provider string, models []string) (map[string][]
 		}
 		cleaned = append(cleaned, name)
 	}
-	if defaults.ProviderModels == nil {
-		defaults.ProviderModels = map[string][]string{}
-	}
-	if len(cleaned) == 0 {
-		delete(defaults.ProviderModels, key)
-	} else {
-		defaults.ProviderModels[key] = cleaned
-	}
-	if err := SaveDefaults(path, defaults); err != nil {
+	defaults, err := ChangeDefaults(layout.Settings(dataDir), func(defaults *Defaults) error {
+		if defaults.ProviderModels == nil {
+			defaults.ProviderModels = map[string][]string{}
+		}
+		if len(cleaned) == 0 {
+			delete(defaults.ProviderModels, key)
+		} else {
+			defaults.ProviderModels[key] = cleaned
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return defaults.ProviderModels, nil

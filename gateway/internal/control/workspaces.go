@@ -875,21 +875,8 @@ func (w *Workspaces) SetInstallAgent(ctx context.Context, name string) error {
 // changeInstall writes the file once and tells every running workspace, so a change applies
 // without a restart.
 func (w *Workspaces) changeInstall(ctx context.Context, change func(*Defaults) error) error {
-	path := layout.Settings(w.opts.DataDir)
-	defaults, err := LoadDefaults(path)
+	defaults, err := ChangeDefaults(layout.Settings(w.opts.DataDir), change)
 	if err != nil {
-		return err
-	}
-	if err := change(&defaults); err != nil {
-		return err
-	}
-	// An empty layer is not a layer: leaving a file full of zeroes behind would make the
-	// install look configured when it is not.
-	if defaults.Empty() {
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-	} else if err := SaveDefaults(path, defaults); err != nil {
 		return err
 	}
 	for _, control := range w.running() {

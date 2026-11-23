@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
@@ -206,5 +208,41 @@ func TestInheritedDefaultsReportTheirOrigin(t *testing.T) {
 	}
 	if state.DefaultModel.ModelID != "deepseek-v4.1-flash" {
 		t.Errorf("the state should report the default that runs, got %+v", state.DefaultModel)
+	}
+}
+
+// The install's settings file has more than one writer: the console's install defaults, its provider lists, and
+// `acornd model` from a terminal. A write that read the file before another writer saved it, and saved after,
+// put back the keys it had read and erased the other's (#72). A write waits for the lock and reads under it.
+func TestAProviderListWrittenWhileAnotherWriterHoldsTheFileKeepsItsChange(t *testing.T) {
+	dataDir := t.TempDir()
+	path := layout.Settings(dataDir)
+	release, err := layout.Lock(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := SetProviderModels(dataDir, "openai", []string{"gpt-5"})
+		done <- err
+	}()
+	// The other writer, holding the lock, saves its key while the list waits.
+	time.Sleep(100 * time.Millisecond)
+	if err := os.WriteFile(path, []byte(`{"defaultThinking": "high"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if err := <-done; err != nil {
+		t.Fatalf("set provider models: %v", err)
+	}
+	defaults, err := LoadDefaults(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.Thinking != "high" {
+		t.Errorf("the other writer's key was erased: %+v", defaults)
+	}
+	if got := defaults.ProviderModels["openai"]; len(got) != 1 || got[0] != "gpt-5" {
+		t.Errorf("the list was not written: %+v", defaults)
 	}
 }
