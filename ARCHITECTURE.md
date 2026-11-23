@@ -153,9 +153,13 @@ that look like a fall and are not: a package split, code moved up into a shared 
 moved into a package that is new to the tree. Anything else that falls fails.
 
 **Only CI runs** (`.github/workflows/`): `make test-sandbox` (microVM, needs `/dev/kvm`),
-`make test-bwrap`, `make test-youki`, `make ui-check` (a browser against a real gateway),
-`make mutations` per package, `make security`, and the commit-message check. Go's `-race` needs
-cgo, so a machine without it cannot run the default tier's race pass.
+`make test-bwrap`, `make ui-check` (a browser against a real gateway), `make mutations` per
+package, the commit-message check, and the weekly security workflow (`govulncheck`, `gosec` and
+`gitleaks`, which `make security` runs in part on a machine). CI gets the default tier's Go suite and
+its coverage from one pass, `make test-suite COVER=1`.
+
+**A person runs, and no workflow does:** `make test-youki`, the youki engine end to end. Go's `-race`
+needs cgo, so a machine without it cannot run the default tier's race pass.
 
 ## To add
 
@@ -183,7 +187,7 @@ cgo, so a machine without it cannot run the default tier's race pass.
 4. `sandbox.EngineNames` in `gateway/internal/sandbox/host.go` (and `defaultEngines` in `tier.go`
    if a machine may pick it on its own).
 5. `worker/src/<name>.ts` implementing `SandboxEngine`, and a `case` in `worker/src/main.ts`.
-6. Floor rows in `.coveragefloors` and `.mutationfloors`, and a CI tier like `make test-youki`.
+6. Floor rows in `.coveragefloors` and `.mutationfloors`, and an end-to-end target like `make test-bwrap`, with a CI job to run it. The youki target has no CI job (see Known gaps).
 7. An ADR (S4).
 
 **An install setting**
@@ -201,7 +205,7 @@ cgo, so a machine without it cannot run the default tier's race pass.
 
 What is still not as the layer table wants. Sizes measured on `main` at d8cbd14, non-test Go.
 
-- **`control.Control` is large.** 161 methods over ten files, and five mutexes: `mu`, `engineMu`,
+- **`control.Control` is large.** 161 methods over eleven files, and five mutexes: `mu`, `engineMu`,
   `secretMu`, `lifecycle`, `continuationMu`. The package is 7,041 lines.
 - **`Workspaces` mixes four jobs:** registry persistence, the engine catalog, idle eviction and
   routing. `workspaces.go` is 1,640 lines with 59 methods on `Workspaces`, three mutex fields
@@ -218,3 +222,6 @@ What is still not as the layer table wants. Sizes measured on `main` at d8cbd14,
   touches more than its own package.
 - **Two files skip `layout`'s write.** `drafts.json` and `update.json` are written by their
   owners without `layout.WriteFile`; `update.json` has no lock.
+- **The youki end-to-end tier has no CI job.** `make test-youki` exists in the `Makefile`, and no
+  file in `.github/workflows` runs it. A break in the youki engine's end-to-end tests can go
+  unseen. `ci.yml` has jobs for `make test-sandbox` and `make test-bwrap`.
