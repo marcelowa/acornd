@@ -70,6 +70,8 @@ its oldest rather than blocking the worker reader.
 
 ## HTTP surface (v0)
 
+This table is v0. `ARCHITECTURE.md` is current.
+
 One workspace and one session (`root`) exist per process. Session-scoped paths
 arrive with multi-session support; the frame shapes do not change when they do.
 

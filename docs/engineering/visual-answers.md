@@ -77,7 +77,7 @@ These already render; the skill below is what makes the agent reach for them.
 
 ## Where the agent is told
 
-1. `PREAMBLE` in `worker/src/main.ts` — one line naming the shapes, because it reaches every
+1. `PREAMBLE` in `worker/src/preamble.ts` — one line naming the shapes, because it reaches every
    conversation in every workspace.
 2. `.agents/skills/visual-answers/SKILL.md` — when a form earns its place, and when plain prose is
    the better answer. A skill is read on demand, so it can be tuned without shipping a release.
