@@ -17,7 +17,6 @@ import {
 	removeMember,
 	removeWorkspace as removeWorkspaceRequest,
 	renameConversation,
-	saveDraft,
 	sendMessage,
 	uploadAttachment,
 	setAgent,
@@ -60,30 +59,18 @@ import type {
 	TranscriptEntry,
 	WorkspaceSummary,
 } from "./view-models";
-import type { Draft, RoomDraft } from "./draft";
-import { shownDraft } from "./draft";
 import { useNavigation, useScreens, type NavigationSlice } from "./use-navigation";
 import { usePeople, type PeopleSlice } from "./use-people";
+import { useDraft, type DraftSlice } from "./use-draft";
 import { useProviders, type ProvidersSlice } from "./use-providers";
 import { useRemote, type RemoteSlice } from "./use-remote";
 import { useSession, type SessionSlice } from "./use-session";
 import { useUpdate, type UpdateSlice } from "./use-update";
 import { read, usePreferences, type PreferencesSlice } from "./use-preferences";
-import type {
-	WireDraft,
-	WireDraftAttachment,
-	WireResolvedAgent,
-	WireSecretEvent,
-	WireSender,
-	WireUsage,
-	WireView,
-} from "./wire";
+import type { WireResolvedAgent, WireSecretEvent, WireSender, WireUsage, WireView } from "./wire";
 
 const SEEN_KEY = "acornd.seen";
 
-/** How long a keystroke waits before the draft is written down. The words are on screen the
- * whole time: the wait is only so a sentence is not one POST and one state event per letter. */
-const DRAFT_SETTLE_MS = 400;
 /** How often a workspace that is opening is asked which step it is on. Fast enough that the line
  * changes when the work does, slow enough that it is one request a second. */
 const openingPollMs = 700;
@@ -116,7 +103,8 @@ export interface Platform
 		PeopleSlice,
 		UpdateSlice,
 		SessionSlice,
-		ProvidersSlice {
+		ProvidersSlice,
+		DraftSlice {
 	conversations: ConversationSummary[];
 	deleted: ConversationSummary[];
 	/** The workspaces, with the one in view marked. */
@@ -206,11 +194,6 @@ export interface Platform
 	send: (text: string, whenBusy: BusyAction, attachments?: string[] | undefined) => Promise<void>;
 	/** Stage files picked in the composer; ids ride with the next send. */
 	upload: (file: File) => Promise<UploadedAttachment>;
-	/** The room in view and its unsent message: this machine's words in front of the
-	 * workspace's copy, so a half-typed line waits in the room on every machine. */
-	draft?: RoomDraft | undefined;
-	/** Record the draft of the conversation in view. Batched; the newest words win. */
-	setDraft: (text: string, attachments: WireDraftAttachment[]) => void;
 	abort: () => void;
 }
 
@@ -253,101 +236,8 @@ export function usePlatform(): Platform {
 	const [seen, setSeen] = useState<Record<string, string>>(() => read(SEEN_KEY, {}));
 	const [composerFocusToken, setComposerFocusToken] = useState(0);
 	const [commands, setCommands] = useState<SlashCommand[]>([]);
-	/**
-	 * The draft of the room in view. The workspace holds the words; this machine holds the two
-	 * things it needs to be honest about them — the edit that has not landed yet, and the last
-	 * value the server took from here, which is what tells a state event carrying this machine's
-	 * own words from one carrying another machine's.
-	 */
-	const draftEdits = useRef(new Map<string, Draft>());
-	const draftWritten = useRef(new Map<string, WireDraft>());
-	/** A counter with no value of its own: the maps above are refs, because the flush reads and
-	 * empties them without being re-made for every keystroke, so this is what re-renders the
-	 * composer when one of them moves. */
-	const [, setDraftMoved] = useState(0);
-	const draftTimer = useRef<number | undefined>(undefined);
-
-	const flushDrafts = useCallback(
-		(keepalive = false): void => {
-			if (draftTimer.current !== undefined) {
-				window.clearTimeout(draftTimer.current);
-				draftTimer.current = undefined;
-			}
-			for (const [room, draft] of [...draftEdits.current]) {
-				void saveDraft(workspace, room, draft, keepalive)
-					.then((stored) => {
-						// Only the edit the server just took is cleared: the person may have typed more
-						// while the save was in flight, and those words are still to come.
-						if (draftEdits.current.get(room) === draft) draftEdits.current.delete(room);
-						draftWritten.current.set(room, stored);
-						setDraftMoved((moved) => moved + 1);
-					})
-					.catch(() => {
-						// The words stay on screen and the next flush tries again. A draft is not worth
-						// an error strip, and nothing is lost on this machine either way.
-					});
-			}
-		},
-		[workspace],
-	);
-
-	const recordDraft = useCallback(
-		(room: string, draft: Draft): void => {
-			draftEdits.current.set(room, draft);
-			setDraftMoved((moved) => moved + 1);
-			if (draftTimer.current !== undefined) return;
-			draftTimer.current = window.setTimeout(() => {
-				draftTimer.current = undefined;
-				flushDrafts();
-			}, DRAFT_SETTLE_MS);
-		},
-		[flushDrafts],
-	);
-
-	const setDraft = useCallback(
-		(text: string, attachments: WireDraftAttachment[]): void => {
-			const room = activeIdRef.current ?? "";
-			if (room === "") return;
-			recordDraft(room, { text, attachments });
-		},
-		[recordDraft, activeIdRef],
-	);
-
-	// The write that has to leave while the page does: a reload mid-sentence is the reload the
-	// draft exists for, and the settle timer would not have fired by then.
-	useEffect(() => {
-		const leaving = (): void => {
-			if (document.visibilityState === "hidden") flushDrafts(true);
-		};
-		const leavingPage = (): void => flushDrafts(true);
-		document.addEventListener("visibilitychange", leaving);
-		window.addEventListener("pagehide", leavingPage);
-		return () => {
-			document.removeEventListener("visibilitychange", leaving);
-			window.removeEventListener("pagehide", leavingPage);
-			// Leaving this workspace is the last moment its drafts can be named: a draft is saved
-			// where its room lives.
-			flushDrafts(true);
-		};
-	}, [flushDrafts]);
-
-	const draftRoom = state?.conversation?.id ?? "";
-	// While a switch lands, the state still describes the room just left; its draft is not the
-	// one this composer should show.
-	const draftServer = draftRoom === activeId ? state?.draft : undefined;
-	const draftEdit = activeId === "" ? undefined : draftEdits.current.get(activeId);
-	const draftWrittenHere = activeId === "" ? undefined : draftWritten.current.get(activeId);
-	const draft: RoomDraft | undefined =
-		activeId === ""
-			? undefined
-			: {
-					conversation: activeId,
-					...shownDraft({
-						edit: draftEdit,
-						server: draftServer,
-						written: draftWrittenHere,
-					}),
-				};
+	const drafts = useDraft(session);
+	const { flushDrafts } = drafts;
 
 	/** What is in the inbox and not committed yet, by its own words: how it was sent. */
 	const sentMarks = useRef(new Map<string, BusyAction>());
@@ -962,6 +852,7 @@ export function usePlatform(): Platform {
 		...preferences,
 		...session.slice,
 		...providers.slice,
+		...drafts.slice,
 		...navigation,
 		...remote,
 		...people,
@@ -1010,8 +901,6 @@ export function usePlatform(): Platform {
 		closeCompactDialog,
 		send,
 		upload,
-		draft,
-		setDraft,
 		abort,
 		renameWorkspace,
 		secretRequest,
