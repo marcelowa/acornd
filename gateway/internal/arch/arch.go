@@ -40,8 +40,8 @@ var Allowed = map[string][]string{
 	// It also asks support for a workspace diagnosis and records the running build in it; both
 	// are leaves, and neither knows how a workspace is opened. It asks layout where the registry, the install's
 	// settings and each workspace's state folder are, and writes the registry with layout's lock and write.
-	// It names an engine by its string and imports none: cmd/acornd registers the drivers into sandbox's table
-	// before anything can choose one (house rule G3, bwrap/register.go).
+	// Control is the package that knows the engines (G17), and it names one by its string rather than importing
+	// it: cmd/acornd registers the drivers into sandbox's table before anything can choose one (bwrap/register.go).
 	"internal/control": {
 		"internal/layout",
 		"internal/protocol",
