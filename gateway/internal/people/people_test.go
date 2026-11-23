@@ -9,11 +9,13 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 )
 
 func book(t *testing.T) *Book {
 	t.Helper()
-	opened, err := Open(filepath.Join(t.TempDir(), File))
+	opened, err := Open(filepath.Join(t.TempDir(), "people.json"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -171,7 +173,7 @@ func TestTheBookIsWrittenWholeAndUnreadableByOthers(t *testing.T) {
 		t.Fatalf("readdir: %v", err)
 	}
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".people-") {
+		if strings.HasPrefix(entry.Name(), ".people.json-") {
 			t.Errorf("a temporary file was left behind: %s", entry.Name())
 		}
 	}
@@ -181,7 +183,7 @@ func TestTheBookIsWrittenWholeAndUnreadableByOthers(t *testing.T) {
 // and starting empty would admit nobody while looking like it worked.
 func TestABookThatCannotBeParsedIsReported(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, File)
+	path := filepath.Join(dir, "people.json")
 	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -202,10 +204,10 @@ func TestABookThatCannotBeParsedIsReported(t *testing.T) {
 // like it worked.
 func TestABookThatCannotBeReadIsReported(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, File), 0o700); err != nil {
+	if err := os.Mkdir(filepath.Join(dir, "people.json"), 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	opened, err := Open(filepath.Join(dir, File))
+	opened, err := Open(filepath.Join(dir, "people.json"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -218,13 +220,13 @@ func TestABookThatCannotBeReadIsReported(t *testing.T) {
 // person who thinks they added somebody and did not.
 func TestAChangeThatCannotBeStoredIsReported(t *testing.T) {
 	dir := t.TempDir()
-	opened, err := Open(filepath.Join(dir, File))
+	opened, err := Open(filepath.Join(dir, "people.json"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	// The lock file is what every change takes first, so a folder in its place is the install becoming
 	// unwritable for everybody at once.
-	if err := os.Mkdir(filepath.Join(dir, File+".lock"), 0o700); err != nil {
+	if err := os.Mkdir(filepath.Join(dir, "people.json.lock"), 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	if _, err := opened.Add("ana@example.com", "Ana"); err == nil {
@@ -236,7 +238,7 @@ func TestAChangeThatCannotBeStoredIsReported(t *testing.T) {
 // whatever directory is current.
 func TestABookWhoseFolderIsGoneIsReported(t *testing.T) {
 	dir := t.TempDir()
-	opened, err := Open(filepath.Join(dir, "install", File))
+	opened, err := Open(filepath.Join(dir, "install", "people.json"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -251,7 +253,7 @@ func TestABookWhoseFolderIsGoneIsReported(t *testing.T) {
 // The clock is a seam, and with no clock injected the date is today's: the one thing a record cannot do
 // is claim to have been created in the future because a test forgot to freeze time.
 func TestTheDateIsTodaysWhenNoClockIsInjected(t *testing.T) {
-	opened, err := Open(filepath.Join(t.TempDir(), File))
+	opened, err := Open(filepath.Join(t.TempDir(), "people.json"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -288,7 +290,7 @@ func TestABookNeedsAPlaceItCanWrite(t *testing.T) {
 	if err := os.WriteFile(file, []byte("not a folder"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, err := Open(filepath.Join(file, File)); err == nil {
+	if _, err := Open(filepath.Join(file, "people.json")); err == nil {
 		t.Error("a book was opened under a file")
 	}
 }
@@ -360,7 +362,7 @@ func TestTheAdminNarrowsWhatSomebodyMayRun(t *testing.T) {
 // not write a twin beside it: with two records for one address, "who is this" depends on line order, and an
 // admin whose first line says "person" is locked out of their own install.
 func TestClaimingSomebodyAlreadyInTheBookPromotesThem(t *testing.T) {
-	path := filepath.Join(t.TempDir(), File)
+	path := filepath.Join(t.TempDir(), "people.json")
 	opened, err := Open(path)
 	if err != nil {
 		t.Fatalf("open: %v", err)
@@ -392,7 +394,7 @@ func TestClaimingSomebodyAlreadyInTheBookPromotesThem(t *testing.T) {
 
 	// A name already in the book survives a claim that does not give one: the record is promoted, not
 	// replaced, and a command that forgot the name must not erase it.
-	named := filepath.Join(t.TempDir(), File)
+	named := filepath.Join(t.TempDir(), "people.json")
 	other, err := Open(named)
 	if err != nil {
 		t.Fatalf("open: %v", err)
@@ -415,7 +417,7 @@ func TestClaimingSomebodyAlreadyInTheBookPromotesThem(t *testing.T) {
 // A book that already holds two records for one address — written before Claim learned to promote — must not
 // lock the admin out: the strongest record answers, whatever order the lines are in.
 func TestAnAddressWrittenTwiceAnswersAsItsAdmin(t *testing.T) {
-	path := filepath.Join(t.TempDir(), File)
+	path := filepath.Join(t.TempDir(), "people.json")
 	written := `{"people":[
 	  {"email":"ana@example.com","role":"member","state":"active","created":"2026-01-01"},
 	  {"email":"ana@example.com","role":"admin","state":"active","created":"2026-01-02"}]}`
@@ -443,7 +445,7 @@ func TestAnAddressWrittenTwiceAnswersAsItsAdmin(t *testing.T) {
 
 	// A duplicate is not the only way to be locked out: the record that answers may be the one with no role
 	// written down at all, and an install that predates roles would then have nobody able to administer it.
-	path = filepath.Join(t.TempDir(), File)
+	path = filepath.Join(t.TempDir(), "people.json")
 	written = `{"people":[{"email":"ana@example.com","state":"active"},{"email":"ana@example.com"}]}`
 	if err := os.WriteFile(path, []byte(written), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
@@ -467,7 +469,7 @@ func TestAnAddressWrittenTwiceAnswersAsItsAdmin(t *testing.T) {
 // timeout to learn nothing. Flock is released when its holder ends, so what a caller waits for is a write in
 // progress — and when that outlives the budget, the caller is told rather than kept.
 func TestAWedgedLockIsRefusedRatherThanWaitedOn(t *testing.T) {
-	path := filepath.Join(t.TempDir(), File)
+	path := filepath.Join(t.TempDir(), "people.json")
 	opened, err := Open(path)
 	if err != nil {
 		t.Fatalf("open: %v", err)
@@ -489,7 +491,7 @@ func TestAWedgedLockIsRefusedRatherThanWaitedOn(t *testing.T) {
 	if !strings.Contains(err.Error(), "another acornd process") {
 		t.Errorf("the refusal does not say what is happening: %v", err)
 	}
-	if waited := time.Since(start); waited > 3*lockBudget {
+	if waited := time.Since(start); waited > 3*layout.LockBudget {
 		t.Errorf("it waited %s, which is longer than the budget it was given", waited)
 	}
 }
@@ -497,7 +499,7 @@ func TestAWedgedLockIsRefusedRatherThanWaitedOn(t *testing.T) {
 // A book written before the roles were renamed still reads: "owner" is the admin and "person" is a member,
 // and the first write puts the new names back (ADR 0034).
 func TestARoleWrittenBeforeTheRenameLoads(t *testing.T) {
-	path := filepath.Join(t.TempDir(), File)
+	path := filepath.Join(t.TempDir(), "people.json")
 	written := `{"people":[
 	  {"email":"me@example.com","role":"owner","state":"active"},
 	  {"email":"ana@example.com","role":"person","state":"active"}]}`

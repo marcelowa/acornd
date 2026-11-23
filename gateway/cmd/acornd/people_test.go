@@ -3,10 +3,10 @@ package main
 import (
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/people"
 )
 
@@ -69,7 +69,7 @@ func TestTheCommandLineNamesPeopleAndTakesAccessAway(t *testing.T) {
 	}
 
 	// And the file agrees, because the command line and the gateway read the same one.
-	book, err := people.Open(filepath.Join(dir, people.File))
+	book, err := people.Open(layout.People(dir))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

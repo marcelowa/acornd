@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/protocol"
 	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 	"github.com/marcelowa/acornd/gateway/internal/vault"
@@ -346,7 +347,6 @@ func (w *Workspaces) Close() {
 }
 
 const (
-	registryFile = "workspaces.json"
 	// A warm worker costs a process. Keeping every workspace the reader has visited alive
 	// forever would turn a few visits into a few hundred megabytes, so an idle one that
 	// nobody is watching is stopped and started again from its own storage.
@@ -602,7 +602,7 @@ func (w *Workspaces) Add(workspace Workspace) error {
 // The record is what knows the folder, so purge is what deletes state, and a state with no record has none:
 // the sentence says so and names the folder, because deleting it by hand is the one escape hatch left.
 func (w *Workspaces) stateRefusal(name string) error {
-	state := StatePath(w.opts.DataDir, name)
+	state := layout.State(w.opts.DataDir, name)
 	if _, err := os.Stat(state); err != nil {
 		return nil
 	}
@@ -788,6 +788,7 @@ func (w *Workspaces) controlFor(name string) *Control {
 // from the code that is doing the work.
 func (w *Workspaces) open(ctx context.Context, name string, workspace Workspace) (*Control, error) {
 	w.setProgress(name, Progress{Status: StatusOpening, Stage: "starting", Since: time.Now()})
+	state := layout.State(w.opts.DataDir, name)
 	control := New(Options{
 		OnStage:        w.stage(name),
 		Progress:       w.Progress,
@@ -797,9 +798,9 @@ func (w *Workspaces) open(ctx context.Context, name string, workspace Workspace)
 		WorkspacesDir:  w.Dir(),
 		DataDir:        w.opts.DataDir,
 		UserHome:       w.opts.UserHome,
-		StoragePath:    filepath.Join(StatePath(w.opts.DataDir, name), "session.sqlite"),
-		SettingsPath:   filepath.Join(StatePath(w.opts.DataDir, name), "settings.json"),
-		DraftsPath:     filepath.Join(StatePath(w.opts.DataDir, name), "drafts.json"),
+		StoragePath:    layout.Session(state),
+		SettingsPath:   layout.Settings(state),
+		DraftsPath:     layout.Drafts(state),
 		Sandbox:        w.opts.Sandbox,
 		Sandboxes:      w.opts.Sandboxes,
 		SandboxProblem: w.opts.SandboxProblem,
@@ -810,7 +811,7 @@ func (w *Workspaces) open(ctx context.Context, name string, workspace Workspace)
 		Update:         w.opts.Update,
 		Model:          w.opts.Model,
 	})
-	if err := os.MkdirAll(StatePath(w.opts.DataDir, name), 0o700); err != nil {
+	if err := os.MkdirAll(state, 0o700); err != nil {
 		return nil, err
 	}
 	control.Open(ctx)
@@ -830,12 +831,6 @@ func (w *Workspaces) open(ctx context.Context, name string, workspace Workspace)
 	w.markUsed(name)
 	workerpool.Log("workspace %s started (%s)", name, workspace.Path)
 	return control, nil
-}
-
-// The install-wide defaults file: <data-dir>/settings.json. The layer that owns the file owns
-// writing it, so every workspace sees one value rather than a copy each.
-func (w *Workspaces) installDefaultsPath() string {
-	return filepath.Join(w.opts.DataDir, "settings.json")
 }
 
 // SetInstallModel changes the model every workspace falls back to, below its own default
@@ -880,21 +875,8 @@ func (w *Workspaces) SetInstallAgent(ctx context.Context, name string) error {
 // changeInstall writes the file once and tells every running workspace, so a change applies
 // without a restart.
 func (w *Workspaces) changeInstall(ctx context.Context, change func(*Defaults) error) error {
-	path := w.installDefaultsPath()
-	defaults, err := LoadDefaults(path)
+	defaults, err := ChangeDefaults(layout.Settings(w.opts.DataDir), change)
 	if err != nil {
-		return err
-	}
-	if err := change(&defaults); err != nil {
-		return err
-	}
-	// An empty layer is not a layer: leaving a file full of zeroes behind would make the
-	// install look configured when it is not.
-	if defaults.Empty() {
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-	} else if err := SaveDefaults(path, defaults); err != nil {
 		return err
 	}
 	for _, control := range w.running() {
@@ -1218,13 +1200,6 @@ func validateWorkspace(workspace Workspace) error {
 	return nil
 }
 
-// StatePath is where a workspace's storage, its settings and its drafts live: `<data-dir>/state/<name>`, beside
-// the registry rather than inside the workspace's folder. It is the folder that makes a name mean a history, so
-// forgetting a room leaves it and purging one deletes it.
-func StatePath(dataDir, name string) string {
-	return filepath.Join(dataDir, "state", name)
-}
-
 // OrphanFolders names every folder under the workspaces folder that no record points at: what forgetting a
 // workspace leaves behind, since forgetting unregisters and never deletes (ADR 0034 §6). Doctor names them,
 // so a folder nobody owns is seen once rather than forgotten twice.
@@ -1442,8 +1417,8 @@ func (w *Workspaces) ownerMembers() []Member {
 // moveState renames one workspace's state folder. One rename, so it either happened or it did not; a folder
 // that is not there is not a failure, because a workspace nobody has opened has no state yet.
 func (w *Workspaces) moveState(from, to string) error {
-	source := StatePath(w.opts.DataDir, from)
-	target := StatePath(w.opts.DataDir, to)
+	source := layout.State(w.opts.DataDir, from)
+	target := layout.State(w.opts.DataDir, to)
 	switch _, err := os.Stat(source); {
 	case errors.Is(err, os.ErrNotExist):
 		return nil
@@ -1509,14 +1484,14 @@ func (w *Workspaces) persist(names ...string) error {
 // settings file, moved into the install's own workspace's state directory. Nothing is rewritten
 // inside them, so every conversation appears exactly where it was.
 func (w *Workspaces) migrate() error {
-	state := StatePath(w.opts.DataDir, PersonalWorkspaceName)
+	state := layout.State(w.opts.DataDir, PersonalWorkspaceName)
 	// The write-ahead log travels with its database. Moving one without the other loses
 	// every commit that had not been checkpointed and leaves megabytes behind.
 	moves := []struct{ from, to string }{
-		{filepath.Join(w.opts.DataDir, "session.sqlite"), filepath.Join(state, "session.sqlite")},
-		{filepath.Join(w.opts.DataDir, "session.sqlite-wal"), filepath.Join(state, "session.sqlite-wal")},
-		{filepath.Join(w.opts.DataDir, "session.sqlite-shm"), filepath.Join(state, "session.sqlite-shm")},
-		{filepath.Join(w.opts.DataDir, "settings.json"), filepath.Join(state, "settings.json")},
+		{layout.Session(w.opts.DataDir), layout.Session(state)},
+		{layout.Session(w.opts.DataDir) + "-wal", layout.Session(state) + "-wal"},
+		{layout.Session(w.opts.DataDir) + "-shm", layout.Session(state) + "-shm"},
+		{layout.Settings(w.opts.DataDir), layout.Settings(state)},
 	}
 	for _, move := range moves {
 		if _, err := os.Stat(move.from); err != nil {
@@ -1535,9 +1510,9 @@ func (w *Workspaces) migrate() error {
 	}
 	// A database that already moved leaves its sidecars behind: they belong to it, so
 	// leaving them would both waste space and invite the next reader to use the wrong one.
-	if _, err := os.Stat(filepath.Join(state, "session.sqlite")); err == nil {
-		for _, orphan := range []string{"session.sqlite-wal", "session.sqlite-shm"} {
-			path := filepath.Join(w.opts.DataDir, orphan)
+	if _, err := os.Stat(layout.Session(state)); err == nil {
+		for _, sidecar := range []string{"-wal", "-shm"} {
+			path := layout.Session(w.opts.DataDir) + sidecar
 			if _, err := os.Stat(path); err == nil {
 				workerpool.Log("removing orphaned %s", path)
 				_ = os.Remove(path)

@@ -6,14 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
-)
 
-// File is where an install keeps its remote access, inside the install folder — which ADR 0014 keeps out of
-// every sandbox mount, so an agent cannot read the tunnel's token.
-const File = "remote.json"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
+)
 
 // Setup is the file: what the admin asked for, and what exists because of it.
 type Setup struct {
@@ -33,7 +30,7 @@ func (s Setup) Configured() bool { return s.Desired.Hostname != "" }
 // Load reads the setup, or an empty one when nothing has been configured. A file that cannot be read is an
 // error rather than an empty setup: an install whose record vanished would make a second tunnel.
 func Load(dir string) (Setup, error) {
-	path := filepath.Join(dir, File)
+	path := layout.Remote(dir)
 	payload, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -62,32 +59,7 @@ func Save(dir string, setup Setup, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	payload = append(payload, '\n')
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	temp, err := os.CreateTemp(dir, ".remote-*")
-	if err != nil {
-		return err
-	}
-	path := temp.Name()
-	defer func() { _ = os.Remove(path) }()
-	if err := temp.Chmod(0o600); err != nil {
-		_ = temp.Close()
-		return err
-	}
-	if _, err := temp.Write(payload); err != nil {
-		_ = temp.Close()
-		return err
-	}
-	if err := temp.Sync(); err != nil {
-		_ = temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(path, filepath.Join(dir, File))
+	return layout.WriteFile(layout.Remote(dir), append(payload, '\n'))
 }
 
 // Env is the identity configuration a run needs once this setup is applied: the four values the assertion

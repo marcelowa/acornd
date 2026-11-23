@@ -9,6 +9,7 @@ import (
 
 	"github.com/marcelowa/acornd/gateway/internal/control"
 	"github.com/marcelowa/acornd/gateway/internal/identity"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/people"
 )
 
@@ -16,7 +17,7 @@ import (
 func allowlisted(t *testing.T, callerIs identity.Caller) (http.Handler, *people.Book, string) {
 	t.Helper()
 	dir := t.TempDir()
-	opened, err := people.Open(dir + "/" + people.File)
+	opened, err := people.Open(layout.People(dir))
 	if err != nil {
 		t.Fatalf("open book: %v", err)
 	}

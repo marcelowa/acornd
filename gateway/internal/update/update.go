@@ -27,6 +27,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 )
 
 // LatestURL is the v1 release source: GitHub releases only.
@@ -302,7 +304,7 @@ func newAssetClient() *http.Client {
 }
 
 func (m *Manager) versionPath() string       { return filepath.Join(m.dataDir, "version") }
-func (m *Manager) settingsPath() string      { return filepath.Join(m.dataDir, "update.json") }
+func (m *Manager) settingsPath() string      { return layout.Update(m.dataDir) }
 func (m *Manager) backupsDir() string        { return filepath.Join(m.dataDir, "backups") }
 func (m *Manager) pendingPath() string       { return filepath.Join(m.dataDir, "update.pending") }
 func (m *Manager) failedPath() string        { return filepath.Join(m.dataDir, "update.failed") }
@@ -905,9 +907,8 @@ func (m *Manager) Backup() (string, error) {
 		}
 		dir = filepath.Join(m.backupsDir(), fmt.Sprintf("%s-%d", stamp, i))
 	}
-	files := []string{"config.json", "settings.json", "workspaces.json", "version", "update.json"}
-	for _, name := range files {
-		source := filepath.Join(m.dataDir, name)
+	files := []string{layout.Config(m.dataDir), layout.Settings(m.dataDir), layout.Registry(m.dataDir), m.versionPath(), m.settingsPath()}
+	for _, source := range files {
 		payload, err := os.ReadFile(source)
 		if err != nil {
 			continue
@@ -915,7 +916,7 @@ func (m *Manager) Backup() (string, error) {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return "", err
 		}
-		if err := os.WriteFile(filepath.Join(dir, name), payload, 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, filepath.Base(source)), payload, 0o600); err != nil {
 			return "", err
 		}
 	}
@@ -949,8 +950,9 @@ func (m *Manager) Backups() []string {
 // backups may hold them, new ones never do.
 func (m *Manager) scrubSecrets() {
 	for _, name := range m.Backups() {
-		for _, secret := range []string{"credentials.json", "secrets.json"} {
-			_ = os.Remove(filepath.Join(m.backupsDir(), name, secret))
+		set := filepath.Join(m.backupsDir(), name)
+		for _, secret := range []string{filepath.Join(set, "credentials.json"), layout.Secrets(set)} {
+			_ = os.Remove(secret)
 		}
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
@@ -131,7 +132,7 @@ func modelList(argv []string) {
 	if err != nil {
 		logFatal(err)
 	}
-	defaults, err := control.LoadDefaults(modelSettingsPath(dir))
+	defaults, err := control.LoadDefaults(layout.Settings(dir))
 	if err != nil {
 		logFatal(err)
 	}
@@ -183,13 +184,10 @@ func modelSet(argv []string) {
 	}
 	// The file is the install's own layer, and the gateway reads it on every turn: this is the
 	// same write the interface makes, not a second place a default can live.
-	path := modelSettingsPath(dir)
-	defaults, err := control.LoadDefaults(path)
-	if err != nil {
-		logFatal(err)
-	}
-	defaults.Model = protocol.ModelBinding{Provider: provider, ModelID: modelID}
-	if err := control.SaveDefaults(path, defaults); err != nil {
+	if _, err := control.ChangeDefaults(layout.Settings(dir), func(defaults *control.Defaults) error {
+		defaults.Model = protocol.ModelBinding{Provider: provider, ModelID: modelID}
+		return nil
+	}); err != nil {
 		logFatal(err)
 	}
 	fmt.Printf("default model is now %s/%s\n", provider, modelID)
@@ -205,20 +203,13 @@ func modelClear(argv []string) {
 	if err != nil {
 		logFatal(err)
 	}
-	path := modelSettingsPath(dir)
-	defaults, err := control.LoadDefaults(path)
-	if err != nil {
-		logFatal(err)
-	}
-	defaults.Model = protocol.ModelBinding{}
-	if err := control.SaveDefaults(path, defaults); err != nil {
+	if _, err := control.ChangeDefaults(layout.Settings(dir), func(defaults *control.Defaults) error {
+		defaults.Model = protocol.ModelBinding{}
+		return nil
+	}); err != nil {
 		logFatal(err)
 	}
 	fmt.Println("default model cleared: each workspace decides, then the provider's own choice")
-}
-
-func modelSettingsPath(dir string) string {
-	return filepath.Join(dir, "settings.json")
 }
 
 func logFatal(err error) {

@@ -17,6 +17,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 )
 
 // Policy is a workspace's intent for its sandbox. It says what the workspace needs; how that
@@ -159,7 +161,7 @@ func globalFolders(dataDir, userHome string) []string {
 // explicit. See docs/adr/0014-global-resources-in-the-sandbox.md.
 func GlobalPaths(dataDir, userHome string) []string {
 	paths := globalFolders(dataDir, userHome)
-	config := filepath.Join(dataDir, "config.json")
+	config := layout.Config(dataDir)
 	if info, err := os.Stat(config); err == nil && !info.IsDir() {
 		paths = append(paths, config)
 	}

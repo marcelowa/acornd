@@ -4,10 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 
 	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/people"
 )
 
@@ -15,7 +15,7 @@ import (
 // needs: the membership from the room and the name from the book.
 func speakerEdge(t *testing.T, rooms ...control.Workspace) (*Server, *people.Book) {
 	t.Helper()
-	opened, err := people.Open(filepath.Join(t.TempDir(), people.File))
+	opened, err := people.Open(layout.People(t.TempDir()))
 	if err != nil {
 		t.Fatalf("open book: %v", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/remote"
 )
 
@@ -233,7 +234,7 @@ func TestListenHostFollowsTheDoor(t *testing.T) {
 // broken would be an open console where the person meant a closed one.
 func TestListenHostRefusesAnUnreadableDoor(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, remote.File), []byte("{not json"), 0o600); err != nil {
+	if err := os.WriteFile(layout.Remote(dir), []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if host, err := listenHost("", dir); err == nil {

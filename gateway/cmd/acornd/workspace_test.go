@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 )
 
 // Purge is the only thing in acornd that deletes a workspace, and it needs the record to find the folder
@@ -44,7 +45,7 @@ func TestPurgeNeedsTheRecord(t *testing.T) {
 func TestPurgeDeletesTheStateToo(t *testing.T) {
 	dataDir := t.TempDir()
 	folder := filepath.Join(t.TempDir(), "team")
-	state := control.StatePath(dataDir, "team")
+	state := layout.State(dataDir, "team")
 	for _, path := range []string{folder, state} {
 		if err := os.MkdirAll(path, 0o700); err != nil {
 			t.Fatal(err)

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/vault"
 )
 
@@ -408,7 +409,7 @@ func openVault(dataDirFlag string) (string, *vault.Store) {
 	if err != nil {
 		secretFail(err)
 	}
-	store, err := vault.Open(filepath.Join(dir, "secrets.json"))
+	store, err := vault.Open(layout.Secrets(dir))
 	if err != nil {
 		secretFail(err)
 	}

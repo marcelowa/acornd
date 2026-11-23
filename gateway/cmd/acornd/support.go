@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/support"
 	"github.com/marcelowa/acornd/gateway/internal/update"
 	"github.com/marcelowa/acornd/gateway/internal/vault"
@@ -95,7 +96,7 @@ func userHome() string {
 }
 
 func supportSecrets(dataDir, workspacePath string) ([]string, []string) {
-	store, err := vault.Open(filepath.Join(dataDir, "secrets.json"))
+	store, err := vault.Open(layout.Secrets(dataDir))
 	if err != nil {
 		return nil, []string{"the vault could not be opened for redaction: " + err.Error()}
 	}

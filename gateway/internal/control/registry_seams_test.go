@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
@@ -39,7 +40,7 @@ func TestTheSidebarIsPersonalFirstThenByName(t *testing.T) {
 // something. A map written in iteration order gives a file that changes for no reason.
 func TestTheRegistryFileIsWrittenSorted(t *testing.T) {
 	dataDir := t.TempDir()
-	path := filepath.Join(dataDir, registryFile)
+	path := layout.Registry(dataDir)
 	registry := RegistryFile{
 		Workspaces: []Workspace{
 			{Name: "zulu", Path: "/z"},
@@ -126,7 +127,7 @@ func TestAFirstRunThatCannotWriteItsRegistryFails(t *testing.T) {
 	}
 	dir := t.TempDir()
 	data := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(data, registryFile)+".lock", 0o755); err != nil {
+	if err := os.MkdirAll(layout.Registry(data)+".lock", 0o755); err != nil {
 		t.Fatal(err)
 	}
 	workspaces := NewWorkspaces(WorkspacesOptions{WorkspacesDir: dir, DataDir: data})
@@ -140,7 +141,7 @@ func TestAFirstRunThatCannotWriteItsRegistryFails(t *testing.T) {
 func TestAStaleRegistryIsRewrittenWithoutTheOldKeys(t *testing.T) {
 	dir := t.TempDir()
 	data := t.TempDir()
-	path := filepath.Join(data, registryFile)
+	path := layout.Registry(data)
 	// `trusted` is the key this build no longer writes: a workspace record that still carries it
 	// is rewritten on load.
 	payload := `{"path":` + strconvQuote(path) + `,"workspaces":[{"name":"personal","path":"` +
@@ -209,7 +210,7 @@ func strconvQuote(value string) string {
 func TestAWriteThatWaitedForTheLockCarriesTheNewerRecord(t *testing.T) {
 	dataDir := t.TempDir()
 	workspaces := registryIn(t, dataDir, "", []Workspace{{Name: "team", Path: "/old", Kind: KindRoom}})
-	held, err := os.OpenFile(filepath.Join(dataDir, registryFile)+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	held, err := os.OpenFile(layout.Registry(dataDir)+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +221,7 @@ func TestAWriteThatWaitedForTheLockCarriesTheNewerRecord(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- workspaces.persist("team") }()
 	// Long enough for the write to start and wait on the lock; well inside its budget.
-	time.Sleep(4 * registryLockRetry)
+	time.Sleep(100 * time.Millisecond)
 	workspaces.mu.Lock()
 	newer := workspaces.registry["team"]
 	newer.Path = "/new"

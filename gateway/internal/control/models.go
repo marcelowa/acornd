@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/protocol"
 	"github.com/marcelowa/acornd/gateway/internal/workerpool"
 )
@@ -665,7 +666,7 @@ func (c *Control) reapplyInheriting(ctx context.Context) error {
 
 // loadInstallDefaults reads the install-wide layer.
 func (c *Control) loadInstallDefaults() {
-	install, err := LoadDefaults(filepath.Join(c.opts.DataDir, "settings.json"))
+	install, err := LoadDefaults(layout.Settings(c.opts.DataDir))
 	if err != nil {
 		workerpool.Log("install defaults unreadable, using this workspace's: %v", err)
 		return
@@ -701,20 +702,39 @@ func LoadDefaults(path string) (Defaults, error) {
 	return defaults, nil
 }
 
-// SaveDefaults writes a defaults file, atomically and privately.
-func SaveDefaults(path string, defaults Defaults) error {
+// ChangeDefaults reads a defaults file under its lock, lets change edit it, and writes the result before the lock
+// goes. The install's file has more than one writer — the console and `acornd model` — and a writer that saved the
+// copy it had read erased the keys another saved meanwhile. An error from change writes nothing.
+//
+// An empty layer is not a layer: the file is removed rather than left full of zeroes, which would make the
+// install look configured when it is not.
+func ChangeDefaults(path string, change func(*Defaults) error) (Defaults, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return Defaults{}, err
+	}
+	release, err := layout.Lock(path)
+	if err != nil {
+		return Defaults{}, err
+	}
+	defer release()
+	defaults, err := LoadDefaults(path)
+	if err != nil {
+		return Defaults{}, err
+	}
+	if err := change(&defaults); err != nil {
+		return Defaults{}, err
+	}
+	if defaults.Empty() {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return Defaults{}, err
+		}
+		return defaults, nil
+	}
 	payload, err := json.MarshalIndent(defaults, "", "  ")
 	if err != nil {
-		return err
+		return Defaults{}, err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	temp := path + ".tmp"
-	if err := os.WriteFile(temp, append(payload, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(temp, path)
+	return defaults, layout.WriteFile(path, append(payload, '\n'))
 }
 
 // SetDefaultModel changes what conversations without an explicit model run.

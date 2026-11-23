@@ -16,13 +16,10 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
-)
 
-// File is the book inside the install folder. ADR 0014 keeps the install folder out of every sandbox
-// mount, which is what makes an admin's list of people a file an agent cannot read.
-const File = "people.json"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
+)
 
 // Role is what a record may do at the install level. There are two, deliberately: a viewer or an
 // operator is a sharing model nobody has asked for, and a role added before its case exists is a
@@ -586,77 +583,20 @@ func (b *Book) write(records []Person) error {
 	if err != nil {
 		return err
 	}
-	payload = append(payload, '\n')
-	temp, err := os.CreateTemp(filepath.Dir(b.path), ".people-*")
-	if err != nil {
-		return err
-	}
-	path := temp.Name()
-	defer func() { _ = os.Remove(path) }()
-	if err := temp.Chmod(0o600); err != nil {
-		_ = temp.Close()
-		return err
-	}
-	if _, err := temp.Write(payload); err != nil {
-		_ = temp.Close()
-		return err
-	}
-	if err := temp.Sync(); err != nil {
-		_ = temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(path, b.path)
+	return layout.WriteFile(b.path, append(payload, '\n'))
 }
 
 // lock is held across the read-modify-write of one change, so the command line and a running gateway
-// cannot lose each other's edit. The lock file holds nothing; it exists to be locked.
-// The wait for another process is bounded on purpose. Flock is released when its holder ends, so what a caller
-// waits for is a write in progress, and that is a moment; a wait that outlives this budget means the other
-// process is wedged, and being told so beats hanging — by the command line, and by every test run, where a hang
-// costs the whole timeout to learn nothing.
-const (
-	lockBudget = 2 * time.Second
-	lockRetry  = 25 * time.Millisecond
-)
-
+// cannot lose each other's edit.
 func (b *Book) lock() (func(), []Person, error) {
-	file, err := os.OpenFile(b.path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	release, err := layout.Lock(b.path)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := waitFor(file); err != nil {
-		_ = file.Close()
-		return nil, nil, err
-	}
 	records, err := b.load()
-	release := func() {
-		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-		_ = file.Close()
-	}
 	if err != nil {
 		release()
 		return nil, nil, err
 	}
 	return release, records, nil
-}
-
-// waitFor is the exclusive lock, asked for without blocking and retried until the budget is spent.
-func waitFor(file *os.File) error {
-	deadline := time.Now().Add(lockBudget)
-	for {
-		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			return nil
-		}
-		if !errors.Is(err, syscall.EWOULDBLOCK) {
-			return err
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("another acornd process has been writing the book of people for over %s: try again", lockBudget)
-		}
-		time.Sleep(lockRetry)
-	}
 }

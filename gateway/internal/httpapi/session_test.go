@@ -11,6 +11,7 @@ import (
 	"testing/fstest"
 
 	"github.com/marcelowa/acornd/gateway/internal/identity"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/people"
 )
 
@@ -36,7 +37,7 @@ func newConsole(t *testing.T) *console {
 	if err != nil {
 		t.Fatalf("setup code: %v", err)
 	}
-	book, err := people.Open(filepath.Join(dir, people.File))
+	book, err := people.Open(layout.People(dir))
 	if err != nil {
 		t.Fatalf("book: %v", err)
 	}
@@ -480,7 +481,7 @@ func TestABookNobodyCanReadDoesNotOpenSetup(t *testing.T) {
 
 // writeBrokenBook leaves a people.json that no reader can parse.
 func writeBrokenBook(dir string) error {
-	return os.WriteFile(filepath.Join(dir, people.File), []byte("not a book"), 0o600)
+	return os.WriteFile(layout.People(dir), []byte("not a book"), 0o600)
 }
 
 // An install folder that cannot say what its credentials are answers with the reason rather than a 401

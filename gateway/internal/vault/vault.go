@@ -19,8 +19,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
+
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 )
 
 // Scope says where a secret lives. A global secret is on every workspace; a workspace
@@ -496,11 +497,11 @@ func (s *Store) Delete(scope Scope, workspace, name string) error {
 func (s *Store) read() (document, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	lock, err := s.lock(false)
+	release, err := layout.LockShared(s.path)
 	if err != nil {
 		return document{}, err
 	}
-	defer unlock(lock)
+	defer release()
 	return s.load()
 }
 
@@ -509,11 +510,11 @@ func (s *Store) read() (document, error) {
 func (s *Store) update(change func(*document) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	lock, err := s.lock(true)
+	release, err := layout.Lock(s.path)
 	if err != nil {
 		return err
 	}
-	defer unlock(lock)
+	defer release()
 	doc, err := s.load()
 	if err != nil {
 		return err
@@ -559,86 +560,7 @@ func (s *Store) save(doc document) error {
 	if err != nil {
 		return err
 	}
-	payload = append(payload, '\n')
-	temp, err := os.CreateTemp(filepath.Dir(s.path), ".secrets-*")
-	if err != nil {
-		return err
-	}
-	path := temp.Name()
-	defer func() { _ = os.Remove(path) }()
-	if err := temp.Chmod(0o600); err != nil {
-		_ = temp.Close()
-		return err
-	}
-	if _, err := temp.Write(payload); err != nil {
-		_ = temp.Close()
-		return err
-	}
-	if err := temp.Sync(); err != nil {
-		_ = temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(path, s.path)
-}
-
-// The wait for another process is bounded on purpose. Flock is released when its holder ends, so what a caller
-// waits for is a write in progress, and that is a moment; a wait that outlives this budget means the other
-// process is wedged, and being told so beats hanging — by the command line, and by every test run, where a hang
-// costs the whole timeout to learn nothing. The book of people learned this the hard way: four mutants that
-// skipped a release turned one package's mutation run into sixteen minutes.
-const (
-	lockBudget = 2 * time.Second
-	lockRetry  = 25 * time.Millisecond
-)
-
-// lock creates the lock file beside the store, so two processes never read-modify-write
-// the same file over each other. The lock file itself holds nothing.
-func (s *Store) lock(exclusive bool) (*os.File, error) {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		return nil, err
-	}
-	file, err := os.OpenFile(s.path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	if err := waitForLock(file, exclusive); err != nil {
-		_ = file.Close()
-		return nil, err
-	}
-	return file, nil
-}
-
-// waitForLock asks for the lock without blocking, and retries until the budget is spent. A holder that never lets
-// go is somebody else's wedged process, and the refusal says which file it was — the person reading it can act on
-// that and a wait cannot.
-func waitForLock(file *os.File, exclusive bool) error {
-	mode := syscall.LOCK_SH
-	if exclusive {
-		mode = syscall.LOCK_EX
-	}
-	mode |= syscall.LOCK_NB
-	deadline := time.Now().Add(lockBudget)
-	for {
-		err := syscall.Flock(int(file.Fd()), mode)
-		if err == nil {
-			return nil
-		}
-		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
-			return err
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("another acornd process has been holding %s for over %s: try again", file.Name(), lockBudget)
-		}
-		time.Sleep(lockRetry)
-	}
-}
-
-func unlock(file *os.File) {
-	_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-	_ = file.Close()
+	return layout.WriteFile(s.path, append(payload, '\n'))
 }
 
 // markOverride says whether a workspace entry has a global entry of the same name to

@@ -21,7 +21,8 @@ internal/sandbox/microsandbox 89 112
 internal/sandbox/youki 100  188
 internal/supervise   85   47
 internal/update      90  258
-internal/vault       95  117
+internal/vault       95  107  -- was 117: the lock and the atomic write moved to internal/layout (#72), and their 10 killed mutants with them
+internal/layout     100   10  -- new (#72): the lock and the atomic write that the vault, the book and the registry each had a copy of
 internal/workerpool  87    7
 internal/ready       97   40
 internal/identity    98   69

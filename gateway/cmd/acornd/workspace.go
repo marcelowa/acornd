@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 )
 
@@ -346,7 +347,7 @@ func workspacePurge(argv []string) {
 // folder beside the registry. Deleting only the first is the bug this pair exists for — the storage, the settings
 // and the drafts would stay, and the next room of the name would open them.
 func purgeTargets(dataDir string, workspace control.Workspace) (folder, state string) {
-	return workspace.Path, control.StatePath(dataDir, workspace.Name)
+	return workspace.Path, layout.State(dataDir, workspace.Name)
 }
 
 // purgeWorkspace deletes the two folders and then the record. The record goes last, so a purge that stopped

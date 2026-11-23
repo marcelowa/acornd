@@ -9,11 +9,20 @@
 // What is checked, and what is deliberately not:
 //
 //   - a floor that falls is a failure, coverage and both mutation numbers;
-//   - a package split is the one move that is not a fall: code and its tests leave a package
-//     for named subpackages, so the parent's killed count drops while the sum the old floor
-//     promised moves with them. The parent plus the new subpackages must still meet the old
-//     killed floor, and every new package has its own row; a drop that is not accounted for
-//     this way is still a failure.
+//   - three moves are not a fall. A package split: code and its tests leave a package for named
+//     subpackages, so the parent's killed count drops while the sum the old floor promised moves
+//     with them. The parent plus the new subpackages must still meet the old killed floor, and
+//     every new package has its own row; a drop that is not accounted for this way is still a
+//     failure;
+//   - code moved up: a helper lifted out of a driver into the shared package brings its mutants
+//     with it, so a child's drop is covered when its ancestor's killed floor rose by as much;
+//   - code moved into a package that is new to this tree: when shared code leaves several
+//     packages for a new sibling, their killed floors drop and the new package's row holds those
+//     mutants now. A new package is a row the base does not have, outside any split. A package
+//     that fell counts only if its own non-test files import a new package, since code that moved
+//     out leaves its old package using the new one. The killed drops of those packages must add up
+//     to at most the killed floors of the new packages they import. A larger drop, a fallen
+//     package that imports no new package, or an efficacy floor that fell, is still a failure;
 //   - a floor line that disappears while its package is still in the tree is a failure, because
 //     that is the same move written the other way;
 //   - a floor that rises is reported and passes — the file is edited by hand, and the person who
@@ -23,7 +32,7 @@
 //
 // Usage: bun scripts/check-floors.mjs [--base origin/main]
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const COVERAGE = ".coveragefloors";
@@ -91,7 +100,7 @@ function compare(kind, name, was, now, violations, raises) {
 	else raises.push(`${name}: ${moved}`);
 }
 
-function judge(kind, base, head, violations, raises, splits, moves, exists) {
+function judge(kind, base, head, violations, raises, splits, moves, exists, fell) {
 	let compared = 0;
 	for (const [name, was] of base) {
 		compared += 1;
@@ -126,9 +135,84 @@ function judge(kind, base, head, violations, raises, splits, moves, exists) {
 				}
 			}
 		}
+		// The third move is judged once every package is seen, because it adds up drops across
+		// packages: one package's drop alone does not say whether the new package holds it.
+		if (kind === "mutation" && now[1] < was[1] && newPackages(head, base).length > 0) {
+			fell.push({ name, was, now });
+			continue;
+		}
 		compare(kind, name, was, now, violations, raises);
 	}
 	return compared;
+}
+
+/**
+ * New rows that are not a split's subpackages: packages that did not exist on the base, where
+ * shared code moved to. A new row under a package that has a floor is a split, judged above.
+ */
+function newPackages(head, base) {
+	return [...head.keys()].filter((name) => !base.has(name) && ancestorFloor(name, base) === undefined);
+}
+
+/**
+ * Whether a package's own non-test Go files import another package of the module. A text match on
+ * the quoted import path is enough: the path is unique, and this needs no parser.
+ */
+function imports(name, target) {
+	const dir = join("gateway", name);
+	if (!existsSync(dir)) return false;
+	const path = `"${modulePath()}/${target}"`;
+	return readdirSync(dir).some(
+		(file) => file.endsWith(".go") && !file.endsWith("_test.go") && readFileSync(join(dir, file), "utf8").includes(path),
+	);
+}
+
+let module;
+function modulePath() {
+	module ??= readFileSync(join("gateway", "go.mod"), "utf8").match(/^module\s+(\S+)/m)?.[1];
+	if (!module) throw new Error("gateway/go.mod names no module");
+	return module;
+}
+
+/**
+ * The third move. Code cannot leave a package for a new one and leave the package not using it,
+ * unless it was deleted; so a package that fell counts only if it imports a new package, and only
+ * the new packages a fallen one imports hold its drop. A package that imports none fell.
+ */
+function judgeMovedIntoNew(fell, head, base, violations, moves) {
+	if (fell.length === 0) return;
+	const added = newPackages(head, base);
+	const moved = [];
+	const into = new Set();
+	for (const entry of fell) {
+		const used = added.filter((target) => imports(entry.name, target));
+		if (used.length === 0) {
+			violations.push(
+				`${entry.name}: ${entry.was.join("/")} -> ${entry.now.join("/")} (mutation); it imports no new package (${added.join(", ")}), so nothing moved there`,
+			);
+			continue;
+		}
+		for (const target of used) into.add(target);
+		moved.push(entry);
+	}
+	if (moved.length === 0) return;
+	const targets = [...into];
+	const held = targets.reduce((total, name) => total + (head.get(name)?.[1] ?? 0), 0);
+	const dropped = moved.reduce((total, { was, now }) => total + (was[1] - now[1]), 0);
+	for (const { name, was, now } of moved) {
+		if (dropped > held) {
+			violations.push(
+				`${name}: ${was.join("/")} -> ${now.join("/")} (mutation); the drops add up to ${dropped}, more than the ${held} killed in ${targets.join(", ")}`,
+			);
+		} else if (now[0] < was[0]) {
+			// The move accounts for killed mutants only; an efficacy floor still may not fall.
+			violations.push(`${name}: efficacy ${was[0]} -> ${now[0]} (mutation); a move into a new package does not lower efficacy`);
+		} else {
+			moves.push(
+				`${name}: ${was.join("/")} -> ${now.join("/")}, into ${targets.join(", ")}: ${dropped} killed dropped, ${held} held there (mutation)`,
+			);
+		}
+	}
 }
 
 /** The nearest package above name that has a floor: where a moved helper would land. */
@@ -181,8 +265,10 @@ const violations = [];
 const raises = [];
 const splits = [];
 const moves = [];
-const coverageCount = judge("coverage", baseCoverage, headCoverage, violations, raises, splits, moves, inTree);
-const mutationCount = judge("mutation", baseMutation, headMutation, violations, raises, splits, moves, inTree);
+const fell = [];
+const coverageCount = judge("coverage", baseCoverage, headCoverage, violations, raises, splits, moves, inTree, fell);
+const mutationCount = judge("mutation", baseMutation, headMutation, violations, raises, splits, moves, inTree, fell);
+judgeMovedIntoNew(fell, headMutation, baseMutation, violations, moves);
 
 if (violations.length > 0) {
 	console.error(`floors in ${COVERAGE} and ${MUTATION} may only move up (standards.md S10):`);

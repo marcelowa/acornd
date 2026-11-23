@@ -13,9 +13,9 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"path/filepath"
 
 	"github.com/marcelowa/acornd/gateway/internal/identity"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/people"
 )
 
@@ -80,7 +80,7 @@ func printSetupCode(out, notes io.Writer, dir string, rotate, disable bool) erro
 // folder it cannot write loudly, and a failure here would only replace the line this command is about
 // to print.
 func ensureSetupCode(dir string) {
-	book, err := people.Open(filepath.Join(dir, people.File))
+	book, err := people.Open(layout.People(dir))
 	if err != nil {
 		return
 	}
@@ -99,7 +99,7 @@ func setupLine(dir, address string) string {
 	if err != nil {
 		return ""
 	}
-	book, err := people.Open(filepath.Join(dir, people.File))
+	book, err := people.Open(layout.People(dir))
 	if err != nil {
 		return ""
 	}

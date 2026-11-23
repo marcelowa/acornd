@@ -9,11 +9,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/people"
 	"github.com/marcelowa/acornd/gateway/internal/remote"
 )
@@ -172,7 +172,7 @@ func applyRemote(ctx context.Context, dir, hostname, zoneName, apiToken string) 
 	for _, step := range steps {
 		fmt.Printf("%-8s %s%s\n", stepVerb(step), step.Name, stepDetail(step))
 	}
-	fmt.Printf("\n%s now reaches this machine; %s holds the door, with the audience %s: restart acornd to open it\n", desire.Hostname, remote.File, state.Audience)
+	fmt.Printf("\n%s now reaches this machine; %s holds the door, with the audience %s: restart acornd to open it\n", desire.Hostname, layout.Remote(dir), state.Audience)
 	return nil
 }
 
@@ -228,7 +228,7 @@ func remoteInputs(dir string) (remote.Setup, []string, error) {
 	if err != nil {
 		return remote.Setup{}, nil, err
 	}
-	book, err := people.Open(filepath.Join(dir, people.File))
+	book, err := people.Open(layout.People(dir))
 	if err != nil {
 		return remote.Setup{}, nil, err
 	}

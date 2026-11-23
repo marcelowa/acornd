@@ -15,12 +15,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/marcelowa/acornd/gateway/internal/identity"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/remote"
 )
 
@@ -228,7 +228,7 @@ func TestAFileWithADoorRefusesEveryInterface(t *testing.T) {
 // set, which is why a machine behind somebody else's proxy never has to keep a record it does not use.
 func TestTheEnvironmentIsNotMergedWithTheFile(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, remote.File), []byte("{not json"), 0o600); err != nil {
+	if err := os.WriteFile(layout.Remote(dir), []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	world := newPublisher(t)

@@ -7,9 +7,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"text/tabwriter"
 
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/people"
 )
 
@@ -63,7 +63,7 @@ func openBook(dataDir string) (*people.Book, error) {
 	if err != nil {
 		return nil, err
 	}
-	return people.Open(filepath.Join(dir, people.File))
+	return people.Open(layout.People(dir))
 }
 
 func peopleList(argv []string) {
