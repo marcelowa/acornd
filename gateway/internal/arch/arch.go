@@ -7,10 +7,11 @@
 // review, and it is the only way the boundary is allowed to move.
 package arch
 
-// Allowed is what each package may import from inside this module, and nothing else. Every
-// directory holding Go files needs a row, including test-only ones: an unlisted package fails,
-// so adding one is a decision rather than an accident. A row that lists an import the package
-// no longer uses fails too, because a permissive row silently outlives the reason for it.
+// Allowed is what each package's production files may import from inside this module, and
+// nothing else. Every directory holding Go files needs a row, including test-only ones: an
+// unlisted package fails, so adding one is a decision rather than an accident. A row that lists an
+// import no production file uses fails too, because a permissive row silently outlives the reason
+// for it. The edges only a _test.go file takes are in AllowedInTests, below.
 var Allowed = map[string][]string{
 	// The entry point constructs every layer; it is the one place allowed to know them all.
 	"cmd/acornd": {
@@ -39,12 +40,12 @@ var Allowed = map[string][]string{
 	// It also asks support for a workspace diagnosis and records the running build in it; both
 	// are leaves, and neither knows how a workspace is opened. It asks layout where the registry, the install's
 	// settings and each workspace's state folder are, and writes the registry with layout's lock and write.
+	// It names an engine by its string and imports none: cmd/acornd registers the drivers into sandbox's table
+	// before anything can choose one (house rule G3, bwrap/register.go).
 	"internal/control": {
 		"internal/layout",
 		"internal/protocol",
 		"internal/sandbox",
-		"internal/sandbox/bwrap",
-		"internal/sandbox/microsandbox",
 		"internal/secretsproxy",
 		"internal/support",
 		"internal/update",
@@ -52,14 +53,8 @@ var Allowed = map[string][]string{
 		"internal/workerpool",
 	},
 
-	// The feature suite drives a real gateway binary; it reaches the engine only to install one, and the
-	// door's credential file to sign its clients in — a console with no proof answers nobody (ADR 0036 §3).
-	"internal/e2e": {
-		"internal/identity",
-		"internal/sandbox",
-		"internal/sandbox/microsandbox",
-		"internal/sandbox/youki",
-	},
+	// The feature suite is test-only: it has no production file, so its row is empty. Its edges are in AllowedInTests.
+	"internal/e2e": {},
 
 	// The edge translates HTTP into domain calls. It must not learn what an engine is: asking
 	// control is the rule, and a second copy of "which engines exist" is how the two drift apart.
@@ -106,15 +101,13 @@ var Allowed = map[string][]string{
 	// One workspace's secrets proxy: loopback, the vault's grants handed in, nothing of this
 	// project imported. It is a leaf on purpose — the package that knows the vault stays control.
 	"internal/secretsproxy": {},
-	// The engines and their drivers. It reaches netns for the test binary's netns helper, which
-	// runs the same configuration the product's acornd runs before a sandbox's first process
-	// (ADR 0025); the alternative was a second copy of the refused ranges in the test.
+	// The engines and their drivers. A driver names the sandbox interface and nothing else in production.
 	// It asks layout where the install's config file is, the one file of the install folder a sandbox mounts.
-	"internal/sandbox":              {"internal/layout", "internal/sandbox/sandboxtest"},
-	"internal/sandbox/bwrap":        {"internal/netns", "internal/sandbox", "internal/sandbox/sandboxtest", "internal/supervise"},
+	"internal/sandbox":              {"internal/layout"},
+	"internal/sandbox/bwrap":        {"internal/sandbox", "internal/supervise"},
 	"internal/sandbox/microsandbox": {"internal/sandbox"},
 	"internal/sandbox/sandboxtest":  {},
-	"internal/sandbox/youki":        {"internal/netns", "internal/sandbox", "internal/sandbox/sandboxtest", "internal/supervise"},
+	"internal/sandbox/youki":        {"internal/sandbox", "internal/supervise"},
 	"internal/supervise":            {},
 	// The support bundle collector: records, cgroups, and redaction. It knows the sandbox naming
 	// scheme, and nothing about control.
@@ -126,4 +119,24 @@ var Allowed = map[string][]string{
 	"internal/vault":      {"internal/layout"},
 	"internal/workerpool": {"internal/protocol"},
 	"web":                 {},
+}
+
+// AllowedInTests is what a package's _test.go files may import from inside this module, on top of
+// its Allowed row. A test is its own entry point, so it may reach an engine or a helper that
+// production does not. Those edges live here, so a production import of one still fails. Like
+// Allowed, a row that lists an import no test file uses fails.
+var AllowedInTests = map[string][]string{
+	// The domain's tests register the two engines they drive: a test binary is its own entry point,
+	// so its TestMain registers the drivers, which production gets from cmd/acornd.
+	"internal/control": {"internal/sandbox/bwrap", "internal/sandbox/microsandbox"},
+	// The feature suite drives a real gateway binary; it reaches the engine only to install one, and the
+	// door's credential file to sign its clients in — a console with no proof answers nobody (ADR 0036 §3).
+	"internal/e2e": {"internal/identity", "internal/sandbox", "internal/sandbox/microsandbox", "internal/sandbox/youki"},
+	// The sandbox package's tests use the helpers in sandboxtest.
+	"internal/sandbox": {"internal/sandbox/sandboxtest"},
+	// The engines' tests reach netns for the test binary's netns helper, which runs the same
+	// configuration the product's acornd runs before a sandbox's first process (ADR 0025); the
+	// alternative was a second copy of the refused ranges in the test.
+	"internal/sandbox/bwrap": {"internal/netns", "internal/sandbox/sandboxtest"},
+	"internal/sandbox/youki": {"internal/netns", "internal/sandbox/sandboxtest"},
 }
