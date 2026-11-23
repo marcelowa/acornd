@@ -334,6 +334,17 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq bubblewrap passt
+      - name: Show the host's network
+        # Issue 87: on some runs every network-on test fails with `no interface "eth0" here`.
+        # pasta names the namespace's interface after the host's default one unless told
+        # otherwise, so the host's links and default route are what a failing run needs to show.
+        # The last line asks pasta which name it picks with the gateway's flags but without -I:
+        # the gateway now passes `-I eth0`, so this shows the name that flag overrides.
+        run: |
+          ip -o link
+          ip route show default
+          passt --version | head -1
+          pasta -q -t none -u none -T none -U none --no-map-gw -a 10.0.2.15 -n 24 -g 10.0.2.2 -- ip -o link || true
       - name: Build the binary the sandbox hands pasta
         # The probe runs this binary, not /bin/true, so it has to be one that is not under
         # /usr/bin — which is the same place a real install puts it. This is what makes the check

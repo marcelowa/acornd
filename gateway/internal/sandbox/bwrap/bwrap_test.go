@@ -420,6 +420,9 @@ func TestBwrapSandboxArgvSharesPastaForEgress(t *testing.T) {
 		// translation maps 10.0.2.2 onto the same loopback. A sandbox that reached 127.0.0.1:7777
 		// would be talking to the acornd that runs it.
 		"-t none -u none -T none -U none", "--no-map-gw",
+		// The helper brings up eth0; without -I, pasta names the interface after the
+		// machine's default one, which is not always eth0 (issue 87).
+		"-I eth0",
 		"-a 10.0.2.15 -n 24 -g 10.0.2.2",
 		// pasta configures neither the address nor the route, so the sandbox does it from inside
 		// the namespace pasta made: this binary over netlink, not a shell and not iproute2.
@@ -989,21 +992,7 @@ func TestAPastaThatCannotMapItsUserNamespaceIsRefused(t *testing.T) {
 // AppArmor profile for pasta allows, so a probe that ran it said the network worked while every
 // sandbox with one refused to start the supervisor. This asks for the same binary a sandbox does.
 func TestThePastaProbeHandsPastaThisBinaryAndNotBinTrue(t *testing.T) {
-	dir := t.TempDir()
-	record := filepath.Join(dir, "argv")
-	script := filepath.Join(dir, "pasta")
-	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + record + "\nexit 0\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := sandbox.ProbePastaWithin(script, time.Second); err != nil {
-		t.Fatalf("the probe: %v", err)
-	}
-	raw, err := os.ReadFile(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	args := probePastaArgs(t)
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -1020,6 +1009,43 @@ func TestThePastaProbeHandsPastaThisBinaryAndNotBinTrue(t *testing.T) {
 			t.Fatalf("the probe still runs /bin/true, which an AppArmor profile for pasta allows: %v", args)
 		}
 	}
+}
+
+// pasta names the interface and the netns helper brings it up by name, from two constants in two
+// packages that may not import each other. A difference fails every sandbox with a network, and
+// only in the bwrap tier (issue 87), so it fails here instead.
+func TestPastaNamesTheInterfaceTheNetnsHelperBringsUp(t *testing.T) {
+	if sandbox.SandboxInterface != netns.Interface {
+		t.Fatalf("pasta is given -I %q but the netns helper brings up %q", sandbox.SandboxInterface, netns.Interface)
+	}
+}
+
+// The probe makes the same interface a sandbox does. On a machine whose default interface is not
+// eth0, a probe without -I would pass while every sandbox failed to find eth0 (issue 87).
+func TestThePastaProbeNamesTheInterfaceEth0(t *testing.T) {
+	if joined := strings.Join(probePastaArgs(t), " "); !strings.Contains(joined, "-I eth0 ") {
+		t.Errorf("the probe should name pasta's interface eth0: %s", joined)
+	}
+}
+
+// probePastaArgs runs the probe against a pasta that only writes down what it was given.
+func probePastaArgs(t *testing.T) []string {
+	t.Helper()
+	dir := t.TempDir()
+	record := filepath.Join(dir, "argv")
+	script := filepath.Join(dir, "pasta")
+	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + record + "\nexit 0\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := sandbox.ProbePastaWithin(script, time.Second); err != nil {
+		t.Fatalf("the probe: %v", err)
+	}
+	raw, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSpace(string(raw)), "\n")
 }
 
 // pasta refusing to start the program it was given is its own sentence, and exit 0 does not make

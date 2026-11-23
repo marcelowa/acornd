@@ -811,7 +811,7 @@ func (b *Bwrap) bootArgv(config bwrapConfig) ([]string, error) {
 		// machine's networks. See resolveResolv.
 		argv = append(argv, "--dns-forward", sandbox.SandboxDNS)
 	}
-	argv = append(argv, "-a", address, "-n", prefix, "-g", config.Network.Gateway, "--")
+	argv = append(argv, "-I", sandbox.SandboxInterface, "-a", address, "-n", prefix, "-g", config.Network.Gateway, "--")
 	argv = append(argv, configure...)
 	return append(argv, bwrapArgv...), nil
 }

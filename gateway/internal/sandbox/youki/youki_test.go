@@ -644,6 +644,8 @@ func TestYoukiPastaArgvKeepsTheMachinesLoopbackOut(t *testing.T) {
 		// The machine's own loopback is not the workspace's, by either route pasta offers.
 		"/usr/bin/pasta -q -t none -u none -T none -U none --no-map-gw",
 		"--dns-forward " + sandbox.SandboxDNS,
+		// The helper brings up eth0, whatever the machine's own interface is called (issue 87).
+		"-I eth0",
 		"-a 10.0.2.15 -n 24 -g 10.0.2.2 --",
 		"internal netns --address " + sandbox.SandboxAddress + " --gateway " + sandbox.SandboxGateway + " " + sandbox.RefusePrivate,
 		driver.binary() + " run --bundle " + driver.workspaceDir("acornd-ws-12345678") + " --pid-file " + driver.pidPath("acornd-ws-12345678") + " acornd-ws-12345678",
