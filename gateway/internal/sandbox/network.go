@@ -50,6 +50,10 @@ const (
 	// private. It is inside 10.0.2.0/24, whose connected route is more specific than the refused
 	// ranges, which is what keeps the gateway and this address reachable.
 	SandboxDNS = "10.0.2.3"
+	// SandboxInterface is the name pasta gives the namespace's interface, passed as -I. Without
+	// it pasta copies the machine's default interface name, which is not always eth0, and the
+	// netns helper (internal/netns/command.go) brings up eth0 by name. See issue 87.
+	SandboxInterface = "eth0"
 )
 
 // RefusePrivate is the flag that asks the namespace's own configuration to install the routes

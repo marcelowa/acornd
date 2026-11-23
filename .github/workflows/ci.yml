@@ -338,7 +338,8 @@ jobs:
         # Issue 87: on some runs every network-on test fails with `no interface "eth0" here`.
         # pasta names the namespace's interface after the host's default one unless told
         # otherwise, so the host's links and default route are what a failing run needs to show.
-        # The last line asks pasta itself, with the gateway's flags, which name it gave.
+        # The last line asks pasta which name it picks with the gateway's flags but without -I:
+        # the gateway now passes `-I eth0`, so this shows the name that flag overrides.
         run: |
           ip -o link
           ip route show default

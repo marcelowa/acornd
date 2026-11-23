@@ -864,7 +864,7 @@ func (y *Youki) pastaArgv(config youkiConfig, name string) ([]string, error) {
 	if !config.Network.Private {
 		argv = append(argv, "--dns-forward", sandbox.SandboxDNS)
 	}
-	argv = append(argv, "-a", address, "-n", prefix, "-g", config.Network.Gateway, "--")
+	argv = append(argv, "-I", sandbox.SandboxInterface, "-a", address, "-n", prefix, "-g", config.Network.Gateway, "--")
 	configure := []string{
 		config.Supervisor, "internal", "netns",
 		"--address", config.Network.Address,

@@ -55,7 +55,7 @@ func ProbePastaWithin(pasta string, wait time.Duration) error {
 	}
 	argv := []string{
 		"-q", "-t", "none", "-u", "none", "-T", "none", "-U", "none", "--no-map-gw",
-		"-a", "10.0.2.15", "-n", "24", "-g", "10.0.2.2", "--", target,
+		"-I", SandboxInterface, "-a", "10.0.2.15", "-n", "24", "-g", "10.0.2.2", "--", target,
 	}
 	argv = append(argv, args...)
 	ctx, cancel := context.WithTimeout(context.Background(), wait)
