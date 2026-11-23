@@ -114,6 +114,7 @@ import type {
 } from "./view-models";
 import type { Draft, RoomDraft } from "./draft";
 import { shownDraft } from "./draft";
+import { useNavigation, useScreens, type NavigationSlice } from "./use-navigation";
 import { read, usePreferences, type PreferencesSlice } from "./use-preferences";
 import type {
 	WireDraft,
@@ -136,102 +137,6 @@ const DRAFT_SETTLE_MS = 400;
  * changes when the work does, slow enough that it is one request a second. */
 const openingPollMs = 700;
 
-interface Route {
-	/** Which of the interface's screens is in view; the conversation is the one behind them. */
-	screen: Screen;
-	workspace: string;
-	conversation: string;
-	/** Which settings page is open. Only the settings screen reads it. */
-	settingsTab: SettingsTab;
-	/** Which release the update page is on; empty means the newest. */
-	updateTag: string;
-}
-
-/** The screens the URL can name. A conversation is one of them, because it has a URL too. The
- * workspaces list is not: it is a layer over the conversation, and it keeps no URL of its own
- * (step 06), so no address can land on it. */
-export type Screen = "conversation" | "settings" | "update";
-
-/** The settings pages, each with its own URL under /settings. `general` is the install-wide
- * page: what runs and how it keeps itself current, the defaults a new conversation starts from,
- * and the theme. The old `defaults`, `updates` and `install` pages kept no redirect — the
- * release page has its own address now, and an unknown page lands on general. */
-export type SettingsTab = "general" | "providers" | "secrets" | "people" | "remote";
-
-export const SETTINGS_TABS: SettingsTab[] = ["general", "providers", "secrets", "people", "remote"];
-
-/**
- * Whether a string names a settings page this build has. It is the one list: the URL parser and the tab bar
- * both ask it, so a page added here cannot be drawn by one and refused by the other.
- */
-export function isSettingsTab(value: string | undefined): value is SettingsTab {
-	return value !== undefined && (SETTINGS_TABS as string[]).includes(value);
-}
-
-function settingsTabFrom(segment: string | undefined): SettingsTab {
-	return isSettingsTab(segment) ? segment : "general";
-}
-
-/** The URL scheme the gateway routes: /c/<workspace>/<conversation>, /w/<workspace>, the
- * settings screen, and one page per settings tab. Settings remembers the workspace in a query
- * so a reload shows the one it was about. `/workspaces` is no longer an address: it was the
- * list's own page, and the list is a layer now, so an old link lands on the conversation
- * instead of on nothing. */
-export function routeFromUrl(path: string, search: string): Route {
-	const settings = /^\/settings(?:\/([^/]+))?\/?$/.exec(path);
-	if (settings !== null) {
-		return {
-			screen: "settings",
-			workspace: new URLSearchParams(search).get("workspace") ?? "",
-			conversation: "",
-			settingsTab: settingsTabFrom(settings[1]),
-			updateTag: "",
-		};
-	}
-	// The release page: /update is the newest release, /update/<tag> a version page.
-	const update = /^\/update(?:\/([^/]+))?\/?$/.exec(path);
-	if (update !== null) {
-		return {
-			screen: "update",
-			workspace: new URLSearchParams(search).get("workspace") ?? "",
-			conversation: "",
-			settingsTab: "general",
-			updateTag: update[1] === undefined ? "" : decodeURIComponent(update[1]),
-		};
-	}
-	const conversation = /^\/c\/([^/]+)\/([^/]+)\/?$/.exec(path);
-	if (conversation !== null) {
-		return {
-			screen: "conversation",
-			workspace: decodeURIComponent(conversation[1] ?? ""),
-			conversation: decodeURIComponent(conversation[2] ?? ""),
-			settingsTab: "general",
-			updateTag: "",
-		};
-	}
-	const workspace = /^\/w\/([^/]+)\/?$/.exec(path);
-	if (workspace !== null) {
-		return {
-			screen: "conversation",
-			workspace: decodeURIComponent(workspace[1] ?? ""),
-			conversation: "",
-			settingsTab: "general",
-			updateTag: "",
-		};
-	}
-	return {
-		screen: "conversation",
-		workspace: "",
-		conversation: "",
-		settingsTab: "general",
-		updateTag: "",
-	};
-}
-
-function fromUrl(): Route {
-	return routeFromUrl(window.location.pathname, window.location.search);
-}
-
 /** What a refusal said, as a page shows it: the gateway writes sentences, and a status code is not one. */
 function messageOf(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -241,6 +146,15 @@ function messageOf(error: unknown): string {
 function timeOf(updatedAt: Date | undefined): number {
 	return updatedAt instanceof Date ? updatedAt.getTime() : Number.NEGATIVE_INFINITY;
 }
+
+/** The route's names, which components and the setup checklist read from here. */
+export {
+	isSettingsTab,
+	routeFromUrl,
+	SETTINGS_TABS,
+	type Screen,
+	type SettingsTab,
+} from "./use-navigation";
 
 /** A login in flight is the dialog's whole state, folded in `auth-flow.ts`. */
 export type { AuthFlow } from "./auth-flow";
@@ -252,7 +166,7 @@ export interface PeopleBook {
 	catalog: ProviderCatalogEntry[];
 }
 
-export interface Platform extends PreferencesSlice {
+export interface Platform extends PreferencesSlice, NavigationSlice {
 	ready: boolean;
 	/** The stream is following, or trying to be. */
 	connection: "live" | "reconnecting";
@@ -296,22 +210,6 @@ export interface Platform extends PreferencesSlice {
 	/** Put somebody the book names into a room, and take a guest out. Both are the room's owner's. */
 	addGuest: (workspace: string, email: string) => void;
 	removeGuest: (workspace: string, email: string) => void;
-	/** The screen in view: a conversation or settings. The workspaces list is a level of the rail
-	 * over the conversations, not a screen (`workspacesOpen`). */
-	screen: Screen;
-	showScreen: (screen: "conversation" | "settings") => void;
-	/** The workspaces list, the level above the conversations in the rail: it keeps no URL, so Back
-	 * goes back to the conversations instead of leaving the console. The rail stays where it is. */
-	workspacesOpen: boolean;
-	openWorkspaces: () => void;
-	closeWorkspaces: () => void;
-	/** The settings page in view, with its own URL. */
-	settingsTab: SettingsTab;
-	/** Which release the update page is on, from the URL; empty means the newest. */
-	updateTag: string;
-	showSettingsTab: (tab: SettingsTab) => void;
-	/** The release page, at its own URL, optionally on one version. */
-	showUpdate: (tag?: string) => void;
 	/** A conversation belongs to a workspace for life, so switching means starting over: the
 	 * transcript is cleared and the next one arrives with the workspace. */
 	selectWorkspace: (name: string) => void;
@@ -439,7 +337,6 @@ export interface Platform extends PreferencesSlice {
 	harness?: string | undefined;
 	/** The level that was asked for when the model could not express it. */
 	thinkingRequested?: string | undefined;
-	railOpen: boolean;
 	select: (id: string) => void;
 	rename: (id: string, title: string) => void;
 	hide: (id: string, hidden: boolean) => void;
@@ -460,7 +357,6 @@ export interface Platform extends PreferencesSlice {
 	/** Record the draft of the conversation in view. Batched; the newest words win. */
 	setDraft: (text: string, attachments: WireDraftAttachment[]) => void;
 	abort: () => void;
-	setRailOpen: (open: boolean) => void;
 }
 
 /**
@@ -470,7 +366,8 @@ export interface Platform extends PreferencesSlice {
  */
 export function usePlatform(): Platform {
 	const preferences = usePreferences();
-	const [route, setRoute] = useState<Route>(fromUrl);
+	const nav = useNavigation();
+	const { route, setRoute, setRailOpen, setWorkspacesOpen } = nav;
 	const [state, setState] = useState<WireState | undefined>(undefined);
 	const [secretRequest, setSecretRequest] = useState<WireSecretEvent | undefined>(undefined);
 	const [view, setView] = useState<WireView | undefined>(undefined);
@@ -485,10 +382,6 @@ export function usePlatform(): Platform {
 	 */
 	const [marks, setMarks] = useState<Record<string, Record<string, BusyAction>>>({});
 	const [seen, setSeen] = useState<Record<string, string>>(() => read(SEEN_KEY, {}));
-	const [railOpen, setRailOpen] = useState(false);
-	/** The workspaces layer. It has no URL of its own, so it lives here and not in `route`; the
-	 * entry a `pushState` leaves behind is what makes Back close it. */
-	const [workspacesOpen, setWorkspacesOpen] = useState(false);
 	const [composerFocusToken, setComposerFocusToken] = useState(0);
 	const [connection, setConnection] = useState<"live" | "reconnecting">("live");
 	const [failure, setFailure] = useState<string | undefined>(undefined);
@@ -620,26 +513,6 @@ export function usePlatform(): Platform {
 
 	/** What is in the inbox and not committed yet, by its own words: how it was sent. */
 	const sentMarks = useRef(new Map<string, BusyAction>());
-
-	const workspacesOpenRef = useRef(workspacesOpen);
-	useEffect(() => {
-		workspacesOpenRef.current = workspacesOpen;
-	}, [workspacesOpen]);
-
-	useEffect(() => {
-		const back = (): void => {
-			// The level has no address of its own, so Back is its own gesture: the entry it consumed
-			// is the one it pushed when it opened, which carried the same address. Popping the level
-			// is all that is left — the address, the rail and the conversation are where they were.
-			if (workspacesOpenRef.current) {
-				setWorkspacesOpen(false);
-				return;
-			}
-			setRoute(fromUrl());
-		};
-		window.addEventListener("popstate", back);
-		return () => window.removeEventListener("popstate", back);
-	}, []);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -987,89 +860,16 @@ export function usePlatform(): Platform {
 				updateTag: "",
 			});
 		},
-		[state, workspace],
+		[state, workspace, setRailOpen, setRoute],
 	);
 
-	/** The rail is the way between the screens; each one keeps its own URL so a reload and a
-	 * shared link land where someone was. The workspaces list is not one of them: it is a level of
-	 * the rail and keeps no address. */
-	const showScreen = useCallback(
-		(screen: "conversation" | "settings") => {
-			if (screen === "conversation") {
-				const name = state?.workspace?.name ?? workspace;
-				const id = state?.conversation?.id ?? activeId;
-				window.history.pushState(
-					null,
-					"",
-					id === ""
-						? `/w/${encodeURIComponent(name)}`
-						: `/c/${encodeURIComponent(name)}/${encodeURIComponent(id)}`,
-				);
-			} else {
-				// Settings are about a workspace, and each page has its own URL;
-				// coming back lands on the page that was open.
-				setRoute((current) => {
-					window.history.pushState(
-						null,
-						"",
-						`/settings/${current.settingsTab}?workspace=${encodeURIComponent(workspace)}`,
-					);
-					return { ...current, screen };
-				});
-				setRailOpen(false);
-				return;
-			}
-			setRailOpen(false);
-			// The conversation stays the one behind the screen: the stream keeps following it, so
-			// coming back shows what happened while the screen was open.
-			setRoute((current) => ({ ...current, screen }));
+	const navigation = useScreens(nav, {
+		workspace,
+		shown: {
+			workspace: state?.workspace?.name ?? workspace,
+			conversation: state?.conversation?.id ?? activeId,
 		},
-		[state, workspace, activeId],
-	);
-
-	/** The workspace list is a level of the rail, not a layer beside it: opening it leaves the rail
-	 * where it is — open on a desktop, the drawer on a phone — and fills it, so the X goes back to
-	 * the conversations before it puts the rail away.
-	 *
-	 * It pushes its own history entry, with the address it already has, so a press of Back has
-	 * something to consume: consuming it leaves the address unchanged and the conversation behind
-	 * the rail never moves (J10). Without that entry Back would leave the console on a fresh tab. */
-	const openWorkspaces = useCallback(() => {
-		window.history.pushState(null, "", window.location.pathname + window.location.search);
-		setWorkspacesOpen(true);
-	}, []);
-
-	const closeWorkspaces = useCallback(() => setWorkspacesOpen(false), []);
-
-	/** One settings page to another: the URL moves so a reload stays where someone was. */
-	const showSettingsTab = useCallback(
-		(tab: SettingsTab) => {
-			window.history.pushState(
-				null,
-				"",
-				`/settings/${tab}?workspace=${encodeURIComponent(workspace)}`,
-			);
-			setRoute((current) => ({ ...current, screen: "settings", settingsTab: tab }));
-		},
-		[workspace],
-	);
-
-	/** The release page: /update is the newest release, /update/<tag> a version page. It is one of
-	 * the screens, so Back returns to whatever the press came from, and a shared link lands on the
-	 * release it named. */
-	const showUpdate = useCallback(
-		(tag?: string) => {
-			const tail = tag === undefined || tag === "" ? "" : `/${encodeURIComponent(tag)}`;
-			window.history.pushState(
-				null,
-				"",
-				`/update${tail}?workspace=${encodeURIComponent(workspace)}`,
-			);
-			setRoute((current) => ({ ...current, screen: "update", updateTag: tag ?? "" }));
-			setRailOpen(false);
-		},
-		[workspace],
-	);
+	});
 
 	/** Every command goes through here: a success clears the last refusal, a failure is it. */
 	const act = useCallback(
@@ -1152,21 +952,24 @@ export function usePlatform(): Platform {
 
 	/** A conversation belongs to a workspace for life, so switching means starting over: the
 	 * transcript is cleared and the next one arrives with the workspace. */
-	const selectWorkspace = useCallback((name: string) => {
-		window.history.pushState(null, "", `/w/${encodeURIComponent(name)}`);
-		setRailOpen(false);
-		// Opening a workspace leaves the layer: the row is the layer's own action.
-		setWorkspacesOpen(false);
-		setView(undefined);
-		setOpening(undefined);
-		setRoute({
-			screen: "conversation",
-			workspace: name,
-			conversation: "",
-			settingsTab: "general",
-			updateTag: "",
-		});
-	}, []);
+	const selectWorkspace = useCallback(
+		(name: string) => {
+			window.history.pushState(null, "", `/w/${encodeURIComponent(name)}`);
+			setRailOpen(false);
+			// Opening a workspace leaves the layer: the row is the layer's own action.
+			setWorkspacesOpen(false);
+			setView(undefined);
+			setOpening(undefined);
+			setRoute({
+				screen: "conversation",
+				workspace: name,
+				conversation: "",
+				settingsTab: "general",
+				updateTag: "",
+			});
+		},
+		[setRailOpen, setRoute, setWorkspacesOpen],
+	);
 
 	// A row on the workspaces screen is not the workspace in view, so the name comes from the
 	// caller: the gateway takes it either way.
@@ -1203,7 +1006,7 @@ export function usePlatform(): Platform {
 				});
 			});
 		},
-		[act],
+		[act, setRoute],
 	);
 
 	const removeWorkspace = useCallback(
@@ -1226,7 +1029,7 @@ export function usePlatform(): Platform {
 				void reload();
 			});
 		},
-		[act, workspace, reload],
+		[act, workspace, reload, setRoute],
 	);
 
 	const renameWorkspace = useCallback(
@@ -1669,7 +1472,7 @@ export function usePlatform(): Platform {
 				});
 			})
 			.catch(reportError);
-	}, [workspace, reportError]);
+	}, [workspace, reportError, setRailOpen, setRoute]);
 
 	const setDefault = useCallback(
 		(kind: "model" | "thinking" | "agent", scope: DefaultScope, value: string) => {
@@ -1710,6 +1513,7 @@ export function usePlatform(): Platform {
 
 	return {
 		...preferences,
+		...navigation,
 		ready,
 		connection,
 		failure,
@@ -1762,10 +1566,6 @@ export function usePlatform(): Platform {
 		resolved: state?.resolved,
 		thinkingRequested: state?.agent.thinkingRequested,
 		harness: state?.harness,
-		railOpen,
-		screen: route.screen,
-		showScreen,
-		settingsTab: route.settingsTab,
 		remote,
 		applyRemote: applyRemoteNow,
 		forgetRemote: forgetRemoteNow,
@@ -1785,9 +1585,6 @@ export function usePlatform(): Platform {
 		closeProviderModels,
 		checkRemote: checkRemoteNow,
 		remoteChecking,
-		showSettingsTab,
-		updateTag: route.updateTag,
-		showUpdate,
 		newConversation,
 		composerFocusToken,
 		select,
@@ -1804,10 +1601,6 @@ export function usePlatform(): Platform {
 		draft,
 		setDraft,
 		abort,
-		setRailOpen,
-		workspacesOpen,
-		openWorkspaces,
-		closeWorkspaces,
 		renameWorkspace,
 		providers,
 		authFlow,

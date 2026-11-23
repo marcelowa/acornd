@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { isSettingsTab, routeFromUrl, SETTINGS_TABS } from "@/app/use-platform";
+import { isSettingsTab, routeFromUrl, SETTINGS_TABS } from "@/app/use-navigation";
 
 /**
  * The URL scheme, as one function. The workspaces list is the case worth a test: it was a page
