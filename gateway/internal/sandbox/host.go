@@ -98,7 +98,7 @@ func (h *Host) Remove(context.Context, string) error          { return nil }
 // the list rather than answered with another engine — a run that meant microsandbox and got the
 // host would be a security change nobody asked for.
 func Engine(dataDir, state, name string) (Driver, error) {
-	if make, ok := driverFactories[name]; ok {
+	if make, ok := driverFactory(name); ok {
 		return make(dataDir, state), nil
 	}
 	switch name {
