@@ -11,7 +11,7 @@ const openingPollMs = 700;
 /** Where the stream's frames go: each to the hook that owns what the frame carries. */
 export interface StreamSinks {
 	/** Forget the transcript before anything else: a new stream is starting. */
-	resetView: () => void;
+	clearView: () => void;
 	/** The stream opening is when a draft saved while it was away can land. */
 	flushDrafts: () => void;
 	receiveView: (view: WireView, senders: Record<string, WireSender>) => void;
@@ -31,12 +31,12 @@ export interface StreamSinks {
 export function useStream(route: Route, session: Session, sinks: StreamSinks): void {
 	const { workspace, reportError, clearFailure, setState, setReady, setOpening, setConnection } =
 		session;
-	const { resetView, flushDrafts, receiveView, receiveSecret, receiveAuth } = sinks;
+	const { clearView, flushDrafts, receiveView, receiveSecret, receiveAuth } = sinks;
 
 	useEffect(() => {
 		let cancelled = false;
 		// A stale transcript from the previous conversation is worse than an empty one.
-		resetView();
+		clearView();
 
 		// A workspace that is not up yet is a state, not a wait: the status is cheap and says
 		// which step it is on, so the pane can say "copying the image" instead of nothing while
@@ -129,7 +129,7 @@ export function useStream(route: Route, session: Session, sinks: StreamSinks): v
 		setOpening,
 		setConnection,
 		receiveAuth,
-		resetView,
+		clearView,
 		receiveSecret,
 		receiveView,
 	]);

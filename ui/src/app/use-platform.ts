@@ -57,7 +57,7 @@ export function usePlatform(): Platform {
 	const conversation = useConversation(session, nav.route);
 	// The hooks a frame lands in come before the stream that feeds them.
 	useStream(nav.route, session, {
-		resetView: conversation.resetView,
+		clearView: conversation.clearView,
 		flushDrafts: drafts.flushDrafts,
 		receiveView: conversation.receiveView,
 		receiveSecret: conversation.receiveSecret,

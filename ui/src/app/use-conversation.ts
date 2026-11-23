@@ -58,9 +58,8 @@ export interface Conversation {
 	receiveView: (view: WireView, senders: Record<string, WireSender>) => void;
 	/** A secret frame: a request opens the card, anything else closes the card it names. */
 	receiveSecret: (event: WireSecretEvent) => void;
-	/** Forget the transcript and its senders: a new stream is starting. */
-	resetView: () => void;
-	/** Forget the transcript: the next one arrives with the workspace or conversation switched to. */
+	/** Forget the transcript and its senders: the next one arrives with the workspace or the
+	 * conversation switched to. */
 	clearView: () => void;
 }
 
@@ -133,12 +132,10 @@ export function useConversation(session: Session, route: Route): Conversation {
 		);
 	}, []);
 
-	const resetView = useCallback((): void => {
+	const clearView = useCallback((): void => {
 		setView(undefined);
 		setSenders({});
 	}, []);
-
-	const clearView = useCallback((): void => setView(undefined), []);
 
 	// The commands the server would expand. They are fetched per workspace, once: the list
 	// changes when the workspace's resources change, not when a conversation does.
@@ -271,7 +268,6 @@ export function useConversation(session: Session, route: Route): Conversation {
 		},
 		receiveView,
 		receiveSecret,
-		resetView,
 		clearView,
 	};
 }
