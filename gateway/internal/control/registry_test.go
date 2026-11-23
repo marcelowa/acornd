@@ -1,9 +1,14 @@
 package control
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
@@ -145,5 +150,65 @@ func TestTheCatalogAnswersForWhatItHas(t *testing.T) {
 	describe.Providers[0].Authenticated = false
 	if c.isAvailable(describe, protocol.ModelBinding{Provider: "p", ModelID: "m"}) {
 		t.Error("an unauthenticated provider offers nothing")
+	}
+}
+
+// Two processes write the registry: `acornd workspace add` from a terminal, and a running console. The console
+// read the file once, at start, and every later write was its own copy of the map — so a workspace added from
+// the terminal while it ran was erased by its next write, with no error and no message (#69).
+func TestATerminalAddSurvivesTheConsolesNextWrite(t *testing.T) {
+	dataDir := t.TempDir()
+	workspaces := registryIn(t, dataDir, "", nil)
+
+	// What `acornd workspace add` does, while the console is running.
+	err := NewRegistry(dataDir).Change(func(file *RegistryFile) error {
+		file.Workspaces = append(file.Workspaces, Workspace{Name: "terminal", Path: filepath.Join(t.TempDir(), "terminal")})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := workspaces.Create("console", "ana@example.com"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	reloaded, err := NewRegistry(dataDir).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"terminal", "console"} {
+		if !slices.ContainsFunc(reloaded.Workspaces, func(workspace Workspace) bool { return workspace.Name == name }) {
+			t.Errorf("the registry lost %q: %+v", name, reloaded.Workspaces)
+		}
+	}
+}
+
+// A write waits for the other writer, and for a bounded time: a lock held past the budget is another process
+// that is wedged, and the caller is told so rather than kept waiting, with the file left as it was.
+func TestAWedgedRegistryLockIsRefusedRatherThanWaitedOn(t *testing.T) {
+	dataDir := t.TempDir()
+	registry := NewRegistry(dataDir)
+	held, err := os.OpenFile(filepath.Join(dataDir, registryFile)+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	err = registry.Change(func(file *RegistryFile) error {
+		file.Workspaces = append(file.Workspaces, Workspace{Name: "late", Path: "/late"})
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "another acornd process") {
+		t.Fatalf("a held lock should refuse the write and say why, got %v", err)
+	}
+	if waited := time.Since(start); waited < registryLockBudget || waited > 3*registryLockBudget {
+		t.Errorf("it waited %s, want the budget of %s", waited, registryLockBudget)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, registryFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the refused write wrote the file: %v", err)
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -121,7 +120,7 @@ func printDoctor(report doctorReport) {
 // room unregisters it and leaves the folder, so this is the one place a folder nothing owns is seen — once,
 // by name, rather than forgotten twice (ADR 0034 §6). Doctor reads the registry rather than repairing it.
 func workspaceOrphans(dataDir string) []string {
-	registry, err := control.LoadRegistryFile(filepath.Join(dataDir, "workspaces.json"))
+	registry, err := control.NewRegistry(dataDir).Load()
 	if err != nil {
 		log.Printf("acornd doctor: %v", err)
 		return nil

@@ -9,7 +9,6 @@ package control
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -262,6 +261,10 @@ type Workspaces struct {
 	// pair of locks, and a pending writer on either side would then hang every request
 	// that touches both — which is every request. `TestStateDoesNotTakeTheRegistryLockInsideItsOwn`
 	// checks the one place that had it backwards.
+	//
+	// The registry file's lock comes before this one: persist reads the registry under the file lock. So no
+	// caller holds mu when it calls persist, and today none does (Add, Update, Remove, ClaimOwner, writeBack,
+	// AddGuest and RemoveMember all release it first).
 	mu       sync.RWMutex
 	dir      string
 	registry map[string]Workspace
@@ -552,7 +555,7 @@ func (w *Workspaces) ClaimOwner(email string) error {
 	// The migration boot runs for an install that already had an owner, run now for the one that just got one:
 	// empty rooms are filled with the admin, and every record keeps the roles it already had.
 	changed, _, _ := w.migrateRooms()
-	if !changed {
+	if len(changed) == 0 {
 		return nil
 	}
 	// A workspace that is already running holds its own copy of the record, and the permissions it answers with
@@ -566,7 +569,7 @@ func (w *Workspaces) ClaimOwner(email string) error {
 			live.SetWorkspace(workspace)
 		}
 	}
-	return w.persist()
+	return w.persist(changed...)
 }
 
 func (w *Workspaces) Add(workspace Workspace) error {
@@ -589,7 +592,7 @@ func (w *Workspaces) Add(workspace Workspace) error {
 	}
 	w.registry[workspace.Name] = workspace
 	w.mu.Unlock()
-	return w.persist()
+	return w.persist(workspace.Name)
 }
 
 // stateRefusal refuses a name whose state folder is still there with no record behind it. A room made over it
@@ -624,7 +627,7 @@ func (w *Workspaces) Update(workspace Workspace) error {
 		// guest keeps the one it booted with.
 		control.discardSandbox(existing.Path)
 	}
-	return w.persist()
+	return w.persist(workspace.Name)
 }
 
 // adopt writes the record and returns what the caller has to do about it: the previous record, the
@@ -721,7 +724,7 @@ func (w *Workspaces) Remove(ctx context.Context, name string) error {
 			workerpool.Log("removing the sandbox for %s: %v", name, err)
 		}
 	}
-	return w.persist()
+	return w.persist(name)
 }
 
 // Ensure returns the Control for a workspace, starting its worker if this is the first
@@ -1215,47 +1218,6 @@ func validateWorkspace(workspace Workspace) error {
 	return nil
 }
 
-func (w *Workspaces) registryPath() string {
-	return filepath.Join(w.opts.DataDir, registryFile)
-}
-
-// RegistryFile is the workspaces registry as it exists on disk. It has one admin so the
-// server and the command line cannot disagree about its shape.
-//
-// WorkspacesDir is recorded here rather than in the global config because it belongs to the
-// registry, and because that config is what shapes prompts: a control-plane path there
-// would be a concern in the wrong file.
-type RegistryFile struct {
-	// Path is where it was read from; not part of the file.
-	Path string `json:"-"`
-	// dropped says the file mentioned keys this build no longer writes, so the caller can
-	// rewrite it. Not part of the file either.
-	dropped       bool
-	WorkspacesDir string      `json:"workspacesDir,omitempty"`
-	Workspaces    []Workspace `json:"workspaces"`
-}
-
-// droppedKeys reports whether the file on disk mentions a key this build no longer writes.
-//
-// A workspace used to carry `trusted`. Nothing reads it any more, and a stale value that
-// nothing reads is a value something can read again by accident — so the first load that sees
-// one rewrites the file without it, rather than leaving it there for a later version to
-// rediscover and mistrust.
-func droppedKeys(payload []byte) bool {
-	var raw struct {
-		Workspaces []map[string]json.RawMessage `json:"workspaces"`
-	}
-	if err := json.Unmarshal(payload, &raw); err != nil {
-		return false
-	}
-	for _, record := range raw.Workspaces {
-		if _, found := record["trusted"]; found {
-			return true
-		}
-	}
-	return false
-}
-
 // StatePath is where a workspace's storage, its settings and its drafts live: `<data-dir>/state/<name>`, beside
 // the registry rather than inside the workspace's folder. It is the folder that makes a name mean a history, so
 // forgetting a room leaves it and purging one deletes it.
@@ -1308,41 +1270,6 @@ func OrphanFolders(registry RegistryFile) ([]string, error) {
 	return orphans, nil
 }
 
-// LoadRegistryFile reads a registry, tolerating absence.
-func LoadRegistryFile(path string) (RegistryFile, error) {
-	registry := RegistryFile{Path: path}
-	payload, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return registry, nil
-	}
-	if err != nil {
-		return registry, err
-	}
-	if err := json.Unmarshal(payload, &registry); err != nil {
-		return registry, fmt.Errorf("%s: %w", path, err)
-	}
-	registry.Path = path
-	registry.dropped = droppedKeys(payload)
-	return registry, nil
-}
-
-// SaveRegistryFile writes a registry atomically and privately.
-func SaveRegistryFile(registry RegistryFile) error {
-	sort.Slice(registry.Workspaces, func(i, j int) bool { return registry.Workspaces[i].Name < registry.Workspaces[j].Name })
-	payload, err := json.MarshalIndent(registry, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(registry.Path), 0o700); err != nil {
-		return err
-	}
-	temp := registry.Path + ".tmp"
-	if err := os.WriteFile(temp, append(payload, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(temp, registry.Path)
-}
-
 // loadRegistry reads the file, brings every record into the shape this build writes, and writes it back
 // once if anything moved.
 //
@@ -1350,7 +1277,7 @@ func SaveRegistryFile(registry RegistryFile) error {
 // that stops halfway leaves a file that is neither the old shape nor the new one, and every later reader
 // has to guess which half it is looking at (ADR 0034 §8).
 func (w *Workspaces) loadRegistry() error {
-	file, err := LoadRegistryFile(w.registryPath())
+	file, err := NewRegistry(w.opts.DataDir).Load()
 	if err != nil {
 		return err
 	}
@@ -1376,7 +1303,7 @@ func (w *Workspaces) loadRegistry() error {
 		return err
 	}
 	sayMigration(guessed, ownerless)
-	return w.writeBack(renamed || created || changed || file.dropped, created)
+	return w.writeBack(renamed || created || len(changed) > 0 || file.dropped, created)
 }
 
 // sayMigration is what the load says out loud about the records it decided for: a guess about an address list,
@@ -1396,7 +1323,11 @@ func (w *Workspaces) writeBack(moved, firstRun bool) error {
 	if !moved {
 		return nil
 	}
-	if err := w.persist(); err != nil {
+	// Every record, because the load may have moved any of them; and the old name, because a rename took it out.
+	w.mu.RLock()
+	names := append(slices.Collect(maps.Keys(w.registry)), oldWorkspaceName)
+	w.mu.RUnlock()
+	if err := w.persist(names...); err != nil {
 		// A file that was read and could not be written back is read again next start, with the records it has;
 		// losing every workspace because the disk was full is the worse failure of the two. The first run is the
 		// exception: an install that cannot record its own room has nothing to open, and says so.
@@ -1553,17 +1484,25 @@ func (w *Workspaces) ensurePersonal() (bool, error) {
 	return true, nil
 }
 
-// persist writes the registry: the folder it records, and every workspace in it. It is the file
-// that answers where a workspace lives on the next start.
-
-func (w *Workspaces) persist() error {
-	w.mu.RLock()
-	file := RegistryFile{Path: w.registryPath(), WorkspacesDir: w.dir, Workspaces: make([]Workspace, 0, len(w.registry))}
-	for _, workspace := range w.registry {
-		file.Workspaces = append(file.Workspaces, workspace)
-	}
-	w.mu.RUnlock()
-	return SaveRegistryFile(file)
+// persist writes the named records as this process holds them, and the folder it records, onto the file as it is
+// now. A name this process no longer holds is taken out of the file; every other record is left as the file has
+// it, so a workspace `acornd workspace add` recorded while the gateway ran survives the gateway's next write (#69).
+//
+// Memory is read inside the file lock, not before it: a copy taken before could wait behind a newer write and
+// then put the older record back.
+func (w *Workspaces) persist(names ...string) error {
+	return NewRegistry(w.opts.DataDir).Change(func(file *RegistryFile) error {
+		file.Workspaces = slices.DeleteFunc(file.Workspaces, func(workspace Workspace) bool { return slices.Contains(names, workspace.Name) })
+		w.mu.RLock()
+		defer w.mu.RUnlock()
+		file.WorkspacesDir = w.dir
+		for _, name := range names {
+			if workspace, held := w.registry[name]; held {
+				file.Workspaces = append(file.Workspaces, workspace)
+			}
+		}
+		return nil
+	})
 }
 
 // migrate moves a single-workspace install onto the workspace layout: one storage and one

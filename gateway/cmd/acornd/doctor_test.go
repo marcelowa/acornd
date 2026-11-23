@@ -77,14 +77,10 @@ func TestDoctorNamesAFolderWithNoRecord(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	registry := control.RegistryFile{
-		Path:          filepath.Join(dataDir, "workspaces.json"),
+	seedRegistry(t, dataDir, control.RegistryFile{
 		WorkspacesDir: dir,
 		Workspaces:    []control.Workspace{{Name: "kept", Path: kept, Kind: control.KindRoom}},
-	}
-	if err := control.SaveRegistryFile(registry); err != nil {
-		t.Fatal(err)
-	}
+	})
 
 	orphans := workspaceOrphans(dataDir)
 	if !slices.Contains(orphans, filepath.Join(dir, "forgotten")) {

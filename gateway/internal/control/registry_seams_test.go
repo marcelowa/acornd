@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -37,16 +38,16 @@ func TestTheSidebarIsPersonalFirstThenByName(t *testing.T) {
 // The registry is written sorted, so the file is the same on every run and a diff of it means
 // something. A map written in iteration order gives a file that changes for no reason.
 func TestTheRegistryFileIsWrittenSorted(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "workspaces.json")
+	dataDir := t.TempDir()
+	path := filepath.Join(dataDir, registryFile)
 	registry := RegistryFile{
-		Path: path,
 		Workspaces: []Workspace{
 			{Name: "zulu", Path: "/z"},
 			{Name: "alpha", Path: "/a"},
 			{Name: "mike", Path: "/m"},
 		},
 	}
-	if err := SaveRegistryFile(registry); err != nil {
+	if err := NewRegistry(dataDir).save(registry); err != nil {
 		t.Fatal(err)
 	}
 	payload, err := os.ReadFile(path)
@@ -119,13 +120,13 @@ func TestEvictionSparesWhatIsStillInUse(t *testing.T) {
 // the folder was made, the registry entry was added, and nothing else would ever say so.
 func TestAFirstRunThatCannotWriteItsRegistryFails(t *testing.T) {
 	if os.Geteuid() == 0 {
-		// A directory in the place of the temp file is what makes the write fail, and that does
+		// A directory in the place of the lock file is what makes the write fail, and that does
 		// not depend on who is running — but say why it is here for the reader.
 		t.Log("the refusal below is made by a directory, not by permissions")
 	}
 	dir := t.TempDir()
 	data := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(data, registryFile)+".tmp", 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(data, registryFile)+".lock", 0o755); err != nil {
 		t.Fatal(err)
 	}
 	workspaces := NewWorkspaces(WorkspacesOptions{WorkspacesDir: dir, DataDir: data})
@@ -200,4 +201,44 @@ func strconvQuote(value string) string {
 		panic(err)
 	}
 	return string(encoded)
+}
+
+// A write carries the record as memory holds it when the file lock is taken, not when the write was asked for.
+// Copied before the lock, a write that waited behind another could put the older record back: A copies, B
+// copies a newer one and writes, then A writes its stale copy over it.
+func TestAWriteThatWaitedForTheLockCarriesTheNewerRecord(t *testing.T) {
+	dataDir := t.TempDir()
+	workspaces := registryIn(t, dataDir, "", []Workspace{{Name: "team", Path: "/old", Kind: KindRoom}})
+	held, err := os.OpenFile(filepath.Join(dataDir, registryFile)+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- workspaces.persist("team") }()
+	// Long enough for the write to start and wait on the lock; well inside its budget.
+	time.Sleep(4 * registryLockRetry)
+	workspaces.mu.Lock()
+	newer := workspaces.registry["team"]
+	newer.Path = "/new"
+	workspaces.registry["team"] = newer
+	workspaces.mu.Unlock()
+	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("persist: %v", err)
+	}
+	file, err := NewRegistry(dataDir).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, workspace := range file.Workspaces {
+		if workspace.Name == "team" && workspace.Path != "/new" {
+			t.Errorf("the file has %q, want the record memory held when the lock was taken", workspace.Path)
+		}
+	}
 }

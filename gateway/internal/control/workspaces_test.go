@@ -62,7 +62,7 @@ func TestARegistryFromAnOlderBuildIsRewrittenWithoutOldKeys(t *testing.T) {
 		t.Errorf("the registry should have been rewritten without the dropped key:\n%s", payload)
 	}
 	// And what it did say is intact.
-	reloaded, err := LoadRegistryFile(path)
+	reloaded, err := NewRegistry(dir).Load()
 	if err != nil {
 		t.Fatal(err)
 	}

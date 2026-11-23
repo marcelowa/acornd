@@ -127,7 +127,7 @@ func registryIn(t *testing.T, dataDir, admin string, list []Workspace) *Workspac
 	// The folder is a temp one and it is what the file records, so a test that makes a room puts it in the
 	// scratch folder rather than in the home directory of whoever runs the suite (G16).
 	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: dataDir, AdminEmail: admin})
-	if err := SaveRegistryFile(RegistryFile{Path: filepath.Join(dataDir, registryFile), WorkspacesDir: t.TempDir(), Workspaces: list}); err != nil {
+	if err := NewRegistry(dataDir).save(RegistryFile{WorkspacesDir: t.TempDir(), Workspaces: list}); err != nil {
 		t.Fatalf("save registry: %v", err)
 	}
 	if err := workspaces.loadRegistry(); err != nil {

@@ -186,7 +186,7 @@ type migrated struct {
 // made it, or it is the install's own — and no members was a room made before there were people, which the
 // admin's claim fills in. It answers with what it changed, and with the rooms whose reading was a guess or
 // that it had to leave with nobody in them, so the load can say each one in a line.
-func (w *Workspaces) migrateRooms() (changed bool, guessed, ownerless []string) {
+func (w *Workspaces) migrateRooms() (changed, guessed, ownerless []string) {
 	admin := w.adminAddress()
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -194,7 +194,7 @@ func (w *Workspaces) migrateRooms() (changed bool, guessed, ownerless []string) 
 		record := workspace.migrateRoom(admin)
 		if record.changed {
 			w.registry[name] = record.workspace
-			changed = true
+			changed = append(changed, name)
 		}
 		if record.guessed {
 			guessed = append(guessed, name)
@@ -380,7 +380,7 @@ func (w *Workspaces) AddGuest(caller Caller, name, address string) (Workspace, e
 	w.registry[name] = workspace
 	control := w.controls[name]
 	w.mu.Unlock()
-	if err := w.persist(); err != nil {
+	if err := w.persist(name); err != nil {
 		return Workspace{}, err
 	}
 	// The live control holds its own copy of the record, and it is what answers "is this room shared" for
@@ -419,7 +419,7 @@ func (w *Workspaces) RemoveMember(caller Caller, name, address string) (Workspac
 	w.registry[name] = workspace
 	control := w.controls[name]
 	w.mu.Unlock()
-	if err := w.persist(); err != nil {
+	if err := w.persist(name); err != nil {
 		return Workspace{}, err
 	}
 	if control != nil {

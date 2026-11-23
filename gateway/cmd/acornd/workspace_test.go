@@ -56,19 +56,16 @@ func TestPurgeDeletesTheStateToo(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	path := filepath.Join(dataDir, "workspaces.json")
-	if err := control.SaveRegistryFile(control.RegistryFile{
-		Path:          path,
+	seedRegistry(t, dataDir, control.RegistryFile{
 		WorkspacesDir: filepath.Dir(folder),
 		Workspaces:    []control.Workspace{{Name: "team", Path: folder, Kind: control.KindRoom}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	registry, err := control.LoadRegistryFile(path)
+	})
+	registry := control.NewRegistry(dataDir)
+	file, err := registry.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	target, err := purgeTarget(registry, "team")
+	target, err := purgeTarget(file, "team")
 	if err != nil {
 		t.Fatalf("purgeTarget(team): %v", err)
 	}
@@ -85,7 +82,7 @@ func TestPurgeDeletesTheStateToo(t *testing.T) {
 			t.Errorf("%s survived the purge: %v", gone, err)
 		}
 	}
-	reloaded, err := control.LoadRegistryFile(path)
+	reloaded, err := registry.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,6 +118,18 @@ func TestPurgeRefusesEveryPersonalRoom(t *testing.T) {
 	}
 }
 
+// seedRegistry writes a whole registry, as an install that already has one would hold it.
+func seedRegistry(t *testing.T, dataDir string, file control.RegistryFile) {
+	t.Helper()
+	err := control.NewRegistry(dataDir).Change(func(registry *control.RegistryFile) error {
+		*registry = file
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 // refusalFor is the sentence a purge gives for one name, and a failure if it deletes it instead.
 func refusalFor(t *testing.T, registry control.RegistryFile, name string) string {
 	t.Helper()
@@ -129,4 +138,24 @@ func refusalFor(t *testing.T, registry control.RegistryFile, name string) string
 	}
 	t.Fatalf("purge accepted %q", name)
 	return ""
+}
+
+// Two terminals adding one name: each checked the file before choosing an engine, so the check is asked again
+// under the registry lock, and the second add is refused rather than written as a second record of the name.
+func TestTwoTerminalsCannotRecordTheSameName(t *testing.T) {
+	dataDir := t.TempDir()
+	record := addRecord{name: "team", absolute: t.TempDir(), engine: "bwrap"}
+	if _, err := recordWorkspace(dataDir, record); err != nil {
+		t.Fatalf("first add: %v", err)
+	}
+	if _, err := recordWorkspace(dataDir, record); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("the second add of one name should be refused, got %v", err)
+	}
+	file, err := control.NewRegistry(dataDir).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(file.Workspaces) != 1 {
+		t.Errorf("the registry holds %d records, want 1: %+v", len(file.Workspaces), file.Workspaces)
+	}
 }

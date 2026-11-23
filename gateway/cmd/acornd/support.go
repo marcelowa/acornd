@@ -142,7 +142,7 @@ func usageSupport() {
 }
 
 func supportWorkspace(dataDir, name string) (control.Workspace, error) {
-	file, err := control.LoadRegistryFile(filepath.Join(dataDir, "workspaces.json"))
+	file, err := control.NewRegistry(dataDir).Load()
 	if err != nil {
 		return control.Workspace{}, err
 	}

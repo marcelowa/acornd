@@ -93,7 +93,7 @@ func (s secretScope) resolve(dir string) (vault.Scope, string, error) {
 
 // workspacePath finds a workspace's folder by its name.
 func workspacePath(dir, name string) (string, error) {
-	registry, err := control.LoadRegistryFile(filepath.Join(dir, "workspaces.json"))
+	registry, err := control.NewRegistry(dir).Load()
 	if err != nil {
 		return "", err
 	}
