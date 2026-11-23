@@ -133,10 +133,14 @@ export function useWorkspaces(
 				.sort((a, b) => timeOf(b.updatedAt) - timeOf(a.updatedAt)),
 		[state, activeId, seen],
 	);
-	const active = useMemo(
-		() => (state?.conversations ?? []).find((conversation) => conversation.id === activeId),
-		[state, activeId],
-	);
+	const active = useMemo(() => {
+		const current = (state?.conversations ?? []).find(
+			(conversation) => conversation.id === activeId,
+		);
+		return current === undefined
+			? undefined
+			: toConversation(current, activeId, seen[current.id]);
+	}, [state, activeId, seen]);
 
 	const { can } = session.slice;
 	// A personal room is never shared, on any install: journey 1 is "make a room and invite people", not
@@ -317,8 +321,7 @@ export function useWorkspaces(
 	return {
 		conversations,
 		deleted,
-		active:
-			active === undefined ? undefined : toConversation(active, activeId, seen[active.id]),
+		active,
 		workspaces,
 		share,
 		addGuest,

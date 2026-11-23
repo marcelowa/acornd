@@ -1,7 +1,8 @@
 import {
 	useCallback,
-	useRef,
 	useEffect,
+	useMemo,
+	useRef,
 	useState,
 	type Dispatch,
 	type MutableRefObject,
@@ -112,22 +113,26 @@ export function useSession(route: Route): Session {
 		[reportError],
 	);
 
+	const reloadNow = useCallback((): void => {
+		void reload();
+	}, [reload]);
+	const wireCan = state?.can;
+	// A guest sees the agent, the model and the thinking with their values and cannot pick another,
+	// and no explanatory sentence: the state carries the answer, so this is the one place that reads
+	// it (ADR 0034 §4).
+	const can = useMemo(() => toRights(wireCan), [wireCan]);
+
 	return {
 		slice: {
 			ready,
 			connection,
 			failure,
 			clearFailure,
-			reload: () => {
-				void reload();
-			},
+			reload: reloadNow,
 			opening,
 			workerUp: state?.workerUp ?? false,
 			workerError: state?.workerError,
-			// A guest sees the agent, the model and the thinking with their values and cannot pick another,
-			// and no explanatory sentence: the state carries the answer, so this is the one place that reads
-			// it (ADR 0034 §4).
-			can: toRights(state?.can),
+			can,
 			role: toRoomRole(state?.role),
 			admin: state?.admin === true,
 		},

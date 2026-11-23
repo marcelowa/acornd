@@ -80,8 +80,10 @@ export function useChoices(session: Session): ChoicesSlice {
 		() => contextWindowFor(state?.providers ?? [], effectiveModel),
 		[state, effectiveModel],
 	);
-	const thinkingLevels =
-		modelChoices.find((choice) => choice.value === effectiveModel)?.thinkingLevels ?? [];
+	const thinkingLevels = useMemo(
+		() => modelChoices.find((choice) => choice.value === effectiveModel)?.thinkingLevels ?? [],
+		[modelChoices, effectiveModel],
+	);
 	const thinkingValue = state?.agent.thinkingLevel ?? "";
 	const agentValue =
 		state?.resolved?.name ??
@@ -98,43 +100,52 @@ export function useChoices(session: Session): ChoicesSlice {
 	const fixed = activeId === "" || subagent || !can.model;
 	const pinnedModel = modelChoices.find((choice) => choice.value === effectiveModel);
 
-	const model: ChoicePicker = {
-		value: pinnedModel?.label ?? state?.agent.modelId ?? "",
-		invalid: stale.model,
-		note: stale.model ? "not available here" : undefined,
-		groups: withDefault(toModelGroups(state?.providers ?? [])),
-		disabled: fixed || modelChoices.length === 0,
-		onSelect: (value) => {
-			if (value === "") {
-				choose({ provider: "", modelId: "" });
-				return;
-			}
-			const slash = value.indexOf("/");
-			choose({ provider: value.slice(0, slash), modelId: value.slice(slash + 1) });
-		},
-	};
+	const model = useMemo<ChoicePicker>(
+		() => ({
+			value: pinnedModel?.label ?? state?.agent.modelId ?? "",
+			invalid: stale.model,
+			note: stale.model ? "not available here" : undefined,
+			groups: withDefault(toModelGroups(state?.providers ?? [])),
+			disabled: fixed || modelChoices.length === 0,
+			onSelect: (value) => {
+				if (value === "") {
+					choose({ provider: "", modelId: "" });
+					return;
+				}
+				const slash = value.indexOf("/");
+				choose({ provider: value.slice(0, slash), modelId: value.slice(slash + 1) });
+			},
+		}),
+		[pinnedModel, state, stale.model, fixed, modelChoices.length, choose],
+	);
 
-	const thinking: ChoicePicker = {
-		value: thinkingValue,
-		note:
-			state !== undefined &&
-			(state.agent.thinkingRequested ?? "") !== "" &&
-			state.agent.thinkingRequested !== thinkingValue
-				? `${state.agent.thinkingRequested ?? ""} was asked`
-				: undefined,
-		groups: withDefault(toThinkingGroups(thinkingLevels)),
-		disabled: fixed || (thinkingLevels.length === 0 && thinkingValue === ""),
-		onSelect: (value) => choose({ thinkingLevel: value }),
-	};
+	const thinking = useMemo<ChoicePicker>(
+		() => ({
+			value: thinkingValue,
+			note:
+				state !== undefined &&
+				(state.agent.thinkingRequested ?? "") !== "" &&
+				state.agent.thinkingRequested !== thinkingValue
+					? `${state.agent.thinkingRequested ?? ""} was asked`
+					: undefined,
+			groups: withDefault(toThinkingGroups(thinkingLevels)),
+			disabled: fixed || (thinkingLevels.length === 0 && thinkingValue === ""),
+			onSelect: (value) => choose({ thinkingLevel: value }),
+		}),
+		[thinkingValue, state, thinkingLevels, fixed, choose],
+	);
 
-	const agent: ChoicePicker = {
-		value: agentValue,
-		invalid: stale.agent,
-		note: stale.agent ? "definition is gone" : subagent ? "set by its creator" : undefined,
-		groups: withDefault(toAgentGroups(state?.agents ?? [])),
-		disabled: fixed,
-		onSelect: (value) => choose({ definition: value }),
-	};
+	const agent = useMemo<ChoicePicker>(
+		() => ({
+			value: agentValue,
+			invalid: stale.agent,
+			note: stale.agent ? "definition is gone" : subagent ? "set by its creator" : undefined,
+			groups: withDefault(toAgentGroups(state?.agents ?? [])),
+			disabled: fixed,
+			onSelect: (value) => choose({ definition: value }),
+		}),
+		[agentValue, stale.agent, subagent, state, fixed, choose],
+	);
 
 	const setDefault = useCallback(
 		(kind: "model" | "thinking" | "agent", scope: DefaultScope, value: string) => {

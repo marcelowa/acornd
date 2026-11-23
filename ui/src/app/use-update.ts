@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	applyUpdate,
 	checkUpdate,
@@ -47,27 +47,30 @@ export function useUpdate(
 	reportError: (cause: unknown) => void,
 ): UpdateSlice {
 	const [fetchedUpdate, setFetchedUpdate] = useState<UpdateStatus | undefined>(undefined);
-	const updateFromState: UpdateStatus | undefined =
-		summary === undefined
-			? undefined
-			: {
-					current: summary.current,
-					latest: summary.latest ?? "",
-					notes: "",
-					channel: "",
-					autoCheck: false,
-					checking: false,
-					available: summary.available,
-					failed: summary.failed,
-					restartRequired: summary.restartRequired,
-					backups: [],
-					downloadSize: 0,
-					workerSize: 0,
-					// The runs gate is the gateway's own answer, and the stream
-					// summary does not carry it: the page's fetch does.
-					runsActive: false,
-					runs: [],
-				};
+	const updateFromState = useMemo<UpdateStatus | undefined>(
+		() =>
+			summary === undefined
+				? undefined
+				: {
+						current: summary.current,
+						latest: summary.latest ?? "",
+						notes: "",
+						channel: "",
+						autoCheck: false,
+						checking: false,
+						available: summary.available,
+						failed: summary.failed,
+						restartRequired: summary.restartRequired,
+						backups: [],
+						downloadSize: 0,
+						workerSize: 0,
+						// The runs gate is the gateway's own answer, and the stream
+						// summary does not carry it: the page's fetch does.
+						runsActive: false,
+						runs: [],
+					},
+		[summary],
+	);
 	const update = fetchedUpdate ?? updateFromState;
 	// The build this page first saw: an apply or rollback restarts the server
 	// under us, the stream's next state names the new build, and this bundle

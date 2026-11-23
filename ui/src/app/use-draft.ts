@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { saveDraft } from "./client";
 import { shownDraft, type Draft, type RoomDraft } from "./draft";
 import type { Session } from "./use-session";
@@ -111,17 +111,21 @@ export function useDraft(session: Session): Drafts {
 	const draftServer = draftRoom === activeId ? state?.draft : undefined;
 	const draftEdit = activeId === "" ? undefined : draftEdits.current.get(activeId);
 	const draftWrittenHere = activeId === "" ? undefined : draftWritten.current.get(activeId);
-	const draft: RoomDraft | undefined =
-		activeId === ""
-			? undefined
-			: {
-					conversation: activeId,
-					...shownDraft({
-						edit: draftEdit,
-						server: draftServer,
-						written: draftWrittenHere,
-					}),
-				};
+	// The map entries are replaced, never changed in place, so they say when the draft moved.
+	const draft = useMemo<RoomDraft | undefined>(
+		() =>
+			activeId === ""
+				? undefined
+				: {
+						conversation: activeId,
+						...shownDraft({
+							edit: draftEdit,
+							server: draftServer,
+							written: draftWrittenHere,
+						}),
+					},
+		[activeId, draftEdit, draftServer, draftWrittenHere],
+	);
 
 	return { slice: { draft, setDraft }, flushDrafts };
 }

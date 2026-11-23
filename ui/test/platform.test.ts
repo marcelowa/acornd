@@ -102,17 +102,34 @@ globals["fetch"] = (input: string, init?: RequestInit): Promise<Response> => {
 	return Promise.resolve(response);
 };
 
-const { act, createElement } = await import("react");
+const { act, createElement, memo } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { usePlatform } = await import("../src/app/use-platform");
 type Platform = ReturnType<typeof usePlatform>;
 
 let platform: Platform | undefined;
 let renders = 0;
-function Probe(): null {
+/** How often a consumer that reads only the transcript rendered. */
+let transcriptRenders = 0;
+const TranscriptReader = memo(function TranscriptReader(_props: {
+	entries: Platform["entries"];
+}): null {
+	transcriptRenders += 1;
+	return null;
+});
+function Probe() {
 	platform = usePlatform();
 	renders += 1;
-	return null;
+	return createElement(TranscriptReader, { entries: platform.entries });
+}
+
+/** The fields whose identity changed: a memoised consumer of any other field would not render. */
+function changed(before: Platform, after: Platform): string[] {
+	const old = new Map<string, unknown>(Object.entries(before));
+	return Object.entries(after)
+		.filter(([key, value]) => !Object.is(old.get(key), value))
+		.map(([key]) => key)
+		.sort();
 }
 
 function now(): Platform {
@@ -152,6 +169,7 @@ beforeEach(async () => {
 	FakeSource.instances = [];
 	platform = undefined;
 	renders = 0;
+	transcriptRenders = 0;
 	browser.window.localStorage.clear();
 	browser.window.history.replaceState(null, "", "/c/home/7");
 	const container = browser.window.document.getElementById("root");
@@ -300,5 +318,57 @@ describe("the platform facade", () => {
 		});
 		expect(now().workspacesOpen).toBe(false);
 		expect(browser.window.location.pathname).toBe("/c/home/7");
+	});
+});
+
+describe("one slice changing leaves the other slices' fields as they were", () => {
+	async function change(press: () => void): Promise<string[]> {
+		await settle();
+		const before = now();
+		await act(async () => {
+			press();
+			await Promise.resolve();
+		});
+		return changed(before, now());
+	}
+
+	test("the theme", async () => {
+		expect(await change(() => now().setThemeChoice("dark"))).toEqual(["theme", "themeChoice"]);
+	});
+
+	test("the rail's fold", async () => {
+		expect(await change(() => now().toggleRail())).toEqual(["railCollapsed"]);
+	});
+
+	test("the workspaces layer", async () => {
+		expect(await change(() => now().openWorkspaces())).toEqual(["workspacesOpen"]);
+	});
+
+	test("the draft", async () => {
+		expect(await change(() => now().setDraft("a few words", []))).toEqual(["draft"]);
+	});
+
+	test("a view frame", async () => {
+		const fields = await change(() =>
+			source().emit("frame", {
+				type: "view",
+				value: {
+					entries: [{ id: 20, kind: "acornd.message", model: [{ content: "hi" }] }],
+				},
+			}),
+		);
+		expect(fields).toEqual(["context", "entries"]);
+	});
+
+	test("a consumer of the transcript does not render for the theme", async () => {
+		await settle();
+		const facade = renders;
+		const transcript = transcriptRenders;
+		await act(async () => {
+			now().setThemeChoice("dark");
+			await Promise.resolve();
+		});
+		expect(renders).toBeGreaterThan(facade);
+		expect(transcriptRenders).toBe(transcript);
 	});
 });
