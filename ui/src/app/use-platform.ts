@@ -2,13 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	abortConversation,
 	addMember,
-	fetchProviderAllowlist,
-	fetchProviderCatalog,
-	saveProviderAllowlist,
-	answerAuthPrompt,
 	answerSecretRequest,
 	cancelSecretRequest,
-	cancelAuthFlow,
 	compactConversation,
 	createConversation as createConversationRequest,
 	fetchCompactPreview,
@@ -18,9 +13,7 @@ import {
 	fetchWorkspaceStatus,
 	forkConversation,
 	hideConversation,
-	logoutProvider,
 	openStream,
-	refreshProviders,
 	removeMember,
 	removeWorkspace as removeWorkspaceRequest,
 	renameConversation,
@@ -31,26 +24,13 @@ import {
 	setDefaultAgent,
 	setDefaultModel,
 	setDefaultThinking,
-	startProviderLogin,
 	type UploadedAttachment,
 	updateWorkspace,
 	type AgentChange,
 	type CompactPreview,
 	type DefaultScope,
-	type ProviderAuthType,
 	type SecretAnswerInput,
-	type ProviderCatalogEntry,
 } from "./client";
-import {
-	authFlowAnswerFailed,
-	authFlowAnswered,
-	authFlowStarted,
-	foldAuthEvent,
-	rememberAuthEvent,
-	takeAuthEvents,
-	type AuthFlow,
-	type AuthWaiting,
-} from "./auth-flow";
 import { foldContext, lastUsage, type ContextRequest } from "./context";
 import {
 	contextWindowFor,
@@ -62,7 +42,6 @@ import {
 	toMembers,
 	toModelChoices,
 	toModelGroups,
-	toProviders,
 	toSandbox,
 	toScopeDefaults,
 	toThinkingGroups,
@@ -75,7 +54,6 @@ import type {
 	ConversationSummary,
 	EngineSummary,
 	PickerGroup,
-	ProviderSummary,
 	SandboxSummary,
 	ShareView,
 	SlashCommand,
@@ -86,6 +64,7 @@ import type { Draft, RoomDraft } from "./draft";
 import { shownDraft } from "./draft";
 import { useNavigation, useScreens, type NavigationSlice } from "./use-navigation";
 import { usePeople, type PeopleSlice } from "./use-people";
+import { useProviders, type ProvidersSlice } from "./use-providers";
 import { useRemote, type RemoteSlice } from "./use-remote";
 import { useSession, type SessionSlice } from "./use-session";
 import { useUpdate, type UpdateSlice } from "./use-update";
@@ -130,7 +109,14 @@ export type { AuthFlow } from "./auth-flow";
 export type { PeopleBook } from "./use-people";
 
 export interface Platform
-	extends PreferencesSlice, NavigationSlice, RemoteSlice, PeopleSlice, UpdateSlice, SessionSlice {
+	extends
+		PreferencesSlice,
+		NavigationSlice,
+		RemoteSlice,
+		PeopleSlice,
+		UpdateSlice,
+		SessionSlice,
+		ProvidersSlice {
 	conversations: ConversationSummary[];
 	deleted: ConversationSummary[];
 	/** The workspaces, with the one in view marked. */
@@ -179,34 +165,12 @@ export interface Platform
 	engines: EngineSummary[];
 	removeWorkspace: (name: string) => void;
 	renameWorkspace: (name: string, title: string) => void;
-	/** Every provider, connected first: the settings screen lists these. */
-	providers: ProviderSummary[];
-	/** A login in flight, if any: the connect dialog renders it. */
-	authFlow?: AuthFlow | undefined;
-	/** Start connecting a provider. Prompts arrive on the stream. A refusal rejects, so the
-	 * dialog can say so where the method was chosen. */
-	startLogin: (provider: ProviderSummary, method: ProviderAuthType) => Promise<void>;
-	/** Answer the waiting prompt. */
-	answerLoginPrompt: (value: string) => void;
-	/** Abort the running flow. */
-	cancelLogin: () => void;
-	/** Dismiss a finished flow. */
-	closeLogin: () => void;
-	/** Forget one provider's stored key. */
-	logoutProvider: (id: string) => void;
-	/** Re-read the catalog, for a key added outside the app. */
-	refreshProviders: () => void;
 	/** A tool's open secret request, shown as a card in the conversation. */
 	secretRequest?: WireSecretEvent | undefined;
 	/** Send the card's value to the gateway; the tool waiting on it gets only the outcome. */
 	answerSecret: (requestId: string, input: SecretAnswerInput) => Promise<void>;
 	/** Close the card without setting anything. */
 	cancelSecret: (requestId: string) => Promise<void>;
-	/** The provider whose models are being chosen, with the catalog and the list as they stand. */
-	modelChoice?: { provider: ProviderCatalogEntry; allowed: string[] } | undefined;
-	openProviderModels: (provider: ProviderSummary) => void;
-	saveProviderModels: (models: string[]) => void;
-	closeProviderModels: () => void;
 	entries: TranscriptEntry[];
 	active?: ConversationSummary | undefined;
 	/** The conversation in view was created by another one, so its choices are not its own. */
@@ -275,6 +239,8 @@ export function usePlatform(): Platform {
 		setOpening,
 		setConnection,
 	} = session;
+	const providers = useProviders(session);
+	const { receiveAuth } = providers;
 	const [secretRequest, setSecretRequest] = useState<WireSecretEvent | undefined>(undefined);
 	const [view, setView] = useState<WireView | undefined>(undefined);
 	const [senders, setSenders] = useState<Record<string, WireSender>>({});
@@ -287,17 +253,6 @@ export function usePlatform(): Platform {
 	const [seen, setSeen] = useState<Record<string, string>>(() => read(SEEN_KEY, {}));
 	const [composerFocusToken, setComposerFocusToken] = useState(0);
 	const [commands, setCommands] = useState<SlashCommand[]>([]);
-	const [authFlow, setAuthFlow] = useState<AuthFlow | undefined>(undefined);
-	/**
-	 * The auth id the dialog is rendering, and the frames that arrived before the POST that
-	 * named it. A worker can answer a login start before the reply is parsed, and a frame with
-	 * no flow to land in would otherwise be dropped — the dialog then waits forever on a prompt
-	 * the provider already sent. The ref is written where the flow is set, not in an effect, so
-	 * a frame cannot slip between the state and its own id.
-	 */
-	const authId = useRef<string | undefined>(undefined);
-	const authWaiting = useRef<AuthWaiting>(new Map());
-
 	/**
 	 * The draft of the room in view. The workspace holds the words; this machine holds the two
 	 * things it needs to be honest about them — the edit that has not landed yet, and the last
@@ -510,13 +465,7 @@ export function usePlatform(): Platform {
 			},
 			onAuth: (id, event) => {
 				if (cancelled) return;
-				if (authId.current !== id) {
-					rememberAuthEvent(authWaiting.current, id, event);
-					return;
-				}
-				setAuthFlow((current) =>
-					current === undefined ? current : foldAuthEvent(current, event),
-				);
+				receiveAuth(id, event);
 			},
 			onReconnecting: () => {
 				if (!cancelled) setConnection("reconnecting");
@@ -538,6 +487,7 @@ export function usePlatform(): Platform {
 		setOpening,
 		setConnection,
 		activeIdRef,
+		receiveAuth,
 	]);
 
 	// Reading a conversation marks it read, which is what clears the dot.
@@ -641,7 +591,6 @@ export function usePlatform(): Platform {
 	// what will actually run; `inherited` says whether this conversation chose it, and
 	// `defaultsOrigin` names the layer when it did not.
 	const modelChoices = useMemo(() => toModelChoices(state?.providers ?? []), [state]);
-	const providers = useMemo(() => toProviders(state?.providers ?? []), [state]);
 	const effectiveModel =
 		state === undefined ? "" : `${state.agent.provider}/${state.agent.modelId}`;
 	const contextWindow = useMemo(
@@ -921,80 +870,6 @@ export function usePlatform(): Platform {
 		[act, reload],
 	);
 
-	// Provider logins. The start answers 202 with a flow id; every step after that
-	// arrives as an auth frame on the stream, matched to the dialog that started it.
-	const startLogin = useCallback(
-		(provider: ProviderSummary, method: ProviderAuthType): Promise<void> => {
-			return startProviderLogin(workspace, provider.id, method).then(
-				(next) => {
-					clearFailure();
-					authId.current = next;
-					// Whatever arrived while the reply was in flight belongs to this flow.
-					setAuthFlow(
-						authFlowStarted(
-							next,
-							provider,
-							method,
-							takeAuthEvents(authWaiting.current, next),
-						),
-					);
-				},
-				(cause: unknown) => {
-					reportError(cause);
-					throw cause;
-				},
-			);
-		},
-		[workspace, reportError, clearFailure],
-	);
-	const answerLoginPrompt = useCallback(
-		(value: string) => {
-			if (authFlow?.prompt === undefined) return;
-			const { authId: id, prompt } = { authId: authFlow.authId, prompt: authFlow.prompt };
-			setAuthFlow({ ...authFlow, answering: true });
-			void answerAuthPrompt(workspace, id, prompt.promptId, value).then(
-				() => {
-					clearFailure();
-					// The answer landed: the question it answered goes, and only that one.
-					setAuthFlow((current) =>
-						current?.authId === id
-							? authFlowAnswered(current, prompt.promptId)
-							: current,
-					);
-				},
-				(cause: unknown) => {
-					reportError(cause);
-					// The question stays, so the answer can be given again.
-					setAuthFlow((current) =>
-						current?.authId === id
-							? authFlowAnswerFailed(current, prompt.promptId)
-							: current,
-					);
-				},
-			);
-		},
-		[authFlow, reportError, workspace, clearFailure],
-	);
-	const cancelLogin = useCallback(() => {
-		const id = authFlow?.authId;
-		authId.current = undefined;
-		setAuthFlow(undefined);
-		if (id !== undefined) void cancelAuthFlow(workspace, id).catch(reportError);
-	}, [authFlow, reportError, workspace]);
-	const closeLogin = useCallback(() => {
-		authId.current = undefined;
-		setAuthFlow(undefined);
-	}, []);
-	const logoutProviderById = useCallback(
-		(id: string) => {
-			act(logoutProvider(workspace, id), () => void reload());
-		},
-		[act, workspace, reload],
-	);
-	const refreshProvidersNow = useCallback(() => {
-		act(refreshProviders(workspace), () => void reload());
-	}, [act, workspace, reload]);
-
 	const answerSecret = useCallback(
 		async (requestId: string, input: SecretAnswerInput): Promise<void> => {
 			const conversation = secretRequest?.conversationId ?? route.conversation;
@@ -1019,36 +894,6 @@ export function usePlatform(): Platform {
 
 	const people = usePeople(route, session.slice.admin);
 
-	const [modelChoice, setModelChoice] = useState<
-		{ provider: ProviderCatalogEntry; allowed: string[] } | undefined
-	>(undefined);
-	const openProviderModels = useCallback(
-		(provider: ProviderSummary): void => {
-			// The catalog and the list come from the install, not from the narrowed state: choosing from what is left
-			// would make the list impossible to widen from the screen that writes it.
-			void Promise.all([fetchProviderCatalog(), fetchProviderAllowlist()]).then(
-				([catalog, allowed]) => {
-					const entry = catalog.find((one) => one.id === provider.id);
-					if (entry === undefined) return;
-					setModelChoice({ provider: entry, allowed: allowed[provider.id] ?? [] });
-				},
-				reportError,
-			);
-		},
-		[reportError],
-	);
-	const saveProviderModels = useCallback(
-		(models: string[]): void => {
-			const provider = modelChoice?.provider.id;
-			if (provider === undefined) return;
-			void saveProviderAllowlist(provider, models).then(() => {
-				setModelChoice(undefined);
-				refreshProvidersNow();
-			}, reportError);
-		},
-		[modelChoice, reportError, refreshProvidersNow],
-	);
-	const closeProviderModels = useCallback((): void => setModelChoice(undefined), []);
 	const newConversation = useCallback(() => {
 		// The drawer covers the conversation on a phone, and the new room is for typing:
 		// close it now so it never lingers over the request, and again on arrival.
@@ -1116,6 +961,7 @@ export function usePlatform(): Platform {
 	return {
 		...preferences,
 		...session.slice,
+		...providers.slice,
 		...navigation,
 		...remote,
 		...people,
@@ -1151,10 +997,6 @@ export function usePlatform(): Platform {
 		resolved: state?.resolved,
 		thinkingRequested: state?.agent.thinkingRequested,
 		harness: state?.harness,
-		modelChoice,
-		openProviderModels,
-		saveProviderModels,
-		closeProviderModels,
 		newConversation,
 		composerFocusToken,
 		select,
@@ -1172,14 +1014,6 @@ export function usePlatform(): Platform {
 		setDraft,
 		abort,
 		renameWorkspace,
-		providers,
-		authFlow,
-		startLogin,
-		answerLoginPrompt,
-		cancelLogin,
-		closeLogin,
-		logoutProvider: logoutProviderById,
-		refreshProviders: refreshProvidersNow,
 		secretRequest,
 		answerSecret,
 		cancelSecret,
