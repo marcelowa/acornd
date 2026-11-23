@@ -3,15 +3,9 @@ import {
 	abortConversation,
 	addMember,
 	addPerson as addPersonRequest,
-	applyRemote,
-	enableRemote as enableRemoteRequest,
-	forgetRemoteToken,
-	previewRemote as previewRemoteRequest,
-	checkRemote as checkRemoteRequest,
 	fetchProviderAllowlist,
 	fetchProviderCatalog,
 	saveProviderAllowlist,
-	fetchRemote,
 	answerAuthPrompt,
 	answerSecretRequest,
 	cancelSecretRequest,
@@ -58,10 +52,7 @@ import {
 	type ProviderAuthType,
 	type SecretAnswerInput,
 	type UpdatePrefs,
-	type DoorReport,
 	type ProviderCatalogEntry,
-	type RemotePreview,
-	type RemoteStatus,
 	type UpdateStatus,
 } from "./client";
 import {
@@ -115,6 +106,7 @@ import type {
 import type { Draft, RoomDraft } from "./draft";
 import { shownDraft } from "./draft";
 import { useNavigation, useScreens, type NavigationSlice } from "./use-navigation";
+import { useRemote, type RemoteSlice } from "./use-remote";
 import { read, usePreferences, type PreferencesSlice } from "./use-preferences";
 import type {
 	WireDraft,
@@ -166,7 +158,7 @@ export interface PeopleBook {
 	catalog: ProviderCatalogEntry[];
 }
 
-export interface Platform extends PreferencesSlice, NavigationSlice {
+export interface Platform extends PreferencesSlice, NavigationSlice, RemoteSlice {
 	ready: boolean;
 	/** The stream is following, or trying to be. */
 	connection: "live" | "reconnecting";
@@ -274,34 +266,11 @@ export interface Platform extends PreferencesSlice, NavigationSlice {
 	cancelSecret: (requestId: string) => Promise<void>;
 	/** The self-update state, if the gateway answered yet. One dot, not a list. */
 	update?: UpdateStatus | undefined;
-	/** The door as this install recorded it, asked for when the remote page is opened. */
-	remote?: RemoteStatus | undefined;
-	/** One press of the remote form: make Cloudflare match what the owner typed. */
-	applyRemote: (request: { hostname: string; zone: string; token: string }) => Promise<void>;
-	/** Forget the stored token, so the door stops following the book until a new one is pasted. */
-	forgetRemote: () => Promise<void>;
-	remoteBusy: boolean;
-	remoteFailure?: string | undefined;
-	/** What the token can see, once somebody checks it: the zones to choose from, and the team domain. */
-	remotePreview?: RemotePreview | undefined;
-	/** A token is being checked. */
-	remotePreviewBusy: boolean;
-	previewRemote: (token: string) => void;
-	/** Ask the gateway for the remote state again, which is how the tunnel line stays current. */
-	refreshRemote: () => void;
-	/** The file records a door this process did not start with; one press restarts into it. */
-	enableRemote: () => void;
-	remoteRestarting: boolean;
-	remoteRestarted: boolean;
-	/** The last answer from outside, and whether a check is in flight. */
-	remoteCheck?: DoorReport | undefined;
 	/** The provider whose models are being chosen, with the catalog and the list as they stand. */
 	modelChoice?: { provider: ProviderCatalogEntry; allowed: string[] } | undefined;
 	openProviderModels: (provider: ProviderSummary) => void;
 	saveProviderModels: (models: string[]) => void;
 	closeProviderModels: () => void;
-	checkRemote: () => void;
-	remoteChecking: boolean;
 	/** Ask the gateway for the update state again; a success clears the last refusal. */
 	refreshUpdate: () => void;
 	/** An apply is in flight: the update button is disabled until it settles. */
@@ -368,6 +337,7 @@ export function usePlatform(): Platform {
 	const preferences = usePreferences();
 	const nav = useNavigation();
 	const { route, setRoute, setRailOpen, setWorkspacesOpen } = nav;
+	const remote = useRemote(route);
 	const [state, setState] = useState<WireState | undefined>(undefined);
 	const [secretRequest, setSecretRequest] = useState<WireSecretEvent | undefined>(undefined);
 	const [view, setView] = useState<WireView | undefined>(undefined);
@@ -1280,14 +1250,6 @@ export function usePlatform(): Platform {
 		[writeBook],
 	);
 
-	const [remote, setRemote] = useState<RemoteStatus | undefined>(undefined);
-	const [remoteFailure, setRemoteFailure] = useState<string | undefined>(undefined);
-	const [remoteBusy, setRemoteBusy] = useState(false);
-	const [remotePreview, setRemotePreview] = useState<RemotePreview | undefined>(undefined);
-	const [remotePreviewBusy, setRemotePreviewBusy] = useState(false);
-	const [remoteRestarting, setRemoteRestarting] = useState(false);
-	const [remoteRestarted, setRemoteRestarted] = useState(false);
-	const [remoteCheck, setRemoteCheck] = useState<DoorReport | undefined>(undefined);
 	const [modelChoice, setModelChoice] = useState<
 		{ provider: ProviderCatalogEntry; allowed: string[] } | undefined
 	>(undefined);
@@ -1318,100 +1280,6 @@ export function usePlatform(): Platform {
 		[modelChoice, reportError, refreshProvidersNow],
 	);
 	const closeProviderModels = useCallback((): void => setModelChoice(undefined), []);
-	const [remoteChecking, setRemoteChecking] = useState(false);
-	useEffect(() => {
-		if (route.screen !== "settings" || route.settingsTab !== "remote") return;
-		let cancelled = false;
-		void fetchRemote().then(
-			(next) => {
-				if (!cancelled) setRemote(next);
-			},
-			() => {
-				// A gateway that cannot answer says nothing here: the form still works, and a refusal with words
-				// is what the person acts on, not "failed to fetch".
-				if (!cancelled) setRemote(undefined);
-			},
-		);
-		return () => {
-			cancelled = true;
-		};
-	}, [route.screen, route.settingsTab]);
-	const applyRemoteNow = useCallback(
-		async (request: { hostname: string; zone: string; token: string }): Promise<void> => {
-			setRemoteBusy(true);
-			setRemoteFailure(undefined);
-			try {
-				setRemote(await applyRemote(request));
-			} catch (cause) {
-				setRemoteFailure(cause instanceof Error ? cause.message : String(cause));
-			} finally {
-				setRemoteBusy(false);
-			}
-		},
-		[],
-	);
-
-	const forgetRemoteNow = useCallback(async (): Promise<void> => {
-		setRemoteBusy(true);
-		setRemoteFailure(undefined);
-		try {
-			setRemote(await forgetRemoteToken());
-		} catch (cause) {
-			setRemoteFailure(cause instanceof Error ? cause.message : String(cause));
-		} finally {
-			setRemoteBusy(false);
-		}
-	}, []);
-
-	const checkRemoteNow = useCallback((): void => {
-		setRemoteChecking(true);
-		void checkRemoteRequest()
-			.then(setRemoteCheck, (cause: unknown) => {
-				// A check that cannot run is a finding, not a crash: it is shown where the answer would be.
-				setRemoteCheck({
-					guarded: false,
-					status: 0,
-					keys: false,
-					detail: cause instanceof Error ? cause.message : String(cause),
-				});
-			})
-			.finally(() => setRemoteChecking(false));
-	}, []);
-
-	const refreshRemoteNow = useCallback((): void => {
-		void fetchRemote().then(setRemote, () => undefined);
-	}, []);
-
-	const previewRemoteNow = useCallback((token: string): void => {
-		setRemotePreviewBusy(true);
-		setRemoteFailure(undefined);
-		void previewRemoteRequest(token)
-			.then(setRemotePreview, (cause: unknown) => {
-				// A token that cannot do this is a sentence about the token, which is what the person pasted.
-				setRemoteFailure(cause instanceof Error ? cause.message : String(cause));
-			})
-			.finally(() => setRemotePreviewBusy(false));
-	}, []);
-
-	const enableRemoteNow = useCallback((): void => {
-		if (remoteRestarting) return;
-		setRemoteRestarting(true);
-		setRemoteFailure(undefined);
-		void enableRemoteRequest().then(
-			(answer) => {
-				// The answer arrives before the process replaces itself: either it is already serving the door, or
-				// it is about to, and the address this page was opened on will not answer again.
-				setRemoteRestarting(false);
-				setRemoteRestarted(true);
-				if (!answer.restarting) setRemotePreview(undefined);
-			},
-			(cause: unknown) => {
-				setRemoteRestarting(false);
-				setRemoteFailure(cause instanceof Error ? cause.message : String(cause));
-			},
-		);
-	}, [remoteRestarting]);
-
 	const refreshUpdate = useCallback((): void => {
 		void fetchUpdateStatus().then(setFetchedUpdate, reportError);
 	}, [reportError]);
@@ -1514,6 +1382,7 @@ export function usePlatform(): Platform {
 	return {
 		...preferences,
 		...navigation,
+		...remote,
 		ready,
 		connection,
 		failure,
@@ -1566,25 +1435,10 @@ export function usePlatform(): Platform {
 		resolved: state?.resolved,
 		thinkingRequested: state?.agent.thinkingRequested,
 		harness: state?.harness,
-		remote,
-		applyRemote: applyRemoteNow,
-		forgetRemote: forgetRemoteNow,
-		remoteBusy,
-		remoteFailure,
-		remotePreview,
-		remotePreviewBusy,
-		previewRemote: previewRemoteNow,
-		refreshRemote: refreshRemoteNow,
-		enableRemote: enableRemoteNow,
-		remoteRestarting,
-		remoteRestarted,
-		remoteCheck,
 		modelChoice,
 		openProviderModels,
 		saveProviderModels,
 		closeProviderModels,
-		checkRemote: checkRemoteNow,
-		remoteChecking,
 		newConversation,
 		composerFocusToken,
 		select,
