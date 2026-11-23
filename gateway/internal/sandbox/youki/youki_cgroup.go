@@ -137,7 +137,7 @@ func enableControllers(dir string, controllers ...string) error {
 		return err
 	}
 	enabled := map[string]bool{}
-	for _, field := range strings.Fields(string(raw)) {
+	for field := range strings.FieldsSeq(string(raw)) {
 		enabled[field] = true
 	}
 	var missing []string
