@@ -37,6 +37,9 @@ class FakeSource {
 	closed = false;
 	listeners = new Map<string, Listener[]>();
 	constructor(url: string) {
+		// A stream that reopens on every render loops forever: each open clears the transcript,
+		// which renders again. Stopping here turns that hang into a failing test.
+		if (FakeSource.instances.length >= 50) throw new Error("the stream reopened 50 times");
 		this.url = url;
 		FakeSource.instances.push(this);
 	}
@@ -370,5 +373,39 @@ describe("one slice changing leaves the other slices' fields as they were", () =
 		});
 		expect(renders).toBeGreaterThan(facade);
 		expect(transcriptRenders).toBe(transcript);
+	});
+});
+
+describe("the stream", () => {
+	/**
+	 * The stream effect depends on its sinks. They read only refs and setters, so they keep their
+	 * identity; if one did not, the effect would run on every render: the stream would reopen and
+	 * the transcript would be cleared, and no Platform field would show it.
+	 */
+	test("opens once per conversation, whatever else moves", async () => {
+		await settle();
+		const opened = FakeSource.instances.length;
+		const press = async (run: () => void): Promise<void> => {
+			await act(async () => {
+				run();
+				await Promise.resolve();
+			});
+		};
+
+		await press(() => now().setThemeChoice("dark"));
+		await press(() => now().toggleRail());
+		await press(() => now().openWorkspaces());
+		await press(() => now().setDraft("a few words", []));
+		await frame({
+			type: "view",
+			value: { entries: [{ id: 20, kind: "acornd.message", model: [{ content: "kept" }] }] },
+		});
+		await press(() => now().closeWorkspaces());
+		expect(FakeSource.instances.length).toBe(opened);
+		// The press after the frame did not clear it.
+		expect(now().entries.map((entry) => entry.id)).toContain("20");
+
+		await press(() => now().select("8"));
+		expect(FakeSource.instances.length).toBe(opened + 1);
 	});
 });
