@@ -1,6 +1,6 @@
 import { arr, obj, oneOf, opt, str } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
-import { emit, log, type SecretInfo } from "./protocol.ts";
+import { log, type Frame, type SecretInfo } from "./protocol.ts";
 
 /**
  * The `secret` tool: what a workspace may use, and the one way a value can reach the vault
@@ -26,58 +26,6 @@ export interface SecretAnswer {
 export interface SecretListAnswer {
 	secrets: SecretInfo[];
 	reason?: string | undefined;
-}
-
-const answers = new Map<string, PendingAnswer>();
-const lists = new Map<string, PendingList>();
-let counter = 0;
-
-function nextRequestId(): string {
-	counter += 1;
-	return `s${counter}`;
-}
-
-/** Control's answer to a request. Unknown ids are late answers to a dead tool; drop them. */
-export function resolveSecretAnswer(requestId: string, answer: SecretAnswer): void {
-	const pending = answers.get(requestId);
-	if (pending === undefined) return;
-	answers.delete(requestId);
-	pending.resolve(answer);
-}
-
-export function resolveSecretList(requestId: string, answer: SecretListAnswer): void {
-	const pending = lists.get(requestId);
-	if (pending === undefined) return;
-	lists.delete(requestId);
-	pending.resolve(answer);
-}
-
-function askForSecret(
-	conversationId: string,
-	name: string,
-	description: string,
-	hosts: readonly string[],
-): Promise<SecretAnswer> {
-	const requestId = nextRequestId();
-	return new Promise<SecretAnswer>((resolve) => {
-		answers.set(requestId, { resolve });
-		emit({
-			type: "secret_request",
-			id: requestId,
-			conversationId,
-			name,
-			description,
-			hosts: [...hosts],
-		});
-	});
-}
-
-function askForList(conversationId: string): Promise<SecretListAnswer> {
-	const requestId = nextRequestId();
-	return new Promise<SecretListAnswer>((resolve) => {
-		lists.set(requestId, { resolve });
-		emit({ type: "secret_list", id: requestId, conversationId });
-	});
 }
 
 /** The `secret list` tool's answer. Exported so its wording is tested without a worker. */
@@ -118,62 +66,126 @@ function answerText(answer: SecretAnswer): string {
 	return `Saved ${where}.${restart}`;
 }
 
-export function secretExtension() {
-	return defineExtension({
-		name: "acornd-secrets",
-		tools: [
-			defineTool({
-				name: "secret",
-				description:
-					"List the secrets this workspace may use, or ask the user to set one. A value is never in this conversation: use request and the user enters it in a card. Never ask the user to paste a secret as text.",
-				parameters: obj({
-					action: oneOf(["list", "request"]),
-					name: opt(
-						str({
-							description:
-								"Environment variable name for request, uppercase letters, digits, and underscores",
-						}),
-					),
-					description: opt(
-						str({ description: "What the secret is for, shown in the list" }),
-					),
-					hosts: opt(
-						arr(str(), {
-							description:
-								"Hosts the value may be substituted for, as a suggestion for the card",
-						}),
-					),
+/** What a worker holds of the secret tool. Its requests are its own: two workers share nothing. */
+export interface Secrets {
+	extension(): ReturnType<typeof defineExtension>;
+	/** Control's answer to a request. Unknown ids are late answers to a dead tool; drop them. */
+	answer(requestId: string, answer: SecretAnswer): void;
+	answerList(requestId: string, answer: SecretListAnswer): void;
+}
+
+/** The requests in flight, writing their frames through `write`. */
+export function createSecrets(write: (frame: Frame) => void): Secrets {
+	const answers = new Map<string, PendingAnswer>();
+	const lists = new Map<string, PendingList>();
+	let counter = 0;
+
+	function nextRequestId(): string {
+		counter += 1;
+		return `s${counter}`;
+	}
+
+	function resolveSecretAnswer(requestId: string, answer: SecretAnswer): void {
+		const pending = answers.get(requestId);
+		if (pending === undefined) return;
+		answers.delete(requestId);
+		pending.resolve(answer);
+	}
+
+	function resolveSecretList(requestId: string, answer: SecretListAnswer): void {
+		const pending = lists.get(requestId);
+		if (pending === undefined) return;
+		lists.delete(requestId);
+		pending.resolve(answer);
+	}
+
+	function askForSecret(
+		conversationId: string,
+		name: string,
+		description: string,
+		hosts: readonly string[],
+	): Promise<SecretAnswer> {
+		const requestId = nextRequestId();
+		return new Promise<SecretAnswer>((resolve) => {
+			answers.set(requestId, { resolve });
+			write({
+				type: "secret_request",
+				id: requestId,
+				conversationId,
+				name,
+				description,
+				hosts: [...hosts],
+			});
+		});
+	}
+
+	function askForList(conversationId: string): Promise<SecretListAnswer> {
+		const requestId = nextRequestId();
+		return new Promise<SecretListAnswer>((resolve) => {
+			lists.set(requestId, { resolve });
+			write({ type: "secret_list", id: requestId, conversationId });
+		});
+	}
+
+	function extension() {
+		return defineExtension({
+			name: "acornd-secrets",
+			tools: [
+				defineTool({
+					name: "secret",
+					description:
+						"List the secrets this workspace may use, or ask the user to set one. A value is never in this conversation: use request and the user enters it in a card. Never ask the user to paste a secret as text.",
+					parameters: obj({
+						action: oneOf(["list", "request"]),
+						name: opt(
+							str({
+								description:
+									"Environment variable name for request, uppercase letters, digits, and underscores",
+							}),
+						),
+						description: opt(
+							str({ description: "What the secret is for, shown in the list" }),
+						),
+						hosts: opt(
+							arr(str(), {
+								description:
+									"Hosts the value may be substituted for, as a suggestion for the card",
+							}),
+						),
+					}),
+					execute: async (args, api) => {
+						const conversationId = String(api.conversationId);
+						if (args.action === "list") {
+							const answer = await askForList(conversationId);
+							return {
+								output: [{ type: "text" as const, text: formatList(answer) }],
+							};
+						}
+						if (args.name === undefined || !/^[A-Z][A-Z0-9_]*$/.test(args.name)) {
+							log(`secret request refused: invalid name ${String(args.name)}`);
+							return {
+								output: [
+									{
+										type: "text" as const,
+										text: "A secret needs a name that is an uppercase environment variable: A-Z, 0-9, and _.",
+									},
+								],
+							};
+						}
+						const answer = await askForSecret(
+							conversationId,
+							args.name,
+							args.description ?? "",
+							args.hosts ?? [],
+						);
+						return {
+							output: [{ type: "text" as const, text: answerText(answer) }],
+						};
+					},
 				}),
-				execute: async (args, api) => {
-					const conversationId = String(api.conversationId);
-					if (args.action === "list") {
-						const answer = await askForList(conversationId);
-						return {
-							output: [{ type: "text" as const, text: formatList(answer) }],
-						};
-					}
-					if (args.name === undefined || !/^[A-Z][A-Z0-9_]*$/.test(args.name)) {
-						log(`secret request refused: invalid name ${String(args.name)}`);
-						return {
-							output: [
-								{
-									type: "text" as const,
-									text: "A secret needs a name that is an uppercase environment variable: A-Z, 0-9, and _.",
-								},
-							],
-						};
-					}
-					const answer = await askForSecret(
-						conversationId,
-						args.name,
-						args.description ?? "",
-						args.hosts ?? [],
-					);
-					return {
-						output: [{ type: "text" as const, text: answerText(answer) }],
-					};
-				},
-			}),
-		],
-	});
+			],
+		});
+	}
+
+	return { extension, answer: resolveSecretAnswer, answerList: resolveSecretList };
 }

@@ -19,7 +19,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { attachmentCommands } from "./attachments.ts";
-import { authCommands, cancelAuth, resolveAuthAnswer } from "./auth.ts";
+import { createAuth } from "./auth.ts";
 import { authorsExtension } from "./authors.ts";
 import { commandCommands } from "./commands.ts";
 import { compactionCommands } from "./compaction.ts";
@@ -44,7 +44,7 @@ import { loadResources, resourceCommands, type Resources } from "./resources.ts"
 import { runCommands } from "./runs.ts";
 import { SandboxExecutionEnv } from "./sandbox-env.ts";
 import type { SandboxClient } from "./sandbox.ts";
-import { resolveSecretAnswer, resolveSecretList, secretExtension } from "./secret-tool.ts";
+import { createSecrets } from "./secret-tool.ts";
 import { secretSection, type SecretInfo } from "./secrets.ts";
 import { skillsExtension } from "./skills.ts";
 import { createViews, viewCommands, type Views } from "./views.ts";
@@ -73,10 +73,7 @@ export interface WorkerDeps {
 	openStorage(): Promise<Storage>;
 	/** `wake` asks control to start a stopped sandbox; a client that can be woken keeps it. */
 	openSandbox(wake: () => Promise<void>): Promise<SandboxClient>;
-	/**
-	 * One frame out. Not the only way out yet: `auth.ts` and `secret-tool.ts` still write their
-	 * frames to stdout themselves.
-	 */
+	/** The one way a frame leaves the process. */
 	write(frame: Frame): void;
 	now(): number;
 	/** Called once, after `shutdown` or the end of input has closed the harness. */
@@ -250,7 +247,9 @@ export async function createWorker(options: WorkerOptions, deps: WorkerDeps): Pr
 		),
 	);
 	registry.install(CodingTools);
-	registry.install(secretExtension());
+	// One set of requests per worker: a tool that asks for a secret writes its frame through `deps.write`.
+	const secrets = createSecrets(deps.write);
+	registry.install(secrets.extension());
 
 	const settings: HarnessSettings = { toolExecution: "parallel" };
 	// One environment per tool call, all of them over the same sandbox: the id is the sandbox's,
@@ -318,6 +317,7 @@ export async function createWorker(options: WorkerOptions, deps: WorkerDeps): Pr
 		now: deps.now,
 	};
 
+	const auth = createAuth(deps.write);
 	const table: CommandTable = {
 		describe: async () => await describe(context),
 		usage: async () => await harness.usage(CONTEXT),
@@ -330,22 +330,22 @@ export async function createWorker(options: WorkerOptions, deps: WorkerDeps): Pr
 		...delegationCommands(context),
 		...commandCommands(context),
 		...resourceCommands(context),
-		...authCommands(context),
+		...auth.commands(context),
 	};
 
 	const bypass: BypassTable = {
 		auth_answer: (command) =>
-			resolveAuthAnswer(command.promptId, command.value, command.cancelled === true),
-		auth_cancel: (command) => cancelAuth(command.authId),
+			auth.answer(command.promptId, command.value, command.cancelled === true),
+		auth_cancel: (command) => auth.cancel(command.authId),
 		secret_answer: (command) =>
-			resolveSecretAnswer(command.secretRequestId, {
+			secrets.answer(command.secretRequestId, {
 				cancelled: command.cancelled === true,
 				scope: command.secretScope,
 				restartRequired: command.restartRequired === true,
 				reason: command.reason,
 			}),
 		secret_list_answer: (command) =>
-			resolveSecretList(command.secretRequestId, {
+			secrets.answerList(command.secretRequestId, {
 				secrets: command.secrets ?? [],
 				reason: command.reason,
 			}),

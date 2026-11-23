@@ -42,6 +42,11 @@ async function start(beforeWrite: (frame: Frame) => void = () => undefined): Pro
 					reply: "WORK DONE",
 				},
 				{ match: "hello", reply: "HI THERE" },
+				{
+					match: "need a secret",
+					tools: [{ name: "secret", args: { action: "request", name: "API_TOKEN" } }],
+					reply: "SECRET HANDLED",
+				},
 			],
 		}),
 	);
@@ -266,6 +271,49 @@ describe("createWorker", () => {
 			}
 		});
 		expect(await failure(own.call({ type: "describe" }))).toBe("the writer failed");
+	});
+
+	test("a login that reaches a prompt sends an auth frame and finishes on the answer", async () => {
+		const own = await start();
+		const authId = "login-1";
+		const prompt = own.wait((frame) => frame.type === "auth" && frame.event.kind === "prompt");
+		const finished = own.call({
+			type: "login",
+			providerId: "anthropic",
+			authType: "api_key",
+			authId,
+		});
+		const frame = await prompt;
+		if (frame.type !== "auth" || frame.event.kind !== "prompt") throw new Error("not a prompt");
+		expect(frame.authId).toBe(authId);
+		const done = own.wait(
+			(candidate) => candidate.type === "auth" && candidate.event.kind === "done",
+		);
+		await own.call({
+			type: "auth_answer",
+			authId,
+			promptId: frame.event.promptId,
+			value: "sk-test",
+		});
+		expect(await finished).toEqual({ providerId: "anthropic" });
+		await done;
+	});
+
+	test("a tool that asks for a secret sends a secret_request and continues on the answer", async () => {
+		const own = await start();
+		const conversationId = await opened(own);
+		const asked = own.wait((frame) => frame.type === "secret_request");
+		await own.call({ type: "prompt", conversationId, text: "need a secret" });
+		const request = await asked;
+		if (request.type !== "secret_request") throw new Error("not a secret request");
+		expect(request.name).toBe("API_TOKEN");
+		expect(request.conversationId).toBe(conversationId);
+		await own.call({
+			type: "secret_answer",
+			secretRequestId: request.id,
+			secretScope: "workspace",
+		});
+		await transcript(own, conversationId, "Saved to this workspace");
 	});
 
 	test("shutdown answers, closes the harness, and exits", async () => {
