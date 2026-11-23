@@ -52,7 +52,8 @@ const (
 	SandboxDNS = "10.0.2.3"
 	// SandboxInterface is the name pasta gives the namespace's interface, passed as -I. Without
 	// it pasta copies the machine's default interface name, which is not always eth0, and the
-	// netns helper (internal/netns/command.go) brings up eth0 by name. See issue 87.
+	// netns helper brings up netns.Interface by name. This package may not import netns, so a
+	// test in the bwrap package holds the two equal. See issue 87.
 	SandboxInterface = "eth0"
 )
 

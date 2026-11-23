@@ -10,6 +10,11 @@ import (
 // 2 for it, so a person sees a usage error rather than a configuration failure.
 var ErrUsage = errors.New("usage")
 
+// Interface is the name of the namespace's interface. pasta is told it with -I
+// (sandbox.SandboxInterface, which a test in the bwrap package holds equal to this); without
+// that, pasta copies the machine's default interface name, and this helper would not find it.
+const Interface = "eth0"
+
 // Command configures the network namespace pasta made from the flags and returns the command
 // to exec. It is the whole of what a sandbox's first process does before it becomes the
 // sandbox's own process: the routes refusing private ranges are code rather than a script, so a
@@ -60,15 +65,15 @@ func configure(c configurer, address, gateway string, refusePrivate bool) error 
 	if address == "" || gateway == "" {
 		return fmt.Errorf("no address or gateway: recreate the sandbox")
 	}
-	for _, name := range []string{"lo", "eth0"} {
+	for _, name := range []string{"lo", Interface} {
 		if err := c.Up(name); err != nil {
 			return fmt.Errorf("cannot bring %s up: %w", name, err)
 		}
 	}
-	if err := c.Address("eth0", address); err != nil {
-		return fmt.Errorf("cannot give eth0 %s: %w", address, err)
+	if err := c.Address(Interface, address); err != nil {
+		return fmt.Errorf("cannot give %s %s: %w", Interface, address, err)
 	}
-	if err := c.Gateway("eth0", gateway); err != nil {
+	if err := c.Gateway(Interface, gateway); err != nil {
 		return fmt.Errorf("cannot route through %s: %w", gateway, err)
 	}
 	if !refusePrivate {

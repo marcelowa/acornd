@@ -1011,6 +1011,15 @@ func TestThePastaProbeHandsPastaThisBinaryAndNotBinTrue(t *testing.T) {
 	}
 }
 
+// pasta names the interface and the netns helper brings it up by name, from two constants in two
+// packages that may not import each other. A difference fails every sandbox with a network, and
+// only in the bwrap tier (issue 87), so it fails here instead.
+func TestPastaNamesTheInterfaceTheNetnsHelperBringsUp(t *testing.T) {
+	if sandbox.SandboxInterface != netns.Interface {
+		t.Fatalf("pasta is given -I %q but the netns helper brings up %q", sandbox.SandboxInterface, netns.Interface)
+	}
+}
+
 // The probe makes the same interface a sandbox does. On a machine whose default interface is not
 // eth0, a probe without -I would pass while every sandbox failed to find eth0 (issue 87).
 func TestThePastaProbeNamesTheInterfaceEth0(t *testing.T) {
