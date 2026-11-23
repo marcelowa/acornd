@@ -139,3 +139,23 @@ func refusalFor(t *testing.T, registry control.RegistryFile, name string) string
 	t.Fatalf("purge accepted %q", name)
 	return ""
 }
+
+// Two terminals adding one name: each checked the file before choosing an engine, so the check is asked again
+// under the registry lock, and the second add is refused rather than written as a second record of the name.
+func TestTwoTerminalsCannotRecordTheSameName(t *testing.T) {
+	dataDir := t.TempDir()
+	record := addRecord{name: "team", absolute: t.TempDir(), engine: "bwrap"}
+	if _, err := recordWorkspace(dataDir, record); err != nil {
+		t.Fatalf("first add: %v", err)
+	}
+	if _, err := recordWorkspace(dataDir, record); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("the second add of one name should be refused, got %v", err)
+	}
+	file, err := control.NewRegistry(dataDir).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(file.Workspaces) != 1 {
+		t.Errorf("the registry holds %d records, want 1: %+v", len(file.Workspaces), file.Workspaces)
+	}
+}
