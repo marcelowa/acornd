@@ -47,6 +47,11 @@ func TestImportsStayInsideTheBoundary(t *testing.T) {
 			if !contains(imports[dir].tests, stale) {
 				t.Errorf("arch.AllowedInTests[%q] lists %s, which no test file imports: drop the row entry", dir, stale)
 			}
+			// A test file does import it, so the stale check above is quiet, but the production row
+			// already allows it for every file in the package: the test-only entry outlives nothing.
+			if contains(allowed, stale) {
+				t.Errorf("arch.AllowedInTests[%q] lists %s, which arch.Allowed[%q] already allows: drop the test-only entry", dir, stale, dir)
+			}
 		}
 	}
 	for _, dir := range sorted(Allowed) {
