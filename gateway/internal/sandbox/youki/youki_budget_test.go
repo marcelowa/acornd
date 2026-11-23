@@ -76,7 +76,7 @@ func TestYoukiBudgetsKillTheRunaway(t *testing.T) {
 
 // oomKills is the oom_kill counter from a cgroup v2 memory.events file.
 func oomKills(events []byte) int {
-	for _, line := range strings.Split(string(events), "\n") {
+	for line := range strings.SplitSeq(string(events), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) == 2 && fields[0] == "oom_kill" {
 			count, _ := strconv.Atoi(fields[1])
