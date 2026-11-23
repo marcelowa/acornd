@@ -18,9 +18,11 @@
 //     with it, so a child's drop is covered when its ancestor's killed floor rose by as much;
 //   - code moved into a package that is new to this tree: when shared code leaves several
 //     packages for a new sibling, their killed floors drop and the new package's row holds those
-//     mutants now. The killed drops of every package that fell must add up to at most the killed
-//     floors of the new packages (rows the base does not have, outside any split). A larger
-//     drop, a drop with no new package, or an efficacy floor that fell, is still a failure;
+//     mutants now. A new package is a row the base does not have, outside any split. A package
+//     that fell counts only if its own non-test files import a new package, since code that moved
+//     out leaves its old package using the new one. The killed drops of those packages must add up
+//     to at most the killed floors of the new packages they import. A larger drop, a fallen
+//     package that imports no new package, or an efficacy floor that fell, is still a failure;
 //   - a floor line that disappears while its package is still in the tree is a failure, because
 //     that is the same move written the other way;
 //   - a floor that rises is reported and passes — the file is edited by hand, and the person who
@@ -30,7 +32,7 @@
 //
 // Usage: bun scripts/check-floors.mjs [--base origin/main]
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const COVERAGE = ".coveragefloors";
@@ -152,29 +154,64 @@ function newPackages(head, base) {
 	return [...head.keys()].filter((name) => !base.has(name) && ancestorFloor(name, base) === undefined);
 }
 
-/** The third move: every drop that waited here is covered by the new packages, or none is. */
+/**
+ * Whether a package's own non-test Go files import another package of the module. A text match on
+ * the quoted import path is enough: the path is unique, and this needs no parser.
+ */
+function imports(name, target) {
+	const dir = join("gateway", name);
+	if (!existsSync(dir)) return false;
+	const path = `"${modulePath()}/${target}"`;
+	return readdirSync(dir).some(
+		(file) => file.endsWith(".go") && !file.endsWith("_test.go") && readFileSync(join(dir, file), "utf8").includes(path),
+	);
+}
+
+let module;
+function modulePath() {
+	module ??= readFileSync(join("gateway", "go.mod"), "utf8").match(/^module\s+(\S+)/m)?.[1];
+	if (!module) throw new Error("gateway/go.mod names no module");
+	return module;
+}
+
+/**
+ * The third move. Code cannot leave a package for a new one and leave the package not using it,
+ * unless it was deleted; so a package that fell counts only if it imports a new package, and only
+ * the new packages a fallen one imports hold its drop. A package that imports none fell.
+ */
 function judgeMovedIntoNew(fell, head, base, violations, moves) {
 	if (fell.length === 0) return;
 	const added = newPackages(head, base);
-	const held = added.reduce((total, name) => total + (head.get(name)?.[1] ?? 0), 0);
-	const dropped = fell.reduce((total, { was, now }) => total + (was[1] - now[1]), 0);
-	if (dropped <= held) {
-		for (const { name, was, now } of fell) {
+	const moved = [];
+	const into = new Set();
+	for (const entry of fell) {
+		const used = added.filter((target) => imports(entry.name, target));
+		if (used.length === 0) {
+			violations.push(
+				`${entry.name}: ${entry.was.join("/")} -> ${entry.now.join("/")} (mutation); it imports no new package (${added.join(", ")}), so nothing moved there`,
+			);
+			continue;
+		}
+		for (const target of used) into.add(target);
+		moved.push(entry);
+	}
+	if (moved.length === 0) return;
+	const targets = [...into];
+	const held = targets.reduce((total, name) => total + (head.get(name)?.[1] ?? 0), 0);
+	const dropped = moved.reduce((total, { was, now }) => total + (was[1] - now[1]), 0);
+	for (const { name, was, now } of moved) {
+		if (dropped > held) {
+			violations.push(
+				`${name}: ${was.join("/")} -> ${now.join("/")} (mutation); the drops add up to ${dropped}, more than the ${held} killed in ${targets.join(", ")}`,
+			);
+		} else if (now[0] < was[0]) {
 			// The move accounts for killed mutants only; an efficacy floor still may not fall.
-			if (now[0] < was[0]) {
-				violations.push(`${name}: efficacy ${was[0]} -> ${now[0]} (mutation); a move into a new package does not lower efficacy`);
-				continue;
-			}
+			violations.push(`${name}: efficacy ${was[0]} -> ${now[0]} (mutation); a move into a new package does not lower efficacy`);
+		} else {
 			moves.push(
-				`${name}: ${was.join("/")} -> ${now.join("/")}, into ${added.join(", ")}: ${dropped} killed dropped, ${held} held there (mutation)`,
+				`${name}: ${was.join("/")} -> ${now.join("/")}, into ${targets.join(", ")}: ${dropped} killed dropped, ${held} held there (mutation)`,
 			);
 		}
-		return;
-	}
-	for (const { name, was, now } of fell) {
-		violations.push(
-			`${name}: ${was.join("/")} -> ${now.join("/")} (mutation); the drops add up to ${dropped}, more than the ${held} killed in ${added.join(", ")}`,
-		);
 	}
 }
 
