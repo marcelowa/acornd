@@ -261,6 +261,10 @@ type Workspaces struct {
 	// pair of locks, and a pending writer on either side would then hang every request
 	// that touches both — which is every request. `TestStateDoesNotTakeTheRegistryLockInsideItsOwn`
 	// checks the one place that had it backwards.
+	//
+	// The registry file's lock comes before this one: persist reads the registry under the file lock. So no
+	// caller holds mu when it calls persist, and today none does (Add, Update, Remove, ClaimOwner, writeBack,
+	// AddGuest and RemoveMember all release it first).
 	mu       sync.RWMutex
 	dir      string
 	registry map[string]Workspace
@@ -1483,20 +1487,20 @@ func (w *Workspaces) ensurePersonal() (bool, error) {
 // persist writes the named records as this process holds them, and the folder it records, onto the file as it is
 // now. A name this process no longer holds is taken out of the file; every other record is left as the file has
 // it, so a workspace `acornd workspace add` recorded while the gateway ran survives the gateway's next write (#69).
+//
+// Memory is read inside the file lock, not before it: a copy taken before could wait behind a newer write and
+// then put the older record back.
 func (w *Workspaces) persist(names ...string) error {
-	w.mu.RLock()
-	dir := w.dir
-	records := make([]Workspace, 0, len(names))
-	for _, name := range names {
-		if workspace, held := w.registry[name]; held {
-			records = append(records, workspace)
-		}
-	}
-	w.mu.RUnlock()
 	return NewRegistry(w.opts.DataDir).Change(func(file *RegistryFile) error {
-		file.WorkspacesDir = dir
 		file.Workspaces = slices.DeleteFunc(file.Workspaces, func(workspace Workspace) bool { return slices.Contains(names, workspace.Name) })
-		file.Workspaces = append(file.Workspaces, records...)
+		w.mu.RLock()
+		defer w.mu.RUnlock()
+		file.WorkspacesDir = w.dir
+		for _, name := range names {
+			if workspace, held := w.registry[name]; held {
+				file.Workspaces = append(file.Workspaces, workspace)
+			}
+		}
 		return nil
 	})
 }
