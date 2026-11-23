@@ -8,13 +8,10 @@ import {
 	answerAuthPrompt,
 	answerSecretRequest,
 	cancelSecretRequest,
-	applyUpdate,
 	cancelAuthFlow,
-	checkUpdate,
 	compactConversation,
 	createConversation as createConversationRequest,
 	fetchCompactPreview,
-	fetchUpdateStatus,
 	createWorkspace as createWorkspaceRequest,
 	fetchCommands,
 	fetchState,
@@ -26,9 +23,7 @@ import {
 	refreshProviders,
 	removeMember,
 	removeWorkspace as removeWorkspaceRequest,
-	restartUpdate,
 	renameConversation,
-	rollbackUpdate,
 	saveDraft,
 	sendMessage,
 	uploadAttachment,
@@ -36,7 +31,6 @@ import {
 	setDefaultAgent,
 	setDefaultModel,
 	setDefaultThinking,
-	setUpdatePrefs as saveUpdatePrefs,
 	startProviderLogin,
 	type UploadedAttachment,
 	updateWorkspace,
@@ -45,9 +39,7 @@ import {
 	type DefaultScope,
 	type ProviderAuthType,
 	type SecretAnswerInput,
-	type UpdatePrefs,
 	type ProviderCatalogEntry,
-	type UpdateStatus,
 } from "./client";
 import {
 	authFlowAnswerFailed,
@@ -60,7 +52,6 @@ import {
 	type AuthWaiting,
 } from "./auth-flow";
 import { foldContext, lastUsage, type ContextRequest } from "./context";
-import { trackBuild } from "./update";
 import {
 	contextWindowFor,
 	stalePins,
@@ -100,6 +91,7 @@ import { shownDraft } from "./draft";
 import { useNavigation, useScreens, type NavigationSlice } from "./use-navigation";
 import { usePeople, type PeopleSlice } from "./use-people";
 import { useRemote, type RemoteSlice } from "./use-remote";
+import { useUpdate, type UpdateSlice } from "./use-update";
 import { read, usePreferences, type PreferencesSlice } from "./use-preferences";
 import type {
 	WireDraft,
@@ -141,7 +133,8 @@ export type { AuthFlow } from "./auth-flow";
 /** The book of people, as the People page reads it. */
 export type { PeopleBook } from "./use-people";
 
-export interface Platform extends PreferencesSlice, NavigationSlice, RemoteSlice, PeopleSlice {
+export interface Platform
+	extends PreferencesSlice, NavigationSlice, RemoteSlice, PeopleSlice, UpdateSlice {
 	ready: boolean;
 	/** The stream is following, or trying to be. */
 	connection: "live" | "reconnecting";
@@ -232,27 +225,11 @@ export interface Platform extends PreferencesSlice, NavigationSlice, RemoteSlice
 	answerSecret: (requestId: string, input: SecretAnswerInput) => Promise<void>;
 	/** Close the card without setting anything. */
 	cancelSecret: (requestId: string) => Promise<void>;
-	/** The self-update state, if the gateway answered yet. One dot, not a list. */
-	update?: UpdateStatus | undefined;
 	/** The provider whose models are being chosen, with the catalog and the list as they stand. */
 	modelChoice?: { provider: ProviderCatalogEntry; allowed: string[] } | undefined;
 	openProviderModels: (provider: ProviderSummary) => void;
 	saveProviderModels: (models: string[]) => void;
 	closeProviderModels: () => void;
-	/** Ask the gateway for the update state again; a success clears the last refusal. */
-	refreshUpdate: () => void;
-	/** An apply is in flight: the update button is disabled until it settles. */
-	applyingUpdate: boolean;
-	/** Force a release check now. */
-	checkUpdateNow: () => void;
-	/** Back up, download, verify, swap. Refusals land in `failure`. */
-	applyUpdateNow: (tag: string, cleanVMs: boolean, drain: "wait" | "stop") => void;
-	/** Finish a pending update: the process replaces itself. */
-	restartUpdateNow: () => void;
-	/** Restore the last good build. */
-	rollbackUpdateNow: () => void;
-	/** The Updates tab: channel, auto-check, pinned tag. */
-	setUpdatePrefs: (prefs: UpdatePrefs) => void;
 	entries: TranscriptEntry[];
 	active?: ConversationSummary | undefined;
 	/** The conversation in view was created by another one, so its choices are not its own. */
@@ -1086,68 +1063,7 @@ export function usePlatform(): Platform {
 		[workspace, route.conversation, secretRequest],
 	);
 
-	// The self-update state: the stream carries the summary (dot data) on
-	// every state event; a fetch fills the details (notes, prefs, sizes)
-	// once at load and every 15 minutes. A failed poll falls back to the
-	// stream summary rather than failing the whole screen: the update
-	// screen is advisory, the conversation is not.
-	const [fetchedUpdate, setFetchedUpdate] = useState<UpdateStatus | undefined>(undefined);
-	const updateFromState: UpdateStatus | undefined =
-		state?.update === undefined
-			? undefined
-			: {
-					current: state.update.current,
-					latest: state.update.latest ?? "",
-					notes: "",
-					channel: "",
-					autoCheck: false,
-					checking: false,
-					available: state.update.available,
-					failed: state.update.failed,
-					restartRequired: state.update.restartRequired,
-					backups: [],
-					downloadSize: 0,
-					workerSize: 0,
-					// The runs gate is the gateway's own answer, and the stream
-					// summary does not carry it: the page's fetch does.
-					runsActive: false,
-					runs: [],
-				};
-	const update = fetchedUpdate ?? updateFromState;
-	// The build this page first saw: an apply or rollback restarts the server
-	// under us, the stream's next state names the new build, and this bundle
-	// is old — reload to fetch the new one. The stream summary is the
-	// freshest sighting; the fetch fills in when the stream has said nothing.
-	const runningBuild = useRef<string | undefined>(undefined);
-	const streamBuild = updateFromState?.current;
-	const fetchedBuild = fetchedUpdate?.current;
-	useEffect(() => {
-		const tracked = trackBuild(runningBuild.current, streamBuild ?? fetchedBuild);
-		runningBuild.current = tracked.seen;
-		if (tracked.reload) window.location.reload();
-	}, [streamBuild, fetchedBuild]);
-	useEffect(() => {
-		let cancelled = false;
-		const load = async (): Promise<void> => {
-			try {
-				const next = await fetchUpdateStatus();
-				if (!cancelled) setFetchedUpdate(next);
-			} catch {
-				if (!cancelled) setFetchedUpdate(undefined);
-			}
-		};
-		void load();
-		const timer = window.setInterval(
-			() => {
-				void load();
-			},
-			15 * 60 * 1000,
-		);
-		return () => {
-			cancelled = true;
-			window.clearInterval(timer);
-		};
-	}, []);
+	const update = useUpdate(state?.update, act, reportError);
 
 	const admin = state?.admin === true;
 	const people = usePeople(route, admin);
@@ -1182,41 +1098,6 @@ export function usePlatform(): Platform {
 		[modelChoice, reportError, refreshProvidersNow],
 	);
 	const closeProviderModels = useCallback((): void => setModelChoice(undefined), []);
-	const refreshUpdate = useCallback((): void => {
-		void fetchUpdateStatus().then(setFetchedUpdate, reportError);
-	}, [reportError]);
-	const checkUpdateNow = useCallback((): void => {
-		act(checkUpdate().then(setFetchedUpdate));
-	}, [act]);
-	const [applyingUpdate, setApplyingUpdate] = useState(false);
-	const applyUpdateNow = useCallback(
-		(tag: string, cleanVMs: boolean, drain: "wait" | "stop"): void => {
-			const request = applyUpdate(cleanVMs, drain, tag);
-			// Immediate and single: the button disables on this render, so a
-			// second tap has nothing to press. Settles either way, so a
-			// refusal re-enables instead of sticking disabled.
-			setApplyingUpdate(true);
-			const done = (): void => setApplyingUpdate(false);
-			void request.then(done, done);
-			act(request.then(setFetchedUpdate));
-		},
-		[act],
-	);
-	const restartUpdateNow = useCallback((): void => {
-		// The gateway answers before it becomes the new binary; the stream drops
-		// and reconnects on its own, and the page follows the build from there.
-		act(restartUpdate().then(setFetchedUpdate));
-	}, [act]);
-	const rollbackUpdateNow = useCallback((): void => {
-		act(rollbackUpdate().then(setFetchedUpdate));
-	}, [act]);
-	const setUpdatePrefs = useCallback(
-		(prefs: UpdatePrefs): void => {
-			act(saveUpdatePrefs(prefs).then(setFetchedUpdate));
-		},
-		[act],
-	);
-
 	const newConversation = useCallback(() => {
 		// The drawer covers the conversation on a phone, and the new room is for typing:
 		// close it now so it never lingers over the request, and again on arrival.
@@ -1286,6 +1167,7 @@ export function usePlatform(): Platform {
 		...navigation,
 		...remote,
 		...people,
+		...update,
 		ready,
 		connection,
 		failure,
@@ -1362,13 +1244,5 @@ export function usePlatform(): Platform {
 		secretRequest,
 		answerSecret,
 		cancelSecret,
-		update,
-		refreshUpdate,
-		applyingUpdate,
-		checkUpdateNow,
-		applyUpdateNow,
-		restartUpdateNow,
-		rollbackUpdateNow,
-		setUpdatePrefs,
 	};
 }
