@@ -20,7 +20,8 @@ interface Driven {
 	wait(predicate: (frame: Frame) => boolean, timeout?: number): Promise<Frame>;
 }
 
-async function start(): Promise<Driven> {
+/** `beforeWrite` sees each frame before it is kept, and may throw to stand in for a broken writer. */
+async function start(beforeWrite: (frame: Frame) => void = () => undefined): Promise<Driven> {
 	const home = await tempDir("acornd-worker-");
 	const workspace = join(home, "workspace");
 	const script = join(home, "script.json");
@@ -62,6 +63,7 @@ async function start(): Promise<Driven> {
 			openStorage: async () => new MemoryStorage(),
 			openSandbox: async () => refusedSandbox("no sandbox in this test"),
 			write: (frame) => {
+				beforeWrite(frame);
 				const index = waiters.findIndex((waiter) => waiter.predicate(frame));
 				if (index >= 0) waiters.splice(index, 1)[0]?.resolve(frame);
 				else frames.push(frame);
@@ -252,6 +254,18 @@ describe("createWorker", () => {
 		});
 		const text = await transcript(worker, conversationId, "ana@example.com");
 		expect(text).not.toContain("FINISHED");
+	});
+
+	test("a writer that fails on the answer still sends an error for that id", async () => {
+		// Its own worker: this writer throws once, on the first ok response.
+		let failed = false;
+		const own = await start((frame) => {
+			if (!failed && frame.type === "response" && frame.ok) {
+				failed = true;
+				throw new Error("the writer failed");
+			}
+		});
+		expect(await failure(own.call({ type: "describe" }))).toBe("the writer failed");
 	});
 
 	test("shutdown answers, closes the harness, and exits", async () => {

@@ -358,18 +358,14 @@ export async function createWorker(options: WorkerOptions, deps: WorkerDeps): Pr
 		return await handler(command);
 	}
 
-	function respond(id: string, run: Promise<unknown>): Promise<void> {
-		return run.then(
-			(data) =>
-				deps.write({
-					type: "response",
-					id,
-					ok: true,
-					...(data === undefined ? {} : { data }),
-				}),
-			(error) =>
-				deps.write({ type: "response", id, ok: false, error: (error as Error).message }),
-		);
+	/** One try around the run and the ok write, so a failed write of the answer is still answered. */
+	async function respond(id: string, run: Promise<unknown>): Promise<void> {
+		try {
+			const data = await run;
+			deps.write({ type: "response", id, ok: true, ...(data === undefined ? {} : { data }) });
+		} catch (error) {
+			deps.write({ type: "response", id, ok: false, error: (error as Error).message });
+		}
 	}
 
 	const queue = new CommandQueue();
