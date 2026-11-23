@@ -1,40 +1,26 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-	abortConversation,
 	addMember,
-	answerSecretRequest,
-	cancelSecretRequest,
-	compactConversation,
 	createConversation as createConversationRequest,
-	fetchCompactPreview,
 	createWorkspace as createWorkspaceRequest,
-	fetchCommands,
 	fetchState,
 	fetchWorkspaceStatus,
-	forkConversation,
 	hideConversation,
 	openStream,
 	removeMember,
 	removeWorkspace as removeWorkspaceRequest,
 	renameConversation,
-	sendMessage,
-	uploadAttachment,
 	setAgent,
 	setDefaultAgent,
 	setDefaultModel,
 	setDefaultThinking,
-	type UploadedAttachment,
 	updateWorkspace,
 	type AgentChange,
-	type CompactPreview,
 	type DefaultScope,
-	type SecretAnswerInput,
 } from "./client";
-import { foldContext, lastUsage, type ContextRequest } from "./context";
 import {
 	contextWindowFor,
 	stalePins,
-	textOf,
 	toAgentGroups,
 	toConversation,
 	toEngines,
@@ -44,30 +30,27 @@ import {
 	toSandbox,
 	toScopeDefaults,
 	toThinkingGroups,
-	toTranscript,
 	toWorkspaces,
 } from "./map";
 import type {
-	BusyAction,
 	ChoicePicker,
 	ConversationSummary,
 	EngineSummary,
 	PickerGroup,
 	SandboxSummary,
 	ShareView,
-	SlashCommand,
-	TranscriptEntry,
 	WorkspaceSummary,
 } from "./view-models";
 import { useNavigation, useScreens, type NavigationSlice } from "./use-navigation";
 import { usePeople, type PeopleSlice } from "./use-people";
+import { useConversation, type ConversationSlice } from "./use-conversation";
 import { useDraft, type DraftSlice } from "./use-draft";
 import { useProviders, type ProvidersSlice } from "./use-providers";
 import { useRemote, type RemoteSlice } from "./use-remote";
 import { useSession, type SessionSlice } from "./use-session";
 import { useUpdate, type UpdateSlice } from "./use-update";
 import { read, usePreferences, type PreferencesSlice } from "./use-preferences";
-import type { WireResolvedAgent, WireSecretEvent, WireSender, WireUsage, WireView } from "./wire";
+import type { WireResolvedAgent } from "./wire";
 
 const SEEN_KEY = "acornd.seen";
 
@@ -104,7 +87,8 @@ export interface Platform
 		UpdateSlice,
 		SessionSlice,
 		ProvidersSlice,
-		DraftSlice {
+		DraftSlice,
+		ConversationSlice {
 	conversations: ConversationSummary[];
 	deleted: ConversationSummary[];
 	/** The workspaces, with the one in view marked. */
@@ -153,48 +137,21 @@ export interface Platform
 	engines: EngineSummary[];
 	removeWorkspace: (name: string) => void;
 	renameWorkspace: (name: string, title: string) => void;
-	/** A tool's open secret request, shown as a card in the conversation. */
-	secretRequest?: WireSecretEvent | undefined;
-	/** Send the card's value to the gateway; the tool waiting on it gets only the outcome. */
-	answerSecret: (requestId: string, input: SecretAnswerInput) => Promise<void>;
-	/** Close the card without setting anything. */
-	cancelSecret: (requestId: string) => Promise<void>;
-	entries: TranscriptEntry[];
 	active?: ConversationSummary | undefined;
 	/** The conversation in view was created by another one, so its choices are not its own. */
 	subagent: boolean;
-	/** The worker can take a steering input mid-turn; without it the choice is stop or queue. */
-	steerable: boolean;
 	/** Model, thinking, and agent as the conversation resolves them, with their layer. */
 	model: ChoicePicker;
 	thinking: ChoicePicker;
 	agent: ChoicePicker;
-	/** The commands the server would expand, for the slash menu. */
-	commands: SlashCommand[];
-	/** What the model saw, request by request — the inspector's fold. */
-	context: ContextRequest[];
-	usage?: WireUsage | undefined;
 	/** The running model's window, when the providers name it. */
 	contextWindow?: number | undefined;
 	resolved?: WireResolvedAgent | undefined;
-	harness?: string | undefined;
 	/** The level that was asked for when the model could not express it. */
 	thinkingRequested?: string | undefined;
 	select: (id: string) => void;
 	rename: (id: string, title: string) => void;
 	hide: (id: string, hidden: boolean) => void;
-	fork: (at: string) => void;
-	/** Start a manual compaction of the conversation in view. */
-	compact: () => void;
-	/** The compact dialog: open flag plus the counted scope. */
-	compactOpen: boolean;
-	compactPreview?: CompactPreview | undefined;
-	openCompactDialog: () => void;
-	closeCompactDialog: () => void;
-	send: (text: string, whenBusy: BusyAction, attachments?: string[] | undefined) => Promise<void>;
-	/** Stage files picked in the composer; ids ride with the next send. */
-	upload: (file: File) => Promise<UploadedAttachment>;
-	abort: () => void;
 }
 
 /**
@@ -212,7 +169,6 @@ export function usePlatform(): Platform {
 		state,
 		workspace,
 		activeId,
-		activeIdRef,
 		reportError,
 		clearFailure,
 		act,
@@ -224,29 +180,17 @@ export function usePlatform(): Platform {
 	} = session;
 	const providers = useProviders(session);
 	const { receiveAuth } = providers;
-	const [secretRequest, setSecretRequest] = useState<WireSecretEvent | undefined>(undefined);
-	const [view, setView] = useState<WireView | undefined>(undefined);
-	const [senders, setSenders] = useState<Record<string, WireSender>>({});
-	/**
-	 * The steer-or-queued mark a message was sent with, per conversation and entry id. The wire
-	 * keeps no link between an inbox item and the entry it becomes, so this is the interface's own
-	 * memory: `onView` claims it as the message lands. See `docs/ui-workflow/refactor-ux/09-build.md`.
-	 */
-	const [marks, setMarks] = useState<Record<string, Record<string, BusyAction>>>({});
 	const [seen, setSeen] = useState<Record<string, string>>(() => read(SEEN_KEY, {}));
 	const [composerFocusToken, setComposerFocusToken] = useState(0);
-	const [commands, setCommands] = useState<SlashCommand[]>([]);
 	const drafts = useDraft(session);
 	const { flushDrafts } = drafts;
-
-	/** What is in the inbox and not committed yet, by its own words: how it was sent. */
-	const sentMarks = useRef(new Map<string, BusyAction>());
+	const conversation = useConversation(session, route);
+	const { receiveView, receiveSecret, resetView, clearView } = conversation;
 
 	useEffect(() => {
 		let cancelled = false;
 		// A stale transcript from the previous conversation is worse than an empty one.
-		setView(undefined);
-		setSenders({});
+		resetView();
 
 		// A workspace that is not up yet is a state, not a wait: the status is cheap and says
 		// which step it is on, so the pane can say "copying the image" instead of nothing while
@@ -309,49 +253,11 @@ export function usePlatform(): Platform {
 			},
 			onSecret: (event) => {
 				if (cancelled) return;
-				if (event.kind === "request") {
-					setSecretRequest(event);
-					return;
-				}
-				setSecretRequest((current) =>
-					current?.requestId === event.requestId ? undefined : current,
-				);
+				receiveSecret(event);
 			},
 			onView: (nextView, nextSenders) => {
 				if (cancelled) return;
-				// A message's steer-or-queued mark cannot come from the wire: an inbox item and the
-				// entry it becomes are different records. So what was sent is remembered, and the
-				// message that lands with the same words gets the mark — once, by entry id, so it
-				// survives every later frame.
-				const pending = sentMarks.current;
-				for (const item of nextView.docs?.["pi.inbox"]?.items ?? []) {
-					if (item.mode !== "steer" && item.mode !== "followUp") continue;
-					const text = textOf(item.content).trim();
-					if (text !== "") pending.set(text, item.mode);
-				}
-				const conversation = activeIdRef.current;
-				const claims: Record<string, BusyAction> = {};
-				for (const entry of nextView.entries ?? []) {
-					// A person's message is placed as `acornd.message` (ADR 0034 §7); `pi.user` is an
-					// agent's message to another conversation.
-					if (entry.kind !== "pi.user" && entry.kind !== "acornd.message") continue;
-					const text = (entry.model ?? [])
-						.map((message) => textOf(message.content))
-						.join("\n")
-						.trim();
-					const mode = pending.get(text);
-					if (mode === undefined) continue;
-					pending.delete(text);
-					claims[String(entry.id)] = mode;
-				}
-				if (conversation !== undefined && Object.keys(claims).length > 0) {
-					setMarks((current) => ({
-						...current,
-						[conversation]: { ...current[conversation], ...claims },
-					}));
-				}
-				setView(nextView);
-				setSenders(nextSenders);
+				receiveView(nextView, nextSenders);
 			},
 			onAuth: (id, event) => {
 				if (cancelled) return;
@@ -376,8 +282,10 @@ export function usePlatform(): Platform {
 		setReady,
 		setOpening,
 		setConnection,
-		activeIdRef,
 		receiveAuth,
+		resetView,
+		receiveSecret,
+		receiveView,
 	]);
 
 	// Reading a conversation marks it read, which is what clears the dot.
@@ -389,24 +297,6 @@ export function usePlatform(): Platform {
 		window.localStorage.setItem(SEEN_KEY, JSON.stringify(next));
 	}, [state, activeId, seen]);
 
-	// The commands the server would expand. They are fetched per workspace, once: the list
-	// changes when the workspace's resources change, not when a conversation does.
-	useEffect(() => {
-		let cancelled = false;
-		const load = async (): Promise<void> => {
-			try {
-				const list = await fetchCommands(workspace);
-				if (!cancelled) setCommands(list);
-			} catch (cause) {
-				if (!cancelled) reportError(cause);
-			}
-		};
-		void load();
-		return () => {
-			cancelled = true;
-		};
-	}, [workspace, reportError]);
-
 	const conversations = useMemo(
 		() =>
 			(state?.conversations ?? [])
@@ -417,8 +307,6 @@ export function usePlatform(): Platform {
 				.sort((a, b) => timeOf(b.updatedAt) - timeOf(a.updatedAt)),
 		[state, activeId, seen],
 	);
-
-	const contextFold = useMemo(() => foldContext(view?.entries ?? []), [view]);
 
 	const workspaces = useMemo(
 		() =>
@@ -444,19 +332,6 @@ export function usePlatform(): Platform {
 				)
 				.sort((a, b) => timeOf(b.updatedAt) - timeOf(a.updatedAt)),
 		[state, activeId, seen],
-	);
-	const runningNow =
-		(state?.conversations ?? []).find((conversation) => conversation.id === activeId)
-			?.running === true;
-	const entries = useMemo(
-		() =>
-			toTranscript(
-				view,
-				senders,
-				runningNow,
-				activeId === undefined ? undefined : marks[activeId],
-			),
-		[view, senders, runningNow, activeId, marks],
 	);
 	const active = useMemo(
 		() => (state?.conversations ?? []).find((conversation) => conversation.id === activeId),
@@ -602,60 +477,6 @@ export function usePlatform(): Platform {
 		},
 		[act, workspace, reload],
 	);
-	const fork = useCallback(
-		(at: string) => {
-			act(forkConversation(workspace, activeId, at), () => void reload());
-		},
-		[act, workspace, activeId, reload],
-	);
-	const compact = useCallback(() => {
-		act(compactConversation(workspace, activeId), () => void reload());
-	}, [act, workspace, activeId, reload]);
-	const [compactOpen, setCompactOpen] = useState(false);
-	const [compactPreview, setCompactPreview] = useState<CompactPreview | undefined>(undefined);
-	const openCompactDialog = useCallback(() => {
-		setCompactOpen(true);
-		setCompactPreview(undefined);
-		fetchCompactPreview(workspace, activeId).then(
-			(preview) => setCompactPreview(preview),
-			(cause: unknown) => {
-				setCompactOpen(false);
-				reportError(cause);
-			},
-		);
-	}, [workspace, activeId, reportError]);
-	const closeCompactDialog = useCallback(() => {
-		setCompactOpen(false);
-		setCompactPreview(undefined);
-	}, []);
-	const send = useCallback(
-		async (
-			text: string,
-			whenBusy: BusyAction,
-			attachments?: string[] | undefined,
-		): Promise<void> => {
-			try {
-				await sendMessage(workspace, activeId, text, whenBusy, attachments);
-				clearFailure();
-				// The send answers 202 with no state, so the busy sign would wait for the
-				// next poll. Read it now: the prompt grace is already counting.
-				void reload();
-			} catch (cause) {
-				// The caller restores the draft; the failure is also the strip's to show.
-				reportError(cause);
-				throw cause;
-			}
-		},
-		[workspace, activeId, reload, reportError, clearFailure],
-	);
-	const upload = useCallback(
-		(file: File): Promise<UploadedAttachment> => uploadAttachment(workspace, file),
-		[workspace],
-	);
-	const abort = useCallback(() => {
-		act(abortConversation(workspace, activeId));
-	}, [act, workspace, activeId]);
-
 	/** A conversation belongs to a workspace for life, so switching means starting over: the
 	 * transcript is cleared and the next one arrives with the workspace. */
 	const selectWorkspace = useCallback(
@@ -664,7 +485,7 @@ export function usePlatform(): Platform {
 			setRailOpen(false);
 			// Opening a workspace leaves the layer: the row is the layer's own action.
 			setWorkspacesOpen(false);
-			setView(undefined);
+			clearView();
 			setOpening(undefined);
 			setRoute({
 				screen: "conversation",
@@ -674,7 +495,7 @@ export function usePlatform(): Platform {
 				updateTag: "",
 			});
 		},
-		[setRailOpen, setRoute, setWorkspacesOpen, setOpening],
+		[setRailOpen, setRoute, setWorkspacesOpen, setOpening, clearView],
 	);
 
 	// A row on the workspaces screen is not the workspace in view, so the name comes from the
@@ -702,7 +523,7 @@ export function usePlatform(): Platform {
 				// workspace that has none — so there is nothing to create here, and creating one
 				// would leave the new workspace with two.
 				window.history.pushState(null, "", `/w/${encodeURIComponent(name)}`);
-				setView(undefined);
+				clearView();
 				setRoute({
 					screen: "conversation",
 					workspace: name,
@@ -712,7 +533,7 @@ export function usePlatform(): Platform {
 				});
 			});
 		},
-		[act, setRoute],
+		[act, setRoute, clearView],
 	);
 
 	const removeWorkspace = useCallback(
@@ -722,7 +543,7 @@ export function usePlatform(): Platform {
 				// takes over rather than an error about a workspace that just went away.
 				if (name === workspace) {
 					window.history.pushState(null, "", `/w/${name}`);
-					setView(undefined);
+					clearView();
 					setRoute({
 						screen: "conversation",
 						workspace: name,
@@ -735,7 +556,7 @@ export function usePlatform(): Platform {
 				void reload();
 			});
 		},
-		[act, workspace, reload, setRoute],
+		[act, workspace, reload, setRoute, clearView],
 	);
 
 	const renameWorkspace = useCallback(
@@ -760,26 +581,6 @@ export function usePlatform(): Platform {
 		[act, reload],
 	);
 
-	const answerSecret = useCallback(
-		async (requestId: string, input: SecretAnswerInput): Promise<void> => {
-			const conversation = secretRequest?.conversationId ?? route.conversation;
-			if (conversation === "") throw new Error("no conversation is open");
-			await answerSecretRequest(workspace, conversation, requestId, input);
-			setSecretRequest((current) => (current?.requestId === requestId ? undefined : current));
-		},
-		[workspace, route.conversation, secretRequest],
-	);
-
-	const cancelSecret = useCallback(
-		async (requestId: string): Promise<void> => {
-			const conversation = secretRequest?.conversationId ?? route.conversation;
-			if (conversation === "") throw new Error("no conversation is open");
-			await cancelSecretRequest(workspace, conversation, requestId);
-			setSecretRequest((current) => (current?.requestId === requestId ? undefined : current));
-		},
-		[workspace, route.conversation, secretRequest],
-	);
-
 	const update = useUpdate(state?.update, act, reportError);
 
 	const people = usePeople(route, session.slice.admin);
@@ -797,7 +598,7 @@ export function usePlatform(): Platform {
 					"",
 					`/c/${encodeURIComponent(workspace)}/${encodeURIComponent(id)}`,
 				);
-				setView(undefined);
+				clearView();
 				setRailOpen(false);
 				setComposerFocusToken((token) => token + 1);
 				setRoute({
@@ -809,7 +610,7 @@ export function usePlatform(): Platform {
 				});
 			})
 			.catch(reportError);
-	}, [workspace, reportError, setRailOpen, setRoute, clearFailure]);
+	}, [workspace, reportError, setRailOpen, setRoute, clearFailure, clearView]);
 
 	const setDefault = useCallback(
 		(kind: "model" | "thinking" | "agent", scope: DefaultScope, value: string) => {
@@ -853,22 +654,19 @@ export function usePlatform(): Platform {
 		...session.slice,
 		...providers.slice,
 		...drafts.slice,
+		...conversation.slice,
 		...navigation,
 		...remote,
 		...people,
 		...update,
 		conversations,
 		deleted,
-		entries,
 		active:
 			active === undefined ? undefined : toConversation(active, activeId, seen[active.id]),
 		subagent,
-		steerable: state?.capabilities.steer ?? false,
 		model,
 		thinking,
 		agent,
-		commands,
-		context: contextFold,
 		workspaces,
 		share,
 		addGuest,
@@ -883,28 +681,14 @@ export function usePlatform(): Platform {
 		createWorkspace,
 		engines,
 		removeWorkspace,
-		usage: lastUsage(view?.entries ?? []),
 		contextWindow,
 		resolved: state?.resolved,
 		thinkingRequested: state?.agent.thinkingRequested,
-		harness: state?.harness,
 		newConversation,
 		composerFocusToken,
 		select,
 		rename,
 		hide,
-		fork,
-		compact,
-		compactOpen,
-		compactPreview,
-		openCompactDialog,
-		closeCompactDialog,
-		send,
-		upload,
-		abort,
 		renameWorkspace,
-		secretRequest,
-		answerSecret,
-		cancelSecret,
 	};
 }
