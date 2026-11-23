@@ -114,6 +114,7 @@ import type {
 } from "./view-models";
 import type { Draft, RoomDraft } from "./draft";
 import { shownDraft } from "./draft";
+import { read, usePreferences, type PreferencesSlice } from "./use-preferences";
 import type {
 	WireDraft,
 	WireDraftAttachment,
@@ -126,10 +127,7 @@ import type {
 	WireView,
 } from "./wire";
 
-const RAIL_WIDTH_KEY = "acornd.ui.railWidth";
-const RAIL_COLLAPSED_KEY = "acornd.ui.railCollapsed";
 const SEEN_KEY = "acornd.seen";
-const THEME_KEY = "acornd.ui.theme";
 
 /** How long a keystroke waits before the draft is written down. The words are on screen the
  * whole time: the wait is only so a sentence is not one POST and one state event per letter. */
@@ -172,24 +170,6 @@ export function isSettingsTab(value: string | undefined): value is SettingsTab {
 
 function settingsTabFrom(segment: string | undefined): SettingsTab {
 	return isSettingsTab(segment) ? segment : "general";
-}
-
-/**
- * The theme someone chose. `system` is the default and a choice like any other: picking it
- * back up means following the system again, which is not the same as having chosen light.
- */
-function storedTheme(): "light" | "dark" | "system" {
-	try {
-		const raw = window.localStorage.getItem(THEME_KEY);
-		const value: unknown = raw === null ? null : JSON.parse(raw);
-		return value === "light" || value === "dark" || value === "system" ? value : "system";
-	} catch {
-		return "system";
-	}
-}
-
-function systemTheme(): "light" | "dark" {
-	return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 /** The URL scheme the gateway routes: /c/<workspace>/<conversation>, /w/<workspace>, the
@@ -252,16 +232,6 @@ function fromUrl(): Route {
 	return routeFromUrl(window.location.pathname, window.location.search);
 }
 
-/** Preferences are ours and local; a corrupt value is a fresh start, not a crash. */
-function read<T>(key: string, fallback: T): T {
-	try {
-		const raw = window.localStorage.getItem(key);
-		return raw === null ? fallback : (JSON.parse(raw) as T);
-	} catch {
-		return fallback;
-	}
-}
-
 /** What a refusal said, as a page shows it: the gateway writes sentences, and a status code is not one. */
 function messageOf(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -282,7 +252,7 @@ export interface PeopleBook {
 	catalog: ProviderCatalogEntry[];
 }
 
-export interface Platform {
+export interface Platform extends PreferencesSlice {
 	ready: boolean;
 	/** The stream is following, or trying to be. */
 	connection: "live" | "reconnecting";
@@ -469,16 +439,7 @@ export interface Platform {
 	harness?: string | undefined;
 	/** The level that was asked for when the model could not express it. */
 	thinkingRequested?: string | undefined;
-	railWidth?: number | undefined;
 	railOpen: boolean;
-	/** The desktop column: false keeps it open, which is the default. */
-	railCollapsed: boolean;
-	toggleRail: () => void;
-	/** The effective theme, which is the system's until a choice says otherwise. */
-	theme: "light" | "dark";
-	/** What was chosen: light, dark, or following the system. */
-	themeChoice: "light" | "dark" | "system";
-	setThemeChoice: (choice: "light" | "dark" | "system") => void;
 	select: (id: string) => void;
 	rename: (id: string, title: string) => void;
 	hide: (id: string, hidden: boolean) => void;
@@ -499,7 +460,6 @@ export interface Platform {
 	/** Record the draft of the conversation in view. Batched; the newest words win. */
 	setDraft: (text: string, attachments: WireDraftAttachment[]) => void;
 	abort: () => void;
-	setRailWidth: (width: number) => void;
 	setRailOpen: (open: boolean) => void;
 }
 
@@ -509,6 +469,7 @@ export interface Platform {
  * Nothing below this hook knows a URL, and nothing above it knows a wire type.
  */
 export function usePlatform(): Platform {
+	const preferences = usePreferences();
 	const [route, setRoute] = useState<Route>(fromUrl);
 	const [state, setState] = useState<WireState | undefined>(undefined);
 	const [secretRequest, setSecretRequest] = useState<WireSecretEvent | undefined>(undefined);
@@ -524,20 +485,11 @@ export function usePlatform(): Platform {
 	 */
 	const [marks, setMarks] = useState<Record<string, Record<string, BusyAction>>>({});
 	const [seen, setSeen] = useState<Record<string, string>>(() => read(SEEN_KEY, {}));
-	const [railWidth, setRailWidthState] = useState<number | undefined>(
-		() => read<number | null>(RAIL_WIDTH_KEY, null) ?? undefined,
-	);
 	const [railOpen, setRailOpen] = useState(false);
 	/** The workspaces layer. It has no URL of its own, so it lives here and not in `route`; the
 	 * entry a `pushState` leaves behind is what makes Back close it. */
 	const [workspacesOpen, setWorkspacesOpen] = useState(false);
 	const [composerFocusToken, setComposerFocusToken] = useState(0);
-	const [railCollapsed, setRailCollapsed] = useState<boolean>(() =>
-		read(RAIL_COLLAPSED_KEY, false),
-	);
-	const [system, setSystem] = useState<"light" | "dark">(systemTheme);
-	const [choice, setChoice] = useState<"light" | "dark" | "system">(storedTheme);
-	const theme = choice === "system" ? system : choice;
 	const [connection, setConnection] = useState<"live" | "reconnecting">("live");
 	const [failure, setFailure] = useState<string | undefined>(undefined);
 	const [commands, setCommands] = useState<SlashCommand[]>([]);
@@ -841,20 +793,6 @@ export function usePlatform(): Platform {
 		setSeen(next);
 		window.localStorage.setItem(SEEN_KEY, JSON.stringify(next));
 	}, [state, activeId, seen]);
-
-	// The system decides until someone says otherwise, and still moves the theme while no
-	// choice has been made.
-	useEffect(() => {
-		const query = window.matchMedia("(prefers-color-scheme: dark)");
-		const follow = (): void => setSystem(query.matches ? "dark" : "light");
-		query.addEventListener("change", follow);
-		return () => query.removeEventListener("change", follow);
-	}, []);
-
-	useEffect(() => {
-		document.documentElement.classList.toggle("dark", theme === "dark");
-		window.localStorage.setItem(THEME_KEY, JSON.stringify(choice));
-	}, [theme, choice]);
 
 	// The commands the server would expand. They are fetched per workspace, once: the list
 	// changes when the workspace's resources change, not when a conversation does.
@@ -1211,19 +1149,6 @@ export function usePlatform(): Platform {
 	const abort = useCallback(() => {
 		act(abortConversation(workspace, activeId));
 	}, [act, workspace, activeId]);
-
-	const setRailWidth = useCallback((width: number) => {
-		setRailWidthState(width);
-		window.localStorage.setItem(RAIL_WIDTH_KEY, JSON.stringify(width));
-	}, []);
-
-	const toggleRail = useCallback(() => {
-		setRailCollapsed((current) => {
-			const next = !current;
-			window.localStorage.setItem(RAIL_COLLAPSED_KEY, JSON.stringify(next));
-			return next;
-		});
-	}, []);
 
 	/** A conversation belongs to a workspace for life, so switching means starting over: the
 	 * transcript is cleared and the next one arrives with the workspace. */
@@ -1784,6 +1709,7 @@ export function usePlatform(): Platform {
 	);
 
 	return {
+		...preferences,
 		ready,
 		connection,
 		failure,
@@ -1836,13 +1762,7 @@ export function usePlatform(): Platform {
 		resolved: state?.resolved,
 		thinkingRequested: state?.agent.thinkingRequested,
 		harness: state?.harness,
-		railWidth,
 		railOpen,
-		railCollapsed,
-		toggleRail,
-		theme,
-		themeChoice: choice,
-		setThemeChoice: setChoice,
 		screen: route.screen,
 		showScreen,
 		settingsTab: route.settingsTab,
@@ -1884,7 +1804,6 @@ export function usePlatform(): Platform {
 		draft,
 		setDraft,
 		abort,
-		setRailWidth,
 		setRailOpen,
 		workspacesOpen,
 		openWorkspaces,
