@@ -317,32 +317,14 @@ type Control struct {
 	// milliseconds. A compaction is one bounded model task, not a turn, so no
 	// run record ever marks it: the stamp keeps the busy sign up for up to five
 	// minutes, and the worker's answer clears it sooner.
-	actionAt map[string]int64
-	// announced is the signature of the state attached clients were last told about. The poll
-	// compares the state against it, because a change only time can make has no data behind
-	// it: nothing refreshes, and only the comparison across ticks can see it.
-	announced   string
-	resolved    map[string]*protocol.ResolvedAgent
-	catalog     protocol.AgentsData
-	providers   []protocol.ProviderInfo
-	policies    map[string]json.RawMessage
-	views       map[string]cachedView
-	subscribers map[int]chan protocol.Frame
-	// staleSignals wakes one client per state change. It is a channel of its own because a
-	// state frame is a signal, not a transcript: on the frame channel a slow write would drop
-	// it, or the signal would evict an event the client has not read yet, and a client that
-	// never hears the state moved keeps the state it read before — busy sign and all.
-	staleSignals map[int]chan struct{}
-	// viewSignals wakes one client when its conversation's view moved. Views do not queue:
-	// a slow write would fill the queue behind them and drop the newest one — the one that
-	// says the run ended — and the next view may never come, because nothing is running any
-	// more. The signal coalesces, and the client reads the newest cached view when it wakes.
-	viewSignals map[int]chan struct{}
-	nextSub     int
-	// Which conversation each subscriber watches, and how many watch each. Several
-	// clients watching different conversations is what makes browser tabs work.
-	subscriberConversation map[int]string
-	attachments            map[string]int
+	actionAt  map[string]int64
+	resolved  map[string]*protocol.ResolvedAgent
+	catalog   protocol.AgentsData
+	providers []protocol.ProviderInfo
+	policies  map[string]json.RawMessage
+	// hub is who is attached and what each of them has to hear. Its lock is a leaf: this
+	// control may call it while holding mu, and it never calls back.
+	hub updateHub
 	// drafts holds one unsent message per person per conversation, keyed by the harness's own id
 	// and the address of the person typing. Loaded at open, persisted on every save: a draft
 	// outlives the process that took it.
@@ -369,36 +351,22 @@ type Control struct {
 	continuations  map[string][]string
 }
 
-// cachedView is the last full view per conversation, so switching back is instant
-// rather than waiting for the worker's next frame. The annotation is cached with it:
-// a view frame is more than its value, and dropping the annotation on the way to a
-// newly attached client is invisible until attribution quietly stops working.
-type cachedView struct {
-	value      []byte
-	annotation json.RawMessage
-	seq        int64
-}
-
 func New(opts Options) *Control {
-	return &Control{
-		workerExited:           make(chan struct{}, 1),
-		opts:                   opts,
-		bindings:               map[string]protocol.ModelBinding{},
-		resolved:               map[string]*protocol.ResolvedAgent{},
-		views:                  map[string]cachedView{},
-		subscribers:            map[int]chan protocol.Frame{},
-		staleSignals:           map[int]chan struct{}{},
-		viewSignals:            map[int]chan struct{}{},
-		subscriberConversation: map[int]string{},
-		attachments:            map[string]int{},
-		policies:               map[string]json.RawMessage{},
-		promptedAt:             map[string]int64{},
-		actionAt:               map[string]int64{},
-		drafts:                 map[draftKey]Draft{},
-		landing:                map[string]string{},
-		secretRequests:         map[string]*pendingSecret{},
-		continuations:          map[string][]string{},
+	c := &Control{
+		workerExited:   make(chan struct{}, 1),
+		opts:           opts,
+		bindings:       map[string]protocol.ModelBinding{},
+		resolved:       map[string]*protocol.ResolvedAgent{},
+		policies:       map[string]json.RawMessage{},
+		promptedAt:     map[string]int64{},
+		actionAt:       map[string]int64{},
+		drafts:         map[draftKey]Draft{},
+		landing:        map[string]string{},
+		secretRequests: map[string]*pendingSecret{},
+		continuations:  map[string][]string{},
 	}
+	c.hub.prepare()
+	return c
 }
 
 // Open starts the worker, reads the catalog, and attaches to the active
@@ -441,10 +409,7 @@ func (c *Control) Open(ctx context.Context) {
 // after, so a signal raised in between can only cause an announcement that says the same
 // thing twice, never a missed one.
 func (c *Control) stateStale() bool {
-	signature := c.conversationSignature()
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return signature != c.announced
+	return c.hub.stale(c.conversationSignature())
 }
 
 // conversationSignature is what the interface sees, not the worker's raw record: the busy
@@ -686,7 +651,7 @@ func (c *Control) stateLocked(caller Caller, parts stateParts) State {
 		Skills:    c.catalog.Skills,
 		Defaults:  c.catalog.Defaults,
 		Providers: c.providers,
-		Seq:       c.views[active].seq,
+		Seq:       c.hub.seq(active),
 		Policy:    c.policies[active],
 	}
 	// The draft travels with the state, not with the transcript: it is the composer's, and
@@ -717,24 +682,11 @@ func (c *Control) WorkspacePath() string { return c.opts.Workspace.Path }
 
 // notifyState wakes every attached client: the state it holds is stale, and the HTTP layer
 // answers each one with a fresh state for its own conversation. A signal already waiting
-// says the same thing, so a second one is not a second wakeup. What was announced is
-// remembered here, so the poll can tell a change it has already announced from one only time
+// says the same thing, so a second one is not a second wakeup. The hub remembers what was
+// announced, so the poll can tell a change it has already announced from one only time
 // has made.
 func (c *Control) notifyState() {
-	signature := c.conversationSignature()
-	c.mu.Lock()
-	c.announced = signature
-	signals := make([]chan struct{}, 0, len(c.staleSignals))
-	for _, signal := range c.staleSignals {
-		signals = append(signals, signal)
-	}
-	c.mu.Unlock()
-	for _, signal := range signals {
-		select {
-		case signal <- struct{}{}:
-		default:
-		}
-	}
+	c.hub.announce(c.conversationSignature())
 }
 
 type persistedSettings struct {

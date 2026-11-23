@@ -87,7 +87,7 @@ func TestEvictionSparesWhatIsStillInUse(t *testing.T) {
 	}
 	workspaces.used["fresh"] = time.Now().Add(-time.Minute)
 	workspaces.controls["running"].conversations = []protocol.ConversationInfo{{ID: "c", Running: true}}
-	workspaces.controls["watched"].subscribers[1] = make(chan protocol.Frame, 1)
+	workspaces.controls["watched"].hub.subscribers[1] = make(chan protocol.Frame, 1)
 	delete(workspaces.used, "watched") // never used: idleFor answers the threshold itself
 
 	// Eviction takes the control out of the map as it hands it over: a request arriving during the
