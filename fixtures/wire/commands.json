@@ -1,0 +1,268 @@
+{
+	"abort": {
+		"id": "c1",
+		"type": "abort",
+		"conversationId": "7",
+		"author": {
+			"email": "ada@example.com",
+			"name": "Ada",
+			"speaker": "Ada"
+		},
+		"hidden": false,
+		"secrets": null
+	},
+	"action": {
+		"id": "c1",
+		"type": "action",
+		"conversationId": "7",
+		"text": "/compact",
+		"author": {
+			"email": "ada@example.com",
+			"name": "Ada",
+			"speaker": "Ada"
+		},
+		"hidden": false,
+		"action": "compact",
+		"secrets": null
+	},
+	"agents": {
+		"id": "c1",
+		"type": "agents",
+		"hidden": false,
+		"secrets": null
+	},
+	"attach": {
+		"id": "c1",
+		"type": "attach",
+		"conversationId": "7",
+		"hidden": false,
+		"secrets": null
+	},
+	"attachment": {
+		"id": "c1",
+		"type": "attachment",
+		"hidden": false,
+		"secrets": null,
+		"tempPath": "/tmp/acornd-upload-1",
+		"name": "notes.txt",
+		"mime": "text/plain",
+		"size": 12
+	},
+	"auth_answer": {
+		"id": "c1",
+		"type": "auth_answer",
+		"hidden": false,
+		"authId": "l1",
+		"promptId": "p1",
+		"value": "abc",
+		"cancelled": true,
+		"secrets": null
+	},
+	"auth_cancel": {
+		"id": "c1",
+		"type": "auth_cancel",
+		"hidden": false,
+		"authId": "l1",
+		"secrets": null
+	},
+	"commands": {
+		"id": "c1",
+		"type": "commands",
+		"hidden": false,
+		"secrets": null
+	},
+	"compact": {
+		"id": "c1",
+		"type": "compact",
+		"conversationId": "7",
+		"hidden": false,
+		"secrets": null
+	},
+	"compact_preview": {
+		"id": "c1",
+		"type": "compact_preview",
+		"conversationId": "7",
+		"hidden": false,
+		"secrets": null
+	},
+	"conversations": {
+		"id": "c1",
+		"type": "conversations",
+		"hidden": false,
+		"secrets": null
+	},
+	"create": {
+		"id": "c1",
+		"type": "create",
+		"hidden": false,
+		"secrets": null
+	},
+	"describe": {
+		"id": "c1",
+		"type": "describe",
+		"hidden": false,
+		"secrets": null
+	},
+	"detach": {
+		"id": "c1",
+		"type": "detach",
+		"conversationId": "7",
+		"hidden": false,
+		"secrets": null
+	},
+	"expand": {
+		"id": "c1",
+		"type": "expand",
+		"text": "/review",
+		"hidden": false,
+		"secrets": null
+	},
+	"fork": {
+		"id": "c1",
+		"type": "fork",
+		"conversationId": "7",
+		"hidden": false,
+		"at": "12",
+		"secrets": null
+	},
+	"hide": {
+		"id": "c1",
+		"type": "hide",
+		"conversationId": "7",
+		"hidden": true,
+		"secrets": null
+	},
+	"login": {
+		"id": "c1",
+		"type": "login",
+		"hidden": false,
+		"authId": "l1",
+		"providerId": "anthropic",
+		"authType": "oauth",
+		"secrets": null
+	},
+	"logout": {
+		"id": "c1",
+		"type": "logout",
+		"hidden": false,
+		"providerId": "anthropic",
+		"secrets": null
+	},
+	"messages": {
+		"id": "c1",
+		"type": "messages",
+		"conversationId": "7",
+		"hidden": false,
+		"secrets": null
+	},
+	"open": {
+		"id": "c1",
+		"type": "open",
+		"conversationId": "7",
+		"agent": {
+			"provider": "anthropic",
+			"modelId": "claude-sonnet-5-5",
+			"thinkingLevel": "high",
+			"instructions": "Be brief.",
+			"definition": "general"
+		},
+		"hidden": false,
+		"secrets": null
+	},
+	"policy": {
+		"id": "c1",
+		"type": "policy",
+		"conversationId": "7",
+		"hidden": false,
+		"secrets": null
+	},
+	"prompt": {
+		"id": "c1",
+		"type": "prompt",
+		"conversationId": "7",
+		"text": "hello",
+		"whenBusy": "steer",
+		"author": {
+			"email": "ada@example.com",
+			"name": "Ada",
+			"speaker": "Ada"
+		},
+		"hidden": false,
+		"attachments": [
+			"a1"
+		],
+		"secrets": null
+	},
+	"reload": {
+		"id": "c1",
+		"type": "reload",
+		"hidden": false,
+		"secrets": null
+	},
+	"rename": {
+		"id": "c1",
+		"type": "rename",
+		"conversationId": "7",
+		"title": "A title",
+		"hidden": false,
+		"secrets": null
+	},
+	"reset": {
+		"id": "c1",
+		"type": "reset",
+		"conversationId": "7",
+		"hidden": false,
+		"secrets": null
+	},
+	"sandbox_wake": {
+		"id": "c1",
+		"type": "sandbox_wake",
+		"hidden": false,
+		"secrets": null,
+		"replyTo": "f1",
+		"error": "no sandbox"
+	},
+	"secret_answer": {
+		"id": "c1",
+		"type": "secret_answer",
+		"hidden": false,
+		"cancelled": true,
+		"secretRequestId": "s1",
+		"secrets": null,
+		"secretScope": "workspace",
+		"restartRequired": true,
+		"reason": "declined"
+	},
+	"secret_list_answer": {
+		"id": "c1",
+		"type": "secret_list_answer",
+		"hidden": false,
+		"secretRequestId": "s1",
+		"secrets": [
+			{
+				"name": "GITHUB_TOKEN",
+				"description": "for gh",
+				"scope": "workspace",
+				"hosts": [
+					"github.com"
+				],
+				"delivery": "substitute",
+				"status": "ok",
+				"placeholder": "ph_123"
+			}
+		],
+		"reason": "vault locked"
+	},
+	"shutdown": {
+		"id": "c1",
+		"type": "shutdown",
+		"hidden": false,
+		"secrets": null
+	},
+	"usage": {
+		"id": "c1",
+		"type": "usage",
+		"hidden": false,
+		"secrets": null
+	}
+}
