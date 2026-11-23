@@ -40,7 +40,7 @@ func TestARoomIsBornWithItsOwner(t *testing.T) {
 		t.Error("the room refuses the person who made it")
 	}
 	// And it is the record, not just the answer: the next start reads an owner rather than an empty room.
-	reloaded, err := LoadRegistryFile(filepath.Join(dataDir, registryFile))
+	reloaded, err := NewRegistry(dataDir).Load()
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestAMembersListBecomesItsOwner(t *testing.T) {
 		t.Errorf("members = %v, want the one address as its owner, lowercased", ana.Members)
 	}
 	// And the file says so: a reload reads a role rather than guessing one again.
-	reloaded, err := LoadRegistryFile(filepath.Join(dataDir, registryFile))
+	reloaded, err := NewRegistry(dataDir).Load()
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestAMemberlessRoomIsTheAdmins(t *testing.T) {
 		t.Errorf("the named room's owner = %q, want it left alone", got)
 	}
 	// And it is stored: the next start reads an owner rather than adopting the room again.
-	reloaded, err := LoadRegistryFile(filepath.Join(dataDir, registryFile))
+	reloaded, err := NewRegistry(dataDir).Load()
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}

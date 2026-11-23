@@ -56,19 +56,16 @@ func TestPurgeDeletesTheStateToo(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	path := filepath.Join(dataDir, "workspaces.json")
-	if err := control.SaveRegistryFile(control.RegistryFile{
-		Path:          path,
+	seedRegistry(t, dataDir, control.RegistryFile{
 		WorkspacesDir: filepath.Dir(folder),
 		Workspaces:    []control.Workspace{{Name: "team", Path: folder, Kind: control.KindRoom}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	registry, err := control.LoadRegistryFile(path)
+	})
+	registry := control.NewRegistry(dataDir)
+	file, err := registry.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	target, err := purgeTarget(registry, "team")
+	target, err := purgeTarget(file, "team")
 	if err != nil {
 		t.Fatalf("purgeTarget(team): %v", err)
 	}
@@ -85,7 +82,7 @@ func TestPurgeDeletesTheStateToo(t *testing.T) {
 			t.Errorf("%s survived the purge: %v", gone, err)
 		}
 	}
-	reloaded, err := control.LoadRegistryFile(path)
+	reloaded, err := registry.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,6 +115,18 @@ func TestPurgeRefusesEveryPersonalRoom(t *testing.T) {
 	// A room is what purge is for: the refusal is the kind, not the command.
 	if _, err := purgeTarget(registry, "team"); err != nil {
 		t.Errorf("a room was refused: %v", err)
+	}
+}
+
+// seedRegistry writes a whole registry, as an install that already has one would hold it.
+func seedRegistry(t *testing.T, dataDir string, file control.RegistryFile) {
+	t.Helper()
+	err := control.NewRegistry(dataDir).Change(func(registry *control.RegistryFile) error {
+		*registry = file
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

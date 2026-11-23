@@ -172,14 +172,10 @@ func currentAccount(t *testing.T) string {
 // A workspace is found by name in the registry, and a name that is not there is told what is.
 func TestAWorkspaceIsFoundByNameOrSaidToBeMissing(t *testing.T) {
 	dir := t.TempDir()
-	registry := control.RegistryFile{Path: filepath.Join(dir, "workspaces.json")}
-	registry.Workspaces = append(registry.Workspaces,
-		control.Workspace{Name: "personal", Path: filepath.Join(dir, "personal")},
-		control.Workspace{Name: "work", Path: filepath.Join(dir, "work")},
-	)
-	if err := control.SaveRegistryFile(registry); err != nil {
-		t.Fatal(err)
-	}
+	seedRegistry(t, dir, control.RegistryFile{Workspaces: []control.Workspace{
+		{Name: "personal", Path: filepath.Join(dir, "personal")},
+		{Name: "work", Path: filepath.Join(dir, "work")},
+	}})
 	path, err := workspacePath(dir, "work")
 	if err != nil {
 		t.Fatalf("workspacePath: %v", err)

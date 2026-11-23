@@ -211,11 +211,10 @@ func TestTheGeneralWorkspaceBecomesPersonal(t *testing.T) {
 		t.Fatal(err)
 	}
 	registry := RegistryFile{
-		Path:          filepath.Join(dataDir, registryFile),
 		WorkspacesDir: dir,
 		Workspaces:    []Workspace{{Name: "general", Path: filepath.Join(dir, "general"), Title: "general"}},
 	}
-	if err := SaveRegistryFile(registry); err != nil {
+	if err := NewRegistry(dataDir).save(registry); err != nil {
 		t.Fatal(err)
 	}
 

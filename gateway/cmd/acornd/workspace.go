@@ -89,8 +89,7 @@ func workspaceAdd(argv []string) {
 	if err != nil {
 		log.Fatalf("acornd: %v", err)
 	}
-	path := filepath.Join(dir, "workspaces.json")
-	registry, err := control.LoadRegistryFile(path)
+	registry, err := control.NewRegistry(dir).Load()
 	if err != nil {
 		log.Fatalf("acornd: %v", err)
 	}
@@ -98,7 +97,7 @@ func workspaceAdd(argv []string) {
 	if err != nil {
 		log.Fatalf("acornd: %v", err)
 	}
-	chosen, err = recordWorkspace(dir, registry, addRecord{
+	chosen, err = recordWorkspace(dir, addRecord{
 		name:      name,
 		absolute:  absolute,
 		image:     *image,
@@ -187,11 +186,11 @@ type addRecord struct {
 	noDevices bool
 }
 
-// recordWorkspace appends the workspace and writes the registry, and answers with the engine it
+// recordWorkspace adds the workspace to the registry, and answers with the engine it
 // recorded. Left blank, an engine would mean "whatever this machine prefers", and an unrecorded
 // choice is one that changes if the workspace moves — so a blank name is resolved here, and a
 // machine with no sandbox is an error rather than a record that points at nothing.
-func recordWorkspace(dir string, registry control.RegistryFile, record addRecord) (string, error) {
+func recordWorkspace(dir string, record addRecord) (string, error) {
 	chosen := record.engine
 	if chosen == "" {
 		var err error
@@ -213,12 +212,20 @@ func recordWorkspace(dir string, registry control.RegistryFile, record addRecord
 	}
 	// A room, with nobody in it yet: this command has no way to say who its owner is, and the gateway's load
 	// gives an unnamed room to the install's admin, which is who a folder added from a terminal belongs to.
-	registry.Workspaces = append(registry.Workspaces, control.Workspace{
-		Name: record.name, Path: record.absolute, Title: record.name, Kind: control.KindRoom,
-		Image: record.image, Network: record.network, Engine: chosen, KeepAlive: record.keepAlive,
-		Private: record.private, DisableVMNesting: nesting, DisableDevices: devices,
+	err := control.NewRegistry(dir).Change(func(registry *control.RegistryFile) error {
+		// Asked again under the lock: addTarget read the file before the engine was chosen, and a console may
+		// have made a room of this name since.
+		if _, err := recordFor(*registry, record.name); err == nil {
+			return fmt.Errorf("workspace %q already exists", record.name)
+		}
+		registry.Workspaces = append(registry.Workspaces, control.Workspace{
+			Name: record.name, Path: record.absolute, Title: record.name, Kind: control.KindRoom,
+			Image: record.image, Network: record.network, Engine: chosen, KeepAlive: record.keepAlive,
+			Private: record.private, DisableVMNesting: nesting, DisableDevices: devices,
+		})
+		return nil
 	})
-	if err := control.SaveRegistryFile(registry); err != nil {
+	if err != nil {
 		return "", err
 	}
 	return chosen, nil
@@ -235,7 +242,7 @@ func workspaceList(argv []string) {
 	if err != nil {
 		log.Fatalf("acornd: %v", err)
 	}
-	registry, err := control.LoadRegistryFile(filepath.Join(dir, "workspaces.json"))
+	registry, err := control.NewRegistry(dir).Load()
 	if err != nil {
 		log.Fatalf("acornd: %v", err)
 	}
@@ -275,22 +282,22 @@ func workspaceRemove(argv []string) {
 	if err != nil {
 		log.Fatalf("acornd: %v", err)
 	}
-	path := filepath.Join(dir, "workspaces.json")
-	registry, err := control.LoadRegistryFile(path)
+	var record control.Workspace
+	err = control.NewRegistry(dir).Change(func(registry *control.RegistryFile) error {
+		found, err := recordFor(*registry, args[0])
+		if err != nil {
+			return err
+		}
+		record = found
+		if record.Personal() {
+			// Somebody's own room is never shared and never removed: forgetting it removes the one place they had,
+			// and the admin can do that by revoking the person, which is a decision with a name.
+			return fmt.Errorf("%s is somebody's own room and cannot be forgotten", record.Name)
+		}
+		registry.Workspaces = withoutWorkspace(registry.Workspaces, record.Name)
+		return nil
+	})
 	if err != nil {
-		log.Fatalf("acornd: %v", err)
-	}
-	record, err := recordFor(registry, args[0])
-	if err != nil {
-		log.Fatalf("acornd: %v", err)
-	}
-	if record.Personal() {
-		// Somebody's own room is never shared and never removed: forgetting it removes the one place they had, and
-		// the admin can do that by revoking the person, which is a decision with a name.
-		log.Fatalf("acornd: %s is somebody's own room and cannot be forgotten", record.Name)
-	}
-	registry.Workspaces = withoutWorkspace(registry.Workspaces, record.Name)
-	if err := control.SaveRegistryFile(registry); err != nil {
 		log.Fatalf("acornd: %v", err)
 	}
 	fmt.Printf("forgot %s (its folder and history are untouched)\n", record.Name)
@@ -314,12 +321,12 @@ leaving the state behind would hand a forgotten history to the next room of that
 // it does: a path is the one thing a person can check before an unrecoverable act.
 func workspacePurge(argv []string) {
 	dir, name, yes := purgeArgs(argv)
-	path := filepath.Join(dir, "workspaces.json")
-	registry, err := control.LoadRegistryFile(path)
+	registry := control.NewRegistry(dir)
+	file, err := registry.Load()
 	if err != nil {
 		log.Fatalf("acornd: %v", err)
 	}
-	workspace, err := purgeTarget(registry, name)
+	workspace, err := purgeTarget(file, name)
 	if err != nil {
 		log.Fatalf("acornd: %v", err)
 	}
@@ -344,14 +351,16 @@ func purgeTargets(dataDir string, workspace control.Workspace) (folder, state st
 
 // purgeWorkspace deletes the two folders and then the record. The record goes last, so a purge that stopped
 // halfway is a purge to run again rather than an orphan nothing can name.
-func purgeWorkspace(registry control.RegistryFile, name, folder, state string) error {
+func purgeWorkspace(registry control.Registry, name, folder, state string) error {
 	for _, path := range []string{folder, state} {
 		if err := os.RemoveAll(path); err != nil {
 			return err
 		}
 	}
-	registry.Workspaces = withoutWorkspace(registry.Workspaces, name)
-	return control.SaveRegistryFile(registry)
+	return registry.Change(func(file *control.RegistryFile) error {
+		file.Workspaces = withoutWorkspace(file.Workspaces, name)
+		return nil
+	})
 }
 
 // purgeArgs is the three things this command cannot guess: which install, which name, and whether the person

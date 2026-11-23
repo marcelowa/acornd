@@ -37,16 +37,16 @@ func TestTheSidebarIsPersonalFirstThenByName(t *testing.T) {
 // The registry is written sorted, so the file is the same on every run and a diff of it means
 // something. A map written in iteration order gives a file that changes for no reason.
 func TestTheRegistryFileIsWrittenSorted(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "workspaces.json")
+	dataDir := t.TempDir()
+	path := filepath.Join(dataDir, registryFile)
 	registry := RegistryFile{
-		Path: path,
 		Workspaces: []Workspace{
 			{Name: "zulu", Path: "/z"},
 			{Name: "alpha", Path: "/a"},
 			{Name: "mike", Path: "/m"},
 		},
 	}
-	if err := SaveRegistryFile(registry); err != nil {
+	if err := NewRegistry(dataDir).save(registry); err != nil {
 		t.Fatal(err)
 	}
 	payload, err := os.ReadFile(path)
@@ -119,13 +119,13 @@ func TestEvictionSparesWhatIsStillInUse(t *testing.T) {
 // the folder was made, the registry entry was added, and nothing else would ever say so.
 func TestAFirstRunThatCannotWriteItsRegistryFails(t *testing.T) {
 	if os.Geteuid() == 0 {
-		// A directory in the place of the temp file is what makes the write fail, and that does
+		// A directory in the place of the lock file is what makes the write fail, and that does
 		// not depend on who is running — but say why it is here for the reader.
 		t.Log("the refusal below is made by a directory, not by permissions")
 	}
 	dir := t.TempDir()
 	data := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(data, registryFile)+".tmp", 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(data, registryFile)+".lock", 0o755); err != nil {
 		t.Fatal(err)
 	}
 	workspaces := NewWorkspaces(WorkspacesOptions{WorkspacesDir: dir, DataDir: data})
