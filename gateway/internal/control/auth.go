@@ -17,10 +17,7 @@ import (
 // flow starts: the interaction arrives as `auth` frames, and a device flow can
 // take minutes.
 func (c *Control) Login(ctx context.Context, providerID, authType string) (string, error) {
-	c.mu.Lock()
-	c.nextSub++
-	authID := fmt.Sprintf("auth-%d", c.nextSub)
-	c.mu.Unlock()
+	authID := fmt.Sprintf("auth-%d", c.hub.ticket())
 
 	go func() {
 		_, err := c.worker.Call(context.WithoutCancel(ctx), protocol.Command{

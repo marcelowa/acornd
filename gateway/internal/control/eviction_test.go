@@ -30,7 +30,7 @@ func TestEvictionStopsOnlyIdleUnwatchedWorkspaces(t *testing.T) {
 	start("idle")
 	watched := start("watched")
 	watched.mu.Lock()
-	watched.subscribers[1] = make(chan protocol.Frame)
+	watched.hub.subscribers[1] = make(chan protocol.Frame)
 	watched.mu.Unlock()
 	busy := start("busy")
 	busy.mu.Lock()

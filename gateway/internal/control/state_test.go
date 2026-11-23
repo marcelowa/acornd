@@ -190,8 +190,8 @@ func TestAStateChangeWakesSubscribersWithoutTouchingTheirFrames(t *testing.T) {
 	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
 	frames := make(chan protocol.Frame, 1)
 	stale := make(chan struct{}, 1)
-	control.subscribers[1] = frames
-	control.staleSignals[1] = stale
+	control.hub.subscribers[1] = frames
+	control.hub.staleSignals[1] = stale
 
 	control.publish(protocol.Frame{Type: "state"})
 	// A second change while the first signal is still waiting is not a second wakeup: the
@@ -247,12 +247,12 @@ func TestAViewFrameReachesOnlyItsConversation(t *testing.T) {
 	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
 	running := make(chan struct{}, 1)
 	other := make(chan struct{}, 1)
-	control.subscribers[1] = make(chan protocol.Frame, 1)
-	control.viewSignals[1] = running
-	control.subscriberConversation[1] = "a"
-	control.subscribers[2] = make(chan protocol.Frame, 1)
-	control.viewSignals[2] = other
-	control.subscriberConversation[2] = "b"
+	control.hub.subscribers[1] = make(chan protocol.Frame, 1)
+	control.hub.viewSignals[1] = running
+	control.hub.subscriberConversation[1] = "a"
+	control.hub.subscribers[2] = make(chan protocol.Frame, 1)
+	control.hub.viewSignals[2] = other
+	control.hub.subscriberConversation[2] = "b"
 
 	control.publish(protocol.Frame{Type: "view", ConversationID: "a", Seq: 7})
 
@@ -274,7 +274,7 @@ func TestAViewFrameReachesOnlyItsConversation(t *testing.T) {
 func TestALoginBurstReachesTheClient(t *testing.T) {
 	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
 	frames := make(chan protocol.Frame, subscriberQueue)
-	control.subscribers[1] = frames
+	control.hub.subscribers[1] = frames
 
 	for _, kind := range []string{"progress", "auth_url", "prompt"} {
 		control.publish(protocol.Frame{
@@ -303,9 +303,9 @@ func TestAFullQueueKeepsTheNewestViewWithoutDisplacingTheEvent(t *testing.T) {
 	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
 	frames := make(chan protocol.Frame, 1)
 	views := make(chan struct{}, 1)
-	control.subscribers[1] = frames
-	control.viewSignals[1] = views
-	control.subscriberConversation[1] = "1"
+	control.hub.subscribers[1] = frames
+	control.hub.viewSignals[1] = views
+	control.hub.subscriberConversation[1] = "1"
 
 	control.publish(protocol.Frame{
 		Type:   "auth",
@@ -340,7 +340,7 @@ func TestAFullQueueKeepsTheNewestViewWithoutDisplacingTheEvent(t *testing.T) {
 func TestAFullQueueOfEventsDropsTheOldest(t *testing.T) {
 	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
 	frames := make(chan protocol.Frame, 1)
-	control.subscribers[1] = frames
+	control.hub.subscribers[1] = frames
 
 	control.publish(protocol.Frame{
 		Type:   "auth",

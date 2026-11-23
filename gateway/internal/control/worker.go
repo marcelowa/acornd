@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/marcelowa/acornd/gateway/internal/protocol"
@@ -407,15 +408,8 @@ func (c *Control) watchConversations(ctx context.Context) {
 func (c *Control) watchedConversations() []string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	seen := map[string]bool{}
-	list := make([]string, 0, len(c.attachments))
-	for id, count := range c.attachments {
-		if count > 0 && !seen[id] {
-			seen[id] = true
-			list = append(list, id)
-		}
-	}
-	if c.active != "" && !seen[c.active] {
+	list := c.hub.watched()
+	if c.active != "" && !slices.Contains(list, c.active) {
 		list = append(list, c.active)
 	}
 	return list
@@ -459,21 +453,12 @@ func (c *Control) WorkerUp() bool {
 // watchingConversation reports whether a client is looking at this conversation. A card in
 // another conversation's tab does not answer the tool that asked here.
 func (c *Control) watchingConversation(conversationID string) bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	for _, watched := range c.subscriberConversation {
-		if watched == conversationID {
-			return true
-		}
-	}
-	return false
+	return c.hub.watching(conversationID)
 }
 
 // Watching reports whether a client is attached to any of this workspace's conversations.
 func (c *Control) Watching() bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return len(c.subscribers) > 0
+	return c.hub.attached()
 }
 
 // Busy reports whether any conversation here is running. An eviction must not stop a

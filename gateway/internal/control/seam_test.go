@@ -142,8 +142,8 @@ func TestARunShowsAsRunningFromItsRecordOrAGrace(t *testing.T) {
 func TestTheConversationOnScreenIsAlwaysWatched(t *testing.T) {
 	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}, DataDir: t.TempDir()})
 	control.active = "1"
-	control.attachments["2"] = 0 // written to, then settled: not watched
-	control.attachments["3"] = 1
+	control.hub.attachments["2"] = 0 // written to, then settled: not watched
+	control.hub.attachments["3"] = 1
 	watched := control.watchedConversations()
 	if len(watched) != 2 {
 		t.Fatalf("watched = %v, want the attachment and the active room", watched)

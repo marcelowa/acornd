@@ -321,7 +321,7 @@ func TestASettledRunRefreshesTheListAndClearsTheBusySign(t *testing.T) {
 	control := controlWithWorker(t, worker)
 	control.promptedAt["1"] = 1
 	stale := make(chan struct{}, 1)
-	control.staleSignals[1] = stale
+	control.hub.staleSignals[1] = stale
 
 	control.onFrame(protocol.Frame{Type: "submission", ConversationID: "1", Status: "done"})
 

@@ -22,12 +22,12 @@ func TestATranscriptFrameReachesOnlyItsOwnRoom(t *testing.T) {
 		own := make(chan protocol.Frame, 4)
 		otherView := make(chan struct{}, 4)
 		ownView := make(chan struct{}, 4)
-		control.subscribers[1] = other
-		control.subscriberConversation[1] = "somewhere-else"
-		control.viewSignals[1] = otherView
-		control.subscribers[2] = own
-		control.subscriberConversation[2] = "here"
-		control.viewSignals[2] = ownView
+		control.hub.subscribers[1] = other
+		control.hub.subscriberConversation[1] = "somewhere-else"
+		control.hub.viewSignals[1] = otherView
+		control.hub.subscribers[2] = own
+		control.hub.subscriberConversation[2] = "here"
+		control.hub.viewSignals[2] = ownView
 
 		control.publish(protocol.Frame{Type: kind, ConversationID: "here", Seq: 2, Status: "running"})
 
@@ -71,10 +71,10 @@ func TestAFrameWithNoConversationReachesEveryWatcher(t *testing.T) {
 	control := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}, DataDir: t.TempDir()})
 	first := make(chan protocol.Frame, 4)
 	second := make(chan protocol.Frame, 4)
-	control.subscribers[1] = first
-	control.subscriberConversation[1] = "a"
-	control.subscribers[2] = second
-	control.subscriberConversation[2] = "b"
+	control.hub.subscribers[1] = first
+	control.hub.subscriberConversation[1] = "a"
+	control.hub.subscribers[2] = second
+	control.hub.subscriberConversation[2] = "b"
 
 	control.publish(protocol.Frame{Type: "auth", Status: "waiting"})
 

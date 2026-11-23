@@ -17,12 +17,12 @@ import (
 func TestAViewOnlyReachesTheClientWatchingThatConversation(t *testing.T) {
 	c := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
 	watching, other := make(chan struct{}, 4), make(chan struct{}, 4)
-	c.subscribers[1] = make(chan protocol.Frame, 4)
-	c.subscriberConversation[1] = "room-1"
-	c.viewSignals[1] = watching
-	c.subscribers[2] = make(chan protocol.Frame, 4)
-	c.subscriberConversation[2] = "room-2"
-	c.viewSignals[2] = other
+	c.hub.subscribers[1] = make(chan protocol.Frame, 4)
+	c.hub.subscriberConversation[1] = "room-1"
+	c.hub.viewSignals[1] = watching
+	c.hub.subscribers[2] = make(chan protocol.Frame, 4)
+	c.hub.subscriberConversation[2] = "room-2"
+	c.hub.viewSignals[2] = other
 
 	c.onFrame(protocol.Frame{Type: "view", ConversationID: "room-1", Seq: 7, Value: []byte(`{}`)})
 
@@ -37,7 +37,7 @@ func TestAViewOnlyReachesTheClientWatchingThatConversation(t *testing.T) {
 	default:
 	}
 	// And the cache holds the newest view, which is what the wakeup is for.
-	if got := c.views["room-1"].seq; got != 7 {
+	if got := c.hub.views["room-1"].seq; got != 7 {
 		t.Errorf("cached seq = %d, want 7", got)
 	}
 	if frame, found := c.CachedView("room-1"); !found || frame.Seq != 7 {
@@ -50,10 +50,10 @@ func TestAViewOnlyReachesTheClientWatchingThatConversation(t *testing.T) {
 func TestAFrameWithNoConversationReachesEveryone(t *testing.T) {
 	c := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
 	first, second := make(chan protocol.Frame, 4), make(chan protocol.Frame, 4)
-	c.subscribers[1] = first
-	c.subscriberConversation[1] = "room-1"
-	c.subscribers[2] = second
-	c.subscriberConversation[2] = "room-2"
+	c.hub.subscribers[1] = first
+	c.hub.subscriberConversation[1] = "room-1"
+	c.hub.subscribers[2] = second
+	c.hub.subscriberConversation[2] = "room-2"
 
 	c.onFrame(protocol.Frame{Type: "submission", Status: "done"})
 	if len(first) != 1 || len(second) != 1 {
@@ -67,9 +67,9 @@ func TestAFrameWithNoConversationReachesEveryone(t *testing.T) {
 func TestAStateFrameIsASignalNotAPayload(t *testing.T) {
 	c := New(Options{Workspace: Workspace{Name: "w", Path: t.TempDir()}})
 	stream := make(chan protocol.Frame, 4)
-	c.subscribers[1] = stream
+	c.hub.subscribers[1] = stream
 	stale := make(chan struct{}, 1)
-	c.staleSignals[1] = stale
+	c.hub.staleSignals[1] = stale
 
 	c.onFrame(protocol.Frame{Type: "state"})
 
