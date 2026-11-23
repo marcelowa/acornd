@@ -1,5 +1,7 @@
 package sandbox
 
+import "sync"
+
 // DriverFactory builds an engine's driver from the install folder and the state folder a caller
 // named. It is the seam a driver in another package registers through: a driver package imports
 // this package for the types it implements, so this package cannot import it back.
@@ -10,6 +12,22 @@ type DriverFactory func(dataDir, state string) Driver
 // this package does not depend on any driver.
 var driverFactories = map[string]DriverFactory{}
 
+// driverMu guards driverFactories: parallel tests register the same engine while others look one
+// up, and an unguarded map stops the process with "concurrent map writes".
+var driverMu sync.RWMutex
+
 // RegisterDriver adds an engine to Engine's table. It is idempotent: a binary that registers the
 // same engine twice still has one factory.
-func RegisterDriver(name string, make DriverFactory) { driverFactories[name] = make }
+func RegisterDriver(name string, make DriverFactory) {
+	driverMu.Lock()
+	defer driverMu.Unlock()
+	driverFactories[name] = make
+}
+
+// driverFactory is the one read of the table, taken under the same lock as the write.
+func driverFactory(name string) (DriverFactory, bool) {
+	driverMu.RLock()
+	defer driverMu.RUnlock()
+	make, ok := driverFactories[name]
+	return make, ok
+}
