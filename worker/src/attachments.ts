@@ -1,9 +1,13 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { ImageContent, TextContent, UserMessage } from "@earendil-works/pi-ai";
+import type { SandboxClient } from "./sandbox.ts";
+import type { CommandTable, WorkerContext } from "./worker.ts";
 /**
  * Attachments: files riding with a message, stored where the sandbox reads
  * them and the host cannot — the workspace's hidden folder, never a host
- * path. This file holds the pure half: caps, names, and shapes. The command
- * handlers in main.ts do the bytes.
+ * path. The caps, names, and shapes come first; the bytes, which go through
+ * the sandbox, are at the end.
  */
 
 /** One file may be this big; the gateway's upload limit fits it with margin. */
@@ -216,4 +220,80 @@ export function messageContent(
 		}
 	}
 	return blocks;
+}
+
+/**
+ * The stored files for the ids riding with a message. Refuses rather than
+ * skipping: a silently dropped file would answer a question never asked.
+ */
+export async function attachmentFiles(
+	sandbox: SandboxClient,
+	workspace: string,
+	ids: readonly string[],
+): Promise<{ meta: AttachmentMeta; bytes: Uint8Array }[]> {
+	if (ids.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+		throw new Error(`one message carries ${MAX_ATTACHMENTS_PER_MESSAGE} files at most`);
+	}
+	const dir = join(workspace, ATTACHMENTS_DIR);
+	const found: { meta: AttachmentMeta; bytes: Uint8Array }[] = [];
+	let total = 0;
+	for (const id of ids) {
+		if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) {
+			throw new Error("an attachment id is bad; upload the file again");
+		}
+		const raw = await sandbox.read(join(dir, metaName(id))).catch(() => null);
+		if (raw === null) throw new Error("an attachment is gone; upload it again");
+		const meta = JSON.parse(raw) as AttachmentMeta;
+		const bytes = await sandbox
+			.readBytes(join(dir, storedName(meta.id, meta.name)))
+			.catch(() => null);
+		if (bytes === null) throw new Error("an attachment is gone; upload it again");
+		total += bytes.byteLength;
+		found.push({ meta: { ...meta, size: bytes.byteLength }, bytes });
+	}
+	if (total > MAX_ATTACHMENTS_TOTAL_BYTES) {
+		throw new Error(
+			`one message carries ${MAX_ATTACHMENTS_TOTAL_BYTES / (1024 * 1024)} MB of files at most`,
+		);
+	}
+	return found;
+}
+
+export function attachmentCommands({
+	sandbox,
+	workspace,
+}: WorkerContext): Pick<CommandTable, "attachment"> {
+	return {
+		attachment: async (command) => {
+			// Bytes the gateway staged: the claimed size refuses fast, the read
+			// size refuses for real. Stored under the workspace's hidden folder
+			// with a generated name, answered with an id. The temp file stays
+			// the gateway's to remove; this side only reads it.
+			if (command.size > MAX_ATTACHMENT_BYTES) {
+				throw new Error(
+					`one file carries ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB at most`,
+				);
+			}
+			const bytes = await readFile(command.tempPath).catch(() => {
+				throw new Error("the upload did not land; send it again");
+			});
+			if (bytes.byteLength === 0) throw new Error("empty files carry nothing");
+			if (bytes.byteLength > MAX_ATTACHMENT_BYTES) {
+				throw new Error(
+					`one file carries ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB at most`,
+				);
+			}
+			const meta: AttachmentMeta = {
+				id: crypto.randomUUID(),
+				name: safeName(command.name),
+				size: bytes.byteLength,
+				mime: command.mime === "" ? "application/octet-stream" : command.mime,
+			};
+			const dir = join(workspace, ATTACHMENTS_DIR);
+			await sandbox.mkdir(dir).catch(() => undefined);
+			await sandbox.write(join(dir, storedName(meta.id, meta.name)), bytes);
+			await sandbox.write(join(dir, metaName(meta.id)), JSON.stringify(meta));
+			return { attachment: meta };
+		},
+	};
 }

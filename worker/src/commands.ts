@@ -8,6 +8,7 @@
  */
 import type { Files } from "./files.ts";
 import { isAbsolute, join, resolve } from "node:path";
+import type { CommandTable, WorkerContext } from "./worker.ts";
 
 export interface Command {
 	name: string;
@@ -137,4 +138,47 @@ export function parseCommandInvocation(text: string): { name: string; args: stri
 	const match = /^\/([a-z0-9][a-z0-9-]{0,63})(?:\s+([\s\S]*))?$/.exec(text.trim());
 	if (match === null) return undefined;
 	return { name: match[1]!, args: (match[2] ?? "").trim() };
+}
+
+export function commandCommands({
+	resources,
+}: WorkerContext): Pick<CommandTable, "commands" | "expand"> {
+	return {
+		commands: async () => ({
+			commands: [
+				...resources.commands.map((template) => ({
+					name: template.name,
+					description: template.description,
+					...(template.argumentHint === undefined
+						? {}
+						: { argumentHint: template.argumentHint }),
+					source: template.source,
+				})),
+				...unshadowedBuiltins(resources.commands).map((builtin) => ({
+					name: builtin.name,
+					description: builtin.description,
+					source: "builtin",
+				})),
+			],
+		}),
+		expand: async (command) => {
+			// A message that opens with /name is a command; anything else is itself, so a
+			// message that merely contains a slash is never rewritten.
+			const invocation = parseCommandInvocation(command.text);
+			if (invocation === undefined) return { text: command.text };
+			const template = resources.commands.find(
+				(candidate) => candidate.name === invocation.name,
+			);
+			if (template !== undefined) {
+				return { text: expandCommand(template, invocation.args), command: template.name };
+			}
+			// No file: a builtin is an action, not a text, and the gateway runs it
+			// instead of sending a turn. A file of the same name wins above.
+			const builtin = unshadowedBuiltins(resources.commands).find(
+				(candidate) => candidate.name === invocation.name,
+			);
+			if (builtin === undefined) return { text: command.text };
+			return { text: command.text, command: builtin.name, action: builtin.action };
+		},
+	};
 }
