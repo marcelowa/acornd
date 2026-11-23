@@ -10,39 +10,19 @@ import {
 	removeMember,
 	removeWorkspace as removeWorkspaceRequest,
 	renameConversation,
-	setAgent,
-	setDefaultAgent,
-	setDefaultModel,
-	setDefaultThinking,
 	updateWorkspace,
-	type AgentChange,
-	type DefaultScope,
 } from "./client";
-import {
-	contextWindowFor,
-	stalePins,
-	toAgentGroups,
-	toConversation,
-	toEngines,
-	toMembers,
-	toModelChoices,
-	toModelGroups,
-	toSandbox,
-	toScopeDefaults,
-	toThinkingGroups,
-	toWorkspaces,
-} from "./map";
+import { toConversation, toEngines, toMembers, toSandbox, toWorkspaces } from "./map";
 import type {
-	ChoicePicker,
 	ConversationSummary,
 	EngineSummary,
-	PickerGroup,
 	SandboxSummary,
 	ShareView,
 	WorkspaceSummary,
 } from "./view-models";
 import { useNavigation, useScreens, type NavigationSlice } from "./use-navigation";
 import { usePeople, type PeopleSlice } from "./use-people";
+import { useChoices, type ChoicesSlice } from "./use-choices";
 import { useConversation, type ConversationSlice } from "./use-conversation";
 import { useDraft, type DraftSlice } from "./use-draft";
 import { useProviders, type ProvidersSlice } from "./use-providers";
@@ -50,7 +30,6 @@ import { useRemote, type RemoteSlice } from "./use-remote";
 import { useSession, type SessionSlice } from "./use-session";
 import { useUpdate, type UpdateSlice } from "./use-update";
 import { read, usePreferences, type PreferencesSlice } from "./use-preferences";
-import type { WireResolvedAgent } from "./wire";
 
 const SEEN_KEY = "acornd.seen";
 
@@ -88,7 +67,8 @@ export interface Platform
 		SessionSlice,
 		ProvidersSlice,
 		DraftSlice,
-		ConversationSlice {
+		ConversationSlice,
+		ChoicesSlice {
 	conversations: ConversationSummary[];
 	deleted: ConversationSummary[];
 	/** The workspaces, with the one in view marked. */
@@ -108,17 +88,6 @@ export interface Platform
 	composerFocusToken: number;
 	/** Where the active workspace's tools actually run. */
 	sandbox?: SandboxSummary | undefined;
-	/** What each scope says, before resolution: one tab per scope in the settings screen. */
-	defaults: {
-		workspace: { model: string; thinking: string; agent: string };
-		global: { model: string; thinking: string; agent: string };
-	};
-	/** Set a default, in this workspace or everywhere. */
-	setDefault: (kind: "model" | "thinking" | "agent", scope: DefaultScope, value: string) => void;
-	/** The name a `provider/modelId` is shown under, when the providers know it. */
-	modelLabel: (value: string) => string;
-	/** The levels a model offers, for the thinking default that follows it. */
-	thinkingFor: (model: string) => PickerGroup[];
 	/** Any workspace's image and network, by name: the workspaces screen's rows are not the one
 	 * in view, and its menu is where a sandbox is changed. */
 	setWorkspaceSandbox: (
@@ -138,17 +107,6 @@ export interface Platform
 	removeWorkspace: (name: string) => void;
 	renameWorkspace: (name: string, title: string) => void;
 	active?: ConversationSummary | undefined;
-	/** The conversation in view was created by another one, so its choices are not its own. */
-	subagent: boolean;
-	/** Model, thinking, and agent as the conversation resolves them, with their layer. */
-	model: ChoicePicker;
-	thinking: ChoicePicker;
-	agent: ChoicePicker;
-	/** The running model's window, when the providers name it. */
-	contextWindow?: number | undefined;
-	resolved?: WireResolvedAgent | undefined;
-	/** The level that was asked for when the model could not express it. */
-	thinkingRequested?: string | undefined;
 	select: (id: string) => void;
 	rename: (id: string, title: string) => void;
 	hide: (id: string, hidden: boolean) => void;
@@ -338,47 +296,8 @@ export function usePlatform(): Platform {
 		[state, activeId],
 	);
 
-	// How a turn lands while one is running: the worker has to offer steering at all, and then
-	// the choice is the person's, not a heuristic.
-	const choose = useCallback(
-		(change: AgentChange) => {
-			void setAgent(workspace, activeId, change)
-				.then((next) => {
-					setState(next);
-					clearFailure();
-				})
-				.catch(reportError);
-		},
-		[workspace, activeId, reportError, setState, clearFailure],
-	);
-
-	// The composer's three choices. `state.agent` is the effective binding, so a picker shows
-	// what will actually run; `inherited` says whether this conversation chose it, and
-	// `defaultsOrigin` names the layer when it did not.
-	const modelChoices = useMemo(() => toModelChoices(state?.providers ?? []), [state]);
-	const effectiveModel =
-		state === undefined ? "" : `${state.agent.provider}/${state.agent.modelId}`;
-	const contextWindow = useMemo(
-		() => contextWindowFor(state?.providers ?? [], effectiveModel),
-		[state, effectiveModel],
-	);
-	const thinkingLevels =
-		modelChoices.find((choice) => choice.value === effectiveModel)?.thinkingLevels ?? [];
-	const thinkingValue = state?.agent.thinkingLevel ?? "";
-	const agentValue =
-		state?.resolved?.name ??
-		(state?.agent.definition !== undefined && state.agent.definition !== ""
-			? state.agent.definition
-			: (state?.defaultAgent ?? ""));
-
-	// A pin can outlive what it names; the value is still shown — it is what the conversation
-	// is pinned to — and it is marked when it cannot run here any more.
-	const stale = state === undefined ? { model: false, agent: false } : stalePins(state);
-	// A subagent runs what its creator gave it: the pickers show that rather than offering a
-	// change the gateway would not apply.
-	const subagent = state?.subagent === true;
+	const choices = useChoices(session);
 	const can = session.slice.can;
-	const fixed = activeId === "" || subagent || !can.model;
 	// A personal room is never shared, on any install: journey 1 is "make a room and invite people", not
 	// "open my room" (ADR 0034 §5). So the surface that shares one has nothing to say about it.
 	const share = useMemo<ShareView | undefined>(() => {
@@ -391,52 +310,6 @@ export function usePlatform(): Platform {
 			administer: can.administer,
 		};
 	}, [state, can.administer]);
-	const pinnedModel = modelChoices.find((choice) => choice.value === effectiveModel);
-
-	/** Every picker can go back to inheriting: a choice has to be undoable. */
-	const withDefault = (groups: PickerGroup[]): PickerGroup[] => [
-		...groups,
-		{ options: [{ value: "", label: "Use the default" }] },
-	];
-
-	const model: ChoicePicker = {
-		value: pinnedModel?.label ?? state?.agent.modelId ?? "",
-		invalid: stale.model,
-		note: stale.model ? "not available here" : undefined,
-		groups: withDefault(toModelGroups(state?.providers ?? [])),
-		disabled: fixed || modelChoices.length === 0,
-		onSelect: (value) => {
-			if (value === "") {
-				choose({ provider: "", modelId: "" });
-				return;
-			}
-			const slash = value.indexOf("/");
-			choose({ provider: value.slice(0, slash), modelId: value.slice(slash + 1) });
-		},
-	};
-
-	const thinking: ChoicePicker = {
-		value: thinkingValue,
-		note:
-			state !== undefined &&
-			(state.agent.thinkingRequested ?? "") !== "" &&
-			state.agent.thinkingRequested !== thinkingValue
-				? `${state.agent.thinkingRequested ?? ""} was asked`
-				: undefined,
-		groups: withDefault(toThinkingGroups(thinkingLevels)),
-		disabled: fixed || (thinkingLevels.length === 0 && thinkingValue === ""),
-		onSelect: (value) => choose({ thinkingLevel: value }),
-	};
-
-	const agent: ChoicePicker = {
-		value: agentValue,
-		invalid: stale.agent,
-		note: stale.agent ? "definition is gone" : subagent ? "set by its creator" : undefined,
-		groups: withDefault(toAgentGroups(state?.agents ?? [])),
-		disabled: fixed,
-		onSelect: (value) => choose({ definition: value }),
-	};
-
 	const select = useCallback(
 		(id: string) => {
 			const name = state?.workspace?.name ?? workspace;
@@ -612,49 +485,13 @@ export function usePlatform(): Platform {
 			.catch(reportError);
 	}, [workspace, reportError, setRailOpen, setRoute, clearFailure, clearView]);
 
-	const setDefault = useCallback(
-		(kind: "model" | "thinking" | "agent", scope: DefaultScope, value: string) => {
-			const request =
-				kind === "model"
-					? setDefaultModel(workspace, scope, value)
-					: kind === "thinking"
-						? setDefaultThinking(workspace, scope, value)
-						: setDefaultAgent(workspace, scope, value);
-			act(request, () => void reload());
-		},
-		[act, workspace, reload],
-	);
-
-	const defaults = useMemo(
-		() => ({
-			workspace: toScopeDefaults(state?.workspaceDefaults),
-			global: toScopeDefaults(state?.installDefaults),
-		}),
-		[state],
-	);
-
-	const modelLabel = useCallback(
-		(value: string): string =>
-			modelChoices.find((choice) => choice.value === value)?.label ??
-			value.split("/").at(-1) ??
-			"",
-		[modelChoices],
-	);
-
-	const thinkingFor = useCallback(
-		(model: string): PickerGroup[] =>
-			toThinkingGroups(
-				modelChoices.find((choice) => choice.value === model)?.thinkingLevels ?? [],
-			),
-		[modelChoices],
-	);
-
 	return {
 		...preferences,
 		...session.slice,
 		...providers.slice,
 		...drafts.slice,
 		...conversation.slice,
+		...choices,
 		...navigation,
 		...remote,
 		...people,
@@ -663,27 +500,16 @@ export function usePlatform(): Platform {
 		deleted,
 		active:
 			active === undefined ? undefined : toConversation(active, activeId, seen[active.id]),
-		subagent,
-		model,
-		thinking,
-		agent,
 		workspaces,
 		share,
 		addGuest,
 		removeGuest,
 		sandbox,
 		selectWorkspace,
-		defaults,
-		setDefault,
-		modelLabel,
-		thinkingFor,
 		setWorkspaceSandbox,
 		createWorkspace,
 		engines,
 		removeWorkspace,
-		contextWindow,
-		resolved: state?.resolved,
-		thinkingRequested: state?.agent.thinkingRequested,
 		newConversation,
 		composerFocusToken,
 		select,
