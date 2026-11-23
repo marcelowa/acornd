@@ -14,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -829,13 +830,7 @@ func writeCgroupPID(path string, pid int) error {
 }
 
 func containsPID(raw []byte, pid int) bool {
-	want := strconv.Itoa(pid)
-	for _, field := range strings.Fields(string(raw)) {
-		if field == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(strings.Fields(string(raw)), strconv.Itoa(pid))
 }
 
 // pastaArgv is the boot command for a workspace with egress: pasta makes the network namespace
