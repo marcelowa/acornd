@@ -5,6 +5,8 @@ React interface (`ui/`). The layers and the wire between them are ADR 0002.
 
 ## Before you change something
 
+- `ARCHITECTURE.md` is the map: the layers, where state lives, and how to add a command, an
+  engine or a setting.
 - The rules are `docs/engineering/standards.md`. Read "Working with an agent" first: do not
   scaffold or reorganise, and make the smallest change that satisfies the rule.
 - Decisions are `docs/adr/`. If a change goes against one, say so before you make it.
