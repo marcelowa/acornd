@@ -63,8 +63,6 @@ import {
 	toModelChoices,
 	toModelGroups,
 	toProviders,
-	toRights,
-	toRoomRole,
 	toSandbox,
 	toScopeDefaults,
 	toThinkingGroups,
@@ -78,8 +76,6 @@ import type {
 	EngineSummary,
 	PickerGroup,
 	ProviderSummary,
-	RoomRights,
-	RoomRole,
 	SandboxSummary,
 	ShareView,
 	SlashCommand,
@@ -91,6 +87,7 @@ import { shownDraft } from "./draft";
 import { useNavigation, useScreens, type NavigationSlice } from "./use-navigation";
 import { usePeople, type PeopleSlice } from "./use-people";
 import { useRemote, type RemoteSlice } from "./use-remote";
+import { useSession, type SessionSlice } from "./use-session";
 import { useUpdate, type UpdateSlice } from "./use-update";
 import { read, usePreferences, type PreferencesSlice } from "./use-preferences";
 import type {
@@ -99,7 +96,6 @@ import type {
 	WireResolvedAgent,
 	WireSecretEvent,
 	WireSender,
-	WireState,
 	WireUsage,
 	WireView,
 } from "./wire";
@@ -134,26 +130,7 @@ export type { AuthFlow } from "./auth-flow";
 export type { PeopleBook } from "./use-people";
 
 export interface Platform
-	extends PreferencesSlice, NavigationSlice, RemoteSlice, PeopleSlice, UpdateSlice {
-	ready: boolean;
-	/** The stream is following, or trying to be. */
-	connection: "live" | "reconnecting";
-	/** The last action the server refused, in its own words, until it is dismissed or a later
-	 * action succeeds. */
-	failure?: string | undefined;
-	clearFailure: () => void;
-	/** Ask the server for the state again; a success clears the last refusal. */
-	reload: () => void;
-	/** The workspace in view is opening, with the step it is on, or undefined when it is up. */
-	opening?: { stage: string } | undefined;
-	workerUp: boolean;
-	workerError?: string | undefined;
-	/** What this caller may change in the room in view: the state's one table, not a guess from a role. */
-	can: RoomRights;
-	/** What this caller is in the room in view; undefined when they are not in it. */
-	role?: RoomRole | undefined;
-	/** The install's role, not the room's: it is what shows the People page (ADR 0034 §1). */
-	admin: boolean;
+	extends PreferencesSlice, NavigationSlice, RemoteSlice, PeopleSlice, UpdateSlice, SessionSlice {
 	conversations: ConversationSummary[];
 	deleted: ConversationSummary[];
 	/** The workspaces, with the one in view marked. */
@@ -283,12 +260,23 @@ export function usePlatform(): Platform {
 	const nav = useNavigation();
 	const { route, setRoute, setRailOpen, setWorkspacesOpen } = nav;
 	const remote = useRemote(route);
-	const [state, setState] = useState<WireState | undefined>(undefined);
+	const session = useSession(route);
+	const {
+		state,
+		workspace,
+		activeId,
+		activeIdRef,
+		reportError,
+		clearFailure,
+		act,
+		reload,
+		setState,
+		setReady,
+		setOpening,
+		setConnection,
+	} = session;
 	const [secretRequest, setSecretRequest] = useState<WireSecretEvent | undefined>(undefined);
 	const [view, setView] = useState<WireView | undefined>(undefined);
-	/** A workspace that is opening, and the step it is on. Undefined means it is up (or failed,
-	 * which is the failure strip's business). */
-	const [opening, setOpening] = useState<{ stage: string } | undefined>(undefined);
 	const [senders, setSenders] = useState<Record<string, WireSender>>({});
 	/**
 	 * The steer-or-queued mark a message was sent with, per conversation and entry id. The wire
@@ -298,10 +286,7 @@ export function usePlatform(): Platform {
 	const [marks, setMarks] = useState<Record<string, Record<string, BusyAction>>>({});
 	const [seen, setSeen] = useState<Record<string, string>>(() => read(SEEN_KEY, {}));
 	const [composerFocusToken, setComposerFocusToken] = useState(0);
-	const [connection, setConnection] = useState<"live" | "reconnecting">("live");
-	const [failure, setFailure] = useState<string | undefined>(undefined);
 	const [commands, setCommands] = useState<SlashCommand[]>([]);
-	const [ready, setReady] = useState(false);
 	const [authFlow, setAuthFlow] = useState<AuthFlow | undefined>(undefined);
 	/**
 	 * The auth id the dialog is rendering, and the frames that arrived before the POST that
@@ -312,23 +297,6 @@ export function usePlatform(): Platform {
 	 */
 	const authId = useRef<string | undefined>(undefined);
 	const authWaiting = useRef<AuthWaiting>(new Map());
-
-	const reportError = useCallback((cause: unknown): void => {
-		setFailure(cause instanceof Error ? cause.message : String(cause));
-	}, []);
-
-	const clearFailure = useCallback((): void => setFailure(undefined), []);
-
-	const workspace = route.workspace === "" ? (state?.workspace.name ?? "") : route.workspace;
-	const activeId =
-		route.conversation === "" ? (state?.conversation?.id ?? "") : route.conversation;
-
-	// The view frame does not say which conversation it belongs to, so the claim in `onView`
-	// reads the one the stream is following from here.
-	const activeIdRef = useRef<string | undefined>(undefined);
-	useEffect(() => {
-		activeIdRef.current = activeId;
-	}, [activeId]);
 
 	/**
 	 * The draft of the room in view. The workspace holds the words; this machine holds the two
@@ -387,7 +355,7 @@ export function usePlatform(): Platform {
 			if (room === "") return;
 			recordDraft(room, { text, attachments });
 		},
-		[recordDraft],
+		[recordDraft, activeIdRef],
 	);
 
 	// The write that has to leave while the page does: a reload mid-sentence is the reload the
@@ -458,16 +426,16 @@ export function usePlatform(): Platform {
 				}
 				setOpening(undefined);
 				if (progress.status === "failed") {
-					setFailure(progress.error ?? "the harness for this workspace did not start");
+					reportError(progress.error ?? "the harness for this workspace did not start");
 					return;
 				}
 				const next = await fetchState(workspace, route.conversation);
 				if (cancelled) return;
 				setState(next);
 				setReady(true);
-				setFailure(undefined);
+				clearFailure();
 			} catch (cause) {
-				if (!cancelled) setFailure(cause instanceof Error ? cause.message : String(cause));
+				if (!cancelled) reportError(cause);
 			}
 		};
 		void load();
@@ -559,19 +527,18 @@ export function usePlatform(): Platform {
 			cancelled = true;
 			source.close();
 		};
-	}, [workspace, route.conversation, reportError, flushDrafts]);
-
-	const reload = useCallback(async (): Promise<void> => {
-		try {
-			// A retry is a decision to wait: whatever an earlier poll was saying about the step is
-			// not worth keeping on screen next to a request that is now in flight.
-			setOpening(undefined);
-			setState(await fetchState(workspace, route.conversation));
-			setFailure(undefined);
-		} catch (cause) {
-			setFailure(cause instanceof Error ? cause.message : String(cause));
-		}
-	}, [workspace, route.conversation]);
+	}, [
+		workspace,
+		route.conversation,
+		reportError,
+		clearFailure,
+		flushDrafts,
+		setState,
+		setReady,
+		setOpening,
+		setConnection,
+		activeIdRef,
+	]);
 
 	// Reading a conversation marks it read, which is what clears the dot.
 	useEffect(() => {
@@ -663,11 +630,11 @@ export function usePlatform(): Platform {
 			void setAgent(workspace, activeId, change)
 				.then((next) => {
 					setState(next);
-					setFailure(undefined);
+					clearFailure();
 				})
 				.catch(reportError);
 		},
-		[workspace, activeId, reportError],
+		[workspace, activeId, reportError, setState, clearFailure],
 	);
 
 	// The composer's three choices. `state.agent` is the effective binding, so a picker shows
@@ -696,9 +663,7 @@ export function usePlatform(): Platform {
 	// A subagent runs what its creator gave it: the pickers show that rather than offering a
 	// change the gateway would not apply.
 	const subagent = state?.subagent === true;
-	// A guest sees the agent, the model and the thinking with their values and cannot pick another, and no
-	// explanatory sentence: the state carries the answer, so this is the one place that reads it (ADR 0034 §4).
-	const can = toRights(state?.can);
+	const can = session.slice.can;
 	const fixed = activeId === "" || subagent || !can.model;
 	// A personal room is never shared, on any install: journey 1 is "make a room and invite people", not
 	// "open my room" (ADR 0034 §5). So the surface that shares one has nothing to say about it.
@@ -786,19 +751,6 @@ export function usePlatform(): Platform {
 		},
 	});
 
-	/** Every command goes through here: a success clears the last refusal, a failure is it. */
-	const act = useCallback(
-		(request: Promise<unknown>, then?: () => void): void => {
-			void request
-				.then(() => {
-					setFailure(undefined);
-					then?.();
-				})
-				.catch(reportError);
-		},
-		[reportError],
-	);
-
 	const rename = useCallback(
 		(id: string, title: string) => {
 			act(renameConversation(workspace, id, title), () => void reload());
@@ -845,7 +797,7 @@ export function usePlatform(): Platform {
 		): Promise<void> => {
 			try {
 				await sendMessage(workspace, activeId, text, whenBusy, attachments);
-				setFailure(undefined);
+				clearFailure();
 				// The send answers 202 with no state, so the busy sign would wait for the
 				// next poll. Read it now: the prompt grace is already counting.
 				void reload();
@@ -855,7 +807,7 @@ export function usePlatform(): Platform {
 				throw cause;
 			}
 		},
-		[workspace, activeId, reload, reportError],
+		[workspace, activeId, reload, reportError, clearFailure],
 	);
 	const upload = useCallback(
 		(file: File): Promise<UploadedAttachment> => uploadAttachment(workspace, file),
@@ -883,7 +835,7 @@ export function usePlatform(): Platform {
 				updateTag: "",
 			});
 		},
-		[setRailOpen, setRoute, setWorkspacesOpen],
+		[setRailOpen, setRoute, setWorkspacesOpen, setOpening],
 	);
 
 	// A row on the workspaces screen is not the workspace in view, so the name comes from the
@@ -975,7 +927,7 @@ export function usePlatform(): Platform {
 		(provider: ProviderSummary, method: ProviderAuthType): Promise<void> => {
 			return startProviderLogin(workspace, provider.id, method).then(
 				(next) => {
-					setFailure(undefined);
+					clearFailure();
 					authId.current = next;
 					// Whatever arrived while the reply was in flight belongs to this flow.
 					setAuthFlow(
@@ -993,7 +945,7 @@ export function usePlatform(): Platform {
 				},
 			);
 		},
-		[workspace, reportError],
+		[workspace, reportError, clearFailure],
 	);
 	const answerLoginPrompt = useCallback(
 		(value: string) => {
@@ -1002,7 +954,7 @@ export function usePlatform(): Platform {
 			setAuthFlow({ ...authFlow, answering: true });
 			void answerAuthPrompt(workspace, id, prompt.promptId, value).then(
 				() => {
-					setFailure(undefined);
+					clearFailure();
 					// The answer landed: the question it answered goes, and only that one.
 					setAuthFlow((current) =>
 						current?.authId === id
@@ -1021,7 +973,7 @@ export function usePlatform(): Platform {
 				},
 			);
 		},
-		[authFlow, reportError, workspace],
+		[authFlow, reportError, workspace, clearFailure],
 	);
 	const cancelLogin = useCallback(() => {
 		const id = authFlow?.authId;
@@ -1065,8 +1017,7 @@ export function usePlatform(): Platform {
 
 	const update = useUpdate(state?.update, act, reportError);
 
-	const admin = state?.admin === true;
-	const people = usePeople(route, admin);
+	const people = usePeople(route, session.slice.admin);
 
 	const [modelChoice, setModelChoice] = useState<
 		{ provider: ProviderCatalogEntry; allowed: string[] } | undefined
@@ -1104,7 +1055,7 @@ export function usePlatform(): Platform {
 		setRailOpen(false);
 		void createConversationRequest(workspace)
 			.then((created) => {
-				setFailure(undefined);
+				clearFailure();
 				const id = created.conversation?.id ?? "";
 				window.history.pushState(
 					null,
@@ -1123,7 +1074,7 @@ export function usePlatform(): Platform {
 				});
 			})
 			.catch(reportError);
-	}, [workspace, reportError, setRailOpen, setRoute]);
+	}, [workspace, reportError, setRailOpen, setRoute, clearFailure]);
 
 	const setDefault = useCallback(
 		(kind: "model" | "thinking" | "agent", scope: DefaultScope, value: string) => {
@@ -1164,29 +1115,17 @@ export function usePlatform(): Platform {
 
 	return {
 		...preferences,
+		...session.slice,
 		...navigation,
 		...remote,
 		...people,
 		...update,
-		ready,
-		connection,
-		failure,
-		clearFailure,
-		reload: () => {
-			void reload();
-		},
 		conversations,
 		deleted,
 		entries,
 		active:
 			active === undefined ? undefined : toConversation(active, activeId, seen[active.id]),
 		subagent,
-		opening,
-		workerUp: state?.workerUp ?? false,
-		workerError: state?.workerError,
-		can,
-		role: toRoomRole(state?.role),
-		admin,
 		steerable: state?.capabilities.steer ?? false,
 		model,
 		thinking,
