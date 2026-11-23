@@ -14,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -829,13 +830,7 @@ func writeCgroupPID(path string, pid int) error {
 }
 
 func containsPID(raw []byte, pid int) bool {
-	want := strconv.Itoa(pid)
-	for _, field := range strings.Fields(string(raw)) {
-		if field == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(strings.Fields(string(raw)), strconv.Itoa(pid))
 }
 
 // pastaArgv is the boot command for a workspace with egress: pasta makes the network namespace
@@ -1345,7 +1340,7 @@ func findSupervisor(pid int, seen map[int]bool, depth int) int {
 	if err != nil {
 		return 0
 	}
-	for _, field := range strings.Fields(string(children)) {
+	for field := range strings.FieldsSeq(string(children)) {
 		child, err := strconv.Atoi(field)
 		if err != nil || child <= 0 {
 			continue
@@ -1397,7 +1392,7 @@ func isSupervisorPID(pid int, want string) bool {
 }
 
 func nsPIDEndsIn(status []byte, want string) bool {
-	for _, line := range strings.Split(string(status), "\n") {
+	for line := range strings.SplitSeq(string(status), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) >= 2 && fields[0] == "NSpid:" {
 			return fields[len(fields)-1] == want

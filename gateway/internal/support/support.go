@@ -289,7 +289,7 @@ func (b *Bundle) system(opts Options, add func(string, []byte)) {
 	add("system/id.txt", []byte(fmt.Sprintf("uid=%d gid=%d euid=%d egid=%d\n", os.Getuid(), os.Getgid(), os.Geteuid(), os.Getegid())))
 	if data, err := os.ReadFile("/proc/self/mountinfo"); err == nil {
 		var lines []string
-		for _, line := range strings.Split(string(data), "\n") {
+		for line := range strings.SplitSeq(string(data), "\n") {
 			if strings.Contains(line, "cgroup") {
 				lines = append(lines, line)
 			}
@@ -519,7 +519,7 @@ func (b *Bundle) procCgroup(opts Options, dir, name string, pid int, add func(st
 		return
 	}
 	add(filepath.Join(base, "cgroup"), raw)
-	for _, line := range strings.Split(string(raw), "\n") {
+	for line := range strings.SplitSeq(string(raw), "\n") {
 		_, after, ok := strings.Cut(line, "::")
 		if !ok {
 			continue
@@ -542,7 +542,7 @@ func (b *Bundle) procFiles(opts Options, pid int, add func(string, []byte)) {
 		return
 	}
 	var kept []string
-	for _, line := range strings.Split(string(raw), "\n") {
+	for line := range strings.SplitSeq(string(raw), "\n") {
 		for _, prefix := range []string{"Name:", "State:", "Uid:", "Gid:", "Groups:", "NSpid:", "CapEff:"} {
 			if strings.HasPrefix(line, prefix) {
 				kept = append(kept, line)
@@ -658,7 +658,7 @@ func (b *Bundle) gatewayLog(opts Options, add func(string, []byte)) {
 // can carry a prompt or a tool's output, and a support bundle must not become a transcript.
 func lifecycleLines(text string) string {
 	var kept []string
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		lower := strings.ToLower(line)
 		if strings.Contains(lower, "worker:") || strings.Contains(lower, "expanding") ||
 			strings.Contains(lower, "conversation") || strings.Contains(lower, "prompt") {
@@ -704,7 +704,7 @@ func (b *Bundle) procTree(opts Options, pid int, add func(string, []byte), actua
 		return
 	}
 	add(filepath.Join("proc", strconv.Itoa(pid), "children"), children)
-	for _, field := range strings.Fields(string(children)) {
+	for field := range strings.FieldsSeq(string(children)) {
 		child, err := strconv.Atoi(field)
 		if err != nil || child <= 0 || seen[child] {
 			continue
