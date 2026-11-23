@@ -9,11 +9,18 @@
 // What is checked, and what is deliberately not:
 //
 //   - a floor that falls is a failure, coverage and both mutation numbers;
-//   - a package split is the one move that is not a fall: code and its tests leave a package
-//     for named subpackages, so the parent's killed count drops while the sum the old floor
-//     promised moves with them. The parent plus the new subpackages must still meet the old
-//     killed floor, and every new package has its own row; a drop that is not accounted for
-//     this way is still a failure.
+//   - three moves are not a fall. A package split: code and its tests leave a package for named
+//     subpackages, so the parent's killed count drops while the sum the old floor promised moves
+//     with them. The parent plus the new subpackages must still meet the old killed floor, and
+//     every new package has its own row; a drop that is not accounted for this way is still a
+//     failure;
+//   - code moved up: a helper lifted out of a driver into the shared package brings its mutants
+//     with it, so a child's drop is covered when its ancestor's killed floor rose by as much;
+//   - code moved into a package that is new to this tree: when shared code leaves several
+//     packages for a new sibling, their killed floors drop and the new package's row holds those
+//     mutants now. The killed drops of every package that fell must add up to at most the killed
+//     floors of the new packages (rows the base does not have, outside any split). A larger
+//     drop, a drop with no new package, or an efficacy floor that fell, is still a failure;
 //   - a floor line that disappears while its package is still in the tree is a failure, because
 //     that is the same move written the other way;
 //   - a floor that rises is reported and passes — the file is edited by hand, and the person who
@@ -91,7 +98,7 @@ function compare(kind, name, was, now, violations, raises) {
 	else raises.push(`${name}: ${moved}`);
 }
 
-function judge(kind, base, head, violations, raises, splits, moves, exists) {
+function judge(kind, base, head, violations, raises, splits, moves, exists, fell) {
 	let compared = 0;
 	for (const [name, was] of base) {
 		compared += 1;
@@ -126,9 +133,49 @@ function judge(kind, base, head, violations, raises, splits, moves, exists) {
 				}
 			}
 		}
+		// The third move is judged once every package is seen, because it adds up drops across
+		// packages: one package's drop alone does not say whether the new package holds it.
+		if (kind === "mutation" && now[1] < was[1] && newPackages(head, base).length > 0) {
+			fell.push({ name, was, now });
+			continue;
+		}
 		compare(kind, name, was, now, violations, raises);
 	}
 	return compared;
+}
+
+/**
+ * New rows that are not a split's subpackages: packages that did not exist on the base, where
+ * shared code moved to. A new row under a package that has a floor is a split, judged above.
+ */
+function newPackages(head, base) {
+	return [...head.keys()].filter((name) => !base.has(name) && ancestorFloor(name, base) === undefined);
+}
+
+/** The third move: every drop that waited here is covered by the new packages, or none is. */
+function judgeMovedIntoNew(fell, head, base, violations, moves) {
+	if (fell.length === 0) return;
+	const added = newPackages(head, base);
+	const held = added.reduce((total, name) => total + (head.get(name)?.[1] ?? 0), 0);
+	const dropped = fell.reduce((total, { was, now }) => total + (was[1] - now[1]), 0);
+	if (dropped <= held) {
+		for (const { name, was, now } of fell) {
+			// The move accounts for killed mutants only; an efficacy floor still may not fall.
+			if (now[0] < was[0]) {
+				violations.push(`${name}: efficacy ${was[0]} -> ${now[0]} (mutation); a move into a new package does not lower efficacy`);
+				continue;
+			}
+			moves.push(
+				`${name}: ${was.join("/")} -> ${now.join("/")}, into ${added.join(", ")}: ${dropped} killed dropped, ${held} held there (mutation)`,
+			);
+		}
+		return;
+	}
+	for (const { name, was, now } of fell) {
+		violations.push(
+			`${name}: ${was.join("/")} -> ${now.join("/")} (mutation); the drops add up to ${dropped}, more than the ${held} killed in ${added.join(", ")}`,
+		);
+	}
 }
 
 /** The nearest package above name that has a floor: where a moved helper would land. */
@@ -181,8 +228,10 @@ const violations = [];
 const raises = [];
 const splits = [];
 const moves = [];
-const coverageCount = judge("coverage", baseCoverage, headCoverage, violations, raises, splits, moves, inTree);
-const mutationCount = judge("mutation", baseMutation, headMutation, violations, raises, splits, moves, inTree);
+const fell = [];
+const coverageCount = judge("coverage", baseCoverage, headCoverage, violations, raises, splits, moves, inTree, fell);
+const mutationCount = judge("mutation", baseMutation, headMutation, violations, raises, splits, moves, inTree, fell);
+judgeMovedIntoNew(fell, headMutation, baseMutation, violations, moves);
 
 if (violations.length > 0) {
 	console.error(`floors in ${COVERAGE} and ${MUTATION} may only move up (standards.md S10):`);
