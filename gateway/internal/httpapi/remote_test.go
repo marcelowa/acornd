@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/marcelowa/acornd/gateway/internal/identity"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/people"
 	"github.com/marcelowa/acornd/gateway/internal/remote"
 	"github.com/marcelowa/acornd/gateway/internal/update"
@@ -184,7 +184,7 @@ func screen(t *testing.T, api *fakeCloudflare) (http.Handler, *people.Book, stri
 func screenWith(t *testing.T, api *fakeCloudflare, publisher bool, runHost string) (http.Handler, *people.Book, string) {
 	t.Helper()
 	dir := t.TempDir()
-	opened, err := people.Open(filepath.Join(dir, people.File))
+	opened, err := people.Open(layout.People(dir))
 	if err != nil {
 		t.Fatalf("open book: %v", err)
 	}
@@ -370,7 +370,7 @@ func TestRemoteApplyKeepsTheTokenButNeverReturnsIt(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/remote/apply", body)
 	request.Header.Set("content-type", "application/json")
 	handler.ServeHTTP(httptest.NewRecorder(), request)
-	payload, err := os.ReadFile(filepath.Join(dir, remote.File))
+	payload, err := os.ReadFile(layout.Remote(dir))
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}

@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/sandbox"
 )
 
@@ -322,7 +323,7 @@ type registryFile struct {
 // workspaceRecord writes the workspace's record without the fields a support bundle never
 // needs: members' addresses and the rest of the room's social graph.
 func (b *Bundle) workspaceRecord(opts Options, addJSON func(string, any), add func(string, []byte)) {
-	path := filepath.Join(opts.DataDir, "workspaces.json")
+	path := layout.Registry(opts.DataDir)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		b.Warnings = append(b.Warnings, path+": "+err.Error())

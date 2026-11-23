@@ -20,10 +20,6 @@ import (
 	"time"
 )
 
-// File is the book inside the install folder. ADR 0014 keeps the install folder out of every sandbox
-// mount, which is what makes an admin's list of people a file an agent cannot read.
-const File = "people.json"
-
 // Role is what a record may do at the install level. There are two, deliberately: a viewer or an
 // operator is a sharing model nobody has asked for, and a role added before its case exists is a
 // permission nobody has thought about (ADR 0032 decision 5).

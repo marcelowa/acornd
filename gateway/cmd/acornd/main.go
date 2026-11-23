@@ -20,6 +20,7 @@ import (
 
 	"github.com/marcelowa/acornd/gateway/internal/control"
 	"github.com/marcelowa/acornd/gateway/internal/httpapi"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/ready"
 	"github.com/marcelowa/acornd/gateway/internal/remote"
 	"github.com/marcelowa/acornd/gateway/internal/sandbox"
@@ -326,7 +327,7 @@ func openInstall(dataDir, explicitHost string) (install, error) {
 	}
 	// The vault is install-wide: one file beside credentials.json, never inside a workspace and
 	// never mounted into a sandbox.
-	store, err := vault.Open(filepath.Join(dir, "secrets.json"))
+	store, err := vault.Open(layout.Secrets(dir))
 	if err != nil {
 		return install{}, err
 	}

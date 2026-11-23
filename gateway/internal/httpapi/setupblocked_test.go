@@ -11,6 +11,7 @@ import (
 	"testing/fstest"
 
 	"github.com/marcelowa/acornd/gateway/internal/identity"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/people"
 )
 
@@ -25,7 +26,7 @@ func throughDoor(request *http.Request) *http.Request {
 func doorConsole(t *testing.T, caller identity.Caller, complete bool) http.Handler {
 	t.Helper()
 	dir := t.TempDir()
-	book, err := people.Open(filepath.Join(dir, people.File))
+	book, err := people.Open(layout.People(dir))
 	if err != nil {
 		t.Fatalf("book: %v", err)
 	}

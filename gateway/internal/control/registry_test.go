@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
@@ -189,7 +190,7 @@ func TestATerminalAddSurvivesTheConsolesNextWrite(t *testing.T) {
 func TestAWedgedRegistryLockIsRefusedRatherThanWaitedOn(t *testing.T) {
 	dataDir := t.TempDir()
 	registry := NewRegistry(dataDir)
-	held, err := os.OpenFile(filepath.Join(dataDir, registryFile)+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	held, err := os.OpenFile(layout.Registry(dataDir)+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +209,7 @@ func TestAWedgedRegistryLockIsRefusedRatherThanWaitedOn(t *testing.T) {
 	if waited := time.Since(start); waited < registryLockBudget || waited > 3*registryLockBudget {
 		t.Errorf("it waited %s, want the budget of %s", waited, registryLockBudget)
 	}
-	if _, err := os.Stat(filepath.Join(dataDir, registryFile)); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(layout.Registry(dataDir)); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("the refused write wrote the file: %v", err)
 	}
 }

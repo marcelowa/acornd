@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 )
 
 // A room's record, from the three sides that can disagree about it: the room being born, the file it is read
@@ -73,7 +75,7 @@ func TestARoomHasExactlyOneOwner(t *testing.T) {
 	if err == nil {
 		t.Fatal("a registry naming two owners was loaded")
 	}
-	if !strings.Contains(err.Error(), registryFile) {
+	if !strings.Contains(err.Error(), "workspaces.json") {
 		t.Errorf("the refusal should name the file, got %q", err)
 	}
 }
@@ -197,7 +199,7 @@ func TestAMembersListBecomesItsOwner(t *testing.T) {
 func TestASecondAddressBecomesAGuestAndSaysSo(t *testing.T) {
 	dataDir := t.TempDir()
 	dir := t.TempDir()
-	path := filepath.Join(dataDir, registryFile)
+	path := layout.Registry(dataDir)
 	payload := fmt.Sprintf(`{"workspacesDir":%s,"workspaces":[{"name":"team","path":%s,"members":["ana@example.com","bo@example.com"]}]}`,
 		strconvQuote(dir), strconvQuote(filepath.Join(dir, "team")))
 	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
@@ -292,7 +294,7 @@ func TestAPersonalRoomWithAGuestIsRefused(t *testing.T) {
 	for name, members := range cases {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
-			path := filepath.Join(t.TempDir(), registryFile)
+			path := layout.Registry(t.TempDir())
 			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -306,7 +308,7 @@ func TestAPersonalRoomWithAGuestIsRefused(t *testing.T) {
 			if err == nil {
 				t.Fatal("a personal room with a guest was loaded")
 			}
-			if !strings.Contains(err.Error(), registryFile) {
+			if !strings.Contains(err.Error(), "workspaces.json") {
 				t.Errorf("the refusal should name the file, got %q", err)
 			}
 			// And nothing was written: a refused registry is the one it was, so a person can edit it.
@@ -326,7 +328,7 @@ func TestAPersonalRoomWithAGuestIsRefused(t *testing.T) {
 func loadRecords(t *testing.T, dataDir, dir, admin, records string) (*Workspaces, error) {
 	t.Helper()
 	payload := fmt.Sprintf(`{"workspacesDir":%s,"workspaces":[%s]}`, strconvQuote(dir), records)
-	if err := os.WriteFile(filepath.Join(dataDir, registryFile), []byte(payload), 0o600); err != nil {
+	if err := os.WriteFile(layout.Registry(dataDir), []byte(payload), 0o600); err != nil {
 		t.Fatalf("write registry: %v", err)
 	}
 	workspaces := NewWorkspaces(WorkspacesOptions{DataDir: dataDir, AdminEmail: admin})
@@ -350,7 +352,7 @@ func captureLog(run func()) string {
 func TestANewRoomCannotInheritAForgottenOne(t *testing.T) {
 	dataDir := t.TempDir()
 	workspaces := registryIn(t, dataDir, "", nil)
-	left := StatePath(dataDir, "team")
+	left := layout.State(dataDir, "team")
 	if err := os.MkdirAll(left, 0o700); err != nil {
 		t.Fatal(err)
 	}

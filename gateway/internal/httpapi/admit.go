@@ -13,6 +13,7 @@ import (
 
 	"github.com/marcelowa/acornd/gateway/internal/control"
 	"github.com/marcelowa/acornd/gateway/internal/identity"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/people"
 	"github.com/marcelowa/acornd/gateway/internal/ready"
 )
@@ -154,7 +155,7 @@ func (s *Server) setupIncomplete() bool {
 	if !ready.HasCredential(s.gate.Dir) && strings.TrimSpace(os.Getenv("ACORND_DEV_PROVIDER")) == "" {
 		return true
 	}
-	defaults, err := control.LoadDefaults(control.ProviderModelsPath(s.gate.Dir))
+	defaults, err := control.LoadDefaults(layout.Settings(s.gate.Dir))
 	if err != nil {
 		return true
 	}

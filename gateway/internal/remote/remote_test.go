@@ -716,7 +716,7 @@ func TestTheSetupIsAFileWithItsToken(t *testing.T) {
 	if err := Save(dir, setup, time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	info, err := os.Stat(filepath.Join(dir, File))
+	info, err := os.Stat(filepath.Join(dir, "remote.json"))
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
@@ -733,7 +733,7 @@ func TestTheSetupIsAFileWithItsToken(t *testing.T) {
 	if loaded.State.TeamDomain != "team.cloudflareaccess.com" {
 		t.Errorf("the team domain did not survive the file: %+v", loaded.State)
 	}
-	if payload, err := os.ReadFile(filepath.Join(dir, File)); err != nil || !strings.Contains(string(payload), `"team_domain"`) {
+	if payload, err := os.ReadFile(filepath.Join(dir, "remote.json")); err != nil || !strings.Contains(string(payload), `"team_domain"`) {
 		t.Errorf("the file does not name the team domain it holds (%v): %s", err, payload)
 	}
 	if loaded.Updated != "2026-10-30T12:00:00Z" {
@@ -759,7 +759,7 @@ func TestAnUnconfiguredInstallHasNoSetup(t *testing.T) {
 // otherwise make a second tunnel.
 func TestASetupThatCannotBeReadIsReported(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, File), []byte("{not json"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "remote.json"), []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Load(dir); err == nil {

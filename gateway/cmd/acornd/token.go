@@ -8,11 +8,11 @@ import (
 	"log"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/marcelowa/acornd/gateway/internal/httpapi"
 	"github.com/marcelowa/acornd/gateway/internal/identity"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/people"
 	"github.com/marcelowa/acornd/gateway/internal/remote"
 )
@@ -73,7 +73,7 @@ func openGate(dir, host string) (httpapi.Gate, error) {
 	if err != nil {
 		return httpapi.Gate{}, err
 	}
-	book, err := people.Open(filepath.Join(dir, people.File))
+	book, err := people.Open(layout.People(dir))
 	if err != nil {
 		return httpapi.Gate{}, err
 	}

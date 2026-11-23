@@ -2,11 +2,11 @@ package main
 
 import (
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/marcelowa/acornd/gateway/internal/identity"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/people"
 )
 
@@ -89,7 +89,7 @@ func TestTheSetupCodeCommandRefusesBothFlags(t *testing.T) {
 // claimBook is a book in dir with an admin, so the install has an owner.
 func claimBook(t *testing.T, dir string) {
 	t.Helper()
-	book, err := people.Open(filepath.Join(dir, people.File))
+	book, err := people.Open(layout.People(dir))
 	if err != nil {
 		t.Fatalf("open book: %v", err)
 	}

@@ -18,6 +18,7 @@ var Allowed = map[string][]string{
 		"internal/control",
 		"internal/httpapi",
 		"internal/identity",
+		"internal/layout",
 		"internal/netns",
 		"internal/people",
 		"internal/protocol",
@@ -36,8 +37,10 @@ var Allowed = map[string][]string{
 
 	// The domain: it provisions the resources it owns and supervises the worker that uses them.
 	// It also asks support for a workspace diagnosis and records the running build in it; both
-	// are leaves, and neither knows how a workspace is opened.
+	// are leaves, and neither knows how a workspace is opened. It asks layout where the registry, the install's
+	// settings and each workspace's state folder are, rather than spelling the file names itself.
 	"internal/control": {
+		"internal/layout",
 		"internal/protocol",
 		"internal/sandbox",
 		"internal/sandbox/bwrap",
@@ -64,9 +67,10 @@ var Allowed = map[string][]string{
 	// that talks to Cloudflare, and control does not own a tunnel (ADR 0033 §2).
 	// The edge's one look at readiness: the door asks whether this install has a provider key, because a door that
 	// opens onto a half-configured console is not a door (ADR 0036 §3). It uses ready's reader rather than a
-	// second parse of the same file.
+	// second parse of the same file. It asks layout where the install's settings file is, for the same check.
 	"internal/httpapi": {
 		"internal/control",
+		"internal/layout",
 		"internal/remote",
 		"internal/identity",
 		"internal/people",
@@ -85,7 +89,11 @@ var Allowed = map[string][]string{
 	// Who is calling, proven: the token file or a signed assertion. A leaf, because the door is a
 	// fact about a request and knows nothing about workspaces or engines (ADR 0032).
 	"internal/identity": {},
-	"internal/netns":    {},
+	// The install folder's file layout: every file's name, the atomic write, and the lock two processes take
+	// before they change a file. A leaf below every package that keeps a file there, so none of them spells a
+	// name or locks a file its own way.
+	"internal/layout": {},
+	"internal/netns":  {},
 	// Who may use the install: a list of people, a file, and the rule that nobody unnamed gets in. A
 	// leaf: it knows nothing about a workspace or an engine (ADR 0032 §3).
 	"internal/people":   {},
@@ -93,14 +101,15 @@ var Allowed = map[string][]string{
 	"internal/ready":    {"internal/update"},
 	// What carries a browser to the console: the tunnel, its record, and the Access application that admits the
 	// book. A leaf — it talks to Cloudflare and to nothing else (ADR 0033).
-	"internal/remote": {},
+	"internal/remote": {"internal/layout"},
 	// One workspace's secrets proxy: loopback, the vault's grants handed in, nothing of this
 	// project imported. It is a leaf on purpose — the package that knows the vault stays control.
 	"internal/secretsproxy": {},
 	// The engines and their drivers. It reaches netns for the test binary's netns helper, which
 	// runs the same configuration the product's acornd runs before a sandbox's first process
 	// (ADR 0025); the alternative was a second copy of the refused ranges in the test.
-	"internal/sandbox":              {"internal/sandbox/sandboxtest"},
+	// It asks layout where the install's config file is, the one file of the install folder a sandbox mounts.
+	"internal/sandbox":              {"internal/layout", "internal/sandbox/sandboxtest"},
 	"internal/sandbox/bwrap":        {"internal/netns", "internal/sandbox", "internal/sandbox/sandboxtest", "internal/supervise"},
 	"internal/sandbox/microsandbox": {"internal/sandbox"},
 	"internal/sandbox/sandboxtest":  {},
@@ -108,8 +117,10 @@ var Allowed = map[string][]string{
 	"internal/supervise":            {},
 	// The support bundle collector: records, cgroups, and redaction. It knows the sandbox naming
 	// scheme, and nothing about control.
-	"internal/support":    {"internal/sandbox"},
-	"internal/update":     {},
+	// It asks layout where the registry is, to copy one workspace's record.
+	"internal/support": {"internal/layout", "internal/sandbox"},
+	// It asks layout which files a backup copies and which secret stores it scrubs.
+	"internal/update":     {"internal/layout"},
 	"internal/vault":      {},
 	"internal/workerpool": {"internal/protocol"},
 	"web":                 {},

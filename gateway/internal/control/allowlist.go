@@ -2,9 +2,9 @@ package control
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
@@ -57,9 +57,6 @@ func (d Defaults) AllowedText(provider string) string {
 	return strings.Join(d.Allowed(provider), ", ")
 }
 
-// ProviderModelsPath is the settings file the list lives in, inside an install folder.
-func ProviderModelsPath(dataDir string) string { return filepath.Join(dataDir, "settings.json") }
-
 // SetProviderModels writes one provider's list and answers the whole map. An empty list clears the entry, which is
 // how an admin says "none of it" again.
 func SetProviderModels(dataDir, provider string, models []string) (map[string][]string, error) {
@@ -67,7 +64,7 @@ func SetProviderModels(dataDir, provider string, models []string) (map[string][]
 	if key == "" {
 		return nil, fmt.Errorf("a provider is needed: write it as the id the console shows")
 	}
-	path := ProviderModelsPath(dataDir)
+	path := layout.Settings(dataDir)
 	defaults, err := LoadDefaults(path)
 	if err != nil {
 		return nil, err
@@ -97,7 +94,7 @@ func SetProviderModels(dataDir, provider string, models []string) (map[string][]
 // InstallAllowlist reads the map, or an empty one when the file is not there yet. A file that cannot be read is
 // reported rather than treated as "nothing is limited": an allowlist nobody can read is not an allowlist.
 func InstallAllowlist(dataDir string) (map[string][]string, error) {
-	defaults, err := LoadDefaults(ProviderModelsPath(dataDir))
+	defaults, err := LoadDefaults(layout.Settings(dataDir))
 	if err != nil {
 		return nil, err
 	}

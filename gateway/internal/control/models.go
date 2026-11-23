@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/protocol"
 	"github.com/marcelowa/acornd/gateway/internal/workerpool"
 )
@@ -665,7 +666,7 @@ func (c *Control) reapplyInheriting(ctx context.Context) error {
 
 // loadInstallDefaults reads the install-wide layer.
 func (c *Control) loadInstallDefaults() {
-	install, err := LoadDefaults(filepath.Join(c.opts.DataDir, "settings.json"))
+	install, err := LoadDefaults(layout.Settings(c.opts.DataDir))
 	if err != nil {
 		workerpool.Log("install defaults unreadable, using this workspace's: %v", err)
 		return

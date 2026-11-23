@@ -9,6 +9,8 @@ import (
 	"sort"
 	"syscall"
 	"time"
+
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 )
 
 // RegistryFile is the workspaces registry as it exists on disk. It has one admin so the
@@ -37,7 +39,7 @@ type Registry struct {
 
 // NewRegistry is the registry of the install whose acornd folder is dataDir.
 func NewRegistry(dataDir string) Registry {
-	return Registry{path: filepath.Join(dataDir, registryFile)}
+	return Registry{path: layout.Registry(dataDir)}
 }
 
 // Load reads the registry, tolerating absence. It takes no lock: a write replaces the file with a rename, so a
@@ -85,7 +87,7 @@ func (r Registry) save(registry RegistryFile) error {
 	if err != nil {
 		return err
 	}
-	temp, err := os.CreateTemp(filepath.Dir(r.path), registryFile+".*.tmp")
+	temp, err := os.CreateTemp(filepath.Dir(r.path), filepath.Base(r.path)+".*.tmp")
 	if err != nil {
 		return err
 	}

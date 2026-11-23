@@ -4,13 +4,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/marcelowa/acornd/gateway/internal/control"
 	"github.com/marcelowa/acornd/gateway/internal/identity"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/people"
 )
 
@@ -34,7 +34,7 @@ func withDoor(door identity.Door) Gate { return Gate{Door: door} }
 // book is a book of people in a temporary install folder.
 func book(t *testing.T) *people.Book {
 	t.Helper()
-	opened, err := people.Open(filepath.Join(t.TempDir(), people.File))
+	opened, err := people.Open(layout.People(t.TempDir()))
 	if err != nil {
 		t.Fatalf("open book: %v", err)
 	}

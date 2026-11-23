@@ -4,11 +4,11 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/marcelowa/acornd/gateway/internal/identity"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/people"
 )
 
@@ -86,7 +86,7 @@ func TestOpenGatePreparesAFreshInstall(t *testing.T) {
 func TestOpenGateLeavesAClaimedInstallNoCode(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("ACORND_IDENTITY", "")
-	book, err := people.Open(filepath.Join(dir, people.File))
+	book, err := people.Open(layout.People(dir))
 	if err != nil {
 		t.Fatalf("open book: %v", err)
 	}

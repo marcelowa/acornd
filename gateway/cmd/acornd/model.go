@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/marcelowa/acornd/gateway/internal/control"
+	"github.com/marcelowa/acornd/gateway/internal/layout"
 	"github.com/marcelowa/acornd/gateway/internal/protocol"
 )
 
@@ -131,7 +132,7 @@ func modelList(argv []string) {
 	if err != nil {
 		logFatal(err)
 	}
-	defaults, err := control.LoadDefaults(modelSettingsPath(dir))
+	defaults, err := control.LoadDefaults(layout.Settings(dir))
 	if err != nil {
 		logFatal(err)
 	}
@@ -183,7 +184,7 @@ func modelSet(argv []string) {
 	}
 	// The file is the install's own layer, and the gateway reads it on every turn: this is the
 	// same write the interface makes, not a second place a default can live.
-	path := modelSettingsPath(dir)
+	path := layout.Settings(dir)
 	defaults, err := control.LoadDefaults(path)
 	if err != nil {
 		logFatal(err)
@@ -205,7 +206,7 @@ func modelClear(argv []string) {
 	if err != nil {
 		logFatal(err)
 	}
-	path := modelSettingsPath(dir)
+	path := layout.Settings(dir)
 	defaults, err := control.LoadDefaults(path)
 	if err != nil {
 		logFatal(err)
@@ -215,10 +216,6 @@ func modelClear(argv []string) {
 		logFatal(err)
 	}
 	fmt.Println("default model cleared: each workspace decides, then the provider's own choice")
-}
-
-func modelSettingsPath(dir string) string {
-	return filepath.Join(dir, "settings.json")
 }
 
 func logFatal(err error) {
