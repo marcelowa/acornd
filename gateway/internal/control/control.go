@@ -651,8 +651,11 @@ func (c *Control) stateLocked(caller Caller, parts stateParts) State {
 		Skills:    c.catalog.Skills,
 		Defaults:  c.catalog.Defaults,
 		Providers: c.providers,
-		Seq:       c.hub.seq(active),
-		Policy:    c.policies[active],
+		// The only read of the hub in the state build. A view write does not take mu, so a view
+		// can land between two hub reads, and a second read here could mix two views. Read the
+		// hub once, here.
+		Seq:    c.hub.seq(active),
+		Policy: c.policies[active],
 	}
 	// The draft travels with the state, not with the transcript: it is the composer's, and
 	// the conversation it belongs to is the one this state is about. A copy, so the client
