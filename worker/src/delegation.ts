@@ -13,7 +13,7 @@
  *   whose answer arrives later as a new message. The durable machinery for that is in
  *   delegation-tasks.ts; this file is the model-facing surface and the policy.
  */
-import type { Context } from "@earendil-works/chord/context";
+import { BACKGROUND_CONTEXT, type Context } from "@earendil-works/chord/context";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { bool, obj, oneOf, opt, str } from "@earendil-works/pi-schema";
 import {
@@ -32,8 +32,9 @@ import {
 } from "@earendil-works/pi-durable";
 import { resolveAgent, type Catalog, type Delegation, type ResolvedAgent } from "./config.ts";
 import { type ConversationMeta, ConversationMetaDoc, conversationIdOf } from "./meta.ts";
-import { Anchor, DelegationDoc, reporterTask } from "./delegation-tasks.ts";
+import { Anchor, DelegationDoc, MessagesDoc, reporterTask } from "./delegation-tasks.ts";
 import { log } from "./protocol.ts";
+import type { CommandTable, WorkerContext } from "./worker.ts";
 import { thinkingLevelFor } from "./thinking.ts";
 import { totalTokens } from "./usage.ts";
 
@@ -719,4 +720,27 @@ export function delegationExtension(deps: DelegationDeps) {
 		tools: [subagentTool, delegateTool],
 	});
 	return self;
+}
+
+export function delegationCommands({
+	harness,
+	storage,
+	resources,
+}: WorkerContext): Pick<CommandTable, "messages" | "policy"> {
+	return {
+		messages: async (command) => {
+			const state = await harness.snapshot(
+				MessagesDoc,
+				conversationIdOf(command.conversationId),
+				BACKGROUND_CONTEXT,
+			);
+			return { conversationId: command.conversationId, state: state ?? null };
+		},
+		policy: async (command) =>
+			await policyFor(
+				{ harness, storage, catalog: () => resources.catalog },
+				command.conversationId,
+				BACKGROUND_CONTEXT,
+			),
+	};
 }

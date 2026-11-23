@@ -6,8 +6,10 @@
  * See docs/adr/0003-provider-credentials.md.
  */
 import type { AuthInteraction, AuthPrompt, Models } from "@earendil-works/pi-ai";
+import { installId } from "./install.ts";
 import { emit, log } from "./protocol.ts";
 import type { AuthEvent } from "./protocol.ts";
+import type { CommandTable, WorkerContext } from "./worker.ts";
 
 interface PendingPrompt {
 	resolve: (value: string) => void;
@@ -130,4 +132,25 @@ export async function login(
 			waiter.reject(new Error("login finished"));
 		}
 	}
+}
+
+export function authCommands({
+	models,
+	home,
+}: WorkerContext): Pick<CommandTable, "login" | "logout"> {
+	return {
+		login: async (command) =>
+			await login(
+				models,
+				command.authId,
+				command.providerId,
+				command.authType,
+				await installId(home),
+			),
+		logout: async (command) => {
+			// Removes the stored credential for this provider only.
+			await models.logout(command.providerId);
+			return { providerId: command.providerId };
+		},
+	};
 }
